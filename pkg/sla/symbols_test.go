@@ -221,8 +221,15 @@ func TestDecodeBoundariesPayload(t *testing.T) {
 	if constructor.PrintPieces[1].OperandIndex != 0 || !constructor.PrintPieces[1].IsOperandRef {
 		t.Fatal("constructor opprint boundary did not decode operand reference")
 	}
-	if len(constructor.ContextOps) != 1 || constructor.ContextOps[0].ElementID != elemOperandExp {
-		t.Fatalf("unexpected context op boundaries: %+v", constructor.ContextOps)
+	if len(constructor.ContextOps) != 1 {
+		t.Fatalf("unexpected context op count: got %d", len(constructor.ContextOps))
+	}
+	ctxOp := constructor.ContextOps[0]
+	if ctxOp.Num != 1 || ctxOp.Shift != 2 || ctxOp.Mask != 3 {
+		t.Fatalf("unexpected context op num/shift/mask: %+v", ctxOp)
+	}
+	if ctxOp.Expression == nil || ctxOp.Expression.ElementID != elemOperandExp {
+		t.Fatalf("unexpected context op expression: %+v", ctxOp.Expression)
 	}
 	if len(constructor.ContextCommits) != 1 || !constructor.ContextCommits[0].Flow {
 		t.Fatalf("unexpected context commit boundaries: %+v", constructor.ContextCommits)
@@ -819,5 +826,65 @@ func TestDecodeContextSymbolBoundaryPreservesAttributes(t *testing.T) {
 	// Body.Pattern should be nil since it is now stored in Body.Context
 	if sym.Body.Pattern != nil {
 		t.Fatal("ContextSymbol should not populate Body.Pattern")
+	}
+}
+
+func TestDecodeEpsilonSymbolBoundaryNotOpaque(t *testing.T) {
+	payload := newPackedTestEncoder()
+	payload.openElement(elemSleigh)
+	payload.writeSigned(attrVersion, FormatVersion)
+	payload.writeBool(attrBigEndian, false)
+	payload.writeSigned(attrAlign, 1)
+	payload.writeUnsigned(attrUniqBase, 0)
+	payload.openElement(elemSourceFiles)
+	payload.closeElement(elemSourceFiles)
+	payload.openElement(elemSpaces)
+	payload.writeString(attrDefaultSpace, "ram")
+	payload.openElement(elemSpace)
+	payload.writeString(attrName, "ram")
+	payload.writeSigned(attrIndex, 1)
+	payload.writeBool(attrBigEndian, false)
+	payload.writeSigned(attrDelay, 0)
+	payload.writeSigned(attrSize, 8)
+	payload.writeSigned(attrWordSize, 1)
+	payload.writeBool(attrPhysical, true)
+	payload.closeElement(elemSpace)
+	payload.closeElement(elemSpaces)
+	payload.openElement(elemSymbolTable)
+	payload.writeSigned(attrScopeSize, 1)
+	payload.writeSigned(attrSymbolSize, 1)
+	payload.openElement(elemScope)
+	payload.writeUnsigned(attrID, 0)
+	payload.writeUnsigned(attrParent, 0)
+	payload.closeElement(elemScope)
+	payload.openElement(elemEpsilonSymHead)
+	payload.writeString(attrName, "eps")
+	payload.writeUnsigned(attrID, 0)
+	payload.writeUnsigned(attrScope, 0)
+	payload.closeElement(elemEpsilonSymHead)
+	// EpsilonSym body -- no attributes beyond ID (mirrors EpsilonSymbol::decode)
+	payload.openElement(elemEpsilonSym)
+	payload.writeUnsigned(attrID, 0)
+	payload.closeElement(elemEpsilonSym)
+	payload.closeElement(elemSymbolTable)
+	payload.closeElement(elemSleigh)
+
+	boundaries, err := DecodeBoundariesPayload(payload.bytes())
+	if err != nil {
+		t.Fatalf("DecodeBoundariesPayload failed: %v", err)
+	}
+	if len(boundaries.SymbolTable.Symbols) != 1 {
+		t.Fatalf("expected 1 symbol, got %d", len(boundaries.SymbolTable.Symbols))
+	}
+	sym := boundaries.SymbolTable.Symbols[0]
+	if sym.Name != "eps" {
+		t.Fatalf("expected name eps, got %q", sym.Name)
+	}
+	// EpsilonSymbol should be decoded as Pattern, not Opaque
+	if sym.Body.Pattern == nil {
+		t.Fatal("epsilon symbol should be decoded as Pattern boundary, not opaque")
+	}
+	if sym.Body.Opaque != nil {
+		t.Fatal("epsilon symbol should not fall through to opaque")
 	}
 }
