@@ -7,6 +7,7 @@ Ghidra decompiler/Sleigh runtime을 Go로 다시 구현하는 프로젝트. stan
 - 현재 진행 상태: `docs/STATUS.md`
 - Sleigh runtime 로드맵: `docs/SLEIGH_RUNTIME_ROADMAP.md`
 - P-code engine 로드맵: `docs/PCODE_ENGINE_ROADMAP.md`
+- Decompiler pipeline 로드맵: `docs/DECOMPILER_PIPELINE_ROADMAP.md`
 - runtime 실행 경로: `docs/RUNTIME_FLOW.md`
 - parity 감사: `docs/PARITY_AUDIT.md`
 - .sla 바운더리: `docs/SLA_BOUNDARIES.md`

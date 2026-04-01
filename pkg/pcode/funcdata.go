@@ -231,3 +231,41 @@ func (fd *Funcdata) FindOp(seq SeqNum) *PcodeOp {
 func (fd *Funcdata) NumOps() int {
 	return fd.obank.NumOps()
 }
+
+// ---------------------------------------------------------------------------
+// Heritage support methods
+// C++ parity: funcdata.hh Funcdata (heritage-related)
+// ---------------------------------------------------------------------------
+
+// OpInsertBegin creates an op and inserts it at the beginning of a basic block.
+// The op is marked alive and its parent is set.
+// C++ parity: Funcdata::opInsertBegin
+func (fd *Funcdata) OpInsertBegin(op *PcodeOp, bb *BlockBasic) {
+	fd.OpMarkAlive(op)
+	op.SetParent(bb)
+	bb.InsertOpBegin(op)
+}
+
+// OpInsertEnd creates an op and inserts it at the end of a basic block.
+// The op is marked alive and its parent is set.
+// C++ parity: Funcdata::opInsertEnd
+func (fd *Funcdata) OpInsertEnd(op *PcodeOp, bb *BlockBasic) {
+	fd.OpMarkAlive(op)
+	op.SetParent(bb)
+	bb.InsertOpEnd(op)
+}
+
+// VarnodesBySpace returns all varnodes in the given address space.
+func (fd *Funcdata) VarnodesBySpace(spc *address.Space) []*Varnode {
+	return fd.vbank.BySpace(spc)
+}
+
+// VarnodesByRange returns all varnodes overlapping [addr, addr+size).
+func (fd *Funcdata) VarnodesByRange(addr address.Address, size int32) []*Varnode {
+	return fd.vbank.LocRange(addr, size)
+}
+
+// ConstSpace returns the constant address space.
+func (fd *Funcdata) ConstSpace() *address.Space {
+	return fd.constSpace
+}

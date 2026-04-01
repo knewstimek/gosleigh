@@ -11,6 +11,7 @@ type BlockBasic struct {
 func NewBlockBasic() *BlockBasic {
 	bb := &BlockBasic{}
 	bb.blockType = BlockBasicType
+	bb.concrete = bb // back-pointer for FlowBlock -> BlockBasic recovery
 	return bb
 }
 

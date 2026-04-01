@@ -76,7 +76,18 @@ type FlowBlock struct {
 	numDesc    int32
 	inEdges    []BlockEdge
 	outEdges   []BlockEdge
+	// concrete points back to the embedding struct (e.g. *BlockBasic).
+	// Set by NewBlockBasic()/NewBlockGraph(). Used by heritage to
+	// recover the concrete block type without unsafe pointer math.
+	// Not part of C++ parity -- Go embedding workaround.
+	concrete interface{}
 }
+
+// Concrete returns the concrete block that owns this FlowBlock, or nil.
+func (b *FlowBlock) Concrete() interface{} { return b.concrete }
+
+// SetConcrete sets the concrete back-pointer.
+func (b *FlowBlock) SetConcrete(c interface{}) { b.concrete = c }
 
 // Type returns the block type.
 func (b *FlowBlock) Type() BlockType { return b.blockType }
