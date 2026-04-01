@@ -1,0 +1,177 @@
+# Project Status
+
+## Current Phase: Runtime Parity Core (2026-04-01)
+
+### Done
+- [x] Git repo initialized
+- [x] Ghidra decompiler C++ source sparse-checked out to ghidra-ref/
+- [x] Apache 2.0 LICENSE + NOTICE (Ghidra attribution)
+- [x] .gitignore
+- [x] Launcher scripts (Gosleigh.bat, Gosleigh-codex.bat)
+- [x] C++ reference codegraph index created for `ghidra-ref/.../decompile/cpp`
+- [x] Indexing workflow documented in `docs/INDEX.md`
+- [x] Detailed implementation plan documented in `docs/PLAN.md`
+- [x] Parity audit document added for current runtime mismatches: `docs/PARITY_AUDIT.md`
+- [x] Go module initialized
+- [x] Initial Go package layout created
+- [x] First core types added: `Address`, `Space`, `VarnodeData`, `OpCode`
+- [x] First raw p-code op container added
+- [x] `.sla` container layer added: header plus compressed payload
+- [x] Minimal packed marshal parser added for `.sla` payload decoding
+- [x] Top-level Sleigh metadata decode added: version, endianness, align, uniqbase, maxdelay, uniqmask, numsections
+- [x] Encoded space metadata decode added: default space plus processor/unique/other spaces
+- [x] Sourcefile decode added for persisted constructor source mappings
+- [x] Symbol table boundary decode added: scopes, symbol headers, body pairing
+- [x] Subtable boundary decode added: constructors plus decision tree skeleton
+- [x] ConstructTpl boundary decode added: handle/varnode/op-template tree plus persisted ConstTpl forms
+- [x] Pattern boundary decode added: PatternExpression tree plus decision-side DisjointPattern subtree
+- [x] First executable lowering added: isolated `ConstructTplBoundary -> pkg/pcode.RawOp` emission
+- [x] Unit tests added for the first core types and `.sla` container layer
+- [x] Unit tests added for packed metadata decode
+- [x] Unit tests added for symbol/subtable/constructor boundary decode
+- [x] Project direction clarified around standalone use plus downstream MCP integration
+- [x] Initial parity audit started and documented in `docs/PARITY_AUDIT.md`
+- [x] Runtime parity core added: `FixedHandle`, `RuntimeContext`, `ResolveHandleTpl()`, `PropagateConstructorResult()`
+- [x] Special `OpTpl` handling split so raw lowering no longer treats control directives as ordinary opcodes
+- [x] `walker.go` shell added: `ParserContext`, `ParserWalker`, `ConstructState`
+- [x] `obtainContext` shell added: cache miss creation plus parse-state promotion hooks
+- [x] `ParserWalkerChange` shell added: root reset, operand allocation, length, and commit reservation
+- [x] `builder.go` now follows walker child state for recursive `BUILD`, selecting main/named sections and falling back to `buildEmpty()` only when a named section is missing
+- [x] `builder.go` now routes `LABELBUILD`, `CROSSBUILD`, and `DELAY_SLOT` through explicit builder/runtime paths
+- [x] `discache.go` shell added: address-keyed `ParserContext` cache with pcode-state helpers
+- [x] `lower.go` now bridges into `runtime.go` parity model for handle and const resolution
+- [x] `CombinePattern` parity status rechecked against original C++ and recorded in `docs/PARITY_AUDIT.md`
+- [x] `resolve.go` shell added: root reset, `loadContext`, constructor/offset/length application, operand descent, pending commit queue wiring, parser-state promotion
+- [x] `decision_resolve.go` added: `SubtableSymbol::resolve()` / `DecisionNode::resolve()` shell with terminal pair matching
+- [x] `resolve_handles.go` updated to follow walker-state iteration and main-template result propagation
+- [x] `load_context.go` added: `LoadContext`, `ClearCommits`, `AddCommit`, `PendingCommits`, `ApplyCommits` shell
+- [x] `ApplyCommits` can now resolve operand-symbol commit addresses from `ParserContext.Symbols` when operand metadata is present
+- [x] `OperandSymbol` boundary metadata is now preserved: `subsym`, `off`, `base`, `minlen`, `code`, `index`, `localexp`, optional `defexp`
+- [x] `patexpr.go` added: `PatternExpression::getValue()` shell for constant, start/end, next2, token, context, and basic unary-binary nodes
+- [x] `OperandValue` now has a first automatic path using preserved operand metadata plus `setOutOfBandState()` when `defexp` or `defsym->getPatternExpression()` is available
+- [x] `ResolveHandles()` now has a first automatic path for operand `defexp` and selected boundary symbol fixed handles
+- [x] `ValueMapSymbol` and `NameSymbol` table bodies are now preserved in boundary decode
+- [x] `ApplyCommits()` can resolve operand-symbol commit addresses from `OperandSymbolBoundary.Index` without a lookup hook
+- [x] `symbols.go` now preserves operand-symbol metadata needed for later operand semantics: `index`, `off`, `base`, `minlen`, `code`, `subsym`, `localexp`, `defexp`
+- [x] `instruction_context.go` added: `ObtainPcodeContext()` wrapper for `obtainContext(..., pcode)` followed by `applyCommits()`
+- [x] `docs/RUNTIME_FLOW.md` added to freeze the current runtime execution order and current authority path
+- [x] Unit tests added for decision resolution, load-context commits, pattern-expression evaluation, operand-symbol boundary decode, and pcode-context preparation
+- [x] `go test ./...` passes after integrating the above shells
+- [x] `translate.go` now enters translation through the runtime authority path: `ObtainPcodeContext()` -> delay-slot preparation -> `ParserWalker` -> `SleighBuilder.Build()`
+- [x] `TranslateInput` now carries runtime cache, symbol table, resolve hooks, resolve-handles hooks, and commit hooks for the real translation entry
+- [x] Runtime translation tests added for cached pcode context, named-section selection, and recursive `BUILD` emission through a resolved operand constructor
+- [x] `TranslateSubtable()` now models the local `oneInstruction()` tail ordering: raw-cache clear -> build -> relative-label fixup -> emit
+- [x] Relative intra-instruction label fixup tests added for translated branch ops
+- [x] `SleighBuilder::buildEmpty()` named-section recursion semantics are now modeled instead of a no-op fallback
+- [x] `DisassemblyCache` can now store emitted raw ops with deep-copy semantics for later translation/runtime use
+- [x] `TranslateSubtable()` now performs the original `oneInstruction()` alignment gate before context preparation
+- [x] `TranslateSubtable()` now stores emitted raw ops in `DisassemblyCache` and returns the cached owned copy
+- [x] Translation tests added for unaligned instruction rejection and raw-op cache ownership
+- [x] `TranslateSubtable()` now conservatively rewraps `ErrBuilderUnimplemented`-class failures into a local `UnimplError` equivalent with `oneInstruction()`-style explain text and instruction length
+- [x] Translation tests added for `oneInstruction()`-style unimplemented error prefix, mnemonic/body split, and explicit operand print-gap marking
+- [x] Alignment failure now follows local typed unimplemented-error semantics with instruction length `0`, matching the original `oneInstruction()` alignment failure contract
+- [x] `wrapTranslateUnimplError()` no longer promotes generic errors by substring and now stays type-driven for known unimplemented paths
+- [x] `DisassemblyCache` now owns staged raw-build lifecycle APIs: begin, append, add-label, resolve, emit, cancel
+- [x] `SleighBuilder` now owns cache-backed raw emission through `LowerRaw`, with explicit root-tail `resolve -> emit` sequencing
+- [x] `TranslateSubtable()` no longer uses the local `translatePcodeCache` stopgap and now routes raw-op ownership through the builder/cache raw-build path
+- [x] Builder/translation tests added for cache-backed raw-build success, cancellation, relative-label resolution, and explicit `resolve -> emit` staging semantics
+- [x] `DisassemblyCache` raw-build staging now separates internal issued-op records from owned varnode storage instead of storing caller-shaped raw-op slices directly
+- [x] Raw-build ownership tests added for owned-buffer isolation and for relative-label patching against cache-owned staged data
+- [x] `DisassemblyCache` raw-build staging now reuses one released state across instructions and resets resolver state while keeping backing storage when capacity is sufficient
+- [x] `wrapTranslateUnimplError()` now rewrites existing typed translation errors in place, closer to original `oneInstruction()` catch/rethrow behavior
+- [x] Package-wide typed `UnimplError` model introduced across key runtime/translation shells, with explain text, optional instruction length, and sentinel-compatible unwrapping
+- [x] `wrapTranslateUnimplError()` now rewrites any typed `*UnimplError`, and catch formatting prints more concrete non-subtable operand text without the old Go-only gap suffix
+- [x] `DisassemblyCache` staged issued ops now point directly into cache-owned varnode storage, and pool-growth rebind logic updates those references after expansion
+- [x] `ObtainPcodeContext()` now best-effort prefetches the fallthrough disassembly context to derive `N2Addr` and populate `DisassemblyCache` through runtime decode path
+- [x] `TranslateSubtable()` now applies typed unimplemented rewrite over a single local build/resolve/emit tail boundary, closer to original `oneInstruction()` catch scope
+- [x] Operand print fallback can now print some symbol-backed operands even without a pre-materialized child state
+- [x] `Resolve()` now carries flow address fields into `ParserContext`, with calladdr-style fallback surviving the full obtain/promote path
+- [x] `ResolveHandles()` automatic symbol-backed path now covers `NameSymbol` and `EpsilonSymbol` fixed-handle cases without hook fallback
+- [x] `ResolveHandles()` can now auto-accept pre-resolved static handles for `VarnodeSymbol` / `VarnodeListSymbol` cases without hook fallback
+- [x] `symbols.go` now preserves `varnode_sym` fixed data (`space/off/size`) in boundary decode
+- [x] `symbols.go` now preserves `varlist_sym` selector expression plus ordered table entry ids/null slots in boundary decode
+- [x] `ResolveHandles()` can now reconstruct static `VarnodeSymbol` fixed handles directly from persisted boundary data
+- [x] `ResolveHandles()` can now reconstruct `VarnodeListSymbol` fixed handles from persisted selector/table body data, with explicit unimplemented errors for null slots and out-of-range selectors
+- [x] `DisassemblyCache` now has a parser-context circular reuse path closer to original `DisassemblyCache::getParserContext()`
+- [x] `ObtainContext()` now uses cache-owned parser-context reuse as the authoritative entry path instead of ad hoc miss-time allocation
+- [x] `ParserWalker.SetOutOfBandState()` now supports constructor-relative operand evaluation without a prebuilt child state, closer to original `OperandValue::getValue()` / `setOutOfBandState()` behavior
+- [x] `OperandValue` automatic path now reports out-of-band setup failure as an explicit typed parity gap instead of silently falling back
+- [x] `ResolveHandles()` now mirrors `OperandSymbol::getFixedHandle()` automatic handoff through `walker.GetFixedHandle(index)`
+- [x] `DisassemblyCache.EmitRawBuildTo()` now emits directly from staged issued ops and commits one cache-owned snapshot on success instead of materializing a pre-emit helper slice first
+- [x] `BuilderHooks` now exposes `RawEmitter`, and the builder tail can drive sink-style emission directly instead of relying on a builder-owned emitted-slice path
+- [x] `translateBuildTail()` now injects a translation sink, chains any existing builder sink, and returns emitted raw ops from that sink without post-emit `GetRawOps()` readback
+- [x] raw-build staging is now a single active reusable cache-owned state instead of unconstrained per-address staging, closer to the original single `PcodeCacher` ownership model
+- [x] `translateBuildTail()` now follows the cache/sink-owned tail only: `Build()` must commit cache-owned raw ops, and translation reads that committed result without any builder-side emitted-slice path
+- [x] `DisassemblyCache` now has an explicit sink-style `EmitRawBuildTo(addr, RawEmitter)` path mirroring `PcodeCacher::emit(addr, PcodeEmit*)`
+- [x] builder root raw-build tail no longer keeps builder-owned emitted ops and now relies on cache/sink-owned `resolve -> emit` only
+- [x] builder root raw-build tail is now sink-only even without an external emitter, using an internal no-op sink instead of falling back to a builder-side slice-return path
+- [x] `lowerVarnodeTpl()` now refuses dynamic handle-backed varnodes with an explicit typed unimplemented error instead of flattening them into guessed concrete raw varnodes
+- [x] `DisassemblyCache` raw-build staging now tracks varnode-pool ownership with explicit issued-op records instead of pointer-search rebinding during pool growth
+- [x] `EmitRawBuildTo()` now emits cloned staged ops to the sink and commits cache-owned snapshots only after successful sink emission, so sink mutation cannot corrupt retryable staging state
+- [x] `wrapTranslateUnimplError()` is now strict typed `*UnimplError` rewrite only and no longer promotes builder sentinel errors without a typed unimplemented cause
+- [x] `lower.go` now performs parity-safe dynamic varnode expansion for the safe subset: dynamic inputs synthesize `LOAD` before the main op and dynamic outputs synthesize `STORE` after it
+- [x] unsupported dynamic `v_offset_plus` cases are now rejected explicitly as typed unimplemented parity gaps instead of being guessed
+- [x] dynamic `v_offset_plus` now follows the original low-16 split more closely: low-16 `0` is treated as a no-op subset, while non-zero low-16 stays an explicit typed parity gap
+- [x] dynamic `v_offset_plus` now also accepts the constant-pointer safe subset for non-zero low-16 by folding the immediate into the pointer offset, matching the constant `INT_ADD` effect without inventing runtime temp state
+- [x] non-constant-pointer dynamic `v_offset_plus` now synthesizes the `INT_ADD` side-op and routes `LOAD`/`STORE` through the runtime temp in unique space at `UniqueBase + 0x100` (`RUNTIME_BITRANGE_EA`)
+- [x] upstream builder/resolve/resolve-handles sentinel errors are now normalized to typed `*UnimplError` more consistently before they reach translation catch rewrite
+- [x] builder directive helper files (`builder_build.go`, `builder_cross.go`, `builder_delay.go`) now normalize sentinel unimplemented paths to typed `*UnimplError`
+- [x] `obtain_context.go` and `patexpr.go` now normalize sentinel unimplemented paths to typed `*UnimplError` at clear promotion/hook boundaries
+- [x] translation-entry hook/cached-state parity gaps (`load-fill`, `load-context`, delay-slot missing length) now return typed `*UnimplError` instead of generic errors
+- [x] `LoweringContext` now carries `UniqueBase` and `UniqueMask`, and dynamic unique-space locations/pointers apply `uniqueoffset = (instruction.offset & UniqueMask) << 8` like original `generateLocation()` / `generatePointer()`
+- [x] `TranslateInput` now supports address-scoped payload sourcing (`ByAddress` map or `Lookup` callback), so translation load-fill/load-context can supply adjacent parser contexts without requiring custom user hooks for every non-base address
+- [x] `ObtainPcodeContext()` now recomputes `N2Addr` per pcode obtain path, derives fallthrough from `addr + length` before trusting cached `naddr`, and uses the same `ObtainContext(..., disassembly)` route for adjacent prefetch
+- [x] `ObtainContext()` now normalizes reused parser contexts more strictly by clearing stale `N2Addr` on uninitialized reuse and resetting mismatched cached-address entries to the requested address before promotion
+- [x] `DisassemblyCache` raw-build staging now tracks an explicit resolved/unresolved phase, so repeated `ResolveRawBuild()` on unchanged staging is idempotent instead of re-patching already-resolved relative references
+- [x] dynamic `LOAD`/`STORE` space-selector payload now uses process-local pointer identity for the target space, closer to original `SleighBuilder::dump()` than the older space-index approximation
+- [x] dynamic `v_offset_plus` lowering now falls back to the deterministic lowest-index unique space in `SpacesByIndex` when `LoweringContext.UniqueSpace` is unset
+- [x] `TranslatePayloadSource` now has a first-class `Loader(addr)` route, and translation entry prefers that authoritative address-based loader before lookup/map/base-seed fallbacks
+- [x] `EmitRawBuildTo()` now enforces resolve-before-emit and returns `ErrRawBuildUnresolved` for unresolved staged raw builds, matching the original `resolveRelatives()` then `emit()` discipline more closely
+- [x] concrete in-memory `Backend` added for the current translation runtime: LoadImage-style instruction fetch, ContextDatabase/ContextCache-style context blob reads and writes, `allowSet`, payload-loader binding, and commit hooks
+- [x] `Backend` now covers the minimal named-context variable surface: registration by bit range, default get/set, per-address get/set, conservative context-range query, and change-point clipping to the next explicit overlapping write boundary
+- [x] high-level `Engine` added: `TranslateInstructionAt(addr)` now exposes a reusable one-instruction translation entry over backend loader, parser-context cache, runtime authority path, and cached fallthrough length
+- [x] `Engine` can now derive the standard root subtable automatically from decoded symbol data by mirroring `sleighbase.cc` global-scope lookup for the `instruction` symbol
+- [x] `NewEngineFromMetadataSymbols()` / `NewEngineFromBoundaries()` now let standalone code build an engine from decoded metadata/symbol tables/backend without explicitly threading a root subtable when the standard root exists
+- [x] backend/engine tests added for payload loading, context writes, named context variables, conservative context-range queries, engine loader wiring, metadata-driven alignment, and standard root-subtable discovery
+- [x] `wrapTranslateUnimplError()` now mirrors `Sleigh::oneInstruction()` more strictly by rewriting only a top-level thrown `*UnimplError`, not an arbitrarily wrapped inner cause
+- [x] `EmitRawBuild()` / `FinishRawBuild()` no longer auto-run relative-label resolution and now require explicit `ResolveRawBuild()` first, matching the original `build -> resolveRelatives -> emit` tail split
+- [x] `AppendBuild()` no longer silently falls through package-level empty-section recursion without an active walker state; missing named-section recursion now returns typed unimplemented
+- [x] `DELAY_SLOT` / `CROSSBUILD` now keep the failing inner walker active until the recursive build returns normally, so `oneInstruction()`-style unimplemented rewrite can inspect the inner constructor state on failure
+- [x] `LoweringContext` now separates active instruction semantics from sink-visible raw-op address via `RootInstruction`
+- [x] engine/translation entry now propagates the root instruction address through cache-backed build/resolve/emit, so emitted raw-op `SeqNum.Address` follows the original `oneInstruction(baseaddr)` contract end-to-end
+- [x] `FinishRawBuild()` removed as a Go-only compatibility alias; sink emission authority now stays with explicit `ResolveRawBuild()` -> `EmitRawBuildTo()`
+- [x] backend now supports a standalone `RawLoadImage`-style raw instruction source via reader/file-backed attachment (`SetRawInstructionReader`, `OpenRawInstructionFile`, `CloseRawInstructionSource`)
+- [x] raw instruction source now supports `RawLoadImage::adjustVma()`-style rebasing via `AdjustRawInstructionVMA()` with word-size scaling semantics
+- [x] `EmitRawBuild()` removed; owned tests and helpers now validate sink-facing `EmitRawBuildTo()` directly
+- [x] tests added for top-level-only typed unimplemented rewrite, unresolved emit rejection, named-section fallback tightening, nested delay/cross failure rewrite context, root instruction raw-op address fallback, engine/translation root-address propagation, reader/file-backed raw instruction loading, raw-image rebasing, and sink-only raw-build completion
+- [x] `DisassemblyCache` raw-build staging now uses one reusable active stage object directly instead of the older map plus reusable-indirection model, closer to the original single `PcodeCacher` staging lifetime
+- [x] nested delay-slot translation now has an end-to-end proof test showing that inner dynamic unique-temp bits come from the inner instruction while all emitted `SeqNum.Address` values stay pinned to the root instruction address
+- [x] relative-label tracking in `DisassemblyCache` now uses direct staged `labelRefs` plus an id-indexed `labels` vector instead of the older resolver-backed helper shape, closer to original `PcodeCacher::addLabelRef()` / `addLabel()` / `resolveRelatives()`
+- [x] raw-build tests now cover undefined-label failure and oversized label-id rejection in the new direct relative-label model
+- [x] `wrapTranslateUnimplError()` now rewrites explain text only when a usable current walker/constructor state is actually available, while still mutating instruction length in place on the same top-level typed error object
+- [x] `EngineBackendAdapter` now supports split-authority `LoadFill` / `LoadContext` hooks, so `TranslateInstructionAt()` can de-emphasize bundled `MatchInput` and prefer the original `Sleigh::resolve()`-style separate decode boundaries when both hooks are available
+- [x] `translateResolveHooks()` now treats bundled `MatchInput` as per-phase compatibility fallback only: explicit `LoadFill` skips bundled instruction fallback, explicit `LoadContext` skips bundled context fallback, and shared fallback lookup is cached per address so one parser-context promotion does not fetch the same payload twice
+- [x] `ParserContext.GetN2addr()` now supports lazy derivation through a bound resolver, closer to original `ParserContext::getN2addr()` semantics than the older eager-best-effort prefetch-only path
+- [x] `ObtainPcodeContext()` now binds lazy `inst_next2` derivation instead of eagerly forcing adjacent disassembly during every pcode obtain, while still clearing stale `N2Addr` state on parser-context reuse
+- [x] engine/instruction-context tests now cover split-authority decode hooks, fallback reuse across load phases, and lazy `inst_next2` derivation on first `GetN2addr()` access
+
+### Next
+- [ ] Finish `Instruction Execution Parity` as one unit by closing the remaining strict parity gaps against original `Sleigh::oneInstruction()`: remaining full catch coverage outside the current typed path, stricter same-object mutation semantics for every nested failure path, and constructor-print/catch-format parity beyond the current shell
+- [ ] Continue `PcodeCacher And Builder Parity` beyond the current pooled staging split: long-lived cache lifecycle closer to original `PcodeCacher`, pointer-record-style relative tracking, and keep moving toward uniformly sink-facing emission while reducing the remaining internal Go-only sink/ownership differences
+- [ ] Continue `Decode Pipeline Parity`: build on the authoritative split `LoadFill` / `LoadContext` route, the per-phase bundled fallback compatibility layer, backend-backed context reads/writes, parser-context circular reuse path, lazy `inst_next2` derivation, root-instruction emission propagation, and the raw file-backed loader path, then replace remaining synthetic setup with broader real decode population of cached fields such as handles, calladdr semantics, commit-backed context state, and broader loader/database parity
+- [ ] Continue `Operand Semantics Parity`: build on the new `OperandSymbol` / `VarnodeSymbol` / `VarnodeListSymbol` automatic paths and then reduce dynamic varnode-style hook fallback further
+- [x] flow-symbol fixed-handle parity now has an automatic runtime path for safe `inst_dest` / `inst_ref` opaque-boundary candidates, without guessing nonexistent persisted `.sla` IDs
+- [ ] Reduce the remaining Go-only sink error semantics gap in `EmitRawBuildTo()` while keeping parity-safe staging ownership
+- [ ] Reduce the remaining internal container-shape gap against original `PcodeCacher` (`PcodeData` / `VarnodeData` allocation layout and pool-growth structure), even though current behavior is now closer
+- [ ] Extend the preserved operand-symbol metadata path to cover more `TripleSymbol::getFixedHandle()` cases and reduce remaining hook-only branches
+- [ ] Finish the remaining dynamic varnode expansion gaps: exact cross-run parity for C++ `LOAD`/`STORE` pointer-space payload handling and the explicit no-`UniqueSpace` parity gap when no unique runtime temp space exists anywhere in context
+- [ ] Keep tightening `Instruction Execution Parity` by normalizing the remaining non-typed unimplemented paths still outside the current coverage
+- [ ] Finish `symbols.go` and `metadata.go` parity audit
+- [ ] Reconcile Gosleigh package/module shape with standalone use plus downstream MCP integration
+- [ ] Continue from translation/runtime into the broader decompiler pipeline instead of stopping at a partial translator layer
+
+### Not Started
+- [ ] Full p-code engine parity
+- [ ] Decompilation pipeline
+- [ ] Code emitter
+- [ ] Golden tests / comparison with original Ghidra output

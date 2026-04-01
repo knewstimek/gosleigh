@@ -1,0 +1,41 @@
+# Ghidra reference source (sparse checkout)
+/ghidra-ref/
+**/.codegraph.db
+
+# Go build artifacts
+/bin/
+/build/
+*.exe
+*.dll
+*.so
+*.dylib
+
+# Go module
+/vendor/
+go.work
+go.work.sum
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Test
+*.test
+*.out
+coverage.html
+coverage.txt
+
+# Temp
+*.tmp
+*.log
+*.local
+.env
+local/
