@@ -194,8 +194,12 @@
 - [x] Phase 3 WU6: Funcdata container wrapping VarnodeBank + PcodeOpBank with Varnode/PcodeOp creation, wiring (def/descend links), and search API (6200824)
 - [x] Phase 3 integration: 125 tests passing across all WU1-WU4/WU6 types
 
+- [x] Phase 3 WU5: Heritage SSA construction -- LocationMap, TaskList, PriorityQueue, BuildADT (Bilardi-Pingali), CalcMultiequals/visitIncr, Rename (Cytron et al.), Heritage() main pipeline (02b803a)
+- [x] Phase 3 complete: 6 work units, ~6,400 lines, 142 tests passing
+- [x] Phase 4-5 roadmap created: docs/DECOMPILER_PIPELINE_ROADMAP.md (~22,400 lines planned)
+
 ### Next
-- [ ] Phase 3 WU5: Heritage (SSA construction) -- phi-node placement, variable rename, LocationMap, LoadGuard/StoreGuard
+- [ ] Phase 4 WU1+WU2: Action/Rule framework + Type system (parallel)
 - [ ] Continue `Instruction Execution Parity`: remaining full catch coverage outside the current typed path, stricter same-object mutation semantics for every nested failure path, and constructor-print/catch-format parity beyond the current shell
 - [ ] Continue `PcodeCacher And Builder Parity`: direct `allocateInstruction()` / `allocateVarnodes()` integration into `AppendRawBuild` path, infallible sink semantics, and full container/pool parity beyond the current `allocateInstruction` stub
 - [ ] Continue `Decode Pipeline Parity`: build on the authoritative split `LoadFill` / `LoadContext` route, the per-phase bundled fallback compatibility layer, backend-backed context reads/writes, parser-context circular reuse path, lazy `inst_next2` derivation, root-instruction emission propagation, and the raw file-backed loader path, then replace remaining synthetic setup with broader real decode population of cached fields such as handles, calladdr semantics, commit-backed context state, and broader loader/database parity
@@ -211,8 +215,8 @@
 - [ ] Continue from translation/runtime into the broader decompiler pipeline instead of stopping at a partial translator layer
 
 ### Not Started
-- [ ] Heritage (SSA) -- Phase 3 WU5
-- [ ] Full p-code engine parity
+- [ ] Full p-code engine parity (Heritage guard infrastructure)
+- [ ] Phase 4: Decompiler pipeline (Action/Rule, Type system, Block structuring)
 - [ ] Decompilation pipeline
 - [ ] Code emitter
 - [ ] Golden tests / comparison with original Ghidra output

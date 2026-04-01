@@ -64,14 +64,15 @@ Phase 4+: Action/Rule -> Type inference -> Control flow structuring
 - 구조화 블록 타입 (BlockIf, BlockWhile 등)은 Phase 4에서 확장 예정
 - 31 tests passing
 
-### 5. Heritage (SSA 구성)
+### 5. Heritage (SSA 구성) -- 완료 (02b803a)
 
-- Phi-node 배치 (placeMultiequals)
-- 변수 이름 변경 알고리즘 (rename)
-- LocationMap: 주소 범위 추적
-- 메모리 별칭 분석 (LoadGuard, StoreGuard)
-- 의존성: 작업 2, 4
-- 가장 복잡한 단위
+- LocationMap, TaskList, PriorityQueue, HeritageInfo, LoadGuard 데이터 구조
+- BuildADT (Bilardi-Pingali augmented dominator tree)
+- CalcMultiequals/visitIncr (phi-node 배치)
+- Rename/renameRecurse (Cytron et al. SSA 변수 이름 변경)
+- Heritage() 메인 진입점 (collect/place/rename 파이프라인)
+- guard 인프라 (guardStores/guardLoads/guardCalls)는 Phase 4로 연기
+- 17 tests passing
 
 ### 6. Funcdata (함수 컨테이너) -- skeleton 완료 (6200824)
 
