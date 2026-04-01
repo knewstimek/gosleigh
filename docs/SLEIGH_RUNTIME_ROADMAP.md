@@ -14,9 +14,16 @@
 
 이미 있는 것:
 
-- `.sla` container, packed decode, metadata, symbol/pattern/template boundary decode
+- `.sla` container (packed v4 + XML v3 auto-detect), packed decode (type 1-6), metadata, symbol/pattern/template boundary decode
+- XML v3 `.sla` loading via `encoding/xml` -- Ghidra 12 `6502.sla` (XML v3) 7단계 integration test 7/7 pass
+- `TYPECODE_ADDRESSSPACE` (type 5) and `TYPECODE_SPECIALSPACE` (type 6) decoding
+- `ContextSymbolBoundary` (varnode/low/high/flow) and `ContextOpBoundary` (num/shift/mask) in symbol boundary decode
+- `BuildXrefs()` -- post-decode xref/userop/context registration pass mirroring `SleighBase::buildXrefs()`
 - `Resolve`, `ResolveHandles`, `LoadContext`, `AddCommit`, `ApplyCommits` shell
-- `PatternExpression` 기본 경로
+  - `runtimeContextForWalker` now passes child handles and `SpacesByIndex` to `HandleTpl::fix()` parity path
+  - `findWalkerSpaceByIndex` now prefers `SpacesByIndex` lookup
+  - `ParserContext` carries `SpacesByIndex` field
+- `PatternExpression` 기본 경로 -- `ContextSymbol` pattern access (Context/Pattern both checked)
 - `Builder`, `BUILD`, `CROSSBUILD`, `DELAY_SLOT`, `LABELBUILD` shell
 - `TranslateSubtable()` 진입 경로
 - concrete backend for the current runtime path
@@ -37,6 +44,7 @@
   - raw-op cache ownership
   - direct staged `labelRefs` / `labels` relative patching
   - conservative `UnimplError` rewrap with `oneInstruction()`-style explain text
+  - emit/resolve error messages aligned to C++ `PcodeCacher` text
 - `varnode_sym` fixed tuple and `varlist_sym` selector/table body persisted in boundary decode
 - parser-context circular reuse path for `DisassemblyCache::getParserContext()` / `Sleigh::obtainContext()` direction
 
@@ -44,7 +52,8 @@
 
 - `oneInstruction()` strict parity 마감
 - full `PcodeCacher` parity
-- operand semantics parity
+- `BuildXrefs()` 등록 테이블의 runtime resolve/pattern-evaluation 연결
+- operand semantics parity (SpacesByIndex 경로는 연결됨; 나머지 symbol 종류별 자동 경로 확장 필요)
 - decode pipeline parity
 - hook 의존 제거
 
@@ -177,12 +186,13 @@
 
 남은 핵심:
 
-- symbol 종류별 fixed handle 해석
+- symbol 종류별 fixed handle 해석 (`ContextSymbol` 등 신설 boundary 활용 포함)
 - completed flow-symbol fixed-handle parity (`inst_dest`, `inst_ref`) needs to be preserved while broader symbol coverage expands
+- `BuildXrefs()` 등록 테이블 연결 -- context variable 및 userop이 실제 resolve/evaluation에 영향을 미쳐야 한다
 - dynamic handle semantics
 - remaining exact C++ pointer-space payload parity
 - remaining explicit no-`UniqueSpace` runtime-temp gap
-- operand metadata 기반 자동 경로 확대
+- operand metadata 기반 자동 경로 확대 (SpacesByIndex/child-handle wiring은 완료)
 - remaining non-typed unimplemented paths outside current normalization scope
 
 완료 기준:
@@ -247,11 +257,18 @@
 현재 상태:
 
 - decode boundary는 많이 있음
-- runtime 사용률은 아직 낮음
+- `TYPECODE_ADDRESSSPACE` (type 5), `TYPECODE_SPECIALSPACE` (type 6) 디코딩 추가됨
+- `ContextSymbolBoundary` (varnode/low/high/flow), `ContextOpBoundary` (num/shift/mask) 신설
+- XML v3 `.sla` 자동 감지 및 파싱 추가됨 (Ghidra 12 `6502.sla` 실 파일 검증 완료)
+- `BuildXrefs()` 구현으로 post-decode xref/userop/context 등록 경로 완성
+- `SpacesByIndex`가 `ParserContext`에 연결되어 handle resolve 시 space lookup 경로 개선
+- runtime 사용률은 여전히 부분적 -- `ContextSymbolBoundary` 등 신설 boundary의 runtime 활용은 아직 `BuildXrefs()` 등록 단계까지만
 
 남은 핵심:
 
-- boundary로만 저장된 데이터를 runtime이 직접 사용하게 연결
+- `ContextSymbolBoundary`, `ContextOpBoundary` 등 신설 boundary를 runtime resolve/evaluation에 연결
+- `BuildXrefs()` 등록 테이블을 runtime 경로에서 실제 사용
+- boundary로만 저장된 나머지 데이터를 runtime이 직접 사용하게 연결
 
 완료 기준:
 
@@ -274,10 +291,13 @@
 현재 상태:
 
 - 단위 테스트 중심
+- 실제 Ghidra 12 `6502.sla` (XML v3, packed v4 양쪽)로 7단계 integration test 7/7 통과 -- `.sla` 로딩/메타데이터/심볼 경계까지의 end-to-end 흐름이 실 파일로 검증됨
+- `testdata/6502.sla` (XML v3), `testdata/6502-packed.sla` (packed v4) fixture 추가됨
 
 남은 핵심:
 
-- 실제 `.sla` + 실제 instruction corpus 비교
+- 실제 instruction bytes 입력 + emitted p-code golden 비교
+- 복수 아키텍처 fixture 확대
 - original Ghidra output 대조 harness
 
 완료 기준:
