@@ -546,11 +546,17 @@ func (c *DisassemblyCache) emitRawBuildToLocked(addr address.Address, state *raw
 	if !state.resolveDone {
 		return fmt.Errorf("%w: %v", ErrRawBuildUnresolved, addr)
 	}
-	// Mirror PcodeCacher::emit() sink routing while isolating staged ownership:
-	// emit per-op clones so sink mutation cannot alter retryable staging state.
+	// Mirror PcodeCacher::emit() sink routing while isolating staged ownership.
+	//
+	// C++ PcodeCacher::emit() passes raw pointers from the issued deque directly
+	// to PcodeEmit::dump() without cloning -- the emitter borrows the data and
+	// the cache clear()s afterwards. Go emits cloned copies so the sink cannot
+	// mutate retryable staging state; this is a deliberate Go adaptation.
+	//
+	// C++ PcodeEmit::dump() is infallible (void return). Go sink may fail
+	// explicitly; staged ownership is preserved on failure so callers can
+	// retry or cancel -- another deliberate deviation from the C++ model.
 	for i := range state.issued {
-		// Gap note: C++ PcodeEmit::dump() is infallible; Go sink failures are explicit.
-		// Keep staged ownership intact on sink failure so callers can retry or cancel.
 		if err := emitter.EmitRaw(cloneRawOp(state.issued[i])); err != nil {
 			return fmt.Errorf("raw emitter failed at op %d for %v: %w", i, addr, err)
 		}
@@ -803,7 +809,9 @@ func (s *rawBuildState) resolveRelatives() error {
 			return fmt.Errorf("relative label id %d out of host index range", id)
 		}
 		if int(id) >= len(s.labels) || s.labels[int(id)] == rawBuildLabelUnset {
-			return fmt.Errorf("relative label id %d is undefined", id)
+			// Mirrors sleigh.cc PcodeCacher::resolveRelatives():
+			// "Reference to non-existant sleigh label"
+			return fmt.Errorf("relative label id %d: reference to non-existant sleigh label", id)
 		}
 		mask, err := labelMask(ptr.Size)
 		if err != nil {

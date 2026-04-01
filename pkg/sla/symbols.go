@@ -126,7 +126,7 @@ type ConstructorBoundary struct {
 	LineNumber       int64
 	OperandSymbolIDs []uint64
 	PrintPieces      []PrintPieceBoundary
-	ContextOps       []PatternExprBoundary
+	ContextOps       []ContextOpBoundary
 	ContextCommits   []ContextCommitBoundary
 	MainSection      *ConstructTplBoundary
 	NamedSections    []NamedSectionBoundary
@@ -136,6 +136,16 @@ type ConstructorBoundary struct {
 type NamedSectionBoundary struct {
 	SectionID int64
 	Template  ConstructTplBoundary
+}
+
+// ContextOpBoundary is the shallow decoded form of one <context_op> node.
+// Mirrors ContextOp::decode() in slghsymbol.cc: num/shift/mask define the
+// context register word and bit range; Expression is the value pattern.
+type ContextOpBoundary struct {
+	Num        int64                // Index of word containing context variable (ATTRIB_I)
+	Shift      int64                // Number of bits to shift value into place (ATTRIB_SHIFT)
+	Mask       uint64               // Mask off size of variable (ATTRIB_MASK)
+	Expression *PatternExprBoundary // PatternExpression determining value
 }
 
 // ContextCommitBoundary is the shallow decoded form of one <commit> node.
@@ -387,6 +397,10 @@ func decodeSymbolBody(elem packedElement) (SymbolBodyBoundary, error) {
 			return SymbolBodyBoundary{}, err
 		}
 		return SymbolBodyBoundary{Context: ctx}, nil
+	// Mirrors EpsilonSymbol::decode() in slghsymbol.cc -- no body attributes to read,
+	// but we route it here to avoid opaque fallthrough. The runtime only needs const_space.
+	case elemEpsilonSym:
+		return SymbolBodyBoundary{Pattern: &PatternSymbolBoundary{}}, nil
 	case elemValueSym, elemValueMapSym, elemNameSym, elemStartSym, elemEndSym, elemNext2Sym:
 		pattern, err := decodePatternSymbolBody(elem)
 		if err != nil {
@@ -643,12 +657,11 @@ func decodeConstructor(elem packedElement) (ConstructorBoundary, error) {
 			}
 			result.PrintPieces = append(result.PrintPieces, PrintPieceBoundary{OperandIndex: operandIndex, IsOperandRef: true})
 		case elemContextOp:
-			if len(child.Children) > 0 {
-				expr, err := decodePatternExpression(child.Children[0])
-				if err == nil {
-					result.ContextOps = append(result.ContextOps, *expr)
-				}
+			ctxOp, err := decodeContextOp(child)
+			if err != nil {
+				return ConstructorBoundary{}, err
 			}
+			result.ContextOps = append(result.ContextOps, ctxOp)
 		case elemCommit:
 			commit, err := decodeContextCommit(child)
 			if err != nil {
@@ -674,6 +687,31 @@ func decodeConstructor(elem packedElement) (ConstructorBoundary, error) {
 		result.FlowThruIndex = result.PrintPieces[0].OperandIndex
 	}
 	return result, nil
+}
+
+// decodeContextOp mirrors ContextOp::decode() in slghsymbol.cc.
+// Reads ATTRIB_I (num), ATTRIB_SHIFT (shift), ATTRIB_MASK (mask), then the child PatternExpression.
+func decodeContextOp(elem packedElement) (ContextOpBoundary, error) {
+	num, err := requiredIntAttr(elem.Attrs, attrI)
+	if err != nil {
+		return ContextOpBoundary{}, fmt.Errorf("read context op num: %w", err)
+	}
+	shift, err := requiredIntAttr(elem.Attrs, attrShift)
+	if err != nil {
+		return ContextOpBoundary{}, fmt.Errorf("read context op shift: %w", err)
+	}
+	mask, err := requiredUintAttr(elem.Attrs, attrMask)
+	if err != nil {
+		return ContextOpBoundary{}, fmt.Errorf("read context op mask: %w", err)
+	}
+	var expr *PatternExprBoundary
+	if len(elem.Children) > 0 {
+		expr, err = decodePatternExpression(elem.Children[0])
+		if err != nil {
+			return ContextOpBoundary{}, fmt.Errorf("read context op expression: %w", err)
+		}
+	}
+	return ContextOpBoundary{Num: num, Shift: shift, Mask: mask, Expression: expr}, nil
 }
 
 func decodeContextCommit(elem packedElement) (ContextCommitBoundary, error) {

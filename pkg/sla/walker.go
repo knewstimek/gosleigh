@@ -259,6 +259,13 @@ func (ctx *ParserContext) GetNaddr() address.Address {
 	return ctx.NAddr
 }
 
+// GetN2addr returns the address of the instruction after the next (inst_next2).
+// Mirrors ParserContext::getN2addr() in context.cc: lazy derivation from the
+// next instruction's disassembly length.
+//
+// C++ throws LowlevelError("inst_next2 not available in this context") when
+// translate is null or parsestate is uninitialized. Go returns an invalid
+// (zero) address instead, letting the caller decide how to handle the gap.
 func (ctx *ParserContext) GetN2addr() address.Address {
 	if ctx == nil {
 		return address.Address{}

@@ -37,6 +37,18 @@ func bindLazyN2Context(cache *DisassemblyCache, req ObtainPcodeContextRequest, c
 	}
 	// Mirrors ParserContext::setAddr() and getN2addr() semantics in context.cc/context.hh:
 	// clear stale next2 on reuse, then derive lazily from next instruction decode.
+	//
+	// C++ getN2addr() (context.cc) uses naddr directly:
+	//   int4 length = translate->instructionLength(naddr);
+	//   n2addr = naddr + length;
+	//
+	// Go derives fallthrough from getLength() first, naddr second.
+	// For normal instructions naddr == addr + length so both paths agree.
+	// Known gap: when delay-slot processing updates naddr to addr + fallOffset
+	// (oneInstruction() in sleigh.cc), the Go builder_delay path does not yet
+	// propagate that naddr update back to the parser context. This means N2addr
+	// may be incorrect for delay-slot instructions. The fix belongs in the
+	// translate layer (which sets naddr after builder returns).
 	ctx.SetN2addr(address.Address{})
 	ctx.SetN2addrResolver(func() (address.Address, bool) {
 		if cache == nil || ctx == nil {
@@ -64,12 +76,18 @@ func bindLazyN2Context(cache *DisassemblyCache, req ObtainPcodeContextRequest, c
 	})
 }
 
+// pcodeFallthroughAddr returns the address immediately after the current instruction.
+//
+// C++ getN2addr() uses naddr directly (context.cc). In C++ naddr is always accurate
+// because resolve() sets naddr = addr + length, and oneInstruction() updates naddr
+// again after delay-slot processing. Go prefers addr + length as a defensive measure
+// against stale naddr values, then falls back to naddr. For non-delay-slot instructions
+// the two are equivalent.
 func pcodeFallthroughAddr(ctx *ParserContext) (address.Address, bool) {
 	if ctx == nil {
 		return address.Address{}, false
 	}
 	if length := ctx.GetLength(); length > 0 {
-		// Mirrors oneInstruction() using getLength()-based fallOffset to avoid stale naddr.
 		return ctx.GetAddr().Add(uint64(length)), true
 	}
 	nextAddr := ctx.GetNaddr()

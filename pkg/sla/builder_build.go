@@ -126,7 +126,9 @@ func (r *RawLabelResolver) Resolve(ops []pcode.RawOp) error {
 		labelID := refOp.Inputs[0].Offset
 		targetIndex, ok := r.labels[labelID]
 		if !ok {
-			return fmt.Errorf("relative label id %d at op %d is undefined", labelID, refIndex)
+			// Mirrors sleigh.cc PcodeCacher::resolveRelatives():
+			// "Reference to non-existant sleigh label"
+			return fmt.Errorf("relative label id %d at op %d: reference to non-existant sleigh label", labelID, refIndex)
 		}
 		delta := (targetIndex - refIndex) & mask
 		refOp.Inputs[0].Offset = delta
