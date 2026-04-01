@@ -249,8 +249,13 @@ func evalOperandValueAuto(index int, walker *ParserWalker, hooks PatternExpressi
 	pattern := operand.DefiningExpression
 	if pattern == nil && operand.HasDefiningSymbolID {
 		defsym, ok := walker.ParserContext().GetSymbolTable().FindSymbol(operand.DefiningSymbolID)
-		if ok && defsym.Body.Pattern != nil {
-			pattern = defsym.Body.Pattern.Expression
+		if ok {
+			// ContextSymbol stores its expression inside Body.Context.Pattern.
+			if defsym.Body.Context != nil && defsym.Body.Context.Pattern != nil {
+				pattern = defsym.Body.Context.Pattern.Expression
+			} else if defsym.Body.Pattern != nil {
+				pattern = defsym.Body.Pattern.Expression
+			}
 		}
 	}
 	if pattern == nil {

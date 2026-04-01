@@ -32,18 +32,31 @@ type SymbolBoundary struct {
 
 // SymbolBodyBoundary preserves the body-specific boundary information we care about before full semantics decode.
 type SymbolBodyBoundary struct {
-	UserOp   *UserOpBoundary
-	Subtable *SubtableBoundary
-	Pattern  *PatternSymbolBoundary
-	Operand  *OperandSymbolBoundary
-	Varnode  *VarnodeSymbolBoundary
+	UserOp      *UserOpBoundary
+	Subtable    *SubtableBoundary
+	Pattern     *PatternSymbolBoundary
+	Context     *ContextSymbolBoundary
+	Operand     *OperandSymbolBoundary
+	Varnode     *VarnodeSymbolBoundary
 	VarnodeList *VarnodeListSymbolBoundary
-	Opaque   *OpaqueSymbolBody
+	Opaque      *OpaqueSymbolBody
 }
 
 // UserOpBoundary is the minimal persisted content of a user-defined p-code op symbol.
 type UserOpBoundary struct {
 	Index int64
+}
+
+// ContextSymbolBoundary preserves the ContextSymbol-specific metadata from slghsymbol.cc.
+// ContextSymbol inherits ValueSymbol (and thus shares PatternExpression for getFixedHandle),
+// but additionally carries varnode, low/high bit range, and flow flag used by buildXrefs.
+type ContextSymbolBoundary struct {
+	VarnodeSymbolID    uint64 // References the VarnodeSymbol backing this context register
+	HasVarnodeSymbolID bool
+	Low                int64 // Low bit in the context register (ContextSymbol::low)
+	High               int64 // High bit in the context register (ContextSymbol::high)
+	Flow               bool  // Flow flag (ContextSymbol::flow)
+	Pattern            *PatternSymbolBoundary
 }
 
 // PatternSymbolBoundary is the shallow decoded form of a symbol body backed by a PatternExpression tree.
@@ -366,7 +379,15 @@ func decodeSymbolBody(elem packedElement) (SymbolBodyBoundary, error) {
 			return SymbolBodyBoundary{}, err
 		}
 		return SymbolBodyBoundary{VarnodeList: varlist}, nil
-	case elemValueSym, elemValueMapSym, elemNameSym, elemContextSym, elemStartSym, elemEndSym, elemNext2Sym:
+	// Mirrors ContextSymbol::decode() in slghsymbol.cc -- context symbols carry
+	// additional varnode/low/high/flow attributes beyond the base PatternExpression.
+	case elemContextSym:
+		ctx, err := decodeContextSymbolBody(elem)
+		if err != nil {
+			return SymbolBodyBoundary{}, err
+		}
+		return SymbolBodyBoundary{Context: ctx}, nil
+	case elemValueSym, elemValueMapSym, elemNameSym, elemStartSym, elemEndSym, elemNext2Sym:
 		pattern, err := decodePatternSymbolBody(elem)
 		if err != nil {
 			return SymbolBodyBoundary{}, err
@@ -467,6 +488,34 @@ func decodePatternSymbolBody(elem packedElement) (*PatternSymbolBoundary, error)
 			}
 		}
 	}
+	return result, nil
+}
+
+// decodeContextSymbolBody mirrors ContextSymbol::decode() in slghsymbol.cc.
+// Attributes varnode/low/high/flow are read first, then the child PatternExpression.
+func decodeContextSymbolBody(elem packedElement) (*ContextSymbolBoundary, error) {
+	result := &ContextSymbolBoundary{}
+	if attr, ok := findAttr(elem.Attrs, attrVarnode); ok && attr.Type == attributeValueUint {
+		result.VarnodeSymbolID = attr.Uint
+		result.HasVarnodeSymbolID = true
+	}
+	low, err := requiredIntAttr(elem.Attrs, attrLow)
+	if err != nil {
+		return nil, fmt.Errorf("read context symbol low: %w", err)
+	}
+	result.Low = low
+	high, err := requiredIntAttr(elem.Attrs, attrHigh)
+	if err != nil {
+		return nil, fmt.Errorf("read context symbol high: %w", err)
+	}
+	result.High = high
+	result.Flow = optionalBoolAttr(elem.Attrs, attrFlow)
+	// Decode the inner pattern expression (same as ValueSymbol base).
+	pattern, err := decodePatternSymbolBody(elem)
+	if err != nil {
+		return nil, fmt.Errorf("read context symbol pattern: %w", err)
+	}
+	result.Pattern = pattern
 	return result, nil
 }
 

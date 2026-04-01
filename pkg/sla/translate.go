@@ -371,10 +371,20 @@ func tryFormatBoundarySymbolPrint(symbol *SymbolBoundary, walker *ParserWalker) 
 }
 
 func evalPatternSymbolValue(symbol *SymbolBoundary, walker *ParserWalker) (int64, error) {
-	if symbol == nil || symbol.Body.Pattern == nil || symbol.Body.Pattern.Expression == nil {
+	if symbol == nil {
 		return 0, fmt.Errorf("pattern symbol expression is unavailable")
 	}
-	return GetPatternExpressionValue(symbol.Body.Pattern.Expression, walker, PatternExpressionValueHooks{})
+	// ContextSymbol stores its expression inside ContextSymbolBoundary.Pattern.
+	var expr *PatternExprBoundary
+	if symbol.Body.Context != nil && symbol.Body.Context.Pattern != nil {
+		expr = symbol.Body.Context.Pattern.Expression
+	} else if symbol.Body.Pattern != nil {
+		expr = symbol.Body.Pattern.Expression
+	}
+	if expr == nil {
+		return 0, fmt.Errorf("pattern symbol expression is unavailable")
+	}
+	return GetPatternExpressionValue(expr, walker, PatternExpressionValueHooks{})
 }
 
 func formatSignedHex(value int64) string {

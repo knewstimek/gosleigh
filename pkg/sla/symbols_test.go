@@ -735,3 +735,89 @@ func (e *packedTestEncoder) writeConstNext() {
 	e.openElement(elemConstNext)
 	e.closeElement(elemConstNext)
 }
+
+func TestDecodeContextSymbolBoundaryPreservesAttributes(t *testing.T) {
+	payload := newPackedTestEncoder()
+	payload.openElement(elemSleigh)
+	payload.writeSigned(attrVersion, FormatVersion)
+	payload.writeBool(attrBigEndian, false)
+	payload.writeSigned(attrAlign, 1)
+	payload.writeUnsigned(attrUniqBase, 0x1000)
+	payload.openElement(elemSourceFiles)
+	payload.closeElement(elemSourceFiles)
+	payload.openElement(elemSpaces)
+	payload.writeString(attrDefaultSpace, "ram")
+	payload.openElement(elemSpace)
+	payload.writeString(attrName, "ram")
+	payload.writeSigned(attrIndex, 1)
+	payload.writeSigned(attrSize, 4)
+	payload.writeSigned(attrDelay, 1)
+	payload.closeElement(elemSpace)
+	payload.closeElement(elemSpaces)
+	payload.openElement(elemSymbolTable)
+	payload.writeSigned(attrScopeSize, 1)
+	payload.writeSigned(attrSymbolSize, 1)
+	payload.openElement(elemScope)
+	payload.writeUnsigned(attrID, 0)
+	payload.writeUnsigned(attrParent, 0)
+	payload.closeElement(elemScope)
+	payload.openElement(elemContextSymHead)
+	payload.writeString(attrName, "phase")
+	payload.writeUnsigned(attrID, 0)
+	payload.writeUnsigned(attrScope, 0)
+	payload.closeElement(elemContextSymHead)
+	// ContextSym body
+	payload.openElement(elemContextSym)
+	payload.writeUnsigned(attrID, 0)
+	payload.writeUnsigned(attrVarnode, 42)
+	payload.writeSigned(attrLow, 0)
+	payload.writeSigned(attrHigh, 3)
+	payload.writeBool(attrFlow, true)
+	// Child: pattern expression (context field)
+	payload.openElement(elemContextField)
+	payload.writeBool(attrSignBit, false)
+	payload.writeSigned(attrStartBit, 0)
+	payload.writeSigned(attrEndBit, 3)
+	payload.writeSigned(attrStartByte, 0)
+	payload.writeSigned(attrEndByte, 0)
+	payload.writeSigned(attrShift, 4)
+	payload.closeElement(elemContextField)
+	payload.closeElement(elemContextSym)
+	payload.closeElement(elemSymbolTable)
+	payload.closeElement(elemSleigh)
+
+	boundaries, err := DecodeBoundariesPayload(payload.bytes())
+	if err != nil {
+		t.Fatalf("DecodeBoundariesPayload failed: %v", err)
+	}
+	if len(boundaries.SymbolTable.Symbols) != 1 {
+		t.Fatalf("expected 1 symbol, got %d", len(boundaries.SymbolTable.Symbols))
+	}
+	sym := boundaries.SymbolTable.Symbols[0]
+	if sym.Name != "phase" {
+		t.Fatalf("expected name phase, got %q", sym.Name)
+	}
+	if sym.Body.Context == nil {
+		t.Fatal("expected ContextSymbolBoundary, got nil")
+	}
+	ctx := sym.Body.Context
+	if !ctx.HasVarnodeSymbolID || ctx.VarnodeSymbolID != 42 {
+		t.Fatalf("expected varnode symbol id 42, got %d (has=%v)", ctx.VarnodeSymbolID, ctx.HasVarnodeSymbolID)
+	}
+	if ctx.Low != 0 || ctx.High != 3 {
+		t.Fatalf("expected low=0 high=3, got low=%d high=%d", ctx.Low, ctx.High)
+	}
+	if !ctx.Flow {
+		t.Fatal("expected flow=true")
+	}
+	if ctx.Pattern == nil || ctx.Pattern.Expression == nil {
+		t.Fatal("expected pattern expression")
+	}
+	if ctx.Pattern.Expression.ElementID != elemContextField {
+		t.Fatalf("expected context field expression, got element %d", ctx.Pattern.Expression.ElementID)
+	}
+	// Body.Pattern should be nil since it is now stored in Body.Context
+	if sym.Body.Pattern != nil {
+		t.Fatal("ContextSymbol should not populate Body.Pattern")
+	}
+}

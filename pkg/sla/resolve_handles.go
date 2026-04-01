@@ -224,8 +224,24 @@ func resolveBoundarySymbolFixedHandle(sym *SymbolBoundary, walker *ParserWalker,
 		return FixedHandle{}, false, nil
 	}
 	switch sym.HeaderElement {
+	// ContextSymbol inherits ValueSymbol::getFixedHandle but stores its pattern
+	// inside ContextSymbolBoundary.Pattern after the ContextSym-specific decode.
+	case elemContextSymHead:
+		pattern := contextSymbolPattern(sym)
+		if pattern == nil || pattern.Expression == nil {
+			return FixedHandle{}, false, nil
+		}
+		value, err := GetPatternExpressionValue(pattern.Expression, walker, patternHooksFromResolveHandles(hooks))
+		if err != nil {
+			return FixedHandle{}, true, normalizeResolveHandlesUnimpl(err)
+		}
+		constSpace := walker.GetConstSpace()
+		if constSpace == nil {
+			return FixedHandle{}, true, newUnimplError(ErrResolveHandlesUnimplemented, "constant space is unavailable for context symbol")
+		}
+		return FixedHandle{Space: constSpace, OffsetOffset: uint64(value), Size: 0}, true, nil
 	// Ghidra NameSymbol inherits ValueSymbol::getFixedHandle (slghsymbol.hh/slghsymbol.cc).
-	case elemValueSymHead, elemContextSymHead, elemValueMapSymHead, elemNameSymHead:
+	case elemValueSymHead, elemValueMapSymHead, elemNameSymHead:
 		if sym.Body.Pattern == nil || sym.Body.Pattern.Expression == nil {
 			return FixedHandle{}, false, nil
 		}
@@ -289,6 +305,20 @@ func resolveBoundarySymbolFixedHandle(sym *SymbolBoundary, walker *ParserWalker,
 	}
 }
 
+// contextSymbolPattern returns the underlying PatternSymbolBoundary for a ContextSymbol.
+// ContextSymbol stores its pattern inside ContextSymbolBoundary; this helper
+// provides a uniform accessor that also falls back to Body.Pattern for backward compat.
+func contextSymbolPattern(sym *SymbolBoundary) *PatternSymbolBoundary {
+	if sym == nil {
+		return nil
+	}
+	if sym.Body.Context != nil {
+		return sym.Body.Context.Pattern
+	}
+	// Fallback: pre-refactor boundaries may still store context as a plain pattern.
+	return sym.Body.Pattern
+}
+
 func isFlowDestSymbolBoundaryCandidate(sym *SymbolBoundary) bool {
 	return isFlowSymbolBoundaryCandidate(sym, flowDestBuiltinSymbolName)
 }
@@ -308,7 +338,7 @@ func isFlowSymbolBoundaryCandidate(sym *SymbolBoundary, expectedName string) boo
 	if sym.BodyElement == 0 && sym.Body.Opaque == nil {
 		return false
 	}
-	if sym.Body.UserOp != nil || sym.Body.Subtable != nil || sym.Body.Pattern != nil || sym.Body.Operand != nil || sym.Body.Varnode != nil || sym.Body.VarnodeList != nil {
+	if sym.Body.UserOp != nil || sym.Body.Subtable != nil || sym.Body.Pattern != nil || sym.Body.Context != nil || sym.Body.Operand != nil || sym.Body.Varnode != nil || sym.Body.VarnodeList != nil {
 		return false
 	}
 	return true
@@ -450,6 +480,14 @@ func findWalkerSpaceByIndex(walker *ParserWalker, index int64) (*address.Space, 
 	if walker == nil {
 		return nil, false
 	}
+	// Prefer the full space registry when available; this covers register,
+	// unique, overlay, and other spaces beyond the walker's implicit set.
+	if walker.ParserContext() != nil && walker.ParserContext().SpacesByIndex != nil {
+		if space, ok := walker.ParserContext().SpacesByIndex[index]; ok && space != nil {
+			return space, true
+		}
+	}
+	// Fallback: scan the spaces reachable from the walker's address fields.
 	candidates := make([]*address.Space, 0, 7)
 	add := func(space *address.Space) {
 		if space == nil {
@@ -549,6 +587,25 @@ func runtimeContextForWalker(walker *ParserWalker) (RuntimeContext, error) {
 	if runtime.ConstantSpace == nil {
 		return RuntimeContext{}, newUnimplError(ErrResolveHandlesUnimplemented, "constant space is unavailable")
 	}
+
+	// Mirrors HandleTpl::fix() in semantics.cc: ConstTpl::fix() with type==handle
+	// accesses walker.getFixedHandle(handle_index). Populate Handles from the
+	// current constructor state's resolved child operand handles.
+	if walker.Point != nil && len(walker.Point.Children) > 0 {
+		runtime.Handles = make([]FixedHandle, len(walker.Point.Children))
+		for i, child := range walker.Point.Children {
+			if child != nil {
+				runtime.Handles[i] = child.Handle
+			}
+		}
+	}
+
+	// Pass through SpacesByIndex so ConstKindSpaceID resolution works in
+	// HandleTpl resolution (fixConstSpace -> spaceByIndex).
+	if ctx.SpacesByIndex != nil {
+		runtime.SpacesByIndex = ctx.SpacesByIndex
+	}
+
 	return runtime, nil
 }
 
