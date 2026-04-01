@@ -679,6 +679,97 @@ func TestBackendLoadContextWordsWithRangeMatchesContextBoundaries(t *testing.T) 
 	}
 }
 
+func TestBackendGetSetFileNameMirrorsLoadImageFileName(t *testing.T) {
+	backend := NewBackend()
+	if got := backend.GetFileName(); got != "" {
+		t.Fatalf("initial GetFileName() should be empty, got %q", got)
+	}
+	backend.SetFileName("test-binary.bin")
+	if got := backend.GetFileName(); got != "test-binary.bin" {
+		t.Fatalf("GetFileName() mismatch: got %q want %q", got, "test-binary.bin")
+	}
+}
+
+func TestBackendGetSetArchTypeMirrorsLoadImageArchType(t *testing.T) {
+	backend := NewBackend()
+	if got := backend.GetArchType(); got != "" {
+		t.Fatalf("initial GetArchType() should be empty, got %q", got)
+	}
+	backend.SetArchType("x86:LE:64:default")
+	if got := backend.GetArchType(); got != "x86:LE:64:default" {
+		t.Fatalf("GetArchType() mismatch: got %q want %q", got, "x86:LE:64:default")
+	}
+}
+
+func TestBackendContextSizeMirrorsRegisteredVariableCount(t *testing.T) {
+	backend := NewBackend()
+	if got := backend.ContextSize(); got != 0 {
+		t.Fatalf("initial ContextSize() should be 0, got %d", got)
+	}
+	if err := backend.RegisterContextVariable("mode", 0, 7); err != nil {
+		t.Fatalf("RegisterContextVariable(mode) returned error: %v", err)
+	}
+	if got := backend.ContextSize(); got != 1 {
+		t.Fatalf("ContextSize() after single-word variable: got %d want 1", got)
+	}
+	if err := backend.RegisterContextVariable("wide", 64, 71); err != nil {
+		t.Fatalf("RegisterContextVariable(wide) returned error: %v", err)
+	}
+	if got := backend.ContextSize(); got != 2 {
+		t.Fatalf("ContextSize() after two-word variable: got %d want 2", got)
+	}
+}
+
+func TestBackendSetVariableRegionPaintsContextAcrossRange(t *testing.T) {
+	ram := testBackendSpace("ram", address.SpaceKindProcessor, 1, 1)
+	backend := NewBackend()
+	if err := backend.RegisterContextVariable("mode", 0, 7); err != nil {
+		t.Fatalf("RegisterContextVariable(mode) returned error: %v", err)
+	}
+	if err := backend.SetVariableDefault("mode", 0x10); err != nil {
+		t.Fatalf("SetVariableDefault(mode) returned error: %v", err)
+	}
+
+	begad := address.Address{Space: ram, Offset: 0x8000}
+	endad := address.Address{Space: ram, Offset: 0x8010}
+	if err := backend.SetVariableRegion("mode", begad, endad, 0xab); err != nil {
+		t.Fatalf("SetVariableRegion() returned error: %v", err)
+	}
+
+	cases := []struct {
+		offset uint64
+		want   uint64
+	}{
+		{offset: 0x7fff, want: 0x10},
+		{offset: 0x8000, want: 0xab},
+		{offset: 0x800f, want: 0xab},
+		{offset: 0x8010, want: 0x10},
+	}
+	for _, tc := range cases {
+		got, err := backend.GetVariable("mode", address.Address{Space: ram, Offset: tc.offset})
+		if err != nil {
+			t.Fatalf("GetVariable(mode, 0x%x) returned error: %v", tc.offset, err)
+		}
+		if got != tc.want {
+			t.Fatalf("GetVariable(mode, 0x%x) mismatch: got 0x%x want 0x%x", tc.offset, got, tc.want)
+		}
+	}
+}
+
+func TestBackendSetVariableRegionRejectsNonExistentVariable(t *testing.T) {
+	ram := testBackendSpace("ram", address.SpaceKindProcessor, 1, 1)
+	backend := NewBackend()
+	err := backend.SetVariableRegion(
+		"missing",
+		address.Address{Space: ram, Offset: 0x1000},
+		address.Address{Space: ram, Offset: 0x2000},
+		0x42,
+	)
+	if err == nil {
+		t.Fatal("SetVariableRegion() should fail for non-existent variable")
+	}
+}
+
 func testBackendSpace(name string, kind address.SpaceKind, index uint16, wordSize uint8) *address.Space {
 	return &address.Space{
 		Name:      name,

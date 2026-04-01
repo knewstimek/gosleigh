@@ -30,24 +30,42 @@ type DisassemblyCache struct {
 	parserMask uint64
 }
 
-// rawBuildState mirrors PcodeCacher staged ownership split between issued
-// instructions and pooled VarnodeData storage (sleigh.hh allocateInstruction/
-// allocateVarnodes, sleigh.cc expandPool). Issued ops directly reference the
-// pooled varnodes and are rebound when the pool relocates.
+// rawBuildState mirrors PcodeCacher (sleigh.hh / sleigh.cc) pool ownership.
+//
+// C++ PcodeCacher owns a contiguous VarnodeData pool (poolstart/curpool/endpool)
+// plus a deque<PcodeData> of issued instructions. allocateVarnodes() bump-allocates
+// from the pool; allocateInstruction() appends to the deque. When the pool grows
+// via expandPool(), all issued PcodeData pointers (outvar/invar) and label_refs
+// are rebound to the new allocation.
+//
+// Go adaptation: varnodes slice = the pool, issued slice = the deque.
+// refs tracks per-op pool indices so rebindIssuedAfterExpand() can fix slice
+// headers after a grow, achieving the same pointer-stability guarantee as C++
+// expandPool(). The pool starts at defaultVarnodePoolSize (600) matching C++.
+//
 // A single DisassemblyCache-owned instance is reused instruction-by-instruction
-// to track the same long-lived ownership model as C++ PcodeCacher.
+// via reset(), mirroring PcodeCacher::clear() which resets curpool to poolstart
+// but never frees the pool until the destructor.
 type rawBuildState struct {
-	issued   []pcode.RawOp
-	refs     []rawBuildIssuedRef
+	// issued mirrors deque<PcodeData> -- each RawOp's Inputs/Output slice into
+	// varnodes via the corresponding refs entry.
+	issued []pcode.RawOp
+	// refs tracks pool positions for each issued op, enabling rebind after grow.
+	// Mirrors the implicit pointer relationship in C++ PcodeData.outvar/invar.
+	refs []rawBuildIssuedRef
+	// varnodes is the VarnodeData pool (C++ poolstart..endpool).
+	// len(varnodes) corresponds to curpool - poolstart.
 	varnodes []pcode.VarnodeData
-	// Mirrors PcodeCacher::addLabelRef() tracking a Varnode pointer plus
-	// the absolute calling instruction index for relative backpatching.
+	// labelRefs mirrors PcodeCacher::label_refs (list<RelativeRecord>).
+	// Each entry stores a pool index + the issued-op index at the time of
+	// addLabelRef, matching RelativeRecord.calling_index = issued.size().
 	labelRefs []rawBuildRelativeRef
-	// Mirrors PcodeCacher labels vector. Undefined entries keep a sentinel.
+	// labels mirrors PcodeCacher::labels (vector<uintb>).
+	// Undefined entries use rawBuildLabelUnset (C++ uses 0xbadbeef).
 	labels []uint64
-	// Mirrors one-instruction tail discipline in sleigh.cc: resolveRelatives()
-	// is a distinct phase from emit(), and repeating resolve without new staged
-	// ops should be a no-op in this Go shell.
+	// resolveDone mirrors the one-instruction tail discipline in sleigh.cc:
+	// resolveRelatives() is a distinct phase from emit(), and repeating
+	// resolve without new staged ops is a no-op.
 	resolveDone bool
 }
 
@@ -68,6 +86,12 @@ type rawBuildRelativeRef struct {
 }
 
 const rawBuildLabelUnset = ^uint64(0)
+
+// defaultVarnodePoolSize mirrors the initial pool allocation in
+// PcodeCacher::PcodeCacher() (sleigh.cc): "uint4 maxsize = 600".
+// Starting with the same capacity avoids early reallocations for
+// typical instruction builds.
+const defaultVarnodePoolSize = 600
 
 // NewDisassemblyCache creates an empty parser-context cache.
 func NewDisassemblyCache() *DisassemblyCache {
@@ -559,6 +583,9 @@ func newRawBuildState(capacity int) *rawBuildState {
 	return state
 }
 
+// reset mirrors PcodeCacher::clear() -- resets issued/labels/labelRefs cursors
+// while keeping pool allocation so the backing arrays are reused across
+// instruction lifecycles (C++ resets curpool to poolstart but never frees).
 func (s *rawBuildState) reset(capacity int) {
 	if s == nil {
 		return
@@ -586,13 +613,18 @@ func (s *rawBuildState) reset(capacity int) {
 	} else {
 		s.labels = s.labels[:0]
 	}
+	// Mirror PcodeCacher pool: initial capacity is defaultVarnodePoolSize (600)
+	// matching the C++ constructor. On subsequent resets the existing (possibly
+	// grown) capacity is retained, just like C++ clear() keeps the pool.
 	varnodeCapacity := capacity * 3
+	if varnodeCapacity < defaultVarnodePoolSize {
+		varnodeCapacity = defaultVarnodePoolSize
+	}
 	if cap(s.varnodes) < varnodeCapacity {
 		s.varnodes = make([]pcode.VarnodeData, 0, varnodeCapacity)
 	} else {
 		s.varnodes = s.varnodes[:0]
 	}
-	// Mirrors sleigh.cc PcodeCacher::clear(): reset issued/labels while keeping pool allocation.
 	s.resolveDone = false
 }
 
@@ -603,6 +635,24 @@ func (s *rawBuildState) markUnresolved() {
 	s.resolveDone = false
 }
 
+// allocateInstruction mirrors PcodeCacher::allocateInstruction() -- appends
+// an empty PcodeData to the issued deque and returns its index.
+// The caller is responsible for filling in OpCode, Inputs, Output via
+// pool-allocated varnodes. This method exists for future dump() parity;
+// the current AppendRawBuild path uses appendIssued which combines
+// allocation and data copy in a single step.
+func (s *rawBuildState) allocateInstruction() int {
+	idx := len(s.issued)
+	s.issued = append(s.issued, pcode.RawOp{})
+	s.refs = append(s.refs, rawBuildIssuedRef{})
+	return idx
+}
+
+// appendIssued is the combined allocate-and-copy path used by AppendRawBuild.
+// It allocates pool varnodes for all inputs + optional output, copies the data,
+// and wires the issued RawOp's slices into the pool.
+// Mirrors the sequence: allocateVarnodes() -> fill data -> allocateInstruction()
+// -> set outvar/invar from the C++ SleighBuilder::dump() flow.
 func (s *rawBuildState) appendIssued(op pcode.RawOp) error {
 	inputCount := len(op.Inputs)
 	total := inputCount
@@ -640,6 +690,9 @@ func (s *rawBuildState) appendIssued(op pcode.RawOp) error {
 	return nil
 }
 
+// allocateVarnodes mirrors PcodeCacher::allocateVarnodes(uint4 size).
+// It bump-allocates count entries from the pool and returns the start index.
+// If the pool is too small, ensureVarnodeCapacity grows it (like expandPool).
 func (s *rawBuildState) allocateVarnodes(count int) (int, error) {
 	if count < 0 {
 		return 0, fmt.Errorf("raw build varnode allocation count %d is negative", count)
@@ -655,6 +708,10 @@ func (s *rawBuildState) allocateVarnodes(count int) (int, error) {
 	return start, nil
 }
 
+// ensureVarnodeCapacity mirrors PcodeCacher::expandPool(uint4 size).
+// Grows the pool if needed, copies old data, and rebinds all issued op
+// slice headers to the new backing array (same as C++ expandPool rebinding
+// outvar/invar pointers and label_refs.dataptr).
 func (s *rawBuildState) ensureVarnodeCapacity(extra int) error {
 	if extra <= 0 {
 		return nil
@@ -731,6 +788,10 @@ func (s *rawBuildState) addLabelRef(varnodeSlot int, callingIndex uint64) error 
 	return nil
 }
 
+// resolveRelatives mirrors PcodeCacher::resolveRelatives() (sleigh.cc).
+// For each label reference, computes (labels[id] - calling_index) & mask
+// and patches the varnode offset in place. The mask comes from labelMask
+// which matches C++ calc_mask(ptr->size).
 func (s *rawBuildState) resolveRelatives() error {
 	for _, ref := range s.labelRefs {
 		if ref.varnodeSlot < 0 || ref.varnodeSlot >= len(s.varnodes) {
