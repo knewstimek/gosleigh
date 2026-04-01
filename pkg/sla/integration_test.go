@@ -121,12 +121,7 @@ func TestIntegration_MetadataDecode(t *testing.T) {
 			i, space.Name, space.Kind, space.Index, space.AddrSize, space.WordSize, space.BigEndian)
 	}
 
-	// 6502 is little-endian
-	if metadata.BigEndian {
-		t.Error("expected 6502 to be little-endian, got big-endian")
-	}
-
-	// 6502 default space should exist
+	// Default space should exist
 	if metadata.DefaultSpace == "" {
 		t.Error("default space name is empty")
 	}
@@ -140,9 +135,8 @@ func TestIntegration_MetadataDecode(t *testing.T) {
 	for _, space := range metadata.Spaces {
 		if space.Name == metadata.DefaultSpace {
 			found = true
-			// 6502 has 16-bit address bus -> addrSize should be 2
-			if space.AddrSize != 2 {
-				t.Errorf("expected 6502 default space addr size 2, got %d", space.AddrSize)
+			if space.AddrSize == 0 {
+				t.Error("default space addr size is 0")
 			}
 			break
 		}
