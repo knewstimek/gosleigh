@@ -33,6 +33,9 @@ Desktop.ini
 coverage.html
 coverage.txt
 
+# Claude Code
+.claude/
+
 # Temp
 *.tmp
 *.log
