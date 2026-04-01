@@ -1,0 +1,412 @@
+package pcode
+
+// BlockType identifies the kind of FlowBlock.
+// C++ parity: block.hh block_type
+type BlockType int
+
+const (
+	BlockPlain         BlockType = iota // t_plain
+	BlockBasicType                      // t_basic
+	BlockGraphType                      // t_graph
+	BlockCopyType                       // t_copy
+	BlockGotoType                       // t_goto
+	BlockMultiGotoType                  // t_multigoto
+	BlockListType                       // t_ls
+	BlockConditionType                  // t_condition
+	BlockIfType                         // t_if
+	BlockWhileDoType                    // t_whiledo
+	BlockDoWhileType                    // t_dowhile
+	BlockSwitchType                     // t_switch
+	BlockInfLoopType                    // t_infloop
+)
+
+// Block flags -- uint32 bitmask
+// C++ parity: block.hh block_flags
+const (
+	BlockFlagGotoGoto         uint32 = 0x001
+	BlockFlagBreakGoto        uint32 = 0x002
+	BlockFlagContinueGoto     uint32 = 0x004
+	BlockFlagSwitchOut        uint32 = 0x010
+	BlockFlagUnstructuredTarg uint32 = 0x020
+	BlockFlagMark             uint32 = 0x080
+	BlockFlagMark2            uint32 = 0x100
+	BlockFlagEntryPoint       uint32 = 0x200
+	BlockFlagInteriorGotoOut  uint32 = 0x400
+	BlockFlagInteriorGotoIn   uint32 = 0x800
+	BlockFlagLabelBumpUp      uint32 = 0x1000
+	BlockFlagDoNothingLoop    uint32 = 0x2000
+	BlockFlagDead             uint32 = 0x4000
+	BlockFlagWhileDoOverflow  uint32 = 0x8000
+	BlockFlagFlipPath         uint32 = 0x10000
+	BlockFlagJoinedBlock      uint32 = 0x20000
+	BlockFlagDuplicateBlock   uint32 = 0x40000
+)
+
+// Edge flags -- uint32 bitmask
+// C++ parity: block.hh edge_flags
+const (
+	EdgeFlagGoto          uint32 = 0x001
+	EdgeFlagLoop          uint32 = 0x002
+	EdgeFlagDefaultSwitch uint32 = 0x004
+	EdgeFlagIrreducible   uint32 = 0x008
+	EdgeFlagTree          uint32 = 0x010
+	EdgeFlagForward       uint32 = 0x020
+	EdgeFlagCross         uint32 = 0x040
+	EdgeFlagBack          uint32 = 0x080
+	EdgeFlagLoopExit      uint32 = 0x100
+)
+
+// BlockEdge is one half of a bidirectional CFG edge.
+// C++ parity: block.hh BlockEdge
+type BlockEdge struct {
+	Label        uint32
+	Point        *FlowBlock
+	ReverseIndex int // index in the opposite direction's edge list
+}
+
+// FlowBlock is the base type for all control flow blocks.
+// C++ parity: block.hh FlowBlock
+type FlowBlock struct {
+	blockType  BlockType
+	flags      uint32
+	parent     *FlowBlock
+	immedDom   *FlowBlock
+	index      int32
+	visitCount int32
+	numDesc    int32
+	inEdges    []BlockEdge
+	outEdges   []BlockEdge
+}
+
+// Type returns the block type.
+func (b *FlowBlock) Type() BlockType { return b.blockType }
+
+// SetType sets the block type.
+func (b *FlowBlock) SetType(t BlockType) { b.blockType = t }
+
+// Index returns the block index (RPO order after spanning tree).
+func (b *FlowBlock) Index() int32 { return b.index }
+
+// SetIndex sets the block index.
+func (b *FlowBlock) SetIndex(i int32) { b.index = i }
+
+// Flags returns the block flags.
+func (b *FlowBlock) Flags() uint32 { return b.flags }
+
+// SetFlag sets the given flag bits.
+func (b *FlowBlock) SetFlag(f uint32) { b.flags |= f }
+
+// ClearFlag clears the given flag bits.
+func (b *FlowBlock) ClearFlag(f uint32) { b.flags &^= f }
+
+// HasFlag returns true if all bits in f are set.
+func (b *FlowBlock) HasFlag(f uint32) bool { return b.flags&f == f }
+
+// Parent returns the parent block.
+func (b *FlowBlock) Parent() *FlowBlock { return b.parent }
+
+// SetParent sets the parent block.
+func (b *FlowBlock) SetParent(p *FlowBlock) { b.parent = p }
+
+// ImmedDom returns the immediate dominator.
+func (b *FlowBlock) ImmedDom() *FlowBlock { return b.immedDom }
+
+// SetImmedDom sets the immediate dominator.
+func (b *FlowBlock) SetImmedDom(d *FlowBlock) { b.immedDom = d }
+
+// VisitCount returns the visit count (used during DFS).
+func (b *FlowBlock) VisitCount() int32 { return b.visitCount }
+
+// SetVisitCount sets the visit count.
+func (b *FlowBlock) SetVisitCount(c int32) { b.visitCount = c }
+
+// NumDesc returns the number of descendants.
+func (b *FlowBlock) NumDesc() int32 { return b.numDesc }
+
+// SetNumDesc sets the number of descendants.
+func (b *FlowBlock) SetNumDesc(n int32) { b.numDesc = n }
+
+// SizeIn returns the number of incoming edges.
+func (b *FlowBlock) SizeIn() int { return len(b.inEdges) }
+
+// SizeOut returns the number of outgoing edges.
+func (b *FlowBlock) SizeOut() int { return len(b.outEdges) }
+
+// InEdge returns the i-th incoming edge.
+func (b *FlowBlock) InEdge(i int) BlockEdge { return b.inEdges[i] }
+
+// OutEdge returns the i-th outgoing edge.
+func (b *FlowBlock) OutEdge(i int) BlockEdge { return b.outEdges[i] }
+
+// InRevIndex returns the reverse index for the i-th incoming edge.
+func (b *FlowBlock) InRevIndex(i int) int { return b.inEdges[i].ReverseIndex }
+
+// OutRevIndex returns the reverse index for the i-th outgoing edge.
+func (b *FlowBlock) OutRevIndex(i int) int { return b.outEdges[i].ReverseIndex }
+
+// GetInIndex returns the index of bl in this block's inEdges, or -1 if not found.
+func (b *FlowBlock) GetInIndex(bl *FlowBlock) int {
+	for i, e := range b.inEdges {
+		if e.Point == bl {
+			return i
+		}
+	}
+	return -1
+}
+
+// GetOutIndex returns the index of bl in this block's outEdges, or -1 if not found.
+func (b *FlowBlock) GetOutIndex(bl *FlowBlock) int {
+	for i, e := range b.outEdges {
+		if e.Point == bl {
+			return i
+		}
+	}
+	return -1
+}
+
+// FalseOut returns the false branch target (outEdges[0]).
+func (b *FlowBlock) FalseOut() *FlowBlock { return b.outEdges[0].Point }
+
+// TrueOut returns the true branch target (outEdges[1]).
+func (b *FlowBlock) TrueOut() *FlowBlock { return b.outEdges[1].Point }
+
+// AddInEdge adds a bidirectional edge: b <- source.
+// The new edge is appended to b.inEdges and source.outEdges with
+// cross-referencing ReverseIndex values.
+// C++ parity: block.cc FlowBlock::addInEdge
+func (b *FlowBlock) AddInEdge(source *FlowBlock, label uint32) {
+	inIdx := len(b.inEdges)
+	outIdx := len(source.outEdges)
+	b.inEdges = append(b.inEdges, BlockEdge{
+		Label:        label,
+		Point:        source,
+		ReverseIndex: outIdx,
+	})
+	source.outEdges = append(source.outEdges, BlockEdge{
+		Label:        label,
+		Point:        b,
+		ReverseIndex: inIdx,
+	})
+}
+
+// halfDeleteInEdge removes inEdges[slot] and fixes the ReverseIndex on the
+// opposite (outEdges) side for the edge that moves into the vacated slot.
+func (b *FlowBlock) halfDeleteInEdge(slot int) {
+	last := len(b.inEdges) - 1
+	if slot != last {
+		// Move last element into the vacated slot.
+		b.inEdges[slot] = b.inEdges[last]
+		// The moved edge's source block has an outEdge pointing here;
+		// update its ReverseIndex to the new slot.
+		movedEdge := &b.inEdges[slot]
+		movedEdge.Point.outEdges[movedEdge.ReverseIndex].ReverseIndex = slot
+	}
+	b.inEdges = b.inEdges[:last]
+}
+
+// halfDeleteOutEdge removes outEdges[slot] and fixes the ReverseIndex on the
+// opposite (inEdges) side for the edge that moves into the vacated slot.
+func (b *FlowBlock) halfDeleteOutEdge(slot int) {
+	last := len(b.outEdges) - 1
+	if slot != last {
+		b.outEdges[slot] = b.outEdges[last]
+		movedEdge := &b.outEdges[slot]
+		movedEdge.Point.inEdges[movedEdge.ReverseIndex].ReverseIndex = slot
+	}
+	b.outEdges = b.outEdges[:last]
+}
+
+// RemoveInEdge removes the bidirectional edge at inEdges[slot].
+// C++ parity: block.cc FlowBlock::removeInEdge
+func (b *FlowBlock) RemoveInEdge(slot int) {
+	// Find the mirror outEdge on the source block.
+	srcBlock := b.inEdges[slot].Point
+	outSlot := b.inEdges[slot].ReverseIndex
+	// Delete from source's outEdges first (may swap-move).
+	srcBlock.halfDeleteOutEdge(outSlot)
+	// If the source's halfDelete moved an edge into outSlot, that moved edge's
+	// target block needs its inEdge ReverseIndex updated -- halfDeleteOutEdge
+	// already did that. But our own inEdge[slot].ReverseIndex may now be stale
+	// if the edge that was swapped in was NOT slot's edge. However, since we're
+	// about to delete inEdge[slot] too, we only need to worry if slot's
+	// ReverseIndex changed. Actually halfDeleteOutEdge already fixed any
+	// moved edge's mirror. Now delete from our inEdges.
+	b.halfDeleteInEdge(slot)
+}
+
+// RemoveOutEdge removes the bidirectional edge at outEdges[slot].
+// C++ parity: block.cc FlowBlock::removeOutEdge
+func (b *FlowBlock) RemoveOutEdge(slot int) {
+	tgtBlock := b.outEdges[slot].Point
+	inSlot := b.outEdges[slot].ReverseIndex
+	tgtBlock.halfDeleteInEdge(inSlot)
+	b.halfDeleteOutEdge(slot)
+}
+
+// ReplaceInEdge replaces the source block of inEdges[slot].
+// C++ parity: block.cc FlowBlock::replaceInEdge
+func (b *FlowBlock) ReplaceInEdge(slot int, newSrc *FlowBlock) {
+	oldSrc := b.inEdges[slot].Point
+	outSlot := b.inEdges[slot].ReverseIndex
+
+	// Remove mirror from old source.
+	oldSrc.halfDeleteOutEdge(outSlot)
+
+	// Add new outEdge on newSrc.
+	newOutIdx := len(newSrc.outEdges)
+	newSrc.outEdges = append(newSrc.outEdges, BlockEdge{
+		Label:        b.inEdges[slot].Label,
+		Point:        b,
+		ReverseIndex: slot,
+	})
+	b.inEdges[slot].Point = newSrc
+	b.inEdges[slot].ReverseIndex = newOutIdx
+}
+
+// ReplaceOutEdge replaces the target block of outEdges[slot].
+// C++ parity: block.cc FlowBlock::replaceOutEdge
+func (b *FlowBlock) ReplaceOutEdge(slot int, newTgt *FlowBlock) {
+	oldTgt := b.outEdges[slot].Point
+	inSlot := b.outEdges[slot].ReverseIndex
+
+	// Remove mirror from old target.
+	oldTgt.halfDeleteInEdge(inSlot)
+
+	// Add new inEdge on newTgt.
+	newInIdx := len(newTgt.inEdges)
+	newTgt.inEdges = append(newTgt.inEdges, BlockEdge{
+		Label:        b.outEdges[slot].Label,
+		Point:        b,
+		ReverseIndex: slot,
+	})
+	b.outEdges[slot].Point = newTgt
+	b.outEdges[slot].ReverseIndex = newInIdx
+}
+
+// SwapEdges swaps outEdges[0] and outEdges[1], fixing ReverseIndex on both
+// sides, and toggles BlockFlagFlipPath.
+// C++ parity: block.cc FlowBlock::swapEdges
+func (b *FlowBlock) SwapEdges() {
+	b.outEdges[0], b.outEdges[1] = b.outEdges[1], b.outEdges[0]
+
+	// Fix ReverseIndex on the target's inEdges for both swapped edges.
+	b.outEdges[0].Point.inEdges[b.outEdges[0].ReverseIndex].ReverseIndex = 0
+	b.outEdges[1].Point.inEdges[b.outEdges[1].ReverseIndex].ReverseIndex = 1
+
+	b.flags ^= BlockFlagFlipPath
+}
+
+// SetOutEdgeFlag sets flag bits on outEdges[i] and the mirror inEdge.
+// C++ parity: block.cc FlowBlock::setOutEdgeFlag
+func (b *FlowBlock) SetOutEdgeFlag(i int, lab uint32) {
+	b.outEdges[i].Label |= lab
+	tgt := b.outEdges[i].Point
+	revIdx := b.outEdges[i].ReverseIndex
+	tgt.inEdges[revIdx].Label |= lab
+}
+
+// ClearOutEdgeFlag clears flag bits on outEdges[i] and the mirror inEdge.
+// C++ parity: block.cc FlowBlock::clearOutEdgeFlag
+func (b *FlowBlock) ClearOutEdgeFlag(i int, lab uint32) {
+	b.outEdges[i].Label &^= lab
+	tgt := b.outEdges[i].Point
+	revIdx := b.outEdges[i].ReverseIndex
+	tgt.inEdges[revIdx].Label &^= lab
+}
+
+// HasLoopIn returns true if any incoming edge has EdgeFlagLoop.
+func (b *FlowBlock) HasLoopIn() bool {
+	for _, e := range b.inEdges {
+		if e.Label&EdgeFlagLoop != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// HasLoopOut returns true if any outgoing edge has EdgeFlagLoop.
+func (b *FlowBlock) HasLoopOut() bool {
+	for _, e := range b.outEdges {
+		if e.Label&EdgeFlagLoop != 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// IsLoopIn returns true if inEdges[i] has EdgeFlagLoop.
+func (b *FlowBlock) IsLoopIn(i int) bool { return b.inEdges[i].Label&EdgeFlagLoop != 0 }
+
+// IsLoopOut returns true if outEdges[i] has EdgeFlagLoop.
+func (b *FlowBlock) IsLoopOut(i int) bool { return b.outEdges[i].Label&EdgeFlagLoop != 0 }
+
+// IsGotoIn returns true if inEdges[i] has EdgeFlagGoto.
+func (b *FlowBlock) IsGotoIn(i int) bool { return b.inEdges[i].Label&EdgeFlagGoto != 0 }
+
+// IsGotoOut returns true if outEdges[i] has EdgeFlagGoto.
+func (b *FlowBlock) IsGotoOut(i int) bool { return b.outEdges[i].Label&EdgeFlagGoto != 0 }
+
+// Dominates returns true if b dominates sub by walking the immedDom chain.
+// C++ parity: block.cc FlowBlock::dominates
+func (b *FlowBlock) Dominates(sub *FlowBlock) bool {
+	cur := sub
+	for cur != nil {
+		if cur == b {
+			return true
+		}
+		if cur.immedDom == cur {
+			// Reached the root without finding b.
+			return false
+		}
+		cur = cur.immedDom
+	}
+	return false
+}
+
+// FindCommonBlock finds the lowest common ancestor of bl1 and bl2 in the
+// dominator tree using BlockFlagMark to detect intersection.
+// C++ parity: block.cc FlowBlock::findCommonBlock
+func FindCommonBlock(bl1, bl2 *FlowBlock) *FlowBlock {
+	if bl1 == nil {
+		return bl2
+	}
+	if bl2 == nil {
+		return bl1
+	}
+
+	// Mark all ancestors of bl1.
+	cur := bl1
+	for cur != nil {
+		cur.SetFlag(BlockFlagMark)
+		if cur.immedDom == cur {
+			break
+		}
+		cur = cur.immedDom
+	}
+
+	// Walk ancestors of bl2 until we find a marked block.
+	var result *FlowBlock
+	cur = bl2
+	for cur != nil {
+		if cur.HasFlag(BlockFlagMark) {
+			result = cur
+			break
+		}
+		if cur.immedDom == cur {
+			break
+		}
+		cur = cur.immedDom
+	}
+
+	// Clear marks.
+	cur = bl1
+	for cur != nil {
+		cur.ClearFlag(BlockFlagMark)
+		if cur.immedDom == cur {
+			break
+		}
+		cur = cur.immedDom
+	}
+
+	return result
+}

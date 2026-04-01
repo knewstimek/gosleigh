@@ -163,6 +163,8 @@ func (op *PcodeOp) HaltType() uint32 {
 
 func (op *PcodeOp) SetFlag(fl uint32)              { op.flags |= fl }
 func (op *PcodeOp) ClearFlag(fl uint32)             { op.flags &^= fl }
+func (op *PcodeOp) FlipFlag(fl uint32)              { op.flags ^= fl }
+func (op *PcodeOp) HasFlag(fl uint32) bool          { return op.flags&fl != 0 }
 func (op *PcodeOp) SetAdditionalFlag(fl uint32)     { op.addlFlags |= fl }
 func (op *PcodeOp) ClearAdditionalFlag(fl uint32)   { op.addlFlags &^= fl }
 
