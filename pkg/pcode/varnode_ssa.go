@@ -135,6 +135,16 @@ func (vn *Varnode) Consumed() uint64          { return vn.consumed }
 func (vn *Varnode) SetConsumed(c uint64)      { vn.consumed = c }
 func (vn *Varnode) AddlFlags() uint16         { return vn.addlFlags }
 
+// Additional flag operations
+// C++ parity: varnode.hh Varnode addl_flags accessors
+
+func (vn *Varnode) SetAddlFlags(fl uint16)      { vn.addlFlags |= fl }
+func (vn *Varnode) ClearAddlFlags(fl uint16)    { vn.addlFlags &^= fl }
+func (vn *Varnode) HasAddlFlags(fl uint16) bool { return vn.addlFlags&fl != 0 }
+func (vn *Varnode) IsActiveHeritage() bool      { return vn.addlFlags&VarnodeActiveHeritage != 0 }
+func (vn *Varnode) SetActiveHeritage()          { vn.addlFlags |= VarnodeActiveHeritage }
+func (vn *Varnode) ClearActiveHeritage()        { vn.addlFlags &^= VarnodeActiveHeritage }
+
 // ---------------------------------------------------------------------------
 // Flag operations
 // ---------------------------------------------------------------------------

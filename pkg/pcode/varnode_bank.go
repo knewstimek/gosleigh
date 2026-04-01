@@ -369,3 +369,35 @@ func (vb *VarnodeBank) AllVarnodes() []*Varnode {
 	copy(out, vb.locTree)
 	return out
 }
+
+// LocRange returns all varnodes whose address overlaps [addr, addr+size)
+// within the given space. Scans locTree (sorted by space/offset).
+// C++ parity: VarnodeBank loc-tree range queries
+func (vb *VarnodeBank) LocRange(addr address.Address, size int32) []*Varnode {
+	var result []*Varnode
+	endOff := addr.Offset + uint64(size)
+	for _, vn := range vb.locTree {
+		if vn.loc.Space != addr.Space {
+			continue
+		}
+		vnEnd := vn.loc.Offset + uint64(vn.size)
+		// Check overlap: vn overlaps [addr, addr+size) if
+		// vn.offset < endOff && vnEnd > addr.offset
+		if vn.loc.Offset < endOff && vnEnd > addr.Offset {
+			result = append(result, vn)
+		}
+	}
+	return result
+}
+
+// BySpace returns all varnodes in the given address space.
+// C++ parity: VarnodeBank space iteration
+func (vb *VarnodeBank) BySpace(spc *address.Space) []*Varnode {
+	var result []*Varnode
+	for _, vn := range vb.locTree {
+		if vn.loc.Space == spc {
+			result = append(result, vn)
+		}
+	}
+	return result
+}
