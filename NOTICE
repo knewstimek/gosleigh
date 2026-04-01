@@ -1,0 +1,12 @@
+Gosleigh
+Copyright 2026 Gosleigh Contributors
+
+This product is a Go reimplementation of the Ghidra Decompiler/Sleigh engine.
+The original Ghidra project is developed by the National Security Agency (NSA)
+and is available at https://github.com/NationalSecurityAgency/ghidra
+
+Original Ghidra Notice:
+  Ghidra
+  Copyright 2019 National Security Agency
+
+  Licensed under the Apache License, Version 2.0
