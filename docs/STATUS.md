@@ -169,19 +169,37 @@
 - [x] `backend.go` `ContextSize()` added, mirroring `ContextDatabase::getContextSize()`
 - [x] `backend.go` `SetVariableRegion()` added, mirroring `ContextDatabase::setVariableRegion()`
 - [x] 11 new tests added for PcodeCacher pool and backend parity (820bfde)
+- [x] `resolve_handles.go`: `runtimeContextForWalker` now passes child handles and `SpacesByIndex` to `HandleTpl::fix()` parity path; `findWalkerSpaceByIndex` now prefers `SpacesByIndex` lookup over walker-visible space scan
+- [x] `walker.go`: `ParserContext` gains `SpacesByIndex` field for space lookup without walker indirection
+- [x] `symbols.go`: `ContextSymbolBoundary` added with `varnode`, `low`, `high`, `flow` attributes, mirroring `ContextSymbol::decode()`
+- [x] `xrefs.go`: `BuildXrefs()` implemented -- post-decode xref/userop/context registration matching `SleighBase` post-decode register pass
+- [x] `patexpr.go`: `ContextSymbol` pattern access path corrected; `translate.go` `evalPatternSymbolValue` now checks both `Context` and `Pattern` sides
+- [x] 12 new tests added for operand semantics and .sla runtime data parity (cc3878d)
+- [x] `discache.go`: emit/resolve error messages aligned to C++ `PcodeCacher` text; `builder_build.go` same-message parity
+- [x] `instruction_context.go`: `N2addr` delay-slot known gap documented; lazy derivation parity comment added
+- [x] `walker.go`: `GetN2addr()` C++ counterpart comment added
+- [x] `symbols.go`: `ContextOpBoundary` type added with `num`, `shift`, `mask` fields; `EpsilonSymbol` body opaque fix
+- [x] `symbols_test.go`: `ContextOp` and `EpsilonSymbol` tests added; `metadata.go` audit confirmed no gaps (9f63d4a)
+- [x] `packed.go`: `TYPECODE_ADDRESSSPACE` (type 5) and `TYPECODE_SPECIALSPACE` (type 6) decoding added
+- [x] `metadata.go`: `requiredSpaceAttr()` helper added; `symbols.go` and `templates.go` now use it for space attribute reads
+- [x] `integration_test.go`: 7-step integration test against real Ghidra 12 `6502.sla` -- all 7/7 pass; `testdata/6502-packed.sla` added (64336df)
+- [x] `container.go`: XML detection and XML payload extraction added
+- [x] `xml.go`: `encoding/xml`-based XML parser converts to internal `element`/`attribute` model
+- [x] `metadata.go`: Sleigh v3 (XML) and v4 (packed) both accepted; `container_test.go` and `integration_test.go` extended with XML coverage
+- [x] `testdata/6502.sla` (XML v3) added; XML fixture path tested end-to-end (320c3fb)
 
 ### Next
 - [ ] Continue `Instruction Execution Parity`: remaining full catch coverage outside the current typed path, stricter same-object mutation semantics for every nested failure path, and constructor-print/catch-format parity beyond the current shell
 - [ ] Continue `PcodeCacher And Builder Parity`: direct `allocateInstruction()` / `allocateVarnodes()` integration into `AppendRawBuild` path, infallible sink semantics, and full container/pool parity beyond the current `allocateInstruction` stub
 - [ ] Continue `Decode Pipeline Parity`: build on the authoritative split `LoadFill` / `LoadContext` route, the per-phase bundled fallback compatibility layer, backend-backed context reads/writes, parser-context circular reuse path, lazy `inst_next2` derivation, root-instruction emission propagation, and the raw file-backed loader path, then replace remaining synthetic setup with broader real decode population of cached fields such as handles, calladdr semantics, commit-backed context state, and broader loader/database parity
-- [ ] Continue `Operand Semantics Parity`: build on the new `OperandSymbol` / `VarnodeSymbol` / `VarnodeListSymbol` automatic paths and then reduce dynamic varnode-style hook fallback further
+- [ ] Continue `Operand Semantics Parity`: operand child-handle passing and `SpacesByIndex` lookup are now wired; extend the automatic path to cover remaining `TripleSymbol::getFixedHandle()` cases and reduce dynamic varnode-style hook fallback further
 - [x] flow-symbol fixed-handle parity now has an automatic runtime path for safe `inst_dest` / `inst_ref` opaque-boundary candidates, without guessing nonexistent persisted `.sla` IDs
 - [ ] Reduce the remaining Go-only sink error semantics gap in `EmitRawBuildTo()` while keeping parity-safe staging ownership
 - [ ] Reduce the remaining internal container-shape gap against original `PcodeCacher` (`PcodeData` / `VarnodeData` allocation layout and pool-growth structure), even though current behavior is now closer
-- [ ] Extend the preserved operand-symbol metadata path to cover more `TripleSymbol::getFixedHandle()` cases and reduce remaining hook-only branches
 - [ ] Finish the remaining dynamic varnode expansion gaps: exact cross-run parity for C++ `LOAD`/`STORE` pointer-space payload handling and the explicit no-`UniqueSpace` parity gap when no unique runtime temp space exists anywhere in context
 - [ ] Keep tightening `Instruction Execution Parity` by normalizing the remaining non-typed unimplemented paths still outside the current coverage
-- [ ] Finish `symbols.go` and `metadata.go` parity audit
+- [ ] Complete `BuildXrefs()` integration: wire the registered xref/userop/context tables into runtime resolve and pattern-evaluation paths
+- [ ] Finish `symbols.go` and `metadata.go` parity audit including `ContextSymbolBoundary` and `ContextOpBoundary` runtime usage
 - [ ] Reconcile Gosleigh package/module shape with standalone use plus downstream MCP integration
 - [ ] Continue from translation/runtime into the broader decompiler pipeline instead of stopping at a partial translator layer
 
