@@ -80,8 +80,11 @@ func TestSleighBuilderCrossBuildLeavesInnerWalkerForUnimplRewrite(t *testing.T) 
 	if err == nil {
 		t.Fatal("AppendCrossBuild() unexpectedly succeeded")
 	}
-	if !errors.Is(err, ErrBuilderUnimplemented) {
-		t.Fatalf("AppendCrossBuild() error does not wrap ErrBuilderUnimplemented: %v", err)
+	// Mirrors C++ parity: the build() inside appendCrossBuild throws UnimplError (not LowlevelError)
+	// when the nested constructor's pcode is not implemented. wrapTranslateUnimplError rewrites it.
+	var uerr *UnimplError
+	if !errors.As(err, &uerr) {
+		t.Fatalf("AppendCrossBuild() error type = %T, want *UnimplError (from nested build)", err)
 	}
 	if b.State.Walker == sourceWalker {
 		t.Fatal("AppendCrossBuild() restored the outer walker before unimplemented rewrite could inspect the inner state")
@@ -133,11 +136,14 @@ func TestSleighBuilderCrossBuildRejectsMissingCache(t *testing.T) {
 	if err == nil {
 		t.Fatal("AppendCrossBuild() returned nil without a cache")
 	}
-	if !errors.Is(err, ErrBuilderUnimplemented) {
-		t.Fatalf("AppendCrossBuild() error does not wrap ErrBuilderUnimplemented: %v", err)
-	}
+	// Mirrors C++ parity: missing cache is a LowlevelError, not UnimplError.
+	// The error must NOT be typed as *UnimplError so that
+	// wrapTranslateUnimplError does not rewrite it.
 	var uerr *UnimplError
-	if !errors.As(err, &uerr) {
-		t.Fatalf("AppendCrossBuild() error type = %T, want *UnimplError", err)
+	if errors.As(err, &uerr) {
+		t.Fatalf("AppendCrossBuild() infrastructure error should not be *UnimplError, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "CROSSBUILD requires a disassembly cache") {
+		t.Fatalf("AppendCrossBuild() error message mismatch: %v", err)
 	}
 }

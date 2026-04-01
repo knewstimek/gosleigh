@@ -1839,6 +1839,58 @@ func TestWrapTranslateUnimplErrorPrintsValueSymbolOperandWhenAvailable(t *testin
 	}
 }
 
+func TestWrapTranslateUnimplErrorPrintsVarnodeSymbolOperand(t *testing.T) {
+	// Mirrors VarnodeSymbol::print() which outputs getName().
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	ctx := NewParserContext(address.Address{Space: ram, Offset: 0x9020}, nil)
+	ctx.BaseState.SetConstructor(ConstructorBoundary{
+		FirstWhitespace: 1,
+		OperandSymbolIDs: []uint64{
+			1,
+		},
+		PrintPieces: []PrintPieceBoundary{
+			{Text: "ldr"},
+			{Text: " "},
+			{OperandIndex: 0, IsOperandRef: true},
+		},
+	})
+	ctx.BaseState.EnsureOperand(0)
+	ctx.SetSymbolTable(&SymbolTableBoundary{
+		Symbols: []SymbolBoundary{
+			{
+				ID:   1,
+				Name: "op0",
+				Body: SymbolBodyBoundary{
+					Operand: &OperandSymbolBoundary{
+						Index:               0,
+						HasDefiningSymbolID: true,
+						DefiningSymbolID:    2,
+					},
+				},
+			},
+			{
+				ID:            2,
+				Name:          "SP",
+				HeaderElement: elemVarnodeSymHead,
+				Body: SymbolBodyBoundary{
+					Varnode: &VarnodeSymbolBoundary{},
+				},
+			},
+		},
+	})
+	walker := NewParserWalker(ctx)
+	walker.BaseState()
+	builder := NewSleighBuilder(RuntimeContext{}, 0, -1, BuilderHooks{})
+	builder.State.Walker = walker
+
+	cause := newUnimplError(ErrBuilderUnimplemented, "directive BUILD unresolved")
+	wrapped := wrapTranslateUnimplError(cause, builder, 4)
+	msg := wrapped.Error()
+	if !strings.Contains(msg, "ram:0x9020: ldr  SP") {
+		t.Fatalf("varnode symbol operand print mismatch: %q", msg)
+	}
+}
+
 func TestWrapTranslateUnimplErrorPrintsValueSymbolOperandWithoutPrebuiltChildState(t *testing.T) {
 	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
 	ctx := NewParserContext(address.Address{Space: ram, Offset: 0x9009}, nil)
@@ -1928,6 +1980,108 @@ func TestFormatConstructorPrintBodySkipsFirstWhitespacePiece(t *testing.T) {
 	}
 	if mnemonicGap || bodyGap {
 		t.Fatalf("unexpected operand gap flags: mnemonic=%v body=%v", mnemonicGap, bodyGap)
+	}
+}
+
+func TestFlowThruIndexMnemonicBodyDelegation(t *testing.T) {
+	// Mirrors C++ flowthruindex behavior: a root constructor whose single print
+	// piece is an operand ref pointing to a subtable child delegates mnemonic/body
+	// printing to that child.
+	root := NewConstructState()
+	root.SetConstructor(ConstructorBoundary{
+		FirstWhitespace: -1,
+		// Single operand ref => FlowThruIndex = 0 (computed by SetConstructor)
+		PrintPieces: []PrintPieceBoundary{
+			{OperandIndex: 0, IsOperandRef: true},
+		},
+	})
+	child := root.EnsureOperand(0)
+	child.SetConstructor(ConstructorBoundary{
+		FirstWhitespace: 1,
+		PrintPieces: []PrintPieceBoundary{
+			{Text: "mov"},
+			{Text: " "},
+			{Text: "r0, r1"},
+		},
+	})
+
+	mnemonic, mnemonicGap := formatConstructorPrint(root, constructorPrintMnemonic, 0)
+	body, bodyGap := formatConstructorPrint(root, constructorPrintBody, 0)
+	if mnemonic != "mov" {
+		t.Fatalf("flowthru mnemonic mismatch: got %q want %q", mnemonic, "mov")
+	}
+	if body != "r0, r1" {
+		t.Fatalf("flowthru body mismatch: got %q want %q", body, "r0, r1")
+	}
+	if mnemonicGap || bodyGap {
+		t.Fatalf("unexpected gap flags: mnemonic=%v body=%v", mnemonicGap, bodyGap)
+	}
+
+	// printAll should NOT use flowthru; it prints the operand normally
+	// which recurses into child's full print (all pieces).
+	all, allGap := formatConstructorPrint(root, constructorPrintAll, 0)
+	if all != "mov r0, r1" {
+		t.Fatalf("printAll through flowthru mismatch: got %q want %q", all, "mov r0, r1")
+	}
+	if allGap {
+		t.Fatalf("unexpected gap flag in printAll")
+	}
+}
+
+func TestFlowThruIndexNonSubtableFallsThrough(t *testing.T) {
+	// When flowthruindex is set but the operand is NOT a subtable (no child
+	// constructor), the C++ code falls through to normal piece-by-piece print.
+	root := NewConstructState()
+	root.SetConstructor(ConstructorBoundary{
+		FirstWhitespace: -1,
+		PrintPieces: []PrintPieceBoundary{
+			{OperandIndex: 0, IsOperandRef: true},
+		},
+	})
+	// No child set => operand 0 has no constructor => not a subtable
+
+	mnemonic, mnemonicGap := formatConstructorPrint(root, constructorPrintMnemonic, 0)
+	// Should fall through and produce a placeholder since operand is unresolved.
+	if mnemonic == "" {
+		t.Fatal("expected non-empty result for non-subtable flowthru fallthrough")
+	}
+	if !mnemonicGap {
+		t.Fatal("expected gap flag for unresolved operand in non-subtable flowthru")
+	}
+}
+
+func TestFlowThruChainedDelegation(t *testing.T) {
+	// Two levels of flowthru: root -> mid -> leaf
+	root := NewConstructState()
+	root.SetConstructor(ConstructorBoundary{
+		FirstWhitespace: -1,
+		PrintPieces: []PrintPieceBoundary{
+			{OperandIndex: 0, IsOperandRef: true},
+		},
+	})
+	mid := root.EnsureOperand(0)
+	mid.SetConstructor(ConstructorBoundary{
+		FirstWhitespace: -1,
+		PrintPieces: []PrintPieceBoundary{
+			{OperandIndex: 0, IsOperandRef: true},
+		},
+	})
+	leaf := mid.EnsureOperand(0)
+	leaf.SetConstructor(ConstructorBoundary{
+		FirstWhitespace: 1,
+		PrintPieces: []PrintPieceBoundary{
+			{Text: "nop"},
+			{Text: " "},
+		},
+	})
+
+	mnemonic, _ := formatConstructorPrint(root, constructorPrintMnemonic, 0)
+	if mnemonic != "nop" {
+		t.Fatalf("chained flowthru mnemonic mismatch: got %q want %q", mnemonic, "nop")
+	}
+	body, _ := formatConstructorPrint(root, constructorPrintBody, 0)
+	if body != "" {
+		t.Fatalf("chained flowthru body mismatch: got %q want %q", body, "")
 	}
 }
 
@@ -2042,5 +2196,158 @@ func TestWrapTranslateUnimplErrorRewritesNonBuilderTypedUnimplemented(t *testing
 	}
 	if !errors.Is(terr, ErrResolveHandlesUnimplemented) {
 		t.Fatalf("rewritten typed error lost original unimplemented cause: %v", terr)
+	}
+}
+
+func TestBuildUnimplementedConstructReturnsUnimplErrorWithZeroLength(t *testing.T) {
+	// Mirrors PcodeBuilder::build(nullptr) -> throw UnimplError("", 0).
+	// When a child constructor has no main section (getTempl() returns nullptr),
+	// Build() must return *UnimplError with empty explain and InstructionLength=0.
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	ctx := NewParserContext(address.Address{Space: ram, Offset: 0x1000}, nil)
+	ctx.SetParserState(ParseStatePcode)
+	ctx.BaseState.Length = 4
+	// Constructor with no MainSection -- simulates getTempl() returning nullptr
+	ctx.BaseState.SetConstructor(ConstructorBoundary{
+		FirstWhitespace: -1,
+		// MainSection intentionally nil
+	})
+	// Add a child that has a constructor but no main section
+	child := &ConstructState{}
+	child.SetConstructor(ConstructorBoundary{
+		FirstWhitespace: -1,
+		// MainSection intentionally nil
+	})
+	ctx.BaseState.Children = []*ConstructState{child}
+
+	walker := NewParserWalker(ctx)
+	walker.BaseState()
+	b := NewSleighBuilder(RuntimeContext{Instruction: address.Address{Space: ram, Offset: 0x1000}}, 0, -1, BuilderHooks{})
+	b.State.Walker = walker
+
+	// BUILD operand 0 will find child with constructor but no main section
+	op := OpTplBoundary{
+		Opcode: "BUILD",
+		Inputs: []VarnodeTplBoundary{{
+			Offset: ConstBoundary{Kind: ConstKindReal, Value: 0},
+		}},
+	}
+	err := b.AppendBuild(op, -1)
+	if err == nil {
+		t.Fatal("AppendBuild() returned nil for constructor with no main section")
+	}
+	var uerr *UnimplError
+	if !errors.As(err, &uerr) {
+		t.Fatalf("AppendBuild() error type = %T, want *UnimplError", err)
+	}
+	if !uerr.HasInstructionLength {
+		t.Fatal("unimpl error missing HasInstructionLength flag")
+	}
+	if uerr.InstructionLength != 0 {
+		t.Fatalf("unimpl error instruction length = %d, want 0", uerr.InstructionLength)
+	}
+}
+
+func TestWrapTranslateUnimplErrorIgnoresDelaySlotInfraError(t *testing.T) {
+	// Mirrors C++ parity: delaySlot infrastructure failures are LowlevelError,
+	// NOT UnimplError, so wrapTranslateUnimplError must pass them through
+	// without rewriting explain/instruction_length.
+	infraErr := fmt.Errorf("Could not obtain cached delay slot instruction at ram:0x5004")
+	wrapped := wrapTranslateUnimplError(infraErr, nil, 8)
+	if wrapped != infraErr {
+		t.Fatalf("wrapTranslateUnimplError rewrote infrastructure error: got %v, want %v", wrapped, infraErr)
+	}
+	var uerr *UnimplError
+	if errors.As(wrapped, &uerr) {
+		t.Fatalf("infrastructure error was promoted to *UnimplError: %v", wrapped)
+	}
+}
+
+func TestWrapTranslateUnimplErrorIgnoresCrossBuildInfraError(t *testing.T) {
+	// Mirrors C++ parity: crossbuild infrastructure failures are LowlevelError,
+	// NOT UnimplError, so wrapTranslateUnimplError must pass them through.
+	infraErr := fmt.Errorf("Could not obtain cached crossbuild instruction at ram:0x9000")
+	wrapped := wrapTranslateUnimplError(infraErr, nil, 4)
+	if wrapped != infraErr {
+		t.Fatalf("wrapTranslateUnimplError rewrote infrastructure error: got %v, want %v", wrapped, infraErr)
+	}
+}
+
+func TestDelaySlotBuildFailurePropagatesAsUnimplError(t *testing.T) {
+	// When build() inside delaySlot fails with *UnimplError (e.g. unimplemented
+	// constructor), the error must propagate as *UnimplError so that
+	// wrapTranslateUnimplError at the TranslateSubtable boundary can rewrite it.
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	sourceAddr := address.Address{Space: ram, Offset: 0x7000}
+	targetAddr := address.Address{Space: ram, Offset: 0x7004}
+
+	sourceCtx := NewParserContext(sourceAddr, nil)
+	sourceCtx.SetParserState(ParseStatePcode)
+	sourceCtx.SetDelaySlot(4)
+	sourceCtx.BaseState.Length = 4
+	sourceCtx.BaseState.SetConstructor(ConstructorBoundary{
+		MainSection: &ConstructTplBoundary{
+			Ops: []OpTplBoundary{{
+				OpcodeID: int64(pcode.CPUI_INDIRECT),
+				Opcode:   "DELAY_SLOT",
+			}},
+		},
+	})
+
+	// Target constructor has a child with no main section -> build(nullptr)
+	targetCtx := NewParserContext(targetAddr, nil)
+	targetCtx.SetParserState(ParseStatePcode)
+	targetCtx.BaseState.Length = 4
+	targetChild := &ConstructState{}
+	targetChild.SetConstructor(ConstructorBoundary{
+		FirstWhitespace: -1,
+		// MainSection nil -> triggers UnimplError("",0)
+	})
+	targetCtx.BaseState.SetConstructor(ConstructorBoundary{
+		FirstWhitespace: -1,
+		MainSection: &ConstructTplBoundary{
+			Ops: []OpTplBoundary{{
+				Opcode: "BUILD",
+				Inputs: []VarnodeTplBoundary{{
+					Offset: ConstBoundary{Kind: ConstKindReal, Value: 0},
+				}},
+			}},
+		},
+	})
+	targetCtx.BaseState.Children = []*ConstructState{targetChild}
+
+	cache := NewDisassemblyCache()
+	for _, item := range []struct {
+		addr address.Address
+		ctx  *ParserContext
+	}{
+		{sourceAddr, sourceCtx},
+		{targetAddr, targetCtx},
+	} {
+		if err := cache.SetParserContext(item.addr, item.ctx); err != nil {
+			t.Fatalf("SetParserContext() error: %v", err)
+		}
+	}
+
+	b := NewSleighBuilder(RuntimeContext{}, 0, -1, BuilderHooks{})
+	b.State.SetDisassemblyCache(cache)
+	sourceWalker := NewParserWalker(sourceCtx)
+	sourceWalker.BaseState()
+	b.State.Walker = sourceWalker
+
+	err := b.DelaySlot(OpTplBoundary{OpcodeID: int64(pcode.CPUI_INDIRECT), Opcode: "DELAY_SLOT"})
+	if err == nil {
+		t.Fatal("DelaySlot() unexpectedly succeeded")
+	}
+	var uerr *UnimplError
+	if !errors.As(err, &uerr) {
+		t.Fatalf("DelaySlot() build failure error type = %T, want *UnimplError", err)
+	}
+	// The *UnimplError should carry instruction_length=0 from the inner build(nullptr)
+	if !uerr.HasInstructionLength {
+		t.Fatal("inner build UnimplError missing HasInstructionLength")
+	}
+	if uerr.InstructionLength != 0 {
+		t.Fatalf("inner build UnimplError instruction length = %d, want 0", uerr.InstructionLength)
 	}
 }

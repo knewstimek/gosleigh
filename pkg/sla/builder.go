@@ -304,15 +304,21 @@ func (b *SleighBuilder) appendBuildFromWalker(op OpTplBoundary, operandIndex int
 		if sectionID >= 0 {
 			return true, b.buildEmpty(sectionID)
 		}
-		return true, fmt.Errorf("BUILD child constructor has no main section")
+		// Mirrors PcodeBuilder::build(nullptr) -> throw UnimplError("",0):
+		// the child constructor exists but has no pcode implementation.
+		return true, newUnimplErrorWithInstructionLength(nil, "", 0)
 	}
 	return true, b.Build(*selected, sectionID)
 }
 
 // DelaySlot routes DELAY_SLOT through the runtime hook or returns an explicit unimplemented error.
+// Mirrors ghidra::SleighBuilder::delaySlot(): infrastructure failures propagate as plain
+// errors (LowlevelError in C++), while build() failures may carry *UnimplError.
 func (b *SleighBuilder) DelaySlot(op OpTplBoundary) error {
 	if handled, err := b.delaySlotFromWalker(); handled || err != nil {
-		return normalizeBuilderUnimpl(err)
+		// delaySlotFromWalker already distinguishes infrastructure errors (plain)
+		// from build errors (*UnimplError); do not re-normalize.
+		return err
 	}
 	if b.Hooks.OnDelaySlot == nil {
 		return newUnimplError(ErrBuilderUnimplemented, "DELAY_SLOT")
@@ -442,8 +448,10 @@ func (b *SleighBuilder) cacheRawLabel(labelID uint64) error {
 }
 
 // AppendCrossBuild routes CROSSBUILD through the cached parser-context re-entry path.
+// Mirrors ghidra::SleighBuilder::appendCrossBuild(): infrastructure failures propagate
+// as plain errors (LowlevelError in C++), while build() failures may carry *UnimplError.
 func (b *SleighBuilder) AppendCrossBuild(op OpTplBoundary, sectionID int64) error {
-	return normalizeBuilderUnimpl(b.appendCrossBuild(op, sectionID))
+	return b.appendCrossBuild(op, sectionID)
 }
 
 func directiveName(op OpTplBoundary) string {
