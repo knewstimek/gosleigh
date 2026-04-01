@@ -151,6 +151,10 @@ type ParserContext struct {
 	ParserState      ParseState
 	DelaySlot        int
 	BaseState        *ConstructState
+	// SpacesByIndex maps space index to AddrSpace for HandleTpl resolution.
+	// Populated by the caller (e.g. translate layer) so that
+	// runtimeContextForWalker can pass it through to RuntimeContext.
+	SpacesByIndex map[int64]*address.Space
 	// Mirrors ParserContext::getN2addr() lazy derivation from context.cc.
 	// When N2Addr is invalid, this callback can derive inst_next2 on demand.
 	n2Resolver  func() (address.Address, bool)

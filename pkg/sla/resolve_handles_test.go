@@ -709,6 +709,108 @@ func TestResolveHandlesUsesMainSectionResultForPropagation(t *testing.T) {
 	}
 }
 
+// Tests that propagateConstructorResult correctly passes child operand handles
+// to RuntimeContext.Handles so that HandleTpl::fix() can reference them via
+// ConstTpl::handle with v_space/v_offset/v_size selectors.
+// Mirrors C++ semantics.cc HandleTpl::fix() -> walker.getFixedHandle(index).
+func TestResolveHandlesPropagationReferencesChildHandle(t *testing.T) {
+	ctx, curSpace, _ := newResolveHandlesTestContext()
+
+	// Root constructor has one operand (symbol id 1).
+	// The operand resolves to a VarnodeSymbol producing a known handle.
+	// The root constructor's export (MainSection.Result) references handle 0.
+	ctx.SetSymbolTable(&SymbolTableBoundary{Symbols: []SymbolBoundary{
+		{
+			ID: 1,
+			Body: SymbolBodyBoundary{Operand: &OperandSymbolBoundary{
+				Index:               0,
+				HasDefiningSymbolID: true,
+				DefiningSymbolID:    2,
+			}},
+		},
+		{
+			ID:            2,
+			HeaderElement: elemVarnodeSymHead,
+			Body: SymbolBodyBoundary{Varnode: &VarnodeSymbolBoundary{
+				SpaceIndex: int64(curSpace.Index),
+				Offset:     0xBB,
+				Size:       4,
+			}},
+		},
+	}})
+	ctx.BaseState.SetConstructor(ConstructorBoundary{
+		OperandSymbolIDs: []uint64{1},
+		MainSection: &ConstructTplBoundary{
+			Result: &HandleTplBoundary{
+				// Export the child handle's space, offset, size via handle references.
+				Space:     ConstBoundary{Kind: ConstKindHandle, HandleIndex: 0, Selector: handleFieldSpace},
+				Size:      ConstBoundary{Kind: ConstKindHandle, HandleIndex: 0, Selector: handleFieldSize},
+				PtrSpace:  ConstBoundary{Kind: ConstKindReal, Value: 0},
+				PtrOffset: ConstBoundary{Kind: ConstKindHandle, HandleIndex: 0, Selector: handleFieldOffset},
+				PtrSize:   ConstBoundary{Kind: ConstKindReal, Value: 0},
+				TempSpace: ConstBoundary{Kind: ConstKindReal, Value: 0},
+				TempOffset: ConstBoundary{Kind: ConstKindReal, Value: 0},
+			},
+		},
+	})
+
+	err := ResolveHandles(ctx, ResolveHandlesHooks{})
+	if err != nil {
+		t.Fatalf("ResolveHandles failed: %v", err)
+	}
+	// The root handle should now carry the child operand's resolved varnode.
+	root := ctx.BaseState.Handle
+	if root.Space != curSpace {
+		t.Fatalf("root handle space = %v, want %v", root.Space, curSpace)
+	}
+	if root.OffsetOffset != 0xBB {
+		t.Fatalf("root handle offset = %#x, want 0xBB", root.OffsetOffset)
+	}
+	if root.Size != 4 {
+		t.Fatalf("root handle size = %d, want 4", root.Size)
+	}
+}
+
+func TestResolveHandlesSpacesByIndexUsedForVarnodeSymbol(t *testing.T) {
+	ctx, _, _ := newResolveHandlesTestContext()
+	regSpace := &address.Space{Name: "register", Kind: address.SpaceKindProcessor, Index: 5, AddrSize: 4, WordSize: 1}
+	ctx.SpacesByIndex = map[int64]*address.Space{
+		5: regSpace,
+	}
+	ctx.SetSymbolTable(&SymbolTableBoundary{Symbols: []SymbolBoundary{
+		{
+			ID: 1,
+			Body: SymbolBodyBoundary{Operand: &OperandSymbolBoundary{
+				Index:               0,
+				HasDefiningSymbolID: true,
+				DefiningSymbolID:    2,
+			}},
+		},
+		{
+			ID:            2,
+			HeaderElement: elemVarnodeSymHead,
+			Body: SymbolBodyBoundary{Varnode: &VarnodeSymbolBoundary{
+				SpaceIndex: 5,
+				Offset:     0x10,
+				Size:       4,
+			}},
+		},
+	}})
+	ctx.BaseState.SetConstructor(ConstructorBoundary{OperandSymbolIDs: []uint64{1}})
+
+	err := ResolveHandles(ctx, ResolveHandlesHooks{})
+	if err != nil {
+		t.Fatalf("ResolveHandles failed: %v", err)
+	}
+	child, ok := ctx.BaseState.Child(0)
+	if !ok {
+		t.Fatalf("child state was not created")
+	}
+	if child.Handle.Space != regSpace || child.Handle.OffsetOffset != 0x10 || child.Handle.Size != 4 {
+		t.Fatalf("child handle = %#v, want register varnode (space=register,0x10,size=4)", child.Handle)
+	}
+}
+
 func TestResolveHandlesMissingHooksReturnsUnimplemented(t *testing.T) {
 	ctx, _, _ := newResolveHandlesTestContext()
 	ctx.BaseState.SetConstructor(ConstructorBoundary{OperandSymbolIDs: []uint64{1}})
