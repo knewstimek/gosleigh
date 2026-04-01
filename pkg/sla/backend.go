@@ -63,6 +63,12 @@ type Backend struct {
 	// rawImage mirrors RawLoadImage file-backed bytes for standalone instruction fetch.
 	rawImage *backendRawInstructionImage
 
+	// fileName mirrors LoadImage::filename for identifying the binary image.
+	fileName string
+
+	// archType mirrors LoadImage::getArchType() identifying the target architecture.
+	archType string
+
 	// defaultContext mirrors ContextDatabase default blob values.
 	defaultContext []uint64
 
@@ -832,6 +838,72 @@ func contextBytesFromWords(words []uint64) []byte {
 		out[base+7] = byte(word)
 	}
 	return out
+}
+
+// GetFileName mirrors LoadImage::getFileName() in loadimage.hh.
+func (b *Backend) GetFileName() string {
+	if b == nil {
+		return ""
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.fileName
+}
+
+// SetFileName sets the image name (mirrors LoadImage constructor argument).
+func (b *Backend) SetFileName(name string) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	b.fileName = name
+	b.mu.Unlock()
+}
+
+// GetArchType mirrors LoadImage::getArchType() in loadimage.hh.
+func (b *Backend) GetArchType() string {
+	if b == nil {
+		return ""
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.archType
+}
+
+// SetArchType sets the architecture type string.
+func (b *Backend) SetArchType(archType string) {
+	if b == nil {
+		return
+	}
+	b.mu.Lock()
+	b.archType = archType
+	b.mu.Unlock()
+}
+
+// ContextSize mirrors ContextDatabase::getContextSize() in globalcontext.hh.
+// Returns the number of uint64 words in a context blob for this backend.
+func (b *Backend) ContextSize() int {
+	if b == nil {
+		return 0
+	}
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	return b.registeredContextWords
+}
+
+// SetVariableRegion mirrors ContextDatabase::setVariableRegion() in globalcontext.cc.
+// The named context variable is painted across [begad, endad).
+func (b *Backend) SetVariableRegion(name string, begad address.Address, endad address.Address, value uint64) error {
+	if b == nil {
+		return fmt.Errorf("backend is nil")
+	}
+	variable, err := b.contextVariable(name)
+	if err != nil {
+		return fmt.Errorf("set variable region: %w", err)
+	}
+	mask := variable.mask << variable.shift
+	shiftedValue := (value & variable.mask) << variable.shift
+	return b.SetContextRegion(begad, endad, variable.word, mask, shiftedValue)
 }
 
 const backendMaxReaderAtSize = ^uint64(0) >> 1

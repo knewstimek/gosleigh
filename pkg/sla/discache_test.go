@@ -709,3 +709,243 @@ func TestDisassemblyCacheRawBuildKeepsCommittedOpsByAddress(t *testing.T) {
 		t.Fatalf("second committed ops mismatch: %+v", secondOps)
 	}
 }
+
+func TestRawBuildStateInitialPoolCapacityMatchesCpp(t *testing.T) {
+	// PcodeCacher::PcodeCacher() allocates 600 VarnodeData initially.
+	// rawBuildState.reset() should guarantee at least defaultVarnodePoolSize.
+	state := newRawBuildState(0)
+	if cap(state.varnodes) < defaultVarnodePoolSize {
+		t.Fatalf("initial varnode pool capacity = %d, want >= %d (C++ PcodeCacher default)",
+			cap(state.varnodes), defaultVarnodePoolSize)
+	}
+}
+
+func TestRawBuildStateResetKeepsGrownPoolCapacity(t *testing.T) {
+	// Mirrors C++ PcodeCacher::clear() which resets curpool to poolstart
+	// but never shrinks the pool allocation.
+	state := newRawBuildState(0)
+	initialCap := cap(state.varnodes)
+
+	// Force pool growth beyond initial capacity.
+	bigCount := initialCap + 200
+	_, err := state.allocateVarnodes(bigCount)
+	if err != nil {
+		t.Fatalf("allocateVarnodes(%d) error: %v", bigCount, err)
+	}
+	grownCap := cap(state.varnodes)
+	if grownCap <= initialCap {
+		t.Fatalf("pool did not grow: cap=%d initial=%d", grownCap, initialCap)
+	}
+
+	// reset() should retain the grown capacity.
+	state.reset(0)
+	if cap(state.varnodes) < grownCap {
+		t.Fatalf("reset() shrank pool: cap=%d grownCap=%d", cap(state.varnodes), grownCap)
+	}
+	if len(state.varnodes) != 0 {
+		t.Fatalf("reset() did not clear pool length: len=%d", len(state.varnodes))
+	}
+}
+
+func TestRawBuildStateAllocateInstructionReturnsSequentialIndices(t *testing.T) {
+	// allocateInstruction mirrors PcodeCacher::allocateInstruction() which
+	// returns a pointer to the back of the issued deque after emplace_back.
+	state := newRawBuildState(4)
+	for i := 0; i < 4; i++ {
+		idx := state.allocateInstruction()
+		if idx != i {
+			t.Fatalf("allocateInstruction() = %d, want %d", idx, i)
+		}
+	}
+	if len(state.issued) != 4 {
+		t.Fatalf("issued length = %d, want 4", len(state.issued))
+	}
+	if len(state.refs) != 4 {
+		t.Fatalf("refs length = %d, want 4", len(state.refs))
+	}
+}
+
+func TestRawBuildStatePoolGrowthRebindsMultipleOps(t *testing.T) {
+	// Exercises the expandPool rebind path with multiple issued ops
+	// that each have inputs + outputs in the pool.
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	state := newRawBuildState(0)
+
+	// Fill pool close to capacity with several ops.
+	numOps := 50
+	for i := 0; i < numOps; i++ {
+		out := pcode.VarnodeData{Space: ram, Offset: uint64(0x1000 + i), Size: 4}
+		err := state.appendIssued(pcode.RawOp{
+			OpCode: pcode.CPUI_COPY,
+			Inputs: []pcode.VarnodeData{
+				{Space: ram, Offset: uint64(0x2000 + i), Size: 4},
+				{Space: ram, Offset: uint64(0x3000 + i), Size: 4},
+			},
+			Output: &out,
+		})
+		if err != nil {
+			t.Fatalf("appendIssued(%d) error: %v", i, err)
+		}
+	}
+
+	// Force a large growth that triggers rebind.
+	bigAlloc := cap(state.varnodes) + 500
+	_, err := state.allocateVarnodes(bigAlloc)
+	if err != nil {
+		t.Fatalf("allocateVarnodes(%d) error: %v", bigAlloc, err)
+	}
+
+	// Verify all issued ops still reference correct pool data.
+	for i := 0; i < numOps; i++ {
+		op := state.issued[i]
+		if len(op.Inputs) != 2 {
+			t.Fatalf("op[%d] input count = %d, want 2", i, len(op.Inputs))
+		}
+		if op.Inputs[0].Offset != uint64(0x2000+i) {
+			t.Fatalf("op[%d] input[0].Offset = %#x, want %#x", i, op.Inputs[0].Offset, 0x2000+i)
+		}
+		if op.Inputs[1].Offset != uint64(0x3000+i) {
+			t.Fatalf("op[%d] input[1].Offset = %#x, want %#x", i, op.Inputs[1].Offset, 0x3000+i)
+		}
+		if op.Output == nil {
+			t.Fatalf("op[%d] output is nil", i)
+		}
+		if op.Output.Offset != uint64(0x1000+i) {
+			t.Fatalf("op[%d] output.Offset = %#x, want %#x", i, op.Output.Offset, 0x1000+i)
+		}
+		// Verify pool ownership: output pointer should reference varnodes slice.
+		ref := state.refs[i]
+		if op.Output != &state.varnodes[ref.outputSlot] {
+			t.Fatalf("op[%d] output not rebound to pool after grow", i)
+		}
+		if &op.Inputs[0] != &state.varnodes[ref.inputStart] {
+			t.Fatalf("op[%d] inputs not rebound to pool after grow", i)
+		}
+	}
+}
+
+func TestRawBuildResolveRelativesMultipleLabels(t *testing.T) {
+	// Test resolveRelatives with multiple branch targets pointing at
+	// different labels, verifying the (target - callingIndex) & mask formula.
+	constSpace := &address.Space{Name: "const", Kind: address.SpaceKindConstant, Index: 2, AddrSize: 8, WordSize: 1}
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	instruction := address.Address{Space: ram, Offset: 0xd000}
+	cache := NewDisassemblyCache()
+
+	if err := cache.BeginRawBuild(instruction, 8); err != nil {
+		t.Fatalf("BeginRawBuild() error: %v", err)
+	}
+
+	// op 0: NOP (filler)
+	nopSource := OpTplBoundary{OpcodeID: int64(pcode.CPUI_COPY), Opcode: pcode.CPUI_COPY.String()}
+	if err := cache.AppendRawBuild(instruction, nopSource, []pcode.RawOp{{
+		OpCode: pcode.CPUI_COPY,
+		Inputs: []pcode.VarnodeData{{Space: ram, Offset: 0x10, Size: 4}},
+	}}, 0); err != nil {
+		t.Fatalf("AppendRawBuild(nop) error: %v", err)
+	}
+
+	// op 1: BRANCH -> label 0 (at op 3)
+	branchSource0 := OpTplBoundary{
+		OpcodeID: int64(pcode.CPUI_BRANCH),
+		Opcode:   pcode.CPUI_BRANCH.String(),
+		Inputs:   []VarnodeTplBoundary{{Offset: ConstBoundary{Kind: ConstKindRelative, Value: 0}}},
+	}
+	if err := cache.AppendRawBuild(instruction, branchSource0, []pcode.RawOp{{
+		OpCode: pcode.CPUI_BRANCH,
+		Inputs: []pcode.VarnodeData{{Space: constSpace, Offset: 0, Size: 8}},
+	}}, 0); err != nil {
+		t.Fatalf("AppendRawBuild(branch0) error: %v", err)
+	}
+
+	// op 2: NOP (filler)
+	if err := cache.AppendRawBuild(instruction, nopSource, []pcode.RawOp{{
+		OpCode: pcode.CPUI_COPY,
+		Inputs: []pcode.VarnodeData{{Space: ram, Offset: 0x20, Size: 4}},
+	}}, 0); err != nil {
+		t.Fatalf("AppendRawBuild(nop2) error: %v", err)
+	}
+
+	// label 0 at op 3
+	if err := cache.AddRawBuildLabel(instruction, 0); err != nil {
+		t.Fatalf("AddRawBuildLabel(0) error: %v", err)
+	}
+
+	// op 3: BRANCH -> label 1 (at op 5)
+	branchSource1 := OpTplBoundary{
+		OpcodeID: int64(pcode.CPUI_BRANCH),
+		Opcode:   pcode.CPUI_BRANCH.String(),
+		Inputs:   []VarnodeTplBoundary{{Offset: ConstBoundary{Kind: ConstKindRelative, Value: 1}}},
+	}
+	if err := cache.AppendRawBuild(instruction, branchSource1, []pcode.RawOp{{
+		OpCode: pcode.CPUI_BRANCH,
+		Inputs: []pcode.VarnodeData{{Space: constSpace, Offset: 0, Size: 8}},
+	}}, 0); err != nil {
+		t.Fatalf("AppendRawBuild(branch1) error: %v", err)
+	}
+
+	// op 4: NOP (filler)
+	if err := cache.AppendRawBuild(instruction, nopSource, []pcode.RawOp{{
+		OpCode: pcode.CPUI_COPY,
+		Inputs: []pcode.VarnodeData{{Space: ram, Offset: 0x30, Size: 4}},
+	}}, 0); err != nil {
+		t.Fatalf("AppendRawBuild(nop3) error: %v", err)
+	}
+
+	// label 1 at op 5
+	if err := cache.AddRawBuildLabel(instruction, 1); err != nil {
+		t.Fatalf("AddRawBuildLabel(1) error: %v", err)
+	}
+
+	if err := cache.ResolveRawBuild(instruction); err != nil {
+		t.Fatalf("ResolveRawBuild() error: %v", err)
+	}
+
+	emitted := mustEmitRawBuildToCapture(t, cache, instruction)
+	if len(emitted) != 5 {
+		t.Fatalf("expected 5 emitted ops, got %d", len(emitted))
+	}
+
+	// branch0 at op 1, label 0 at op 3: relative = 3 - 1 = 2
+	if emitted[1].Inputs[0].Offset != 2 {
+		t.Fatalf("branch0 relative offset = %d, want 2", emitted[1].Inputs[0].Offset)
+	}
+	// branch1 at op 3, label 1 at op 5: relative = 5 - 3 = 2
+	if emitted[3].Inputs[0].Offset != 2 {
+		t.Fatalf("branch1 relative offset = %d, want 2", emitted[3].Inputs[0].Offset)
+	}
+}
+
+func TestRawBuildEmitOrderMatchesCppPcodeCacher(t *testing.T) {
+	// Verify emit() iterates issued in order, matching PcodeCacher::emit()
+	// which does: for(iter=issued.begin();iter!=issued.end();++iter)
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	instruction := address.Address{Space: ram, Offset: 0xe000}
+	cache := NewDisassemblyCache()
+
+	if err := cache.BeginRawBuild(instruction, 4); err != nil {
+		t.Fatalf("BeginRawBuild() error: %v", err)
+	}
+	source := OpTplBoundary{OpcodeID: int64(pcode.CPUI_COPY), Opcode: pcode.CPUI_COPY.String()}
+	opcodes := []pcode.OpCode{pcode.CPUI_COPY, pcode.CPUI_INT_ADD, pcode.CPUI_INT_SUB, pcode.CPUI_STORE}
+	for _, opc := range opcodes {
+		if err := cache.AppendRawBuild(instruction, source, []pcode.RawOp{{
+			OpCode: opc,
+			Inputs: []pcode.VarnodeData{{Space: ram, Offset: 0x10, Size: 4}},
+		}}, 0); err != nil {
+			t.Fatalf("AppendRawBuild(%v) error: %v", opc, err)
+		}
+	}
+	if err := cache.ResolveRawBuild(instruction); err != nil {
+		t.Fatalf("ResolveRawBuild() error: %v", err)
+	}
+	emitted := mustEmitRawBuildToCapture(t, cache, instruction)
+	if len(emitted) != len(opcodes) {
+		t.Fatalf("emitted count = %d, want %d", len(emitted), len(opcodes))
+	}
+	for i, opc := range opcodes {
+		if emitted[i].OpCode != opc {
+			t.Fatalf("emitted[%d].OpCode = %v, want %v", i, emitted[i].OpCode, opc)
+		}
+	}
+}
