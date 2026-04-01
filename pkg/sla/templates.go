@@ -224,7 +224,7 @@ func decodeConst(elem packedElement) (ConstBoundary, error) {
 	case elemConstCurSpaceSize:
 		result.Kind = ConstKindCurSpaceSize
 	case elemConstSpaceID:
-		spaceIndex, err := requiredIntAttr(elem.Attrs, attrSpace)
+		spaceIndex, err := requiredSpaceAttr(elem.Attrs, attrSpace)
 		if err != nil {
 			return ConstBoundary{}, fmt.Errorf("read const space index: %w", err)
 		}
