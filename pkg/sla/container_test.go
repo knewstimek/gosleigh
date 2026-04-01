@@ -50,3 +50,17 @@ func TestReadRejectsBrokenPayload(t *testing.T) {
 		t.Fatal("Read() returned nil for broken compressed payload")
 	}
 }
+
+func TestReadXMLPayload(t *testing.T) {
+	xmlData := []byte("<?xml version=\"1.0\"?><sleigh version=\"3\" bigendian=\"false\" align=\"1\" uniqbase=\"0x0\"><spaces defaultspace=\"ram\"><space name=\"ram\" index=\"1\" bigendian=\"false\" delay=\"0\" size=\"1\" physical=\"true\"/></spaces></sleigh>")
+	container, err := Read(bytes.NewReader(xmlData))
+	if err != nil {
+		t.Fatalf("Read() returned unexpected error for xml payload: %v", err)
+	}
+	if container.Version != XMLFormatVersion {
+		t.Fatalf("unexpected xml version: got %d want %d", container.Version, XMLFormatVersion)
+	}
+	if !bytes.Equal(container.Payload, xmlData) {
+		t.Fatal("xml payload bytes were not preserved")
+	}
+}

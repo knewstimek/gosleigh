@@ -8,11 +8,13 @@ import (
 )
 
 const (
-	HeaderMagic   = "sla"
-	FormatVersion = 4
+	HeaderMagic      = "sla"
+	FormatVersion    = 4
+	XMLFormatVersion = 3
 )
 
-// Container is the outer `.sla` container: a fixed 4-byte header plus a zlib-compressed payload.
+// Container is the decoded `.sla` input: packed v4 files expose the decompressed payload,
+// while XML v3 files preserve the original XML document as the payload.
 type Container struct {
 	Version byte
 	Payload []byte
@@ -23,10 +25,30 @@ func IsHeader(header []byte) bool {
 }
 
 func Read(r io.Reader) (*Container, error) {
-	header := make([]byte, 4)
-	if _, err := io.ReadFull(r, header); err != nil {
-		return nil, fmt.Errorf("read sla header: %w", err)
+	data, err := io.ReadAll(r)
+	if err != nil {
+		return nil, fmt.Errorf("read sla stream: %w", err)
 	}
+
+	if isXMLPayload(data) {
+		root, err := parseXMLRootElement(data)
+		if err != nil {
+			return nil, err
+		}
+		version, err := requiredIntAttr(root.Attrs, attrVersion)
+		if err != nil {
+			return nil, fmt.Errorf("read xml sleigh version: %w", err)
+		}
+		if version != XMLFormatVersion {
+			return nil, fmt.Errorf("unsupported xml sleigh version: got %d want %d", version, XMLFormatVersion)
+		}
+		return &Container{Version: byte(version), Payload: data}, nil
+	}
+
+	if len(data) < 4 {
+		return nil, fmt.Errorf("read sla header: %w", io.ErrUnexpectedEOF)
+	}
+	header := data[:4]
 	if string(header[:3]) != HeaderMagic {
 		return nil, fmt.Errorf("invalid sla magic")
 	}
@@ -34,7 +56,7 @@ func Read(r io.Reader) (*Container, error) {
 		return nil, fmt.Errorf("unsupported sla version: got %d want %d", header[3], FormatVersion)
 	}
 
-	zr, err := zlib.NewReader(r)
+	zr, err := zlib.NewReader(bytes.NewReader(data[4:]))
 	if err != nil {
 		return nil, fmt.Errorf("open sla zlib stream: %w", err)
 	}
