@@ -38,34 +38,31 @@ Phase 4+: Action/Rule -> Type inference -> Control flow structuring
 
 ## 작업 단위
 
-### 1. PcodeOp & TypeOp 기본 구조
+### 1. PcodeOp & TypeOp 기본 구조 -- 완료 (605ab92)
 
-- PcodeOp: 입/출력 관리, 플래그, 시퀀스 번호
-- TypeOp: 연산 동작 정의 인터페이스
-- Phase 2의 RawOp -> PcodeOp 변환 경계
-- 의존성: 없음. Varnode과 병렬 가능.
+- PcodeOp: 32 primary + 11 secondary flags, SetOpcode behavioral flag clearing
+- TypeOp: interface + 72-opcode registration factory
+- PcodeOpBank: SeqNum-indexed map + alive/dead lists
+- 29 tests passing
 
-### 2. Varnode & VarnodeBank
+### 2. Varnode & VarnodeBank -- 완료 (605ab92)
 
-- Varnode: 위치, 크기, SSA 정보, 플래그, def-use 링크
-- VarnodeBank: 생성/삭제, 위치/정의 기준 검색
-- 범위 교차/포함 검사
-- 의존성: 없음. PcodeOp과 병렬 가능.
+- Varnode: 32+13 flags, def-use links, overlap/containment
+- VarnodeBank: dual sorted indices (locTree/defTree), C++ (f-1) status trick
+- 46 tests passing
 
-### 3. PcodeOpBank & 기본 쿼리
+### 3. PcodeOpBank & 기본 쿼리 -- 완료 (작업 1에 포함)
 
-- PcodeOpBank: 생성/삭제, alive/dead 마킹
-- 다중 정렬 유지 (시퀀스, 주소, 연산 타입)
-- 기본 쿼리: findOp, target, fallthru
-- 의존성: 작업 1 (PcodeOp)
+- PcodeOpBank: Create/FindOp/Target/MarkAlive/MarkDead/Destroy
+- 작업 1과 함께 구현됨
 
-### 4. FlowBlock & BlockBasic
+### 4. FlowBlock & BlockBasic -- 완료 (6200824)
 
-- FlowBlock: 에지 관리, 양방향 링크 동기화
-- BlockBasic: PcodeOp 리스트 포함
-- BlockGraph: 블록 간 관계 그래프
-- 구조화 블록 타입 (BlockIf, BlockWhile, BlockSwitch 등)
-- 의존성: 작업 1, 2, 3
+- FlowBlock: bidirectional edge management, block/edge flags
+- BlockBasic: PcodeOp list with insert/remove/NegateCondition
+- BlockGraph: CFG container, FindSpanningTree, CalcForwardDominator, StructureLoops
+- 구조화 블록 타입 (BlockIf, BlockWhile 등)은 Phase 4에서 확장 예정
+- 31 tests passing
 
 ### 5. Heritage (SSA 구성)
 
@@ -76,13 +73,13 @@ Phase 4+: Action/Rule -> Type inference -> Control flow structuring
 - 의존성: 작업 2, 4
 - 가장 복잡한 단위
 
-### 6. Funcdata (함수 컨테이너)
+### 6. Funcdata (함수 컨테이너) -- skeleton 완료 (6200824)
 
-- VarnodeBank + PcodeOpBank + BlockGraph + Heritage 통합
-- 공개 API: Varnode/PcodeOp 생성, 검색, 순회
-- 함수 프로토타입, 호출 스펙
-- Phase 2 PcodeEmit -> Phase 3 Funcdata 경계 구현
-- 의존성: 작업 1-5 모두
+- VarnodeBank + PcodeOpBank 통합
+- Varnode/PcodeOp creation, wiring (def/descend), search API
+- Heritage/BlockGraph 통합은 WU5 완료 후 확장
+- 19 tests passing
+- 의존성: 작업 1-5 모두 (Heritage 연동은 미완)
 
 ## 의존 관계 및 병렬화
 

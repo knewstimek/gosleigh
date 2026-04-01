@@ -44,20 +44,25 @@ standalone 라이브러리/도구와 downstream MCP 통합 모두 가능한 구�
 - .sla container, packed marshal parser
 - 기본 테스트
 
-### Phase 2: Sleigh Runtime -- 진행 중
+### Phase 2: Sleigh Runtime -- 완료
 
 - .sla 전체 decode (metadata, symbols, patterns, templates, decision tree)
 - Instruction decoding (constructor resolve, handle resolution)
 - P-code emission (builder, cache, sink-style emit)
 - Runtime context (obtain, commit, delay slot)
 - Backend (LoadImage, ContextDatabase, Engine)
+- XML v3 (Ghidra 10.x) + packed v4 (Ghidra 11+/12) 지원
 - 상세 진행 상태: `docs/STATUS.md`, `docs/SLEIGH_RUNTIME_ROADMAP.md`
 
-### Phase 3: P-code Engine -- 미착수
+### Phase 3: P-code Engine -- 진행 중
 
-- Varnode, PcodeOp graph construction
-- Basic block partitioning
-- SSA form conversion
+- PcodeOp + TypeOp: 완료 (WU1)
+- Varnode + VarnodeBank: 완료 (WU2)
+- PcodeOpBank: 완료 (WU1에 포함, WU3)
+- FlowBlock + BlockBasic + BlockGraph: 완료 (WU4)
+- Funcdata container: 완료 (WU6)
+- Heritage (SSA construction): 미착수 (WU5)
+- 상세 로드맵: `docs/PCODE_ENGINE_ROADMAP.md`
 
 ### Phase 4: Decompilation Pipeline -- 미착수
 

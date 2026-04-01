@@ -1,6 +1,6 @@
 # Project Status
 
-## Current Phase: Runtime Parity Core (2026-04-02)
+## Current Phase: P-code Engine (Phase 3) (2026-04-02)
 
 ### Done
 - [x] Git repo initialized
@@ -188,7 +188,14 @@
 - [x] `metadata.go`: Sleigh v3 (XML) and v4 (packed) both accepted; `container_test.go` and `integration_test.go` extended with XML coverage
 - [x] `testdata/6502.sla` (XML v3) added; XML fixture path tested end-to-end (320c3fb)
 
+- [x] Phase 3 WU1: PcodeOp struct (32 primary + 11 secondary flags), TypeOp interface with 72-opcode registration, PcodeOpBank container (605ab92)
+- [x] Phase 3 WU2: Varnode SSA struct (32+13 flags), VarnodeBank with dual sorted indices (locTree/defTree) using C++ (f-1) unsigned status trick (605ab92)
+- [x] Phase 3 WU4: FlowBlock base with bidirectional edge management, BlockBasic (PcodeOp list), BlockGraph (CFG container with FindSpanningTree/CalcForwardDominator/StructureLoops) (6200824)
+- [x] Phase 3 WU6: Funcdata container wrapping VarnodeBank + PcodeOpBank with Varnode/PcodeOp creation, wiring (def/descend links), and search API (6200824)
+- [x] Phase 3 integration: 125 tests passing across all WU1-WU4/WU6 types
+
 ### Next
+- [ ] Phase 3 WU5: Heritage (SSA construction) -- phi-node placement, variable rename, LocationMap, LoadGuard/StoreGuard
 - [ ] Continue `Instruction Execution Parity`: remaining full catch coverage outside the current typed path, stricter same-object mutation semantics for every nested failure path, and constructor-print/catch-format parity beyond the current shell
 - [ ] Continue `PcodeCacher And Builder Parity`: direct `allocateInstruction()` / `allocateVarnodes()` integration into `AppendRawBuild` path, infallible sink semantics, and full container/pool parity beyond the current `allocateInstruction` stub
 - [ ] Continue `Decode Pipeline Parity`: build on the authoritative split `LoadFill` / `LoadContext` route, the per-phase bundled fallback compatibility layer, backend-backed context reads/writes, parser-context circular reuse path, lazy `inst_next2` derivation, root-instruction emission propagation, and the raw file-backed loader path, then replace remaining synthetic setup with broader real decode population of cached fields such as handles, calladdr semantics, commit-backed context state, and broader loader/database parity
@@ -204,6 +211,7 @@
 - [ ] Continue from translation/runtime into the broader decompiler pipeline instead of stopping at a partial translator layer
 
 ### Not Started
+- [ ] Heritage (SSA) -- Phase 3 WU5
 - [ ] Full p-code engine parity
 - [ ] Decompilation pipeline
 - [ ] Code emitter
