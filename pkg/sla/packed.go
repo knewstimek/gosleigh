@@ -170,6 +170,20 @@ func (p *packedParser) parseAttribute() (packedAttribute, error) {
 		}
 		attr.Type = attributeValueUint
 		attr.Uint = value
+	case attrTypeAddressSpace:
+		// C++ PackedDecode::readSpace -- address space stored as integer index
+		value, err := p.readInteger(lengthCode)
+		if err != nil {
+			return packedAttribute{}, err
+		}
+		attr.Type = attributeValueUint
+		attr.Uint = value
+	case attrTypeSpecialSpace:
+		// C++ PackedDecode::readSpace -- special space code is the lengthCode itself,
+		// no additional data bytes follow.
+		// 0=stack, 1=join, 2=fspec, 3=iop, 4=spacebase
+		attr.Type = attributeValueUint
+		attr.Uint = uint64(lengthCode)
 	case attrTypeString:
 		lengthValue, err := p.readInteger(lengthCode)
 		if err != nil {

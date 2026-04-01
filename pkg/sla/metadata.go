@@ -2,6 +2,7 @@ package sla
 
 import (
 	"fmt"
+	"math"
 
 	"gosleigh/pkg/address"
 	"gosleigh/pkg/pcode"
@@ -179,6 +180,9 @@ func DecodeMetadataPayload(payload []byte) (*Metadata, error) {
 }
 
 func decodeRootElement(payload []byte) (*packedElement, error) {
+	if isXMLPayload(payload) {
+		return parseXMLRootElement(payload)
+	}
 	root, err := parsePackedElement(payload)
 	if err != nil {
 		return nil, err
@@ -196,8 +200,8 @@ func decodeMetadata(root *packedElement) (*Metadata, error) {
 		return nil, fmt.Errorf("read sleigh version: %w", err)
 	}
 	metadata.Version = version
-	if metadata.Version != FormatVersion {
-		return nil, fmt.Errorf("unsupported sleigh format version: got %d want %d", metadata.Version, FormatVersion)
+	if metadata.Version != FormatVersion && metadata.Version != XMLFormatVersion {
+		return nil, fmt.Errorf("unsupported sleigh format version: got %d want %d or %d", metadata.Version, XMLFormatVersion, FormatVersion)
 	}
 	metadata.BigEndian, err = requiredBoolAttr(root.Attrs, attrBigEndian)
 	if err != nil {
@@ -323,26 +327,71 @@ func requiredIntAttr(attrs []packedAttribute, id uint32) (int64, error) {
 	if !ok {
 		return 0, fmt.Errorf("required integer attribute %d missing", id)
 	}
-	if attr.Type != attributeValueInt {
+	switch attr.Type {
+	case attributeValueInt:
+		return attr.Int, nil
+	case attributeValueUint:
+		if attr.Uint > math.MaxInt64 {
+			return 0, fmt.Errorf("attribute %d overflows signed integer", id)
+		}
+		return int64(attr.Uint), nil
+	default:
 		return 0, fmt.Errorf("attribute %d is not a signed integer", id)
 	}
-	return attr.Int, nil
 }
 
 func optionalIntAttr(attrs []packedAttribute, id uint32) (int64, bool) {
 	attr, ok := findAttr(attrs, id)
-	if !ok || attr.Type != attributeValueInt {
+	if !ok {
 		return 0, false
 	}
-	return attr.Int, true
+	switch attr.Type {
+	case attributeValueInt:
+		return attr.Int, true
+	case attributeValueUint:
+		if attr.Uint > math.MaxInt64 {
+			return 0, false
+		}
+		return int64(attr.Uint), true
+	default:
+		return 0, false
+	}
 }
 
 func optionalIntAttrDefault(attrs []packedAttribute, id uint32, fallback int64) int64 {
 	attr, ok := findAttr(attrs, id)
-	if !ok || attr.Type != attributeValueInt {
+	if !ok {
 		return fallback
 	}
-	return attr.Int
+	switch attr.Type {
+	case attributeValueInt:
+		return attr.Int
+	case attributeValueUint:
+		if attr.Uint > math.MaxInt64 {
+			return fallback
+		}
+		return int64(attr.Uint)
+	default:
+		return fallback
+	}
+}
+
+// requiredSpaceAttr reads a space index attribute that may be encoded as
+// signed int (XML/text format) or unsigned int (packed binary address space type 5).
+// C++ PackedDecode::readSpace returns an integer index for TYPECODE_ADDRESSSPACE.
+func requiredSpaceAttr(attrs []packedAttribute, id uint32) (int64, error) {
+	attr, ok := findAttr(attrs, id)
+	if !ok {
+		return 0, fmt.Errorf("required space attribute %d missing", id)
+	}
+	switch attr.Type {
+	case attributeValueInt:
+		return attr.Int, nil
+	case attributeValueUint:
+		return int64(attr.Uint), nil
+	default:
+		return 0, fmt.Errorf("attribute %d is not a space index (type=%d)", id, attr.Type)
+	}
 }
 
 func requiredUintAttr(attrs []packedAttribute, id uint32) (uint64, error) {
@@ -350,18 +399,35 @@ func requiredUintAttr(attrs []packedAttribute, id uint32) (uint64, error) {
 	if !ok {
 		return 0, fmt.Errorf("required unsigned integer attribute %d missing", id)
 	}
-	if attr.Type != attributeValueUint {
+	switch attr.Type {
+	case attributeValueUint:
+		return attr.Uint, nil
+	case attributeValueInt:
+		if attr.Int < 0 {
+			return 0, fmt.Errorf("attribute %d is negative", id)
+		}
+		return uint64(attr.Int), nil
+	default:
 		return 0, fmt.Errorf("attribute %d is not an unsigned integer", id)
 	}
-	return attr.Uint, nil
 }
 
 func optionalUintAttr(attrs []packedAttribute, id uint32) uint64 {
 	attr, ok := findAttr(attrs, id)
-	if !ok || attr.Type != attributeValueUint {
+	if !ok {
 		return 0
 	}
-	return attr.Uint
+	switch attr.Type {
+	case attributeValueUint:
+		return attr.Uint
+	case attributeValueInt:
+		if attr.Int < 0 {
+			return 0
+		}
+		return uint64(attr.Int)
+	default:
+		return 0
+	}
 }
 
 func requiredStringAttr(attrs []packedAttribute, id uint32) (string, error) {

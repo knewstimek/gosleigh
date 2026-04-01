@@ -417,7 +417,7 @@ func decodeSymbolBody(elem packedElement) (SymbolBodyBoundary, error) {
 }
 
 func decodeVarnodeSymbolBody(elem packedElement) (*VarnodeSymbolBoundary, error) {
-	spaceIndex, err := requiredIntAttr(elem.Attrs, attrSpace)
+	spaceIndex, err := requiredSpaceAttr(elem.Attrs, attrSpace)
 	if err != nil {
 		return nil, fmt.Errorf("read varnode symbol space index: %w", err)
 	}
