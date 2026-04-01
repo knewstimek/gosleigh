@@ -1197,7 +1197,10 @@ func TestSleighBuilderCacheOwnedRawEmissionCancelsOnLowerRawFailure(t *testing.T
 	}
 }
 
-func TestSleighBuilderAppendCrossBuildPromotesSentinelToTypedUnimpl(t *testing.T) {
+func TestSleighBuilderAppendCrossBuildInfraErrorIsPlain(t *testing.T) {
+	// Mirrors C++ parity: infrastructure failures in appendCrossBuild are
+	// LowlevelError (not UnimplError) and must NOT be rewritten by
+	// wrapTranslateUnimplError.
 	b := NewSleighBuilder(RuntimeContext{}, 0, -1, BuilderHooks{})
 	err := b.AppendCrossBuild(OpTplBoundary{
 		OpcodeID: int64(pcode.CPUI_PTRSUB),
@@ -1212,17 +1215,11 @@ func TestSleighBuilderAppendCrossBuildPromotesSentinelToTypedUnimpl(t *testing.T
 		},
 	}, -1)
 	if err == nil {
-		t.Fatal("AppendCrossBuild() returned nil, want typed unimplemented error")
-	}
-	if !errors.Is(err, ErrBuilderUnimplemented) {
-		t.Fatalf("AppendCrossBuild() error does not wrap ErrBuilderUnimplemented: %v", err)
+		t.Fatal("AppendCrossBuild() returned nil, want error")
 	}
 	var uerr *UnimplError
-	if !errors.As(err, &uerr) {
-		t.Fatalf("AppendCrossBuild() error type = %T, want *UnimplError", err)
-	}
-	if uerr.Explain == "" {
-		t.Fatal("AppendCrossBuild() returned typed unimplemented error without explain text")
+	if errors.As(err, &uerr) {
+		t.Fatalf("AppendCrossBuild() infrastructure error should not be *UnimplError, got %v", err)
 	}
 }
 
@@ -1254,23 +1251,20 @@ func TestSleighBuilderResolveBuildNamedSectionWithoutWalkerReturnsTypedUnimpl(t 
 	}
 }
 
-func TestSleighBuilderDelaySlotPromotesSentinelToTypedUnimpl(t *testing.T) {
+func TestSleighBuilderDelaySlotInfraErrorIsPlain(t *testing.T) {
+	// Mirrors C++ parity: infrastructure failures in delaySlot are
+	// LowlevelError (not UnimplError) and must NOT be rewritten by
+	// wrapTranslateUnimplError.
 	b := NewSleighBuilder(RuntimeContext{}, 0, -1, BuilderHooks{})
 	err := b.DelaySlot(OpTplBoundary{
 		OpcodeID: int64(pcode.CPUI_INDIRECT),
 		Opcode:   "DELAY_SLOT",
 	})
 	if err == nil {
-		t.Fatal("DelaySlot() returned nil, want typed unimplemented error")
-	}
-	if !errors.Is(err, ErrBuilderUnimplemented) {
-		t.Fatalf("DelaySlot() error does not wrap ErrBuilderUnimplemented: %v", err)
+		t.Fatal("DelaySlot() returned nil, want error")
 	}
 	var uerr *UnimplError
-	if !errors.As(err, &uerr) {
-		t.Fatalf("DelaySlot() error type = %T, want *UnimplError", err)
-	}
-	if uerr.Explain == "" {
-		t.Fatal("DelaySlot() returned typed unimplemented error without explain text")
+	if errors.As(err, &uerr) {
+		t.Fatalf("DelaySlot() infrastructure error should not be *UnimplError, got %v", err)
 	}
 }

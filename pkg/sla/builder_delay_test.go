@@ -214,12 +214,13 @@ func TestSleighBuilderDelaySlotRejectsMissingCachedContext(t *testing.T) {
 	if err == nil {
 		t.Fatal("DelaySlot() returned nil without cached target contexts")
 	}
-	if !errors.Is(err, ErrBuilderUnimplemented) {
-		t.Fatalf("DelaySlot() error does not wrap ErrBuilderUnimplemented: %v", err)
-	}
+	// Mirrors C++ parity: missing cached context is a LowlevelError, not UnimplError.
 	var uerr *UnimplError
-	if !errors.As(err, &uerr) {
-		t.Fatalf("DelaySlot() error type = %T, want *UnimplError", err)
+	if errors.As(err, &uerr) {
+		t.Fatalf("DelaySlot() infrastructure error should not be *UnimplError, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "Could not obtain cached delay slot instruction") {
+		t.Fatalf("DelaySlot() error message mismatch: %v", err)
 	}
 }
 
@@ -229,11 +230,9 @@ func TestSleighBuilderDelaySlotRejectsMissingWalkerOrCache(t *testing.T) {
 	if err == nil {
 		t.Fatal("DelaySlot() returned nil without walker/cache")
 	}
-	if !errors.Is(err, ErrBuilderUnimplemented) {
-		t.Fatalf("DelaySlot() error does not wrap ErrBuilderUnimplemented: %v", err)
-	}
-	var uerr *UnimplError
-	if !errors.As(err, &uerr) {
-		t.Fatalf("DelaySlot() error type = %T, want *UnimplError", err)
+	// Mirrors C++ parity: missing walker/cache is a LowlevelError, not UnimplError.
+	var uerr2 *UnimplError
+	if errors.As(err, &uerr2) {
+		t.Fatalf("DelaySlot() infrastructure error should not be *UnimplError, got %v", err)
 	}
 }

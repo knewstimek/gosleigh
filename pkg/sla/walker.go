@@ -48,6 +48,15 @@ func (s *ConstructState) ClearSectionID() {
 // SetConstructor stores the constructor boundary for this state.
 func (s *ConstructState) SetConstructor(constructor ConstructorBoundary) {
 	copy := constructor
+	// Ensure FlowThruIndex is correctly derived from PrintPieces.
+	// Mirrors C++ Constructor::decode(): flowthruindex = operand index when
+	// there is exactly one print piece and it is an operand reference.
+	if len(copy.PrintPieces) == 1 && copy.PrintPieces[0].IsOperandRef {
+		copy.FlowThruIndex = copy.PrintPieces[0].OperandIndex
+	} else if copy.FlowThruIndex >= 0 && !(len(copy.PrintPieces) == 1 && copy.PrintPieces[0].IsOperandRef) {
+		// Caller set an inconsistent FlowThruIndex; reset to -1.
+		copy.FlowThruIndex = -1
+	}
 	s.Constructor = &copy
 }
 

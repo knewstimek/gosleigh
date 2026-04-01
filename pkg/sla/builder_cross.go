@@ -7,20 +7,26 @@ import (
 )
 
 func (b *SleighBuilder) appendCrossBuild(op OpTplBoundary, sectionID int64) error {
+	// Mirrors ghidra::SleighBuilder::appendCrossBuild().
+	// Infrastructure failures use plain errors (C++ throws LowlevelError which is NOT
+	// caught by oneInstruction's catch(UnimplError&)). Only build()/buildEmpty() failures
+	// may propagate as *UnimplError so that wrapTranslateUnimplError rewrites only
+	// pcode-level failures.
 	if b == nil {
 		return fmt.Errorf("builder is nil")
 	}
 	if sectionID >= 0 {
+		// Mirrors C++ throw LowlevelError("CROSSBUILD directive within a named section")
 		return fmt.Errorf("CROSSBUILD directive within a named section")
 	}
 	if len(op.Inputs) < 2 {
 		return fmt.Errorf("CROSSBUILD expects at least two inputs, got %d", len(op.Inputs))
 	}
 	if b.State.Walker == nil || b.State.Walker.ParserContext() == nil {
-		return normalizeBuilderUnimpl(fmt.Errorf("%w: CROSSBUILD requires an active parser walker", ErrBuilderUnimplemented))
+		return fmt.Errorf("CROSSBUILD requires an active parser walker")
 	}
 	if b.State.Cache == nil {
-		return normalizeBuilderUnimpl(fmt.Errorf("%w: CROSSBUILD requires a disassembly cache", ErrBuilderUnimplemented))
+		return fmt.Errorf("CROSSBUILD requires a disassembly cache")
 	}
 
 	targetAddr, err := b.crossBuildTargetAddress(op.Inputs[0])
@@ -34,13 +40,14 @@ func (b *SleighBuilder) appendCrossBuild(op OpTplBoundary, sectionID int64) erro
 
 	targetCtx, err := b.State.RequirePcodeParserContext(targetAddr)
 	if err != nil {
-		return normalizeBuilderUnimpl(fmt.Errorf("%w: CROSSBUILD target parser context %v", ErrBuilderUnimplemented, targetAddr))
+		// Mirrors C++ throw LowlevelError("Could not obtain cached crossbuild instruction")
+		return fmt.Errorf("Could not obtain cached crossbuild instruction at %v: %w", targetAddr, err)
 	}
 
 	crossWalker := NewCrossParserWalker(targetCtx, b.State.Walker.ParserContext())
 	crossWalker.BaseState()
 	if crossWalker.Point == nil || crossWalker.Point.Constructor == nil {
-		return normalizeBuilderUnimpl(fmt.Errorf("%w: CROSSBUILD target has no constructor state", ErrBuilderUnimplemented))
+		return fmt.Errorf("CROSSBUILD target has no constructor state at %v", targetAddr)
 	}
 
 	prevWalker := b.State.Walker
@@ -50,13 +57,16 @@ func (b *SleighBuilder) appendCrossBuild(op OpTplBoundary, sectionID int64) erro
 	b.State.Walker = crossWalker
 	selected, ok := crossWalker.Point.TemplateForSection(crossSectionID)
 	if !ok {
-		if err := normalizeBuilderUnimpl(b.buildEmpty(crossSectionID)); err != nil {
+		// buildEmpty propagates *UnimplError from nested build() if applicable.
+		if err := b.buildEmpty(crossSectionID); err != nil {
 			return err
 		}
 		b.State.Walker = prevWalker
 		return nil
 	}
-	if err := normalizeBuilderUnimpl(b.Build(*selected, crossSectionID)); err != nil {
+	// build() errors propagate as-is; *UnimplError from nested build() will be
+	// rewritten by wrapTranslateUnimplError at the TranslateSubtable boundary.
+	if err := b.Build(*selected, crossSectionID); err != nil {
 		return err
 	}
 	b.State.Walker = prevWalker

@@ -158,6 +158,27 @@ func formatConstructorPrintWithWalker(walker *ParserWalker, state *ConstructStat
 	if depth >= translateMaxPrintDepth {
 		return "<constructor print depth exceeded>", true
 	}
+	// Mirrors C++ Constructor::printMnemonic()/printBody() flowthruindex delegation.
+	// When a constructor has exactly one operand ref (no markup), and that operand
+	// resolves to a subtable child, delegate mnemonic/body printing to the child.
+	// printAll (Constructor::print) does NOT use flowthruindex in C++.
+	if mode != constructorPrintAll && state.Constructor.FlowThruIndex >= 0 {
+		idx := int(state.Constructor.FlowThruIndex)
+		child, childOK := state.Child(idx)
+		if childOK && child != nil && child.Constructor != nil {
+			// The child resolved to a subtable constructor; recurse into it.
+			if walker != nil && walker.Point == state {
+				if err := walker.PushOperand(idx); err == nil {
+					text, gap := formatConstructorPrintWithWalker(walker, walker.Point, mode, depth+1)
+					walker.PopOperand()
+					return text, gap
+				}
+			}
+			return formatConstructorPrintWithWalker(nil, child, mode, depth+1)
+		}
+		// flowthruindex is set but the operand is not a subtable; fall through
+		// to the normal piece-by-piece print path (mirrors C++ behavior).
+	}
 	start, end, gap := constructorPrintRange(state.Constructor, mode)
 	if start >= end {
 		return "", gap
@@ -338,7 +359,13 @@ func tryFormatBoundarySymbolPrint(symbol *SymbolBoundary, walker *ParserWalker) 
 			return "", true, true
 		}
 		return formatSignedHex(int64(addr.Offset)), true, false
+	case elemVarnodeSymHead:
+		// Mirrors VarnodeSymbol::print() in slghsymbol.hh: just outputs getName().
+		return symbol.Name, true, false
 	default:
+		// known mismatch: FlowDestSymbol and FlowRefSymbol print() are not yet
+		// handled because those symbol header elements are not decoded. They print
+		// walker.getDestAddr()/getRefAddr() offset as hex in C++.
 		return "", false, false
 	}
 }

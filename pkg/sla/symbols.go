@@ -107,6 +107,7 @@ type ConstructorBoundary struct {
 	ConstructorID    uint64
 	ParentSymbolID   uint64
 	FirstWhitespace  int64
+	FlowThruIndex    int64 // >=0 when printpiece has exactly one operand ref and no markup; mirrors C++ Constructor::flowthruindex
 	MinimumLength    int64
 	SourceFileIndex  int64
 	LineNumber       int64
@@ -567,6 +568,7 @@ func decodeConstructor(elem packedElement) (ConstructorBoundary, error) {
 	result := ConstructorBoundary{
 		ParentSymbolID:  parentSymbolID,
 		FirstWhitespace: firstWhitespace,
+		FlowThruIndex:   -1,
 		MinimumLength:   minimumLength,
 		SourceFileIndex: sourceIndex,
 		LineNumber:      lineNumber,
@@ -615,6 +617,12 @@ func decodeConstructor(elem packedElement) (ConstructorBoundary, error) {
 				result.NamedSections = append(result.NamedSections, NamedSectionBoundary{SectionID: *tpl.SectionID, Template: *tpl})
 			}
 		}
+	}
+	// Mirrors C++ Constructor::decode(): if printpiece has exactly one entry that
+	// is an operand reference, set flowthruindex to that operand.
+	// C++ condition: (printpiece.size()==1)&&(printpiece[0][0]=='\n')
+	if len(result.PrintPieces) == 1 && result.PrintPieces[0].IsOperandRef {
+		result.FlowThruIndex = result.PrintPieces[0].OperandIndex
 	}
 	return result, nil
 }
