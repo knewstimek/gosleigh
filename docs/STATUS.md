@@ -1,6 +1,6 @@
 # Project Status
 
-## Current Phase: Runtime Parity Core (2026-04-01)
+## Current Phase: Runtime Parity Core (2026-04-02)
 
 ### Done
 - [x] Git repo initialized
@@ -154,10 +154,25 @@
 - [x] `ParserContext.GetN2addr()` now supports lazy derivation through a bound resolver, closer to original `ParserContext::getN2addr()` semantics than the older eager-best-effort prefetch-only path
 - [x] `ObtainPcodeContext()` now binds lazy `inst_next2` derivation instead of eagerly forcing adjacent disassembly during every pcode obtain, while still clearing stale `N2Addr` state on parser-context reuse
 - [x] engine/instruction-context tests now cover split-authority decode hooks, fallback reuse across load phases, and lazy `inst_next2` derivation on first `GetN2addr()` access
+- [x] `builder_delay.go` and `builder_cross.go` now separate infrastructure errors (plain `error`) from build errors (`*UnimplError`), matching C++ `LowlevelError` vs `UnimplError` distinction in `oneInstruction()` catch block
+- [x] `builder.go` null-construct path now returns `*UnimplError("", 0)` matching `PcodeBuilder::build(nullptr)` throw semantics
+- [x] `symbols.go` now preserves `FlowThruIndex` in `ConstructorBoundary`, mirroring C++ `Constructor::flowthruindex`
+- [x] `walker.go` `SetConstructor()` now recomputes `FlowThruIndex` from `PrintPieces` on every constructor assignment, keeping it consistent with the C++ decode-time derivation
+- [x] `translate.go` now implements `flowthruindex` recursion for `printMnemonic`/`printBody`: when a constructor has exactly one operand ref, printing delegates to the child constructor
+- [x] `translate.go` now implements `VarnodeSymbol::print()` parity: outputs `getName()` directly
+- [x] 8 new tests added for instruction execution parity (49d0392)
+- [x] `discache.go` initial varnode pool size set to 600, matching `PcodeCacher::PcodeCacher()` default (`uint4 maxsize = 600`)
+- [x] `discache.go` `allocateInstruction()` added to `rawBuildState`, mirroring `PcodeCacher::allocateInstruction()`
+- [x] `discache.go` pool backing storage is retained on `reset()`, matching `PcodeCacher::clear()` which resets cursor but never frees the pool
+- [x] `backend.go` `GetFileName()` / `SetFileName()` added, mirroring `LoadImage::getFileName()`
+- [x] `backend.go` `GetArchType()` / `SetArchType()` added, mirroring `LoadImage::getArchType()`
+- [x] `backend.go` `ContextSize()` added, mirroring `ContextDatabase::getContextSize()`
+- [x] `backend.go` `SetVariableRegion()` added, mirroring `ContextDatabase::setVariableRegion()`
+- [x] 11 new tests added for PcodeCacher pool and backend parity (820bfde)
 
 ### Next
-- [ ] Finish `Instruction Execution Parity` as one unit by closing the remaining strict parity gaps against original `Sleigh::oneInstruction()`: remaining full catch coverage outside the current typed path, stricter same-object mutation semantics for every nested failure path, and constructor-print/catch-format parity beyond the current shell
-- [ ] Continue `PcodeCacher And Builder Parity` beyond the current pooled staging split: long-lived cache lifecycle closer to original `PcodeCacher`, pointer-record-style relative tracking, and keep moving toward uniformly sink-facing emission while reducing the remaining internal Go-only sink/ownership differences
+- [ ] Continue `Instruction Execution Parity`: remaining full catch coverage outside the current typed path, stricter same-object mutation semantics for every nested failure path, and constructor-print/catch-format parity beyond the current shell
+- [ ] Continue `PcodeCacher And Builder Parity`: direct `allocateInstruction()` / `allocateVarnodes()` integration into `AppendRawBuild` path, infallible sink semantics, and full container/pool parity beyond the current `allocateInstruction` stub
 - [ ] Continue `Decode Pipeline Parity`: build on the authoritative split `LoadFill` / `LoadContext` route, the per-phase bundled fallback compatibility layer, backend-backed context reads/writes, parser-context circular reuse path, lazy `inst_next2` derivation, root-instruction emission propagation, and the raw file-backed loader path, then replace remaining synthetic setup with broader real decode population of cached fields such as handles, calladdr semantics, commit-backed context state, and broader loader/database parity
 - [ ] Continue `Operand Semantics Parity`: build on the new `OperandSymbol` / `VarnodeSymbol` / `VarnodeListSymbol` automatic paths and then reduce dynamic varnode-style hook fallback further
 - [x] flow-symbol fixed-handle parity now has an automatic runtime path for safe `inst_dest` / `inst_ref` opaque-boundary candidates, without guessing nonexistent persisted `.sla` IDs
