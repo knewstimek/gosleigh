@@ -61,7 +61,7 @@ standalone 라이브러리/도구와 downstream MCP 통합 모두 가능한 구�
 - PcodeOpBank: 완료 (WU1에 포함, WU3)
 - FlowBlock + BlockBasic + BlockGraph: 완료 (WU4)
 - Funcdata container: 완료 (WU6)
-- Heritage (SSA construction): 미착수 (WU5)
+- Heritage (SSA construction): 완료 (WU5) -- guard 인프라는 Phase 4로 연기
 - 상세 로드맵: `docs/PCODE_ENGINE_ROADMAP.md`
 
 ### Phase 4: Decompilation Pipeline -- 미착수
