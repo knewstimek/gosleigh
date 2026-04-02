@@ -3,7 +3,7 @@ package pcode
 // BlockBasic is a basic block containing PcodeOps.
 // C++ parity: block.hh BlockBasic
 type BlockBasic struct {
-	FlowBlock           // embedded
+	FlowBlock // embedded
 	ops       []*PcodeOp
 }
 

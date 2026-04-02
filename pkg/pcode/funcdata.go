@@ -69,14 +69,14 @@ func NewFuncdata(name string, addr address.Address, uniqSpace *address.Space, un
 // Getters
 // ---------------------------------------------------------------------------
 
-func (fd *Funcdata) Name() string               { return fd.name }
-func (fd *Funcdata) DisplayName() string         { return fd.displayName }
+func (fd *Funcdata) Name() string                 { return fd.name }
+func (fd *Funcdata) DisplayName() string          { return fd.displayName }
 func (fd *Funcdata) BaseAddr() address.Address    { return fd.baseAddr }
-func (fd *Funcdata) Size() int32                 { return fd.size }
-func (fd *Funcdata) Flags() uint32               { return fd.flags }
-func (fd *Funcdata) HasFlag(f uint32) bool       { return fd.flags&f != 0 }
-func (fd *Funcdata) SetFlag(f uint32)            { fd.flags |= f }
-func (fd *Funcdata) ClearFlag(f uint32)          { fd.flags &^= f }
+func (fd *Funcdata) Size() int32                  { return fd.size }
+func (fd *Funcdata) Flags() uint32                { return fd.flags }
+func (fd *Funcdata) HasFlag(f uint32) bool        { return fd.flags&f != 0 }
+func (fd *Funcdata) SetFlag(f uint32)             { fd.flags |= f }
+func (fd *Funcdata) ClearFlag(f uint32)           { fd.flags &^= f }
 func (fd *Funcdata) GetVarnodeBank() *VarnodeBank { return &fd.vbank }
 func (fd *Funcdata) GetPcodeOpBank() *PcodeOpBank { return &fd.obank }
 

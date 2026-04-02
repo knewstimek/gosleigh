@@ -1,8 +1,8 @@
-# Project Status
+# 프로젝트 상태
 
-## Current Phase: P-code Engine (Phase 3) (2026-04-02)
+## 현재 단계: Decompiler Pipeline + PrintC (Phase 4-5 완료) (2026-04-02)
 
-### Done
+### 완료
 - [x] Git repo initialized
 - [x] Ghidra decompiler C++ source sparse-checked out to ghidra-ref/
 - [x] Apache 2.0 LICENSE + NOTICE (Ghidra attribution)
@@ -197,9 +197,11 @@
 - [x] Phase 3 WU5: Heritage SSA construction -- LocationMap, TaskList, PriorityQueue, BuildADT (Bilardi-Pingali), CalcMultiequals/visitIncr, Rename (Cytron et al.), Heritage() main pipeline (02b803a)
 - [x] Phase 3 complete: 6 work units, ~6,400 lines, 142 tests passing
 - [x] Phase 4-5 roadmap created: docs/DECOMPILER_PIPELINE_ROADMAP.md (~22,400 lines planned)
+- [x] Phase 4 complete: WU1-WU6 완료. Action/Rule framework, Type system, transformation rules, dead-code/type propagation, block structuring 경로가 구현됨
+- [x] Phase 5 complete: WU7 완료. PrintC 기반 C 출력 경로와 선언 출력기가 구현됨
+- [x] 현재 저장소 기준 `go test ./...` 통과
 
-### Next
-- [ ] Phase 4 WU1+WU2: Action/Rule framework + Type system (parallel)
+### 다음
 - [ ] Continue `Instruction Execution Parity`: remaining full catch coverage outside the current typed path, stricter same-object mutation semantics for every nested failure path, and constructor-print/catch-format parity beyond the current shell
 - [ ] Continue `PcodeCacher And Builder Parity`: direct `allocateInstruction()` / `allocateVarnodes()` integration into `AppendRawBuild` path, infallible sink semantics, and full container/pool parity beyond the current `allocateInstruction` stub
 - [ ] Continue `Decode Pipeline Parity`: build on the authoritative split `LoadFill` / `LoadContext` route, the per-phase bundled fallback compatibility layer, backend-backed context reads/writes, parser-context circular reuse path, lazy `inst_next2` derivation, root-instruction emission propagation, and the raw file-backed loader path, then replace remaining synthetic setup with broader real decode population of cached fields such as handles, calladdr semantics, commit-backed context state, and broader loader/database parity
@@ -214,9 +216,6 @@
 - [ ] Reconcile Gosleigh package/module shape with standalone use plus downstream MCP integration
 - [ ] Continue from translation/runtime into the broader decompiler pipeline instead of stopping at a partial translator layer
 
-### Not Started
+### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
-- [ ] Phase 4: Decompiler pipeline (Action/Rule, Type system, Block structuring)
-- [ ] Decompilation pipeline
-- [ ] Code emitter
 - [ ] Golden tests / comparison with original Ghidra output

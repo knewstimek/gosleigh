@@ -120,20 +120,20 @@ func NewVarnode(size int32, loc address.Address) *Varnode {
 // Basic accessors
 // ---------------------------------------------------------------------------
 
-func (vn *Varnode) Addr() address.Address    { return vn.loc }
-func (vn *Varnode) Space() *address.Space     { return vn.loc.Space }
-func (vn *Varnode) Offset() uint64            { return vn.loc.Offset }
-func (vn *Varnode) Size() int32               { return vn.size }
-func (vn *Varnode) Def() *PcodeOp             { return vn.def }
-func (vn *Varnode) SetDef(op *PcodeOp)        { vn.def = op }
-func (vn *Varnode) CreateIndex() uint32       { return vn.createIndex }
-func (vn *Varnode) MergeGroup() int16         { return vn.mergeGroup }
-func (vn *Varnode) SetMergeGroup(g int16)     { vn.mergeGroup = g }
-func (vn *Varnode) NZMask() uint64            { return vn.nzm }
-func (vn *Varnode) SetNZMask(m uint64)        { vn.nzm = m }
-func (vn *Varnode) Consumed() uint64          { return vn.consumed }
-func (vn *Varnode) SetConsumed(c uint64)      { vn.consumed = c }
-func (vn *Varnode) AddlFlags() uint16         { return vn.addlFlags }
+func (vn *Varnode) Addr() address.Address { return vn.loc }
+func (vn *Varnode) Space() *address.Space { return vn.loc.Space }
+func (vn *Varnode) Offset() uint64        { return vn.loc.Offset }
+func (vn *Varnode) Size() int32           { return vn.size }
+func (vn *Varnode) Def() *PcodeOp         { return vn.def }
+func (vn *Varnode) SetDef(op *PcodeOp)    { vn.def = op }
+func (vn *Varnode) CreateIndex() uint32   { return vn.createIndex }
+func (vn *Varnode) MergeGroup() int16     { return vn.mergeGroup }
+func (vn *Varnode) SetMergeGroup(g int16) { vn.mergeGroup = g }
+func (vn *Varnode) NZMask() uint64        { return vn.nzm }
+func (vn *Varnode) SetNZMask(m uint64)    { vn.nzm = m }
+func (vn *Varnode) Consumed() uint64      { return vn.consumed }
+func (vn *Varnode) SetConsumed(c uint64)  { vn.consumed = c }
+func (vn *Varnode) AddlFlags() uint16     { return vn.addlFlags }
 
 // Additional flag operations
 // C++ parity: varnode.hh Varnode addl_flags accessors
