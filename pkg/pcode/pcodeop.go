@@ -133,15 +133,15 @@ func (op *PcodeOp) Parent() *BlockBasic { return op.parent }
 // --- flag queries ---
 
 func (op *PcodeOp) IsDead() bool             { return op.flags&PcodeOpDead != 0 }
-func (op *PcodeOp) IsAssignment() bool        { return op.output != nil }
-func (op *PcodeOp) IsCall() bool              { return op.flags&PcodeOpCall != 0 }
-func (op *PcodeOp) IsMarker() bool            { return op.flags&PcodeOpMarker != 0 }
-func (op *PcodeOp) IsBranch() bool            { return op.flags&PcodeOpBranch != 0 }
-func (op *PcodeOp) IsBoolOutput() bool        { return op.flags&PcodeOpBoolOutput != 0 }
-func (op *PcodeOp) IsCommutative() bool       { return op.flags&PcodeOpCommutative != 0 }
-func (op *PcodeOp) IsIndirectCreation() bool  { return op.flags&PcodeOpIndirectCreation != 0 }
-func (op *PcodeOp) IsIndirectSource() bool    { return op.flags&PcodeOpIndirectSource != 0 }
-func (op *PcodeOp) IsIndirectStore() bool     { return op.flags&PcodeOpIndirectStore != 0 }
+func (op *PcodeOp) IsAssignment() bool       { return op.output != nil }
+func (op *PcodeOp) IsCall() bool             { return op.flags&PcodeOpCall != 0 }
+func (op *PcodeOp) IsMarker() bool           { return op.flags&PcodeOpMarker != 0 }
+func (op *PcodeOp) IsBranch() bool           { return op.flags&PcodeOpBranch != 0 }
+func (op *PcodeOp) IsBoolOutput() bool       { return op.flags&PcodeOpBoolOutput != 0 }
+func (op *PcodeOp) IsCommutative() bool      { return op.flags&PcodeOpCommutative != 0 }
+func (op *PcodeOp) IsIndirectCreation() bool { return op.flags&PcodeOpIndirectCreation != 0 }
+func (op *PcodeOp) IsIndirectSource() bool   { return op.flags&PcodeOpIndirectSource != 0 }
+func (op *PcodeOp) IsIndirectStore() bool    { return op.flags&PcodeOpIndirectStore != 0 }
 
 // IsFlowBreak returns true if this op breaks sequential flow
 // (branches, calls with noreturn, returns).
@@ -161,12 +161,12 @@ func (op *PcodeOp) HaltType() uint32 {
 
 // --- flag mutation ---
 
-func (op *PcodeOp) SetFlag(fl uint32)              { op.flags |= fl }
-func (op *PcodeOp) ClearFlag(fl uint32)             { op.flags &^= fl }
-func (op *PcodeOp) FlipFlag(fl uint32)              { op.flags ^= fl }
-func (op *PcodeOp) HasFlag(fl uint32) bool          { return op.flags&fl != 0 }
-func (op *PcodeOp) SetAdditionalFlag(fl uint32)     { op.addlFlags |= fl }
-func (op *PcodeOp) ClearAdditionalFlag(fl uint32)   { op.addlFlags &^= fl }
+func (op *PcodeOp) SetFlag(fl uint32)             { op.flags |= fl }
+func (op *PcodeOp) ClearFlag(fl uint32)           { op.flags &^= fl }
+func (op *PcodeOp) FlipFlag(fl uint32)            { op.flags ^= fl }
+func (op *PcodeOp) HasFlag(fl uint32) bool        { return op.flags&fl != 0 }
+func (op *PcodeOp) SetAdditionalFlag(fl uint32)   { op.addlFlags |= fl }
+func (op *PcodeOp) ClearAdditionalFlag(fl uint32) { op.addlFlags &^= fl }
 
 // SetOpcode assigns a new TypeOp, clearing all behavioral flags and
 // re-applying those defined by the new TypeOp.
@@ -181,9 +181,9 @@ func (op *PcodeOp) SetOpcode(t TypeOp) {
 
 // --- input/output mutation ---
 
-func (op *PcodeOp) SetOutput(vn *Varnode)           { op.output = vn }
-func (op *PcodeOp) SetInput(vn *Varnode, slot int)  { op.inputs[slot] = vn }
-func (op *PcodeOp) ClearInput(slot int)             { op.inputs[slot] = nil }
+func (op *PcodeOp) SetOutput(vn *Varnode)          { op.output = vn }
+func (op *PcodeOp) SetInput(vn *Varnode, slot int) { op.inputs[slot] = vn }
+func (op *PcodeOp) ClearInput(slot int)            { op.inputs[slot] = nil }
 
 // SetNumInputs resizes the input slice, preserving existing entries.
 func (op *PcodeOp) SetNumInputs(n int) {

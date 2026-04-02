@@ -5,7 +5,7 @@ import "sort"
 // BlockGraph is a container of FlowBlocks forming a control flow graph.
 // C++ parity: block.hh BlockGraph
 type BlockGraph struct {
-	FlowBlock            // embedded
+	FlowBlock // embedded
 	blocks    []*FlowBlock
 }
 
@@ -145,7 +145,7 @@ func (bg *BlockGraph) FindSpanningTree() {
 
 	// finished[block] = true when DFS post-visit is done.
 	type stackEntry struct {
-		block    *FlowBlock
+		block   *FlowBlock
 		edgeIdx int // next outEdge to visit
 	}
 

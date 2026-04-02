@@ -15,11 +15,11 @@ type Heritage struct {
 	spaces         []*address.Space // available address spaces
 	globalDisjoint LocationMap
 	disjoint       TaskList
-	domChild       [][]int32  // domChild[blockIndex] = child block indices
-	augment        [][]int32  // augment[blockIndex] = augmented edge target indices
-	heritageFlags  []uint32   // per-block flags
-	depth          []int32    // dominator depth per block
-	maxDepth       int32      // -1 means needs rebuild
+	domChild       [][]int32 // domChild[blockIndex] = child block indices
+	augment        [][]int32 // augment[blockIndex] = augmented edge target indices
+	heritageFlags  []uint32  // per-block flags
+	depth          []int32   // dominator depth per block
+	maxDepth       int32     // -1 means needs rebuild
 	pass           int32
 	pq             PriorityQueue
 	mergeBlocks    []int32 // block indices needing phi-nodes

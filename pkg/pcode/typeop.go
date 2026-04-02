@@ -6,8 +6,8 @@ package pcode
 // C++ parity: typeop.hh TypeOp
 type TypeOp interface {
 	GetOpCode() OpCode
-	GetFlags() uint32  // PcodeOp flags this opcode implies
-	GetName() string   // display name ("+", "COPY", etc.)
+	GetFlags() uint32 // PcodeOp flags this opcode implies
+	GetName() string  // display name ("+", "COPY", etc.)
 	IsCommutative() bool
 }
 
@@ -19,10 +19,10 @@ type typeOpBase struct {
 	name   string
 }
 
-func (t *typeOpBase) GetOpCode() OpCode    { return t.opcode }
-func (t *typeOpBase) GetFlags() uint32     { return t.flags }
-func (t *typeOpBase) GetName() string      { return t.name }
-func (t *typeOpBase) IsCommutative() bool  { return t.flags&PcodeOpCommutative != 0 }
+func (t *typeOpBase) GetOpCode() OpCode   { return t.opcode }
+func (t *typeOpBase) GetFlags() uint32    { return t.flags }
+func (t *typeOpBase) GetName() string     { return t.name }
+func (t *typeOpBase) IsCommutative() bool { return t.flags&PcodeOpCommutative != 0 }
 
 // RegisterTypeOps creates the canonical TypeOp instance for each OpCode.
 // C++ parity: TypeOp::registerInstructions (typeop.cc)
