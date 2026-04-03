@@ -63,5 +63,6 @@ Ghidra decompiler/Sleigh runtime을 Go로 다시 구현하는 프로젝트. stan
 ## 프로젝트 목표
 
 - Gosleigh의 목표는 완성형, 실사용 가능한 Go 기반 Sleigh runtime과 decompiler 경로다.
+- 실사용 가능 = x86/ARM 등 주요 아키텍처의 .sla를 로드해서 디컴파일 C 출력까지 동작하는 수준.
 - 현재 우선순위는 SLEIGH 기반 translation/runtime이며, 이것도 전체 디컴파일 경로의 일부다.
 - 기존 host의 disassembler를 바로 대체한다고 가정하지 않는다.
