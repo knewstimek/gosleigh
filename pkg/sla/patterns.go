@@ -22,6 +22,21 @@ type PatternMaskWordBoundary struct {
 	Val  uint64
 }
 
+// Pattern blocks in the persisted .sla stream are encoded as 32-bit uintm words.
+// Matchers must read and advance in the same 4-byte units even on 64-bit hosts.
+const patternMaskWordBytes = 4
+
+const maxPatternMaskWord32 = uint64(^uint32(0))
+
+func patternBlockWordBytes(block PatternBlockBoundary) int {
+	for _, word := range block.MaskWords {
+		if word.Mask > maxPatternMaskWord32 || word.Val > maxPatternMaskWord32 {
+			return 8
+		}
+	}
+	return patternMaskWordBytes
+}
+
 // DisjointPatternBoundary is the shallow decoded form of one disjoint pattern subtree.
 type DisjointPatternBoundary struct {
 	ElementID uint32

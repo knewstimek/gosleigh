@@ -135,7 +135,13 @@ func resolveFrame(ctx *ParserContext, change *ParserWalkerChange, resolve func(R
 		return normalizeResolveUnimpl(err)
 	}
 	if outcome.Constructor == nil {
-		return newUnimplError(ErrResolveUnimplemented, fmt.Sprintf("constructor resolution at depth %d", depth))
+		if depth == 0 {
+			return newUnimplError(ErrResolveUnimplemented, fmt.Sprintf("constructor resolution at depth %d", depth))
+		}
+		// Non-subtable operand (token field, context field): resolve signaled no subtable
+		// recursion needed by returning nil constructor without error.
+		// Mirrors C++ SubtableSymbol::resolve() which skips non-SubtableSymbol operands.
+		return nil
 	}
 	if err := change.SetConstructor(*outcome.Constructor); err != nil {
 		return err

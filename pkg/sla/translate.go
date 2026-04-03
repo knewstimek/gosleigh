@@ -465,6 +465,11 @@ func TranslateSubtable(subtable *SubtableBoundary, input TranslateInput) ([]pcod
 					if input.Symbols != nil && ctx.GetSymbolTable() == nil {
 						ctx.SetSymbolTable(input.Symbols)
 					}
+					// Propagate space index map so propagateConstructorResult can resolve
+					// space-indexed varnodes (e.g. ConstKindSpaceID in HandleTpl::fix).
+					if ctx.SpacesByIndex == nil && input.Lowering.SpacesByIndex != nil {
+						ctx.SpacesByIndex = input.Lowering.SpacesByIndex
+					}
 					return ResolveHandles(ctx, input.ResolveHandles)
 				},
 			},
@@ -597,6 +602,11 @@ func translatePcodeContextRequest(subtable *SubtableBoundary, input TranslateInp
 				ResolveHandles: func(ctx *ParserContext) error {
 					if input.Symbols != nil && ctx.GetSymbolTable() == nil {
 						ctx.SetSymbolTable(input.Symbols)
+					}
+					// Propagate space index map so propagateConstructorResult can resolve
+					// space-indexed varnodes (e.g. ConstKindSpaceID in HandleTpl::fix).
+					if ctx.SpacesByIndex == nil && input.Lowering.SpacesByIndex != nil {
+						ctx.SpacesByIndex = input.Lowering.SpacesByIndex
 					}
 					return ResolveHandles(ctx, input.ResolveHandles)
 				},
@@ -872,6 +882,11 @@ func resolveTranslateFrame(subtable *SubtableBoundary, frame ResolveFrame) (Reso
 	if err != nil {
 		return ResolveOutcome{}, err
 	}
+	// nil target with a non-nil parent means a non-subtable operand (token field, context field).
+	// Signal the caller to skip recursive state setup by returning an empty outcome with nil constructor.
+	if target == nil && frame.Parent != nil {
+		return ResolveOutcome{}, nil
+	}
 	constructor, err := resolveTranslateConstructor(target, frame.Walker.Walker)
 	if err != nil {
 		return ResolveOutcome{}, err
@@ -920,7 +935,10 @@ func resolveTranslateFrameSubtable(subtable *SubtableBoundary, frame ResolveFram
 		return nil, nil, fmt.Errorf("translate subtable: operand %d is not available on constructor %d", frame.Operand, frame.Parent.ConstructorID)
 	}
 	if !operand.HasDefiningSymbolID {
-		return nil, nil, fmt.Errorf("translate subtable: operand %d has no defining subtable symbol", frame.Operand)
+		// Token-field or context-field operand: no subtable to recurse into.
+		// Return nil/nil/nil to signal the caller to skip recursive resolution.
+		// Mirrors Ghidra C++ SubtableSymbol::resolve() which skips non-SubtableSymbol operands.
+		return nil, nil, nil
 	}
 	sym, ok := frame.Context.GetSymbolTable().FindSymbol(operand.DefiningSymbolID)
 	if !ok || sym.Body.Subtable == nil {

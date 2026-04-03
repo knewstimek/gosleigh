@@ -105,8 +105,8 @@ func TestResolveDecisionNodeReturnsFirstMatchingConstructor(t *testing.T) {
 						Offset:      0,
 						NonZeroSize: 1,
 						MaskWords: []PatternMaskWordBoundary{{
-							Mask: 0xff00000000000000,
-							Val:  0x5500000000000000,
+							Mask: 0xff000000,
+							Val:  0x55000000,
 						}},
 					},
 				},
@@ -126,7 +126,7 @@ func TestResolveDecisionNodeReturnsFirstMatchingConstructor(t *testing.T) {
 
 	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
 	ctx := NewParserContext(address.Address{Space: ram, Offset: 0x3000}, nil)
-	ctx.SetInstructionBytes([]byte{0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+	ctx.SetInstructionBytes([]byte{0x55, 0x00, 0x00, 0x00})
 
 	walker := NewParserWalker(ctx)
 	walker.BaseState()
@@ -153,8 +153,8 @@ func TestResolveDecisionNodeErrorsWhenNoPatternMatches(t *testing.T) {
 					Offset:      0,
 					NonZeroSize: 1,
 					MaskWords: []PatternMaskWordBoundary{{
-						Mask: 0xff00000000000000,
-						Val:  0x6600000000000000,
+						Mask: 0xff000000,
+						Val:  0x66000000,
 					}},
 				},
 			},
@@ -163,7 +163,7 @@ func TestResolveDecisionNodeErrorsWhenNoPatternMatches(t *testing.T) {
 
 	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
 	ctx := NewParserContext(address.Address{Space: ram, Offset: 0x4000}, nil)
-	ctx.SetInstructionBytes([]byte{0x55, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00})
+	ctx.SetInstructionBytes([]byte{0x55, 0x00, 0x00, 0x00})
 
 	walker := NewParserWalker(ctx)
 	walker.BaseState()
@@ -174,5 +174,73 @@ func TestResolveDecisionNodeErrorsWhenNoPatternMatches(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "unable to resolve constructor") {
 		t.Fatalf("ResolveDecisionNode() error = %q, want unable to resolve constructor", err)
+	}
+}
+
+func TestResolveDecisionNodeMatchesPersisted32BitPatternWords(t *testing.T) {
+	subtable := &SubtableBoundary{
+		Constructors: []ConstructorBoundary{
+			{ConstructorID: 0},
+			{ConstructorID: 1},
+		},
+	}
+	node := &DecisionNodeBoundary{
+		Pairs: []DecisionPairBoundary{
+			{
+				ConstructorID: 0,
+				Pattern: &DisjointPatternBoundary{
+					ElementID: elemInstructPat,
+					Block: &PatternBlockBoundary{
+						Offset:      0,
+						NonZeroSize: 1,
+						MaskWords: []PatternMaskWordBoundary{{
+							Mask: 0xff000000,
+							Val:  0xea000000,
+						}},
+					},
+				},
+			},
+			{
+				ConstructorID: 1,
+				Pattern: &DisjointPatternBoundary{
+					ElementID: elemInstructPat,
+					Block: &PatternBlockBoundary{
+						Offset:      0,
+						NonZeroSize: 1,
+						MaskWords: []PatternMaskWordBoundary{{
+							Mask: 0xff000000,
+							Val:  0xa9000000,
+						}},
+					},
+				},
+			},
+		},
+	}
+
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	tests := []struct {
+		name  string
+		bytes []byte
+		want  uint64
+	}{
+		{name: "NOP", bytes: []byte{0xea, 0x00, 0x00, 0x00}, want: 0},
+		{name: "LDA_imm", bytes: []byte{0xa9, 0x42, 0x00, 0x00}, want: 1},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := NewParserContext(address.Address{Space: ram, Offset: 0x5000}, nil)
+			ctx.SetInstructionBytes(tc.bytes)
+
+			walker := NewParserWalker(ctx)
+			walker.BaseState()
+
+			constructor, err := ResolveDecisionNode(subtable, node, walker)
+			if err != nil {
+				t.Fatalf("ResolveDecisionNode() error: %v", err)
+			}
+			if constructor.ConstructorID != tc.want {
+				t.Fatalf("ResolveDecisionNode() chose constructor %d, want %d", constructor.ConstructorID, tc.want)
+			}
+		})
 	}
 }
