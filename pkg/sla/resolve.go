@@ -29,6 +29,9 @@ type ResolveHooks struct {
 	LoadFill      func(ctx *ParserContext) error
 	LoadContext   func(ctx *ParserContext) error
 	ResolveSymbol func(frame ResolveFrame) (ResolveOutcome, error)
+	// ContextOps carries optional pattern evaluation hooks for ApplyContextOps.
+	// Applied per matched constructor, mirroring Constructor::applyContext() in C++.
+	ContextOps ApplyContextOpsHooks
 }
 
 // ResolveFrame describes the current parser state handed to the symbol-resolution hook.
@@ -97,7 +100,7 @@ func Resolve(ctx *ParserContext, hooks ResolveHooks) (*ResolveResult, error) {
 		}
 	}
 
-	if err := resolveFrame(ctx, change, hooks.ResolveSymbol, 0); err != nil {
+	if err := resolveFrame(ctx, change, hooks.ResolveSymbol, hooks.ContextOps, 0); err != nil {
 		return nil, normalizeResolveUnimpl(err)
 	}
 
@@ -115,7 +118,7 @@ func Resolve(ctx *ParserContext, hooks ResolveHooks) (*ResolveResult, error) {
 	}, nil
 }
 
-func resolveFrame(ctx *ParserContext, change *ParserWalkerChange, resolve func(ResolveFrame) (ResolveOutcome, error), depth int) error {
+func resolveFrame(ctx *ParserContext, change *ParserWalkerChange, resolve func(ResolveFrame) (ResolveOutcome, error), ctxOps ApplyContextOpsHooks, depth int) error {
 	if ctx == nil || change == nil || change.Walker == nil || change.Walker.Point == nil {
 		return fmt.Errorf("resolve: missing active walker state")
 	}
@@ -162,6 +165,14 @@ func resolveFrame(ctx *ParserContext, change *ParserWalkerChange, resolve func(R
 		ctx.SetDelaySlot(outcome.DelaySlot)
 	}
 	applyResolveFlowAddresses(ctx, outcome)
+	// Mirrors Constructor::applyContext() called from Sleigh::resolve() in sleigh.cc:
+	// each matched constructor's ContextOps are evaluated and written into the context
+	// words before operand recursion so that sub-constructors see updated context state.
+	if len(outcome.Constructor.ContextOps) > 0 {
+		if err := ApplyContextOps(ctx, outcome.Constructor.ContextOps, change.Walker, ctxOps); err != nil {
+			return fmt.Errorf("resolve: applyContextOps at depth %d: %w", depth, err)
+		}
+	}
 	for _, commit := range outcome.Constructor.ContextCommits {
 		if err := queueContextCommit(ctx, change, commit); err != nil {
 			return err
@@ -196,7 +207,7 @@ func resolveFrame(ctx *ParserContext, change *ParserWalkerChange, resolve func(R
 				return err
 			}
 		}
-		if err := resolveFrame(ctx, change, resolve, depth+1); err != nil {
+		if err := resolveFrame(ctx, change, resolve, ctxOps, depth+1); err != nil {
 			return normalizeResolveUnimpl(err)
 		}
 		change.Walker.PopOperand()

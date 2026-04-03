@@ -1022,6 +1022,179 @@ func TestLowerConstructTplRejectsDynamicOffsetPlusWithoutUniqueRuntimeSpace(t *t
 	}
 }
 
+// TestLowerConstructTplExpandsDynamicInputWrappingPointerOffset exercises the
+// non-const, non-unique OffsetSpace branch of lowerDynamicPointerVarnode where
+// wrapSpaceOffset actually changes the pointer offset value. This mirrors the
+// else branch in C++ generatePointer: vn.offset = vn.space->wrapOffset(hand.offset_offset).
+// The handle's OffsetSpace has AddrSize=2, so offsets wider than 16 bits wrap.
+func TestLowerConstructTplExpandsDynamicInputWrappingPointerOffset(t *testing.T) {
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	reg16 := &address.Space{Name: "reg16", Kind: address.SpaceKindProcessor, Index: 2, AddrSize: 2, WordSize: 1}
+	constant := &address.Space{Name: "const", Kind: address.SpaceKindConstant, Index: 3, AddrSize: 8, WordSize: 1}
+	ctx := LoweringContext{
+		Instruction:   address.Address{Space: ram, Offset: 0x6000},
+		CurrentSpace:  ram,
+		ConstantSpace: constant,
+		SpacesByIndex: map[int64]*address.Space{1: ram, 2: reg16, 3: constant},
+		Handles: []HandleReference{{
+			// OffsetSpace is a 16-bit space; Offset=0x10004 wraps to 0x4.
+			Space:       ram,
+			Size:        4,
+			OffsetSpace: reg16,
+			Offset:      0x10004,
+			OffsetSize:  2,
+			TempSpace:   reg16,
+			TempOffset:  0x10,
+		}},
+	}
+	dynamic := VarnodeTplBoundary{
+		Space:  ConstBoundary{Kind: ConstKindHandle, HandleIndex: 0, Selector: handleFieldSpace},
+		Offset: ConstBoundary{Kind: ConstKindHandle, HandleIndex: 0, Selector: handleFieldOffset},
+		Size:   ConstBoundary{Kind: ConstKindHandle, HandleIndex: 0, Selector: handleFieldSize},
+	}
+	tpl := ConstructTplBoundary{
+		Ops: []OpTplBoundary{{
+			OpcodeID: int64(pcode.CPUI_COPY),
+			Opcode:   pcode.CPUI_COPY.String(),
+			Output: &VarnodeTplBoundary{
+				Space:  ConstBoundary{Kind: ConstKindSpaceID, SpaceIndex: int64(ram.Index)},
+				Offset: ConstBoundary{Kind: ConstKindReal, Value: 0x100},
+				Size:   ConstBoundary{Kind: ConstKindReal, Value: 4},
+			},
+			Inputs: []VarnodeTplBoundary{dynamic},
+		}},
+	}
+
+	ops, err := LowerConstructTpl(tpl, ctx)
+	if err != nil {
+		t.Fatalf("LowerConstructTpl() returned unexpected error: %v", err)
+	}
+	if len(ops) != 2 {
+		t.Fatalf("unexpected op count: got %d want 2", len(ops))
+	}
+	if ops[0].OpCode != pcode.CPUI_LOAD {
+		t.Fatalf("first opcode = %v, want LOAD", ops[0].OpCode)
+	}
+	// The pointer offset 0x10004 must have been wrapped to 0x4 by wrapSpaceOffset
+	// on the 16-bit reg16 space (mod = 0x10000).
+	if ops[0].Inputs[1].Space != reg16 || ops[0].Inputs[1].Offset != 0x4 || ops[0].Inputs[1].Size != 2 {
+		t.Fatalf("unexpected LOAD pointer after wrapOffset: %+v", ops[0].Inputs[1])
+	}
+	// The LOAD output (temp) uses hand.TempSpace/TempOffset resolved via fixHandleSelector.
+	// TempSpace = reg16, TempOffset = 0x10; since reg16 is not unique, no uniqueoffset is applied.
+	if ops[0].Output == nil || ops[0].Output.Space != reg16 || ops[0].Output.Offset != 0x10 || ops[0].Output.Size != 4 {
+		t.Fatalf("unexpected LOAD output temp: %+v", ops[0].Output)
+	}
+	assertDynamicSpaceSelector(t, ops[0].Inputs[0], constant, ram)
+}
+
+// TestLowerConstructTplExpandsTwoDynamicInputsWithSeparateLoads exercises the
+// input-loop in C++ SleighBuilder::dump(): each dynamic input gets its own
+// LOAD pre-op with an independent temp, ordered before the main op.
+// This mirrors two successive isDynamic() iterations in the C++ loop.
+func TestLowerConstructTplExpandsTwoDynamicInputsWithSeparateLoads(t *testing.T) {
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	reg := &address.Space{Name: "register", Kind: address.SpaceKindProcessor, Index: 2, AddrSize: 8, WordSize: 1}
+	constant := &address.Space{Name: "const", Kind: address.SpaceKindConstant, Index: 3, AddrSize: 8, WordSize: 1}
+	ctx := LoweringContext{
+		Instruction:   address.Address{Space: ram, Offset: 0x7000},
+		CurrentSpace:  ram,
+		ConstantSpace: constant,
+		SpacesByIndex: map[int64]*address.Space{1: ram, 2: reg, 3: constant},
+		Handles: []HandleReference{
+			{
+				// Handle 0: pointer in reg[0x10], temp at reg[0x50].
+				Space:       ram,
+				Size:        4,
+				OffsetSpace: reg,
+				Offset:      0x10,
+				OffsetSize:  8,
+				TempSpace:   reg,
+				TempOffset:  0x50,
+			},
+			{
+				// Handle 1: pointer in reg[0x18], temp at reg[0x58].
+				Space:       ram,
+				Size:        4,
+				OffsetSpace: reg,
+				Offset:      0x18,
+				OffsetSize:  8,
+				TempSpace:   reg,
+				TempOffset:  0x58,
+			},
+		},
+	}
+	dyn0 := VarnodeTplBoundary{
+		Space:  ConstBoundary{Kind: ConstKindHandle, HandleIndex: 0, Selector: handleFieldSpace},
+		Offset: ConstBoundary{Kind: ConstKindHandle, HandleIndex: 0, Selector: handleFieldOffset},
+		Size:   ConstBoundary{Kind: ConstKindHandle, HandleIndex: 0, Selector: handleFieldSize},
+	}
+	dyn1 := VarnodeTplBoundary{
+		Space:  ConstBoundary{Kind: ConstKindHandle, HandleIndex: 1, Selector: handleFieldSpace},
+		Offset: ConstBoundary{Kind: ConstKindHandle, HandleIndex: 1, Selector: handleFieldOffset},
+		Size:   ConstBoundary{Kind: ConstKindHandle, HandleIndex: 1, Selector: handleFieldSize},
+	}
+	tpl := ConstructTplBoundary{
+		Ops: []OpTplBoundary{{
+			OpcodeID: int64(pcode.CPUI_INT_ADD),
+			Opcode:   pcode.CPUI_INT_ADD.String(),
+			Output: &VarnodeTplBoundary{
+				Space:  ConstBoundary{Kind: ConstKindSpaceID, SpaceIndex: int64(reg.Index)},
+				Offset: ConstBoundary{Kind: ConstKindReal, Value: 0x60},
+				Size:   ConstBoundary{Kind: ConstKindReal, Value: 4},
+			},
+			Inputs: []VarnodeTplBoundary{dyn0, dyn1},
+		}},
+	}
+
+	ops, err := LowerConstructTpl(tpl, ctx)
+	if err != nil {
+		t.Fatalf("LowerConstructTpl() returned unexpected error: %v", err)
+	}
+	// Expected: LOAD(handle0) + LOAD(handle1) + INT_ADD = 3 ops.
+	if len(ops) != 3 {
+		t.Fatalf("unexpected op count: got %d want 3", len(ops))
+	}
+	// First pre-op: LOAD for input 0 (handle 0).
+	if ops[0].OpCode != pcode.CPUI_LOAD {
+		t.Fatalf("op[0] = %v, want LOAD (handle 0)", ops[0].OpCode)
+	}
+	assertDynamicSpaceSelector(t, ops[0].Inputs[0], constant, ram)
+	if ops[0].Inputs[1].Space != reg || ops[0].Inputs[1].Offset != 0x10 || ops[0].Inputs[1].Size != 8 {
+		t.Fatalf("op[0] LOAD pointer (handle 0): %+v", ops[0].Inputs[1])
+	}
+	if ops[0].Output == nil || ops[0].Output.Space != reg || ops[0].Output.Offset != 0x50 || ops[0].Output.Size != 4 {
+		t.Fatalf("op[0] LOAD output temp (handle 0): %+v", ops[0].Output)
+	}
+	// Second pre-op: LOAD for input 1 (handle 1).
+	if ops[1].OpCode != pcode.CPUI_LOAD {
+		t.Fatalf("op[1] = %v, want LOAD (handle 1)", ops[1].OpCode)
+	}
+	assertDynamicSpaceSelector(t, ops[1].Inputs[0], constant, ram)
+	if ops[1].Inputs[1].Space != reg || ops[1].Inputs[1].Offset != 0x18 || ops[1].Inputs[1].Size != 8 {
+		t.Fatalf("op[1] LOAD pointer (handle 1): %+v", ops[1].Inputs[1])
+	}
+	if ops[1].Output == nil || ops[1].Output.Space != reg || ops[1].Output.Offset != 0x58 || ops[1].Output.Size != 4 {
+		t.Fatalf("op[1] LOAD output temp (handle 1): %+v", ops[1].Output)
+	}
+	// Main op: INT_ADD consuming both LOAD temps.
+	if ops[2].OpCode != pcode.CPUI_INT_ADD {
+		t.Fatalf("op[2] = %v, want INT_ADD", ops[2].OpCode)
+	}
+	if len(ops[2].Inputs) != 2 {
+		t.Fatalf("op[2] input count = %d, want 2", len(ops[2].Inputs))
+	}
+	if ops[0].Output == nil || ops[2].Inputs[0] != *ops[0].Output {
+		t.Fatalf("INT_ADD input[0] must be LOAD[0] temp: got %+v want %+v", ops[2].Inputs[0], ops[0].Output)
+	}
+	if ops[1].Output == nil || ops[2].Inputs[1] != *ops[1].Output {
+		t.Fatalf("INT_ADD input[1] must be LOAD[1] temp: got %+v want %+v", ops[2].Inputs[1], ops[1].Output)
+	}
+	if ops[2].Output == nil || ops[2].Output.Space != reg || ops[2].Output.Offset != 0x60 || ops[2].Output.Size != 4 {
+		t.Fatalf("INT_ADD output: %+v", ops[2].Output)
+	}
+}
+
 func TestLowerConstructTplExpandsDynamicOutputOffsetPlusUsesUniqueSpaceMapFallback(t *testing.T) {
 	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
 	register := &address.Space{Name: "register", Kind: address.SpaceKindProcessor, Index: 2, AddrSize: 8, WordSize: 1}

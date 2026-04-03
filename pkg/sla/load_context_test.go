@@ -364,6 +364,56 @@ func TestSetContextWordAppliesMaskedWrite(t *testing.T) {
 	}
 }
 
+// TestContextOpsAppliedDuringResolve is a regression test that proves
+// ContextOpBoundary entries on a matched constructor are applied to the
+// parser context's context words during the Resolve pass.
+//
+// Before the fix, resolveFrame never called ApplyContextOps so constructor
+// ContextOps were silently ignored. This test uses Resolve() directly with a
+// synthetic constructor that carries one ContextOpBoundary and verifies the
+// context word is mutated after the call.
+func TestContextOpsAppliedDuringResolve(t *testing.T) {
+	space := testLoadContextSpace("ram", address.SpaceKindProcessor, 1)
+	addr := address.Address{Space: space, Offset: 0x1000}
+
+	// One context word initialised to 0.
+	ctx := NewParserContext(addr, nil)
+	ctx.SetContextWords([]uint64{0})
+	ctx.SetInstructionBytes([]byte{0x00})
+
+	// Synthetic constructor: no operands, one ContextOp that writes constant
+	// value 0x5 at shift=0, mask=0x0f into word 0.
+	// Expected: ctx.ContextWords[0] = (0 & ^0x0f) | (0x0f & 5) = 0x05
+	ctxOp := ContextOpBoundary{
+		Num:   0,
+		Shift: 0,
+		Mask:  0x0f,
+		Expression: &PatternExprBoundary{
+			ElementID: elemIntB,
+			Attrs:     map[uint32]packedAttribute{attrVal: patternIntAttr(attrVal, 5)},
+		},
+	}
+	ctor := &ConstructorBoundary{
+		ConstructorID: 1,
+		ContextOps:    []ContextOpBoundary{ctxOp},
+	}
+
+	hooks := ResolveHooks{
+		ResolveSymbol: func(frame ResolveFrame) (ResolveOutcome, error) {
+			return ResolveOutcome{Constructor: ctor}, nil
+		},
+	}
+
+	if _, err := Resolve(ctx, hooks); err != nil {
+		t.Fatalf("Resolve() returned unexpected error: %v", err)
+	}
+
+	want := uint64(0x05)
+	if ctx.ContextWords[0] != want {
+		t.Fatalf("context word after Resolve: got 0x%x want 0x%x -- ContextOps not applied during resolve", ctx.ContextWords[0], want)
+	}
+}
+
 func testLoadContextSpace(name string, kind address.SpaceKind, wordSize uint8) *address.Space {
 	return &address.Space{
 		Name:      name,

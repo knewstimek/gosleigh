@@ -1,6 +1,11 @@
 package sla
 
-import "testing"
+import (
+	"testing"
+
+	"gosleigh/pkg/address"
+	"gosleigh/pkg/pcode"
+)
 
 func TestBuildXrefsCollectsVarnodeRegisterNames(t *testing.T) {
 	symbols := &SymbolTableBoundary{
@@ -315,6 +320,76 @@ func TestXRefsUserOpNamesLookupWiring(t *testing.T) {
 	var nilXrefs *XRefs
 	if got := nilXrefs.GetUserOpName(2); got != "" {
 		t.Fatalf("nil.GetUserOpName(2) = %q, want empty", got)
+	}
+}
+
+// TestCallotherXRefsUserOpWiring is a regression test that verifies the
+// CALLOTHER user-op wiring end-to-end: BuildXrefs populates UserOpNames, and
+// GetUserOpName resolves the name from a CALLOTHER op's first input offset.
+//
+// In Ghidra's sleigh.cc, a CALLOTHER raw op stores the user-op index in
+// Inputs[0].Offset (constant space varnode). This test creates a synthetic
+// engine state -- symbol table with two UserOpSymbols, a CALLOTHER RawOp with
+// the matching constant input -- and verifies that the XRefs lookup resolves
+// both names correctly without any real .sla data.
+func TestCallotherXRefsUserOpWiring(t *testing.T) {
+	constSpace := &address.Space{Name: "const", Kind: address.SpaceKindConstant, Index: 0, AddrSize: 8}
+	ramSpace := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	ramAddr := address.Address{Space: ramSpace, Offset: 0x4000}
+
+	symbols := &SymbolTableBoundary{
+		Symbols: []SymbolBoundary{
+			{
+				Name:          "os_call",
+				ID:            10,
+				ScopeID:       globalSymbolScopeID,
+				HeaderElement: elemUserOpHead,
+				BodyElement:   elemUserOp,
+				Body:          SymbolBodyBoundary{UserOp: &UserOpBoundary{Index: 0}},
+			},
+			{
+				Name:          "debugbreak",
+				ID:            11,
+				ScopeID:       globalSymbolScopeID,
+				HeaderElement: elemUserOpHead,
+				BodyElement:   elemUserOp,
+				Body:          SymbolBodyBoundary{UserOp: &UserOpBoundary{Index: 1}},
+			},
+		},
+	}
+
+	xrefs, err := BuildXrefs(symbols)
+	if err != nil {
+		t.Fatalf("BuildXrefs() failed: %v", err)
+	}
+	if len(xrefs.UserOpNames) < 2 {
+		t.Fatalf("UserOpNames length = %d, want >= 2", len(xrefs.UserOpNames))
+	}
+
+	// Synthetic CALLOTHER ops: first input is a constant varnode whose Offset
+	// encodes the user-op index, mirroring the encoding in sleigh.cc emit().
+	makeCallother := func(userOpIndex uint64) pcode.RawOp {
+		return pcode.RawOp{
+			SeqNum: pcode.SeqNum{Address: ramAddr},
+			OpCode: pcode.CPUI_CALLOTHER,
+			Inputs: []pcode.VarnodeData{
+				{Space: constSpace, Offset: userOpIndex, Size: 4},
+			},
+		}
+	}
+
+	op0 := makeCallother(0)
+	op1 := makeCallother(1)
+
+	// Wiring check: XRefs.GetUserOpName must resolve both names from the
+	// user-op index carried in the CALLOTHER op's first input offset.
+	idx0 := int(op0.Inputs[0].Offset)
+	if got := xrefs.GetUserOpName(idx0); got != "os_call" {
+		t.Fatalf("CALLOTHER index 0: GetUserOpName = %q, want os_call", got)
+	}
+	idx1 := int(op1.Inputs[0].Offset)
+	if got := xrefs.GetUserOpName(idx1); got != "debugbreak" {
+		t.Fatalf("CALLOTHER index 1: GetUserOpName = %q, want debugbreak", got)
 	}
 }
 
