@@ -2,8 +2,6 @@ package sla
 
 import "fmt"
 
-const decisionPatternWordBytes = 8
-
 // ResolveSubtableDecision mirrors SubtableSymbol::resolve() by dispatching into the
 // persisted decision tree for the current walker state.
 func ResolveSubtableDecision(subtable *SubtableBoundary, walker *ParserWalker) (*ConstructorBoundary, error) {
@@ -108,6 +106,7 @@ func matchDecisionPatternBlock(block PatternBlockBoundary, context bool, walker 
 	if block.NonZeroSize <= 0 {
 		return block.NonZeroSize == 0, nil
 	}
+	wordBytes := patternBlockWordBytes(block)
 	offset := int(block.Offset)
 	for _, word := range block.MaskWords {
 		var (
@@ -115,9 +114,9 @@ func matchDecisionPatternBlock(block PatternBlockBoundary, context bool, walker 
 			err  error
 		)
 		if context {
-			data, err = walker.GetContextBytes(offset, decisionPatternWordBytes)
+			data, err = walker.GetContextBytes(offset, wordBytes)
 		} else {
-			data, err = walker.GetInstructionBytes(offset, decisionPatternWordBytes)
+			data, err = walker.GetInstructionBytes(offset, wordBytes)
 		}
 		if err != nil {
 			return false, err
@@ -125,7 +124,7 @@ func matchDecisionPatternBlock(block PatternBlockBoundary, context bool, walker 
 		if (word.Mask & data) != word.Val {
 			return false, nil
 		}
-		offset += decisionPatternWordBytes
+		offset += wordBytes
 	}
 	return true, nil
 }
