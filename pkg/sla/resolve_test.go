@@ -166,6 +166,81 @@ func TestResolveOutcomeCanSplitRefAndDestAddresses(t *testing.T) {
 	}
 }
 
+// TestResolveLeafOperandOffset is a regression test for the bug where leaf
+// operand ConstructState entries were allocated without initializing their
+// Offset field, causing token-field evaluation (getPatternInstructionBytes) to
+// always read from byte 0 (the opcode) instead of the correct
+// instruction-relative offset.
+//
+// C++ reference: Sleigh::resolve() sets walker.setOffset(off) immediately after
+// pos.allocateOperand(), where off = walker.getOffset(sym->getOffsetBase()) +
+// sym->getRelativeOffset(). This must happen for leaf (non-subtable) operands
+// as well as subtable operands.
+func TestResolveLeafOperandOffset(t *testing.T) {
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1}
+	constSpace := &address.Space{Name: "const", Kind: address.SpaceKindConstant, Index: 2, AddrSize: 8, WordSize: 1}
+
+	// Simulate a 2-byte instruction: opcode at byte 0, immediate at byte 1.
+	// The root constructor has one operand with OffsetBase=-1 (constructor-relative)
+	// and RelativeOffset=1 (byte 1), MinimumLength=1.
+	// The leaf operand returns nil Constructor (no subtable).
+	rootCtor := &ConstructorBoundary{
+		ConstructorID: 42,
+		MinimumLength: 2,
+		OperandSymbolIDs: []uint64{100},
+	}
+	leafSym := &OperandSymbolBoundary{
+		Index:          0,
+		OffsetBase:     -1, // constructor-relative
+		RelativeOffset: 1,  // byte 1 = immediate field
+		MinimumLength:  1,
+	}
+	symTable := &SymbolTableBoundary{
+		Symbols: []SymbolBoundary{
+			{
+				ID:   100,
+				Name: "imm",
+				Body: SymbolBodyBoundary{Operand: leafSym},
+			},
+		},
+	}
+
+	ctx := NewParserContext(address.Address{Space: ram, Offset: 0}, constSpace)
+	ctx.SetSymbolTable(symTable)
+	ctx.SetInstructionBytes([]byte{0xA9, 0x42}) // opcode, immediate
+
+	var leafState *ConstructState
+	_, err := Resolve(ctx, ResolveHooks{
+		ResolveSymbol: func(frame ResolveFrame) (ResolveOutcome, error) {
+			if frame.Depth == 0 {
+				return ResolveOutcome{
+					Constructor: rootCtor,
+					Offset:      0,
+					Length:      2,
+				}, nil
+			}
+			// Leaf operand: record state for inspection, return no subtable.
+			leafState = frame.State
+			return ResolveOutcome{}, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("Resolve() error: %v", err)
+	}
+	if leafState == nil {
+		t.Fatal("leaf operand frame.State was not captured")
+	}
+	// The leaf ConstructState must carry Offset=1 (byte 1, the immediate field),
+	// not 0 (the opcode byte). If this is 0, token-field evaluation reads 0xA9
+	// instead of 0x42.
+	if leafState.Offset != 1 {
+		t.Errorf("leaf operand Offset = %d, want 1 (immediate byte); got opcode byte instead", leafState.Offset)
+	}
+	if leafState.Length != 1 {
+		t.Errorf("leaf operand Length = %d, want 1 (MinimumLength)", leafState.Length)
+	}
+}
+
 func TestResolveRequiresSymbolHook(t *testing.T) {
 	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1}
 	ctx := NewParserContext(address.Address{Space: ram, Offset: 0x2000}, nil)
