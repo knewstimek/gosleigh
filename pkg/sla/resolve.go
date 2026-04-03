@@ -174,8 +174,27 @@ func resolveFrame(ctx *ParserContext, change *ParserWalkerChange, resolve func(R
 	}
 
 	for operand := 0; operand < len(outcome.Constructor.OperandSymbolIDs); operand++ {
+		parent := change.Walker.Point
 		if _, err := change.AllocateOperand(operand); err != nil {
 			return err
+		}
+		// Mirrors C++ Sleigh::resolve():
+		//   off = walker.getOffset(sym->getOffsetBase()) + sym->getRelativeOffset();
+		//   pos.allocateOperand(oper, walker);
+		//   walker.setOffset(off);
+		//   walker.setCurrentLength(sym->getMinimumLength());  // when no subtable
+		// We compute and apply offset+minlength on the newly allocated child so that
+		// token-field evaluation (getPatternInstructionBytes) reads from the correct
+		// instruction-relative position regardless of whether the operand is a
+		// subtable or a leaf (token/context field).
+		operandOff, minLen := computeOperandOffsetAndLen(ctx, parent, operand)
+		if err := change.SetOffset(operandOff); err != nil {
+			return err
+		}
+		if minLen > 0 {
+			if err := change.SetCurrentLength(minLen); err != nil {
+				return err
+			}
 		}
 		if err := resolveFrame(ctx, change, resolve, depth+1); err != nil {
 			return normalizeResolveUnimpl(err)
@@ -183,6 +202,49 @@ func resolveFrame(ctx *ParserContext, change *ParserWalkerChange, resolve func(R
 		change.Walker.PopOperand()
 	}
 	return nil
+}
+
+// computeOperandOffsetAndLen mirrors the C++ offset-calculation done in Sleigh::resolve()
+// just before allocateOperand + setOffset + setCurrentLength.
+//
+// C++ reference:
+//   off = walker.getOffset(sym->getOffsetBase()) + sym->getRelativeOffset();
+//   walker.getOffset(i):
+//     i < 0  => point->offset                              (constructor-relative)
+//     i >= 0 => point->resolve[i]->offset + point->resolve[i]->length  (end of sibling i)
+//
+// Returns (instruction-relative byte offset, minimum length in bytes).
+// When the symbol table is unavailable, falls back to the parent offset so callers
+// get a safe default rather than silently reading from offset 0.
+func computeOperandOffsetAndLen(ctx *ParserContext, parent *ConstructState, operandIndex int) (uint64, int) {
+	if ctx == nil || ctx.GetSymbolTable() == nil || parent == nil || parent.Constructor == nil {
+		// Fallback: inherit parent offset; length unknown.
+		if parent != nil {
+			return parent.Offset, 0
+		}
+		return 0, 0
+	}
+	sym, ok := ctx.GetSymbolTable().FindOperandForConstructor(parent.Constructor, operandIndex)
+	if !ok {
+		return parent.Offset, 0
+	}
+	// Replicate walker.getOffset(sym->getOffsetBase()).
+	var base uint64
+	if sym.OffsetBase < 0 {
+		// Constructor-relative: use parent's own instruction-relative offset.
+		base = parent.Offset
+	} else {
+		// Relative to end of sibling operand sym.OffsetBase.
+		sibling, ok := parent.Child(int(sym.OffsetBase))
+		if !ok {
+			// Sibling not yet allocated; fall back to parent offset.
+			base = parent.Offset
+		} else {
+			base = sibling.Offset + uint64(sibling.Length)
+		}
+	}
+	off := base + uint64(sym.RelativeOffset)
+	return off, int(sym.MinimumLength)
 }
 
 func applyResolveFlowAddresses(ctx *ParserContext, outcome ResolveOutcome) {
