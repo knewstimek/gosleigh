@@ -445,6 +445,31 @@ func TranslateSubtable(subtable *SubtableBoundary, input TranslateInput) ([]pcod
 	builder.Pcode.rawInstruction = input.Lowering.RootInstruction
 	builder.State.SetDisassemblyCache(cache)
 	builder.State.Walker = walker
+	// Wire ObtainContextFallback so that delay-slot/crossbuild paths can populate
+	// the cache for adjacent instructions when called without prior prepareDelaySlotContexts.
+	// Mirrors Sleigh::obtainContext() pre-population inside oneInstruction().
+	builder.State.ObtainContextFallback = func(addr address.Address, targetState ParseState) (*ParserContext, error) {
+		return ObtainContext(cache, ObtainContextRequest{
+			Address:       addr,
+			TargetState:   targetState,
+			ConstantSpace: selectConstantSpace(input.Lowering),
+			Hooks: ObtainContextHooks{
+				Resolve: func(ctx *ParserContext) error {
+					if input.Symbols != nil {
+						ctx.SetSymbolTable(input.Symbols)
+					}
+					_, err := Resolve(ctx, translateResolveHooks(subtable, input))
+					return err
+				},
+				ResolveHandles: func(ctx *ParserContext) error {
+					if input.Symbols != nil && ctx.GetSymbolTable() == nil {
+						ctx.SetSymbolTable(input.Symbols)
+					}
+					return ResolveHandles(ctx, input.ResolveHandles)
+				},
+			},
+		})
+	}
 	// Mirrors SleighBuilder::dump() -> PcodeCacher staged raw emission through LowerRaw.
 	builder.Hooks.LowerRaw = func(op OpTplBoundary, state BuilderState, order uint64) ([]pcode.RawOp, error) {
 		active := state

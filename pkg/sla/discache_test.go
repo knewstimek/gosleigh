@@ -8,6 +8,109 @@ import (
 	"gosleigh/pkg/pcode"
 )
 
+// TestCacheHitSecondCall verifies that ObtainContext returns immediately on the
+// second call for the same address once the context has been promoted to
+// ParseStateDisassembly, without invoking the Resolve hook again.
+// Mirrors Sleigh::obtainContext(): "if (curstate >= state) return pos;".
+func TestCacheHitSecondCall(t *testing.T) {
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	addr := address.Address{Space: ram, Offset: 0xf100}
+	cache := NewDisassemblyCache()
+
+	resolveCalls := 0
+	hooks := ObtainContextHooks{
+		Resolve: func(ctx *ParserContext) error {
+			resolveCalls++
+			ctx.SetParserState(ParseStateDisassembly)
+			return nil
+		},
+	}
+	req := ObtainContextRequest{
+		Address:     addr,
+		TargetState: ParseStateDisassembly,
+		Hooks:       hooks,
+	}
+
+	// First call: context is uninitialized, Resolve must run.
+	first, err := ObtainContext(cache, req)
+	if err != nil {
+		t.Fatalf("ObtainContext() first call error: %v", err)
+	}
+	if first == nil {
+		t.Fatal("ObtainContext() first call returned nil")
+	}
+	if resolveCalls != 1 {
+		t.Fatalf("first call: resolve calls = %d, want 1", resolveCalls)
+	}
+	if first.GetParserState() != ParseStateDisassembly {
+		t.Fatalf("first call: parser state = %d, want ParseStateDisassembly", first.GetParserState())
+	}
+
+	// Second call: context is already at ParseStateDisassembly.
+	// The cache-hit short-circuit must return without calling Resolve.
+	second, err := ObtainContext(cache, req)
+	if err != nil {
+		t.Fatalf("ObtainContext() second call error: %v", err)
+	}
+	if second != first {
+		t.Fatalf("second call returned different context: got=%p want=%p", second, first)
+	}
+	if resolveCalls != 1 {
+		t.Fatalf("second call: resolve called again (calls=%d), want 1 (no re-resolve on cache hit)", resolveCalls)
+	}
+	if second.GetParserState() != ParseStateDisassembly {
+		t.Fatalf("second call: parser state = %d, want ParseStateDisassembly", second.GetParserState())
+	}
+}
+
+// TestGetN2addrUnimpl verifies that GetN2addrE() returns a typed *UnimplError
+// when the context is nil or in ParseStateUninitialized, matching the C++
+// ParserContext::getN2addr() LowlevelError throw.
+func TestGetN2addrUnimpl(t *testing.T) {
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	addr := address.Address{Space: ram, Offset: 0xf200}
+
+	// Case 1: nil context pointer.
+	var nilCtx *ParserContext
+	_, err := nilCtx.GetN2addrE()
+	if err == nil {
+		t.Fatal("GetN2addrE() on nil context: expected error, got nil")
+	}
+	var uerr *UnimplError
+	if !errors.As(err, &uerr) {
+		t.Fatalf("GetN2addrE() on nil context: error type = %T, want *UnimplError", err)
+	}
+
+	// Case 2: context with ParseStateUninitialized (no translate bound).
+	uninitCtx := NewParserContext(addr, nil)
+	// NewParserContext sets ParseStateUninitialized by default.
+	if uninitCtx.GetParserState() != ParseStateUninitialized {
+		t.Fatalf("precondition: expected ParseStateUninitialized, got %d", uninitCtx.GetParserState())
+	}
+	_, err = uninitCtx.GetN2addrE()
+	if err == nil {
+		t.Fatal("GetN2addrE() on uninitialized context: expected error, got nil")
+	}
+	var uerr2 *UnimplError
+	if !errors.As(err, &uerr2) {
+		t.Fatalf("GetN2addrE() on uninitialized context: error type = %T, want *UnimplError", err)
+	}
+
+	// Case 3: context promoted to ParseStateDisassembly should succeed (no error).
+	disasmCtx := NewParserContext(addr, nil)
+	disasmCtx.SetParserState(ParseStateDisassembly)
+	disasmCtx.SetNaddr(addr.Add(4))
+	// N2Addr is invalid (zero) but state is sufficient: GetN2addrE should not error.
+	got, err := disasmCtx.GetN2addrE()
+	if err != nil {
+		t.Fatalf("GetN2addrE() on disassembly context: unexpected error: %v", err)
+	}
+	// N2addr is not yet resolved (no resolver), so it returns invalid address -- not an error.
+	if !got.IsInvalid() {
+		t.Fatalf("GetN2addrE() on disassembly context without resolver: got %v, want invalid", got)
+	}
+}
+
 func TestDisassemblyCacheStoresAndRetrievesParserContext(t *testing.T) {
 	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
 	addr := address.Address{Space: ram, Offset: 0x401000}
@@ -946,6 +1049,75 @@ func TestRawBuildEmitOrderMatchesCppPcodeCacher(t *testing.T) {
 	for i, opc := range opcodes {
 		if emitted[i].OpCode != opc {
 			t.Fatalf("emitted[%d].OpCode = %v, want %v", i, emitted[i].OpCode, opc)
+		}
+	}
+}
+
+// TestRawBuildStateAllocateInstructionCalledPerIssuedOp verifies that
+// AppendRawBuild uses the pool direct path (allocateInstruction called once
+// per issued op) rather than appending issued/refs independently.
+// Mirrors C++ SleighBuilder::dump() which calls allocateInstruction() once
+// per logical p-code operation via PcodeCacher::allocateInstruction().
+func TestRawBuildStateAllocateInstructionCalledPerIssuedOp(t *testing.T) {
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	instruction := address.Address{Space: ram, Offset: 0xf000}
+	cache := NewDisassemblyCache()
+
+	if err := cache.BeginRawBuild(instruction, 4); err != nil {
+		t.Fatalf("BeginRawBuild() error: %v", err)
+	}
+	source := OpTplBoundary{OpcodeID: int64(pcode.CPUI_COPY), Opcode: pcode.CPUI_COPY.String()}
+
+	// Append 3 ops and verify that after each append the issued length
+	// and refs length remain in lock-step, which is only guaranteed when
+	// allocateInstruction() (not a raw append) is the allocating primitive.
+	state := cache.rawBuild
+	if state == nil {
+		t.Fatal("raw build state is nil after BeginRawBuild")
+	}
+
+	for i := 0; i < 3; i++ {
+		prevIssued := len(state.issued)
+		prevRefs := len(state.refs)
+		if prevIssued != prevRefs {
+			t.Fatalf("issued/refs length mismatch before op %d: issued=%d refs=%d", i, prevIssued, prevRefs)
+		}
+		if err := cache.AppendRawBuild(instruction, source, []pcode.RawOp{{
+			OpCode: pcode.CPUI_COPY,
+			Inputs: []pcode.VarnodeData{{Space: ram, Offset: uint64(0x10 + i), Size: 4}},
+		}}, 0); err != nil {
+			t.Fatalf("AppendRawBuild(%d) error: %v", i, err)
+		}
+		if len(state.issued) != prevIssued+1 {
+			t.Fatalf("op %d: issued grew by %d, want 1", i, len(state.issued)-prevIssued)
+		}
+		if len(state.refs) != prevRefs+1 {
+			t.Fatalf("op %d: refs grew by %d, want 1 (allocateInstruction must grow refs in lock-step)", i, len(state.refs)-prevRefs)
+		}
+		// Verify pool ownership: the issued op's Inputs slice must point into varnodes.
+		op := state.issued[i]
+		ref := state.refs[i]
+		if ref.inputCount != 1 {
+			t.Fatalf("op %d: ref.inputCount = %d, want 1", i, ref.inputCount)
+		}
+		if &op.Inputs[0] != &state.varnodes[ref.inputStart] {
+			t.Fatalf("op %d: Inputs[0] not backed by pool slot %d (pool direct path broken)", i, ref.inputStart)
+		}
+		if op.Inputs[0].Offset != uint64(0x10+i) {
+			t.Fatalf("op %d: Inputs[0].Offset = %#x, want %#x", i, op.Inputs[0].Offset, 0x10+i)
+		}
+	}
+
+	if err := cache.ResolveRawBuild(instruction); err != nil {
+		t.Fatalf("ResolveRawBuild() error: %v", err)
+	}
+	emitted := mustEmitRawBuildToCapture(t, cache, instruction)
+	if len(emitted) != 3 {
+		t.Fatalf("emitted count = %d, want 3", len(emitted))
+	}
+	for i, op := range emitted {
+		if op.Inputs[0].Offset != uint64(0x10+i) {
+			t.Fatalf("emitted[%d].Inputs[0].Offset = %#x, want %#x", i, op.Inputs[0].Offset, 0x10+i)
 		}
 	}
 }

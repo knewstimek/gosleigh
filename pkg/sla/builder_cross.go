@@ -38,7 +38,7 @@ func (b *SleighBuilder) appendCrossBuild(op OpTplBoundary, sectionID int64) erro
 		return err
 	}
 
-	targetCtx, err := b.State.RequirePcodeParserContext(targetAddr)
+	targetCtx, err := b.State.requireOrObtainPcodeContext(targetAddr)
 	if err != nil {
 		// Mirrors C++ throw LowlevelError("Could not obtain cached crossbuild instruction")
 		return fmt.Errorf("Could not obtain cached crossbuild instruction at %v: %w", targetAddr, err)

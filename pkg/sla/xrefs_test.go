@@ -259,3 +259,130 @@ func TestBoundariesBuildXrefs(t *testing.T) {
 		t.Fatal("Boundaries.BuildXrefs did not collect SP register")
 	}
 }
+
+// TestXRefsUserOpNamesLookupWiring verifies that GetUserOpName correctly routes
+// through the UserOpNames slice built by BuildXrefs, including out-of-range safety.
+// This tests the "wiring" between BuildXrefs output and the runtime lookup path.
+func TestXRefsUserOpNamesLookupWiring(t *testing.T) {
+	symbols := &SymbolTableBoundary{
+		Symbols: []SymbolBoundary{
+			{
+				Name:          "callother_op",
+				ID:            0,
+				ScopeID:       globalSymbolScopeID,
+				HeaderElement: elemUserOpHead,
+				BodyElement:   elemUserOp,
+				Body:          SymbolBodyBoundary{UserOp: &UserOpBoundary{Index: 2}},
+			},
+			{
+				Name:          "another_op",
+				ID:            1,
+				ScopeID:       globalSymbolScopeID,
+				HeaderElement: elemUserOpHead,
+				BodyElement:   elemUserOp,
+				Body:          SymbolBodyBoundary{UserOp: &UserOpBoundary{Index: 5}},
+			},
+		},
+	}
+
+	xrefs, err := BuildXrefs(symbols)
+	if err != nil {
+		t.Fatalf("BuildXrefs failed: %v", err)
+	}
+
+	// Wiring check: GetUserOpName must route through UserOpNames correctly.
+	if got := xrefs.GetUserOpName(2); got != "callother_op" {
+		t.Fatalf("GetUserOpName(2) = %q, want callother_op", got)
+	}
+	if got := xrefs.GetUserOpName(5); got != "another_op" {
+		t.Fatalf("GetUserOpName(5) = %q, want another_op", got)
+	}
+	// Slots not set by any symbol must be empty strings (zero-value fill).
+	if got := xrefs.GetUserOpName(0); got != "" {
+		t.Fatalf("GetUserOpName(0) = %q, want empty (no symbol at index 0)", got)
+	}
+	if got := xrefs.GetUserOpName(1); got != "" {
+		t.Fatalf("GetUserOpName(1) = %q, want empty (no symbol at index 1)", got)
+	}
+	// Out-of-range must not panic and must return empty.
+	if got := xrefs.GetUserOpName(-1); got != "" {
+		t.Fatalf("GetUserOpName(-1) = %q, want empty for negative index", got)
+	}
+	if got := xrefs.GetUserOpName(1000); got != "" {
+		t.Fatalf("GetUserOpName(1000) = %q, want empty for out-of-range index", got)
+	}
+	// Nil receiver must not panic.
+	var nilXrefs *XRefs
+	if got := nilXrefs.GetUserOpName(2); got != "" {
+		t.Fatalf("nil.GetUserOpName(2) = %q, want empty", got)
+	}
+}
+
+// TestXRefsContextFieldsAccessWiring verifies that BuildXrefs populates
+// ContextFields correctly and that direct slice access returns the expected
+// bit-range and flow data for each registered context symbol.
+// This tests the "wiring" from ContextSymbolBoundary into XRefs.ContextFields.
+func TestXRefsContextFieldsAccessWiring(t *testing.T) {
+	symbols := &SymbolTableBoundary{
+		Symbols: []SymbolBoundary{
+			{
+				Name:          "TF",
+				ID:            0,
+				ScopeID:       globalSymbolScopeID,
+				HeaderElement: elemContextSymHead,
+				BodyElement:   elemContextSym,
+				Body: SymbolBodyBoundary{
+					Context: &ContextSymbolBoundary{Low: 8, High: 8, Flow: false},
+				},
+			},
+			{
+				Name:          "DF",
+				ID:            1,
+				ScopeID:       globalSymbolScopeID,
+				HeaderElement: elemContextSymHead,
+				BodyElement:   elemContextSym,
+				Body: SymbolBodyBoundary{
+					Context: &ContextSymbolBoundary{Low: 10, High: 10, Flow: true},
+				},
+			},
+			{
+				// Non-context symbol must not appear in ContextFields.
+				Name:          "EAX",
+				ID:            2,
+				ScopeID:       globalSymbolScopeID,
+				HeaderElement: elemVarnodeSymHead,
+				BodyElement:   elemVarnodeSym,
+				Body: SymbolBodyBoundary{
+					Varnode: &VarnodeSymbolBoundary{SpaceIndex: 3, Offset: 0x00, Size: 4},
+				},
+			},
+		},
+	}
+
+	xrefs, err := BuildXrefs(symbols)
+	if err != nil {
+		t.Fatalf("BuildXrefs failed: %v", err)
+	}
+
+	// Wiring check: only context symbols must appear in ContextFields.
+	if len(xrefs.ContextFields) != 2 {
+		t.Fatalf("ContextFields length = %d, want 2", len(xrefs.ContextFields))
+	}
+
+	// Access ContextFields directly to verify wiring from Low/High/Flow boundary fields.
+	tfField := xrefs.ContextFields[0]
+	if tfField.Name != "TF" || tfField.StartBit != 8 || tfField.EndBit != 8 || tfField.Flow {
+		t.Fatalf("ContextFields[0] = %+v, want {Name:TF StartBit:8 EndBit:8 Flow:false}", tfField)
+	}
+	dfField := xrefs.ContextFields[1]
+	if dfField.Name != "DF" || dfField.StartBit != 10 || dfField.EndBit != 10 || !dfField.Flow {
+		t.Fatalf("ContextFields[1] = %+v, want {Name:DF StartBit:10 EndBit:10 Flow:true}", dfField)
+	}
+
+	// Verify no VarnodeXref entry for context symbols.
+	for _, vn := range xrefs.VarnodeXref {
+		if vn.Name == "TF" || vn.Name == "DF" {
+			t.Fatalf("context symbol %q incorrectly appears in VarnodeXref", vn.Name)
+		}
+	}
+}

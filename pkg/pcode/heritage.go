@@ -235,6 +235,14 @@ func (h *Heritage) CalcMultiequals(graph *BlockGraph, writes []*Varnode) {
 			continue
 		}
 		bidx := vn.Def().Parent().Index()
+		if bidx < 0 || int(bidx) >= len(h.depth) {
+			continue
+		}
+		// Skip blocks unreachable from the dominator root (depth == -1).
+		// C++ heritage never visits these; the ADT BFS left their depth unset.
+		if h.depth[bidx] < 0 {
+			continue
+		}
 		if h.heritageFlags[bidx]&heritageMarkNode == 0 {
 			h.heritageFlags[bidx] |= heritageMarkNode
 			h.pq.Insert(bidx, h.depth[bidx])

@@ -37,6 +37,11 @@ type EngineConfig struct {
 	Section         *int64
 	Cache           *DisassemblyCache
 	Backend         EngineBackendAdapter
+	// XRefs is the optional cross-reference table built by BuildXrefs() after
+	// .sla decode. When non-nil it is passed through to translate/runtime paths
+	// for register-name lookup, user-op naming, and context field resolution.
+	// Mirrors SleighBase::buildXrefs() output available to Sleigh at runtime.
+	XRefs *XRefs
 }
 
 // InstructionTranslation is the high-level translation result for one instruction address.
@@ -56,6 +61,9 @@ type Engine struct {
 	section         *int64
 	cache           *DisassemblyCache
 	backend         EngineBackendAdapter
+	// xrefs is the optional runtime cross-reference table (BuildXrefs output).
+	// nil means no xref data is available; callers must not panic on nil.
+	xrefs *XRefs
 }
 
 // FindInstructionRootSubtable mirrors SleighBase::decode() root lookup from sleighbase.cc:
@@ -141,6 +149,7 @@ func NewEngine(cfg EngineConfig) (*Engine, error) {
 		section:         cloneSectionID(cfg.Section),
 		cache:           cache,
 		backend:         cfg.Backend,
+		xrefs:           cfg.XRefs,
 	}, nil
 }
 
@@ -150,6 +159,15 @@ func (e *Engine) DisassemblyCache() *DisassemblyCache {
 		return nil
 	}
 	return e.cache
+}
+
+// XRefs returns the cross-reference table associated with this engine.
+// Returns nil when no xref data was provided at construction time.
+func (e *Engine) XRefs() *XRefs {
+	if e == nil {
+		return nil
+	}
+	return e.xrefs
 }
 
 // TranslateInstructionAt mirrors Sleigh::oneInstruction() authority flow through TranslateSubtable:

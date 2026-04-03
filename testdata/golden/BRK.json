@@ -1,0 +1,610 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "INT_SUB",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 34,
+				"size": 2
+			},
+			{
+				"space": "const",
+				"offset": 1,
+				"size": 2
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 16128,
+			"size": 2
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "STORE",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 3,
+				"size": 8
+			},
+			{
+				"space": "unique",
+				"offset": 16128,
+				"size": 2
+			},
+			{
+				"space": "const",
+				"offset": 1,
+				"size": 2
+			}
+		],
+		"output": null
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SUB",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 34,
+				"size": 2
+			},
+			{
+				"space": "const",
+				"offset": 2,
+				"size": 2
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 34,
+			"size": 2
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 1,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 50,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 255,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 1920,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_AND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 1920,
+				"size": 1
+			},
+			{
+				"space": "const",
+				"offset": 18446744073709551487,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 2048,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_LEFT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 48,
+				"size": 1
+			},
+			{
+				"space": "const",
+				"offset": 7,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 2176,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_OR",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 2048,
+				"size": 1
+			},
+			{
+				"space": "unique",
+				"offset": 2176,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 1920,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_AND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 1920,
+				"size": 1
+			},
+			{
+				"space": "const",
+				"offset": 18446744073709551551,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 2304,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_LEFT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 49,
+				"size": 1
+			},
+			{
+				"space": "const",
+				"offset": 6,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 2432,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_OR",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 2304,
+				"size": 1
+			},
+			{
+				"space": "unique",
+				"offset": 2432,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 1920,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_AND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 1920,
+				"size": 1
+			},
+			{
+				"space": "const",
+				"offset": 18446744073709551599,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 2560,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_LEFT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 50,
+				"size": 1
+			},
+			{
+				"space": "const",
+				"offset": 4,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 2688,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_OR",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 2560,
+				"size": 1
+			},
+			{
+				"space": "unique",
+				"offset": 2688,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 1920,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_AND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 1920,
+				"size": 1
+			},
+			{
+				"space": "const",
+				"offset": 18446744073709551607,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 2816,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_LEFT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 51,
+				"size": 1
+			},
+			{
+				"space": "const",
+				"offset": 3,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 2944,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_OR",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 2816,
+				"size": 1
+			},
+			{
+				"space": "unique",
+				"offset": 2944,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 1920,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_AND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 1920,
+				"size": 1
+			},
+			{
+				"space": "const",
+				"offset": 18446744073709551611,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 3072,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_LEFT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 52,
+				"size": 1
+			},
+			{
+				"space": "const",
+				"offset": 2,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 3200,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_OR",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 3072,
+				"size": 1
+			},
+			{
+				"space": "unique",
+				"offset": 3200,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 1920,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_AND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 1920,
+				"size": 1
+			},
+			{
+				"space": "const",
+				"offset": 18446744073709551613,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 3328,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_LEFT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 53,
+				"size": 1
+			},
+			{
+				"space": "const",
+				"offset": 1,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 3456,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_OR",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 3328,
+				"size": 1
+			},
+			{
+				"space": "unique",
+				"offset": 3456,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 1920,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_AND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 1920,
+				"size": 1
+			},
+			{
+				"space": "const",
+				"offset": 18446744073709551614,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 3584,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_OR",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 3584,
+				"size": 1
+			},
+			{
+				"space": "register",
+				"offset": 54,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 1920,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "STORE",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 3,
+				"size": 8
+			},
+			{
+				"space": "register",
+				"offset": 34,
+				"size": 2
+			},
+			{
+				"space": "unique",
+				"offset": 1920,
+				"size": 1
+			}
+		],
+		"output": null
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SUB",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 34,
+				"size": 2
+			},
+			{
+				"space": "const",
+				"offset": 1,
+				"size": 2
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 34,
+			"size": 2
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 1,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 52,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "LOAD",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 3,
+				"size": 8
+			},
+			{
+				"space": "const",
+				"offset": 65534,
+				"size": 2
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 16512,
+			"size": 2
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "BRANCHIND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 16512,
+				"size": 2
+			}
+		],
+		"output": null
+	}
+]

@@ -836,3 +836,204 @@ func TestResolveHandlesMissingHooksReturnsUnimplemented(t *testing.T) {
 		t.Fatalf("parser state promoted to pcode on failure")
 	}
 }
+
+// TestResolveHandlesUsesContextSymbolBoundaryFixedHandle verifies the automatic
+// path for ContextSymbol::getFixedHandle() (slghsymbol.cc).
+// ContextSymbol inherits ValueSymbol::getFixedHandle: it evaluates its pattern
+// expression and returns a constant-space handle with the result as offset.
+// The pattern is stored in ContextSymbolBoundary.Pattern (not Body.Pattern).
+func TestResolveHandlesUsesContextSymbolBoundaryFixedHandle(t *testing.T) {
+	ctx, _, constSpace := newResolveHandlesTestContext()
+	ctx.SetSymbolTable(&SymbolTableBoundary{Symbols: []SymbolBoundary{
+		{
+			ID: 1,
+			Body: SymbolBodyBoundary{Operand: &OperandSymbolBoundary{
+				Index:               0,
+				HasDefiningSymbolID: true,
+				DefiningSymbolID:    2,
+			}},
+		},
+		{
+			ID:            2,
+			HeaderElement: elemContextSymHead,
+			Body: SymbolBodyBoundary{Context: &ContextSymbolBoundary{
+				Low:  0,
+				High: 3,
+				Flow: false,
+				Pattern: &PatternSymbolBoundary{
+					// Pattern expression evaluates to 7 (constant).
+					// Mirrors ContextSymbol storing its ValueSymbol pattern expression.
+					Expression: &PatternExprBoundary{
+						ElementID: elemIntB,
+						Attrs:     map[uint32]packedAttribute{attrVal: patternIntAttr(attrVal, 7)},
+					},
+				},
+			}},
+		},
+	}})
+	ctx.BaseState.SetConstructor(ConstructorBoundary{OperandSymbolIDs: []uint64{1}})
+
+	err := ResolveHandles(ctx, ResolveHandlesHooks{})
+	if err != nil {
+		t.Fatalf("ResolveHandles failed: %v", err)
+	}
+	if ctx.GetParserState() != ParseStatePcode {
+		t.Fatalf("parser state = %v, want pcode", ctx.GetParserState())
+	}
+	child, ok := ctx.BaseState.Child(0)
+	if !ok {
+		t.Fatalf("child state was not created")
+	}
+	// ContextSymbol::getFixedHandle returns constant-space handle with pattern value as offset.
+	if child.Handle.Space != constSpace {
+		t.Fatalf("child handle space = %v, want const space", child.Handle.Space)
+	}
+	if child.Handle.OffsetOffset != 7 {
+		t.Fatalf("child handle OffsetOffset = %d, want 7 (pattern constant value)", child.Handle.OffsetOffset)
+	}
+	if child.Handle.Size != 0 {
+		t.Fatalf("child handle Size = %d, want 0 (ValueSymbol::getFixedHandle sets size=0)", child.Handle.Size)
+	}
+	if child.Handle.OffsetSpace != nil {
+		t.Fatalf("child handle OffsetSpace = %v, want nil", child.Handle.OffsetSpace)
+	}
+}
+
+// TestResolveHandlesContextSymbolNilPatternFallsBackToHook verifies that a
+// ContextSymbol with no pattern expression gracefully falls back to the hook
+// path rather than panicking. This guards the nil-pattern fallback branch in
+// resolveBoundarySymbolFixedHandle for elemContextSymHead.
+func TestResolveHandlesContextSymbolNilPatternFallsBackToHook(t *testing.T) {
+	ctx, curSpace, _ := newResolveHandlesTestContext()
+	ctx.SetSymbolTable(&SymbolTableBoundary{Symbols: []SymbolBoundary{
+		{
+			ID: 1,
+			Body: SymbolBodyBoundary{Operand: &OperandSymbolBoundary{
+				Index:               0,
+				HasDefiningSymbolID: true,
+				DefiningSymbolID:    2,
+			}},
+		},
+		{
+			ID:            2,
+			HeaderElement: elemContextSymHead,
+			Body: SymbolBodyBoundary{Context: &ContextSymbolBoundary{
+				Low:     0,
+				High:    3,
+				Pattern: nil, // no pattern -- must not panic
+			}},
+		},
+	}})
+	ctx.BaseState.SetConstructor(ConstructorBoundary{OperandSymbolIDs: []uint64{1}})
+
+	var hookCalled bool
+	err := ResolveHandles(ctx, ResolveHandlesHooks{
+		ResolveFixedHandle: func(walker *ParserWalker) (FixedHandle, bool, error) {
+			hookCalled = true
+			return FixedHandle{Space: curSpace, Size: 4, OffsetOffset: 0xcc}, true, nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveHandles failed: %v", err)
+	}
+	if !hookCalled {
+		t.Fatalf("hook was not called for context symbol with nil pattern")
+	}
+	child, ok := ctx.BaseState.Child(0)
+	if !ok {
+		t.Fatalf("child state was not created")
+	}
+	if child.Handle.Space != curSpace || child.Handle.Size != 4 || child.Handle.OffsetOffset != 0xcc {
+		t.Fatalf("child handle = %#v, want hook-provided fixed handle", child.Handle)
+	}
+}
+
+// TestResolveHandlesUsesValueMapSymbolPatternAndValueTable verifies the
+// automatic path for ValueMapSymbol::getFixedHandle() (slghsymbol.cc).
+// ValueMapSymbol evaluates its pattern expression as a selector index and
+// returns ValueTable[index] as the constant-space handle offset.
+// This test complements TestResolveHandlesUsesValueMapBoundaryFixedHandle by
+// exercising explicit pattern + table lookup tracing through the auto path.
+func TestResolveHandlesUsesValueMapSymbolPatternAndValueTable(t *testing.T) {
+	ctx, _, constSpace := newResolveHandlesTestContext()
+	// selector = 0; ValueTable[0] = 0x55
+	ctx.SetSymbolTable(&SymbolTableBoundary{Symbols: []SymbolBoundary{
+		{
+			ID: 1,
+			Body: SymbolBodyBoundary{Operand: &OperandSymbolBoundary{
+				Index:               0,
+				HasDefiningSymbolID: true,
+				DefiningSymbolID:    2,
+			}},
+		},
+		{
+			ID:            2,
+			HeaderElement: elemValueMapSymHead,
+			Body: SymbolBodyBoundary{Pattern: &PatternSymbolBoundary{
+				Expression: &PatternExprBoundary{
+					ElementID: elemIntB,
+					Attrs:     map[uint32]packedAttribute{attrVal: patternIntAttr(attrVal, 0)},
+				},
+				ValueTable: []int64{0x55, 0x66, 0x77},
+			}},
+		},
+	}})
+	ctx.BaseState.SetConstructor(ConstructorBoundary{OperandSymbolIDs: []uint64{1}})
+
+	err := ResolveHandles(ctx, ResolveHandlesHooks{})
+	if err != nil {
+		t.Fatalf("ResolveHandles failed: %v", err)
+	}
+	child, ok := ctx.BaseState.Child(0)
+	if !ok {
+		t.Fatalf("child state was not created")
+	}
+	if child.Handle.Space != constSpace || child.Handle.OffsetOffset != 0x55 || child.Handle.Size != 0 {
+		t.Fatalf("child handle = %#v, want valuemap[0]=0x55 in const space", child.Handle)
+	}
+}
+
+// TestResolveHandlesValueMapOutOfRangeReturnsUnimplemented verifies that when
+// the selector evaluates to an out-of-range ValueTable index the result is a
+// typed UnimplError rather than a panic or a silent wrong value.
+func TestResolveHandlesValueMapOutOfRangeReturnsUnimplemented(t *testing.T) {
+	ctx, _, _ := newResolveHandlesTestContext()
+	// selector = 5; ValueTable has only 3 entries
+	ctx.SetSymbolTable(&SymbolTableBoundary{Symbols: []SymbolBoundary{
+		{
+			ID: 1,
+			Body: SymbolBodyBoundary{Operand: &OperandSymbolBoundary{
+				Index:               0,
+				HasDefiningSymbolID: true,
+				DefiningSymbolID:    2,
+			}},
+		},
+		{
+			ID:            2,
+			HeaderElement: elemValueMapSymHead,
+			Body: SymbolBodyBoundary{Pattern: &PatternSymbolBoundary{
+				Expression: &PatternExprBoundary{
+					ElementID: elemIntB,
+					Attrs:     map[uint32]packedAttribute{attrVal: patternIntAttr(attrVal, 5)},
+				},
+				ValueTable: []int64{0x11, 0x22, 0x33},
+			}},
+		},
+	}})
+	ctx.BaseState.SetConstructor(ConstructorBoundary{OperandSymbolIDs: []uint64{1}})
+
+	err := ResolveHandles(ctx, ResolveHandlesHooks{})
+	if err == nil {
+		t.Fatalf("ResolveHandles succeeded, want unimplemented error for out-of-range valuemap index")
+	}
+	if !errors.Is(err, ErrResolveHandlesUnimplemented) {
+		t.Fatalf("error = %v, want ErrResolveHandlesUnimplemented", err)
+	}
+	var uerr *UnimplError
+	if !errors.As(err, &uerr) {
+		t.Fatalf("error type = %T, want *UnimplError", err)
+	}
+	if uerr.Explain != "valuemap index 5 is out of range" {
+		t.Fatalf("unimplemented explain = %q, want \"valuemap index 5 is out of range\"", uerr.Explain)
+	}
+}
