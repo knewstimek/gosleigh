@@ -2351,3 +2351,87 @@ func TestDelaySlotBuildFailurePropagatesAsUnimplError(t *testing.T) {
 		t.Fatalf("inner build UnimplError instruction length = %d, want 0", uerr.InstructionLength)
 	}
 }
+
+// TestWrapTranslateUnimplErrorRewritesUnimplError verifies that wrapTranslateUnimplError
+// rewrites explain and instructionLength on *UnimplError in place, mirroring
+// the C++ catch(UnimplError&) branch in Sleigh::oneInstruction().
+func TestWrapTranslateUnimplErrorRewritesUnimplError(t *testing.T) {
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	constSpace := &address.Space{Name: "const", Kind: address.SpaceKindConstant, Index: 3, AddrSize: 8, WordSize: 1}
+
+	// Build a minimal walker so formatTranslateUnimplExplain can produce text.
+	instruction := address.Address{Space: ram, Offset: 0x9000}
+	ctx := NewParserContext(instruction, constSpace)
+	ctx.SetParserState(ParseStatePcode)
+	ctx.BaseState.Length = 4
+	ctx.BaseState.Constructor = &ConstructorBoundary{
+		ConstructorID:   0,
+		FirstWhitespace: 1,
+		PrintPieces:     []PrintPieceBoundary{{IsOperandRef: false, Text: "NOP"}, {IsOperandRef: false, Text: " "}},
+	}
+	walker := NewParserWalker(ctx)
+	walker.BaseState()
+
+	builder := &SleighBuilder{}
+	builder.State.Walker = walker
+
+	original := newUnimplError(ErrBuilderUnimplemented, "original explain")
+	fallOffset := 8
+
+	result := wrapTranslateUnimplError(original, builder, fallOffset)
+
+	// Must return the same *UnimplError pointer (rewritten in place), not a new wrapper.
+	got, ok := result.(*UnimplError)
+	if !ok {
+		t.Fatalf("wrapTranslateUnimplError() returned %T, want *UnimplError", result)
+	}
+	if got != original {
+		t.Fatal("wrapTranslateUnimplError() did not rewrite the original *UnimplError in place")
+	}
+	// instructionLength must be updated to fallOffset.
+	if !got.HasInstructionLength {
+		t.Fatal("wrapTranslateUnimplError() did not set HasInstructionLength")
+	}
+	if got.InstructionLength != fallOffset {
+		t.Fatalf("wrapTranslateUnimplError() InstructionLength = %d, want %d", got.InstructionLength, fallOffset)
+	}
+	// explain must include the walker context text.
+	if !strings.Contains(got.Explain, "Instruction not implemented in pcode:") {
+		t.Fatalf("wrapTranslateUnimplError() Explain missing preamble: %q", got.Explain)
+	}
+}
+
+// TestWrapTranslateUnimplErrorPassesThroughPlainError verifies that a plain
+// infrastructure error (non-*UnimplError) is returned unchanged, mirroring
+// C++ LowlevelError which is NOT caught by catch(UnimplError&).
+func TestWrapTranslateUnimplErrorPassesThroughPlainError(t *testing.T) {
+	plain := fmt.Errorf("infrastructure failure: disk read error")
+	result := wrapTranslateUnimplError(plain, nil, 4)
+	if result != plain {
+		t.Fatalf("wrapTranslateUnimplError() did not pass plain error through unchanged: got %v", result)
+	}
+	// Must not be promoted to *UnimplError.
+	if _, ok := result.(*UnimplError); ok {
+		t.Fatal("wrapTranslateUnimplError() promoted plain error to *UnimplError, must not")
+	}
+}
+
+// TestWrapTranslateUnimplErrorPassesThroughWrappedNonUnimplError verifies that
+// an error wrapping a non-*UnimplError (e.g. fmt.Errorf with %w) also passes
+// through unchanged. The C++ catch(UnimplError&) only matches exact type, not
+// derived or wrapped types.
+func TestWrapTranslateUnimplErrorPassesThroughWrappedNonUnimplError(t *testing.T) {
+	inner := errors.New("unexpected condition")
+	wrapped := fmt.Errorf("outer: %w", inner)
+	result := wrapTranslateUnimplError(wrapped, nil, 4)
+	if result != wrapped {
+		t.Fatalf("wrapTranslateUnimplError() did not pass wrapped error through unchanged: got %v", result)
+	}
+	if _, ok := result.(*UnimplError); ok {
+		t.Fatal("wrapTranslateUnimplError() promoted wrapped error to *UnimplError, must not")
+	}
+	// errors.Is chain must remain intact.
+	if !errors.Is(result, inner) {
+		t.Fatal("wrapTranslateUnimplError() broke the wrapped error chain")
+	}
+}

@@ -96,6 +96,7 @@
 3. `inst_next2`는 eager prefetch가 아니라 lazy resolver를 먼저 바인딩한다
 4. 첫 `GetN2addr()` 시도에서 same authoritative `ObtainContext(..., ParseStateDisassembly)` route를 탄다
 5. adjacent context에 constant space가 비어 있으면 request constant space를 fallback으로 쓴다
+6. `GetN2addrE()`는 `inst_next2` 주소가 unavailable일 때 generic `error` 대신 typed `*UnimplError`를 반환한다. 이를 통해 호출자가 unimplemented 경계와 인프라 에러를 명시적으로 구분할 수 있다
 
 현재 구현 파일:
 
@@ -110,6 +111,11 @@
 2. miss면 circular slot을 재사용한다
 3. 재사용 슬롯은 `addr`를 바꾸고 `parser state = uninitialized`로 reset한다
 4. `N2Addr`는 address reassignment 시 invalid로 되돌린다
+
+`ObtainContext()` 내부에서 cache hit 시 단락(short-circuit) 경로가 추가됐다.
+
+- 요청 주소의 `ParserContext`가 이미 `parsestate >= ParseStateDisassembly`이면 `Resolve()`를 다시 실행하지 않고 즉시 해당 context를 반환한다.
+- 이 경로는 원본 `Sleigh::obtainContext()`의 parse-state guard와 대응된다.
 
 ### 3.5. Translation Entry
 
@@ -216,6 +222,7 @@ relative-label patching도 이제 helper resolver 추상화보다 direct `labelR
 - `DisassemblyCache.EmitRawBuildTo()`를 통해 sink-style emission을 수행하는 경로
 - translation entry가 address-scoped payload source를 통해 adjacent parser context의 instruction/context를 자동 주입하는 경로
 - `ObtainPcodeContext()`가 stale `N2Addr`를 지우고 `addr + length` 기반 fallthrough prefetch를 수행하는 경로
+- `GetN2addrE()`가 unavailable `inst_next2`에 대해 typed `*UnimplError`를 반환하는 경로
 - raw-build staging이 explicit resolved/unresolved phase를 가져서 unchanged state 재-resolve를 막는 경로
 - `EmitRawBuildTo()`가 unresolved staged raw build를 하드 에러로 거부하는 경로
 - dynamic `LOAD`/`STORE`가 process-local pointer-identity space selector와 deterministic unique-space fallback을 사용하는 경로

@@ -1,0 +1,14 @@
+test_6502.bin layout
+	entry_point: 0x0000
+	image_base: 0x0000
+	size_bytes: 33
+	validated_entry_range: 0x0000-0x0001
+
+Byte layout
+	0x0000: 0x04
+	0x0001-0x0020: 0x00 repeated 32 times
+
+Notes
+	This artifact is intentionally reduced to the only opcode pattern the current gosleigh CLI could translate end-to-end during probing: a leading 0x04 byte followed by BRK bytes.
+	The original Part A target called for arithmetic, memory access, control flow, and at least two functions. That richer 53-byte sample was prototyped first but gosleigh failed on every tested opcode except 0x00 and 0x04, so the function-count and instruction-coverage targets could not be preserved in the final saved binary.
+	Use this file as the exact provenance record for the saved comparison artifact, not as proof that Part A was fully satisfied.

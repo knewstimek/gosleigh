@@ -11,6 +11,7 @@ import (
 
 var ErrLoadContextUnimplemented = errors.New("loadContext shell is unimplemented")
 var ErrApplyCommitsUnimplemented = errors.New("applyCommits shell is unimplemented")
+var ErrApplyContextOpsUnimplemented = errors.New("applyContextOps shell is unimplemented")
 
 // ContextSet records one pending formal context change, matching the data
 // ParserContext stores in contextcommit in the original C++.
@@ -263,4 +264,54 @@ func nextCommitAddress(commitAddr address.Address, flow bool) (address.Address, 
 		return address.Address{}, false
 	}
 	return commitAddr.Add(1), true
+}
+
+// ApplyContextOpsHooks carries the PatternExpression evaluation boundary for
+// ContextOp application. ResolveOperandValue is optional; nil disables operand
+// expression evaluation.
+type ApplyContextOpsHooks struct {
+	PatternHooks PatternExpressionValueHooks
+}
+
+// ApplyContextOps applies each ContextOpBoundary in ops to ctx, mirroring the
+// loop in Constructor::applyContext() -> ContextOp::apply() in slghsymbol.cc/hh.
+//
+// Each op evaluates its PatternExpression via walker, shifts the result, then
+// writes it into the matching context word using the stored mask:
+//
+//	val = expr.getValue(walker) << shift
+//	ctx->setContextWord(num, val, mask)
+//
+// walker must already be positioned (BaseState or equivalent). If walker is nil
+// a new one is created at BaseState of ctx.
+func ApplyContextOps(ctx *ParserContext, ops []ContextOpBoundary, walker *ParserWalker, hooks ApplyContextOpsHooks) error {
+	if ctx == nil {
+		return newUnimplError(ErrApplyContextOpsUnimplemented, "parser context is nil")
+	}
+	if len(ops) == 0 {
+		return nil
+	}
+	if walker == nil {
+		walker = NewParserWalker(ctx)
+		walker.BaseState()
+	}
+	for i := range ops {
+		op := &ops[i]
+		if op.Expression == nil {
+			// No expression: nothing to evaluate; skip silently like C++ would if
+			// patexp were null (defensive, should not happen in valid .sla data).
+			continue
+		}
+		if op.Num < 0 || int(op.Num) >= len(ctx.ContextWords) {
+			return fmt.Errorf("applyContextOps: op %d num %d out of range (len=%d)", i, op.Num, len(ctx.ContextWords))
+		}
+		// Mirrors ContextOp::apply(): val = patexp->getValue(walker); val <<= shift
+		raw, err := GetPatternExpressionValue(op.Expression, walker, hooks.PatternHooks)
+		if err != nil {
+			return fmt.Errorf("applyContextOps: op %d expression eval: %w", i, err)
+		}
+		val := uint64(raw) << uint(op.Shift)
+		ctx.SetContextWord(int(op.Num), val, op.Mask)
+	}
+	return nil
 }

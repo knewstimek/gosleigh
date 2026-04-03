@@ -94,6 +94,13 @@ type BuilderState struct {
 	Walker    *ParserWalker
 	Cache     *DisassemblyCache
 	SectionID int64
+	// ObtainContextFallback is an optional hook invoked by delay-slot and
+	// crossbuild paths when a target address is not yet present in Cache.
+	// It mirrors the Sleigh::obtainContext() call that populates the cache
+	// before SleighBuilder::delaySlot()/appendCrossBuild() read it back.
+	// If nil, cache misses propagate as errors (original C++ behavior where
+	// the caller is responsible for pre-populating the cache via oneInstruction).
+	ObtainContextFallback func(addr address.Address, state ParseState) (*ParserContext, error)
 }
 
 // SetDisassemblyCache attaches a parser-context cache to the builder state.
@@ -126,6 +133,36 @@ func (s BuilderState) RequireWalkerPcodeParserContext() (*ParserContext, error) 
 		return nil, fmt.Errorf("builder state has no walker parser context")
 	}
 	return s.RequirePcodeParserContext(s.Walker.ParserContext().GetAddr())
+}
+
+// requireOrObtainPcodeContext returns a cached pcode parser context for addr.
+// If the cache does not have a pcode-ready context and ObtainContextFallback is
+// set, it is called with ParseStateDisassembly to populate the cache before the
+// lookup is retried. This mirrors the Sleigh::obtainContext() pre-population that
+// happens in oneInstruction() before SleighBuilder::delaySlot()/appendCrossBuild()
+// read the cache back.
+func (s BuilderState) requireOrObtainPcodeContext(addr address.Address) (*ParserContext, error) {
+	if s.Cache == nil {
+		return nil, fmt.Errorf("builder state has no disassembly cache")
+	}
+	ctx, err := s.Cache.RequirePcodeParserContext(addr)
+	if err == nil {
+		return ctx, nil
+	}
+	// Cache miss: attempt fallback if the engine has provided one.
+	if s.ObtainContextFallback == nil {
+		return nil, err
+	}
+	obtained, fallbackErr := s.ObtainContextFallback(addr, ParseStateDisassembly)
+	if fallbackErr != nil {
+		// Return the original cache-miss error so the caller message stays accurate.
+		return nil, err
+	}
+	if obtained != nil && obtained.GetParserState() >= ParseStatePcode {
+		return obtained, nil
+	}
+	// Fallback only reached disassembly state; pcode is still unavailable.
+	return nil, err
 }
 
 // BuilderHooks routes control directives and ordinary op emission to runtime callbacks.

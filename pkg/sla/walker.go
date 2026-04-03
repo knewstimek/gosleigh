@@ -251,6 +251,17 @@ func (ctx *ParserContext) SetContextWords(words []uint64) {
 	ctx.ContextWords = append([]uint64(nil), words...)
 }
 
+// SetContextWord mirrors ParserContext::setContextWord() in context.hh.
+// Applies val under mask to the i-th context word:
+//
+//	context[i] = (context[i] & ^mask) | (mask & val)
+func (ctx *ParserContext) SetContextWord(i int, val, mask uint64) {
+	if i < 0 || i >= len(ctx.ContextWords) {
+		return
+	}
+	ctx.ContextWords[i] = (ctx.ContextWords[i] &^ mask) | (mask & val)
+}
+
 func (ctx *ParserContext) GetAddr() address.Address {
 	return ctx.Addr
 }
@@ -280,6 +291,25 @@ func (ctx *ParserContext) GetN2addr() address.Address {
 		}
 	}
 	return ctx.N2Addr
+}
+
+// GetN2addrE returns the inst_next2 address or a typed *UnimplError.
+// Mirrors the error path of ParserContext::getN2addr() in context.cc:
+//
+//	if (translate == 0 || parsestate == uninitialized)
+//	    throw LowlevelError("inst_next2 not available in this context");
+//
+// Unlike GetN2addr(), this method reports unavailability explicitly so callers
+// can use errors.As(*UnimplError) to distinguish "not yet resolved" from a
+// valid invalid address.
+func (ctx *ParserContext) GetN2addrE() (address.Address, error) {
+	if ctx == nil || ctx.ParserState == ParseStateUninitialized {
+		return address.Address{}, newUnimplError(
+			ErrBuilderUnimplemented,
+			"inst_next2 not available in this context",
+		)
+	}
+	return ctx.GetN2addr(), nil
 }
 
 func (ctx *ParserContext) GetRefAddr() address.Address {

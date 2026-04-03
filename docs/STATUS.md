@@ -201,7 +201,16 @@
 - [x] Phase 5 complete: WU7 완료. PrintC 기반 C 출력 경로와 선언 출력기가 구현됨
 - [x] 현재 저장소 기준 `go test ./...` 통과
 
+- [x] WU6 (Verification / Golden Testing / E2E Integration) 완료 (2026-04-04)
+  - `pkg/sla/golden_test.go`: golden test harness 구현. `GOSLEIGH_UPDATE_GOLDEN=1` 환경변수로 update mode 전환.
+  - `testdata/golden/`: 6502 fixture 3종 -- BRK (0x00, 29 ops, match), NOP_EA (unimplemented gap), LDA_imm (unimplemented gap).
+  - `pkg/bridge/bridge.go`: `Result.Warnings []string` 필드 추가. `collectInstructions()`에서 `*sla.UnimplError`는 Warnings 기록 후 수집 중단 (graceful), 그 외 오류는 hard-fail 유지.
+  - `pkg/bridge/bridge_test.go`: `TestBuildE2EWithRealSLA` 추가 (constructor resolution gap으로 인해 skip). `TestMultiArchFixture` 추가 (추가 .sla 없어 skip).
+  - `go test ./...` 통과.
+  - 핵심 발견: BRK (0x00)만 정상 resolve. 나머지 6502 opcode (NOP 0xEA, LDA 0xA9, BNE 0xD0 등)는 `"unable to resolve constructor"` plain error 반환 -- decision tree resolution path의 주요 parity gap. 상세는 `docs/PARITY_AUDIT.md` Golden/Bridge Test Findings 섹션 참조.
+
 ### 다음
+- [ ] **[우선순위 높음]** `DecisionNode::resolve()` 결함 수정: 6502 BRK 외 대부분 opcode (NOP 0xEA, LDA 0xA9 등)에서 발생하는 `"unable to resolve constructor"` 원인을 C++ `slghsymbol.cc` 대조로 찾아 수정. 수정 후 `GOSLEIGH_UPDATE_GOLDEN=1`로 golden fixture 재생성.
 - [ ] Continue `Instruction Execution Parity`: remaining full catch coverage outside the current typed path, stricter same-object mutation semantics for every nested failure path, and constructor-print/catch-format parity beyond the current shell
 - [ ] Continue `PcodeCacher And Builder Parity`: direct `allocateInstruction()` / `allocateVarnodes()` integration into `AppendRawBuild` path, infallible sink semantics, and full container/pool parity beyond the current `allocateInstruction` stub
 - [ ] Continue `Decode Pipeline Parity`: build on the authoritative split `LoadFill` / `LoadContext` route, the per-phase bundled fallback compatibility layer, backend-backed context reads/writes, parser-context circular reuse path, lazy `inst_next2` derivation, root-instruction emission propagation, and the raw file-backed loader path, then replace remaining synthetic setup with broader real decode population of cached fields such as handles, calladdr semantics, commit-backed context state, and broader loader/database parity
@@ -218,4 +227,4 @@
 
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
-- [ ] Golden tests / comparison with original Ghidra output
+- [ ] Full golden test coverage: decision tree resolution fix required before NOP/LDA/branch fixtures can be promoted from "unimplemented" to "match". See PARITY_AUDIT.md Golden/Bridge section.

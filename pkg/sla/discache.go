@@ -655,10 +655,15 @@ func (s *rawBuildState) allocateInstruction() int {
 }
 
 // appendIssued is the combined allocate-and-copy path used by AppendRawBuild.
-// It allocates pool varnodes for all inputs + optional output, copies the data,
-// and wires the issued RawOp's slices into the pool.
-// Mirrors the sequence: allocateVarnodes() -> fill data -> allocateInstruction()
-// -> set outvar/invar from the C++ SleighBuilder::dump() flow.
+// It mirrors C++ SleighBuilder::dump() pool discipline:
+//   1. allocateVarnodes(n) -- bump-allocate input + optional output slots
+//   2. fill input varnode data from op.Inputs
+//   3. allocateInstruction() -- append PcodeData slot and return its index
+//   4. fill the PcodeData fields from the allocated pool slice
+//
+// The order matches dump() so allocateInstruction is the authoritative append
+// point rather than a direct slice append. This makes the pool ownership model
+// observable to tests that track per-op allocateInstruction call count.
 func (s *rawBuildState) appendIssued(op pcode.RawOp) error {
 	inputCount := len(op.Inputs)
 	total := inputCount
@@ -666,6 +671,8 @@ func (s *rawBuildState) appendIssued(op pcode.RawOp) error {
 		total++
 	}
 
+	// Step 1+2: allocate pool varnodes and fill inputs
+	// (mirrors allocateVarnodes + generateLocation loop in C++ dump()).
 	start, err := s.allocateVarnodes(total)
 	if err != nil {
 		return err
@@ -673,14 +680,21 @@ func (s *rawBuildState) appendIssued(op pcode.RawOp) error {
 	if inputCount > 0 {
 		copy(s.varnodes[start:start+inputCount], op.Inputs)
 	}
+
+	// Step 3: allocateInstruction() is the canonical append point for one PcodeData.
+	// It appends an empty slot to issued and a matching empty slot to refs, then
+	// returns the index. Callers must fill both after this call.
+	idx := s.allocateInstruction()
+
+	// Step 4: fill PcodeData from pool-allocated varnodes
+	// (mirrors thisop->opc / thisop->invar / thisop->isize / thisop->outvar).
 	ref := rawBuildIssuedRef{
 		inputStart: start,
 		inputCount: inputCount,
 	}
-	issued := pcode.RawOp{
-		SeqNum: op.SeqNum,
-		OpCode: op.OpCode,
-	}
+	issued := &s.issued[idx]
+	issued.SeqNum = op.SeqNum
+	issued.OpCode = op.OpCode
 	if inputCount > 0 {
 		issued.Inputs = s.varnodes[start : start+inputCount]
 	}
@@ -691,8 +705,7 @@ func (s *rawBuildState) appendIssued(op pcode.RawOp) error {
 		ref.hasOutput = true
 		ref.outputSlot = outputSlot
 	}
-	s.issued = append(s.issued, issued)
-	s.refs = append(s.refs, ref)
+	s.refs[idx] = ref
 	return nil
 }
 

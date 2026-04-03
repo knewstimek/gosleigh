@@ -43,7 +43,7 @@ func (b *SleighBuilder) delaySlotFromWalker() (bool, error) {
 			Space:  baseAddr.Space,
 			Offset: baseAddr.Offset + fallOffset,
 		}
-		targetCtx, err := b.State.RequirePcodeParserContext(targetAddr)
+		targetCtx, err := b.State.requireOrObtainPcodeContext(targetAddr)
 		if err != nil {
 			// Mirrors C++ throw LowlevelError("Could not obtain cached delay slot instruction")
 			return true, fmt.Errorf("Could not obtain cached delay slot instruction at %v: %w", targetAddr, err)

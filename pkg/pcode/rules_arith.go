@@ -281,12 +281,31 @@ func NewRuleSub2Add(group string) *RuleSub2Add {
 }
 
 func (r *RuleSub2Add) apply(op *PcodeOp, data *Funcdata) int {
-	val, ok := constantValue(op.Input(1))
-	if !ok || val == 0 {
+	// C++ parity: RuleSub2Add::applyOp (ruleaction.cc)
+	// V - W  =>  V + (W * -1)
+	// Must NOT fold to V + (-const) directly: a raw negative constant would
+	// re-trigger RuleAddUnsigned on the resulting INT_ADD, causing an infinite
+	// rewrite cycle. Instead, introduce a CPUI_INT_MULT op so the result is a
+	// non-constant varnode from RuleAddUnsigned's perspective.
+	vn := op.Input(1)
+	if vn == nil {
 		return 0
 	}
-	size := outputOrInputSize(op)
-	rewriteOp(data, op, CPUI_INT_ADD, op.Input(0), data.NewConstant(size, negateConstForSize(val, size)))
+	size := vn.Size()
+	if size == 0 {
+		size = outputOrInputSize(op)
+	}
+	allOnes := truncateToSize(^uint64(0), size)
+	mulOp := data.NewOpBefore(op, CPUI_INT_MULT, vn, data.NewConstant(size, allOnes))
+	newvn := data.NewUniqueOut(size, mulOp)
+	// Insert mulOp into the same block as op, immediately before it.
+	// C++ uses opInsertBefore which places the new op in the instruction stream.
+	if blk := op.Parent(); blk != nil {
+		mulOp.SetParent(blk)
+		blk.InsertOpBefore(mulOp, op)
+	}
+	data.OpSetInput(op, newvn, 1)
+	data.OpSetOpcode(op, CPUI_INT_ADD)
 	return 1
 }
 
