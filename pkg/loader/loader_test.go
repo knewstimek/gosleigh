@@ -1322,7 +1322,7 @@ func TestX86CdeclParamLocalFunction(t *testing.T) {
 	// NewProtoModelFromCspec handles nil by falling back to name-based matching.
 
 	// Build ProtoModel from cspec and apply calling convention.
-	model := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace)
+	model := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace, nil)
 	pcode.ApplyCallingConvention(result.Funcdata, model)
 
 	output, err := pcode.NewPrintC().Emit(result.Funcdata)
@@ -1473,7 +1473,7 @@ func TestE2DeadCodeElimination(t *testing.T) {
 		}
 	}
 
-	model := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace)
+	model := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace, nil)
 	pcode.ApplyCallingConvention(result.Funcdata, model)
 
 	output, err := pcode.NewPrintC().Emit(result.Funcdata)
@@ -1489,4 +1489,131 @@ func TestE2DeadCodeElimination(t *testing.T) {
 			t.Errorf("expected %s to be eliminated from output, but found it:\n%s", deadStr, output)
 		}
 	}
+}
+
+// TestX8664SimpleFunction exercises the full x86-64 pipeline:
+//
+//	EngineBuilder.Build -> bridge.Build -> Heritage -> PrintC
+//
+// Bytes: MOV RAX,RDI (48 89 F8) + ADD RAX,RSI (48 01 F0) + RET (C3).
+// Verifies that x86-64 instructions with REX prefix decode and produce
+// non-empty PrintC output end-to-end.
+func TestX8664SimpleFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-64-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86-64.pspec")
+
+	// MOV RAX,RDI; ADD RAX,RSI; RET
+	prog := []byte{0x48, 0x89, 0xF8, 0x48, 0x01, 0xF0, 0xC3}
+
+	engine, entryAddr, err := (&loader.EngineBuilder{
+		SLAPath:   slaPath,
+		PspecPath: pspecPath,
+		Bytes:     prog,
+	}).Build()
+	if err != nil {
+		t.Fatalf("EngineBuilder.Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{
+		Name:            "x64_add_ret",
+		Entry:           entryAddr,
+		MaxInstructions: 10,
+	})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+	if result == nil {
+		t.Fatal("bridge.Build returned nil result")
+	}
+	if len(result.Instructions) == 0 {
+		t.Fatal("bridge returned no instructions")
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for x86-64 function")
+	}
+	t.Logf("x86-64 simple function C output:\n%s", output)
+}
+
+// TestX8664CallingConvention exercises the full x86-64 pipeline with a
+// conditional return function:
+//
+//	TEST RDI,RDI (48 85 FF) + JLE +5 (7E 05) + MOV EAX,1 (B8 01 00 00 00) +
+//	RET (C3) + XOR EAX,EAX (31 C0) + RET (C3)
+//
+// Verifies that the pipeline succeeds, produces >= 4 instructions and
+// >= 2 CFG blocks, and emits non-empty PrintC output.
+func TestX8664CallingConvention(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-64-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86-64.pspec")
+
+	// TEST RDI,RDI; JLE +5; MOV EAX,1; RET; XOR EAX,EAX; RET
+	prog := []byte{
+		0x48, 0x85, 0xFF, // TEST RDI,RDI
+		0x7E, 0x05,       // JLE +5
+		0xB8, 0x01, 0x00, 0x00, 0x00, // MOV EAX,1
+		0xC3,             // RET
+		0x31, 0xC0,       // XOR EAX,EAX
+		0xC3,             // RET
+	}
+
+	engine, entryAddr, err := (&loader.EngineBuilder{
+		SLAPath:   slaPath,
+		PspecPath: pspecPath,
+		Bytes:     prog,
+	}).Build()
+	if err != nil {
+		t.Fatalf("EngineBuilder.Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{
+		Name:            "x64_clamp",
+		Entry:           entryAddr,
+		MaxInstructions: 20,
+	})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	if len(result.Instructions) < 4 {
+		t.Fatalf("expected >= 4 instructions, got %d", len(result.Instructions))
+	}
+	if result.Graph.GetSize() < 2 {
+		t.Fatalf("expected >= 2 CFG blocks, got %d", result.Graph.GetSize())
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for x86-64 calling convention test")
+	}
+	t.Logf("x86-64 calling convention C output:\n%s", output)
 }

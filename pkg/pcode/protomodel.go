@@ -14,7 +14,9 @@
 
 package pcode
 
-import "gosleigh/pkg/address"
+import (
+	"gosleigh/pkg/address"
+)
 
 // ProtoModel is a lightweight representation of a calling convention prototype
 // sufficient for ABI-aware variable naming. It does not replicate the full
@@ -36,12 +38,34 @@ type ProtoModel struct {
 
 	// KilledByCallRegs are register names that are not preserved across calls (caller-saved).
 	KilledByCallRegs map[string]bool
+
+	// RegParams is the ordered list of integer/pointer register parameter names,
+	// derived from cspec IntegerRegParams(). Empty for x86-32 (stack-only ABI).
+	RegParams []string
+
+	// RegParamOffsets maps register-space byte offset to parameter index.
+	// Used by ScopeLocal to classify register varnodes as named parameters.
+	// Nil/empty for x86-32 (stack-only ABI); populated for x86-64 and similar ABIs.
+	RegParamOffsets map[uint64]int
+
+	// PointerSize is the pointer size in bytes from the cspec data_organization.
+	// 0 means unset; treat as 4.
+	PointerSize int
 }
+
+// RegLookupFunc is an optional callback for looking up a register's byte offset
+// in the register address space by name. Returns (offset, true) on success.
+// Used by NewProtoModelFromCspec to populate RegParamOffsets for register-based ABIs.
+// Pass nil for architectures with stack-only calling conventions (e.g. x86-32 cdecl).
+type RegLookupFunc func(name string) (offset uint64, ok bool)
 
 // NewProtoModelFromCspec builds a ProtoModel from parsed CspecData and the
 // address space map. stackSpace should be the stack address space (SpaceKindStack).
+// regLookup is optional: when non-nil it is used to resolve register parameter
+// offsets for ABIs that pass arguments in registers (x86-64, AArch64, etc.).
+// Pass nil for stack-only calling conventions (x86-32 cdecl).
 // C++ parity: Architecture::setPrimitiveMethods / PrototypeModel construction
-func NewProtoModelFromCspec(cs *CspecData, stackSpace *address.Space) *ProtoModel {
+func NewProtoModelFromCspec(cs *CspecData, stackSpace *address.Space, regLookup RegLookupFunc) *ProtoModel {
 	pm := &ProtoModel{
 		StackSpace:       stackSpace,
 		ParamBaseOffset:  4, // default for x86 cdecl
@@ -54,6 +78,7 @@ func NewProtoModelFromCspec(cs *CspecData, stackSpace *address.Space) *ProtoMode
 	}
 	pm.ParamBaseOffset = cs.StackParamBaseOffset()
 	pm.ParamAlign = cs.StackParamAlign()
+	pm.PointerSize = cs.PointerSize()
 
 	if cs.DefaultProto != nil {
 		for _, reg := range cs.DefaultProto.Unaffected.Registers {
@@ -63,7 +88,34 @@ func NewProtoModelFromCspec(cs *CspecData, stackSpace *address.Space) *ProtoMode
 			pm.KilledByCallRegs[reg.Name] = true
 		}
 	}
+
+	// Populate register parameter list and offset map when a register lookup is available.
+	// For x86-32 cdecl (stack-only ABI), IntegerRegParams() returns nil and regLookup is nil,
+	// so this block is a no-op -- preserving identical behavior for x86-32.
+	regParams := cs.IntegerRegParams()
+	if len(regParams) > 0 && regLookup != nil {
+		pm.RegParams = regParams
+		pm.RegParamOffsets = make(map[uint64]int, len(regParams))
+		for i, name := range regParams {
+			if offset, found := regLookup(name); found {
+				pm.RegParamOffsets[offset] = i
+			}
+		}
+	}
+
 	return pm
+}
+
+// localThreshold returns the unsigned offset boundary that separates stack params
+// from stack locals. For 32-bit pointer size the threshold is 0x80000000 (the
+// sign bit of a 32-bit value). For 64-bit pointer size it is 0x8000000000000000.
+// When PointerSize is 0 or 4 (x86-32 default), the 32-bit threshold is used --
+// this preserves identical behavior for all existing x86-32 code paths.
+func (pm *ProtoModel) localThreshold() uint64 {
+	if pm == nil || pm.PointerSize <= 4 {
+		return 0x80000000
+	}
+	return 0x8000000000000000
 }
 
 // IsParamOffset returns true if the given stack offset is in the parameter area.
@@ -77,27 +129,34 @@ func (pm *ProtoModel) IsParamOffset(offset uint64) bool {
 	if pm == nil {
 		return false
 	}
-	// In x86-32 with 4-byte pointer size, the stack space is 32-bit addressable.
-	// Stack locals are stored at large unsigned offsets (>= 0x80000000 when viewed
-	// as uint64) because they are negative relative to the frame pointer.
-	// Parameters are at small positive offsets (4, 8, 12, ...).
-	// Threshold: treat offsets >= 0x80000000 as locals (negative frame offsets).
-	const localThreshold = uint64(0x80000000)
-	if offset >= localThreshold {
+	// Stack locals are stored at large unsigned offsets (negative frame offsets).
+	// Parameters are at small positive offsets. See localThreshold() for details.
+	if offset >= pm.localThreshold() {
 		return false
 	}
 	return int64(offset) >= pm.ParamBaseOffset
 }
 
 // IsLocalOffset returns true if the given stack offset represents a local variable.
-// In x86-32, locals are at negative frame offsets, stored as large unsigned values.
+// Locals are at negative frame offsets, stored as large unsigned values >= localThreshold.
 // C++ parity: ScopeLocal analysis
 func (pm *ProtoModel) IsLocalOffset(offset uint64) bool {
 	if pm == nil {
 		return false
 	}
-	const localThreshold = uint64(0x80000000)
-	return offset >= localThreshold
+	return offset >= pm.localThreshold()
+}
+
+// IsRegParam returns the parameter index and true if the given register-space
+// byte offset matches a known integer register parameter. Returns 0, false when
+// the offset is not a register parameter (including when RegParamOffsets is nil).
+// C++ parity: ProtoModel::assignMap register slot lookup
+func (pm *ProtoModel) IsRegParam(regOffset uint64) (paramIdx int, ok bool) {
+	if pm == nil || pm.RegParamOffsets == nil {
+		return 0, false
+	}
+	idx, found := pm.RegParamOffsets[regOffset]
+	return idx, found
 }
 
 // IsUnaffected reports whether the named register is callee-saved.

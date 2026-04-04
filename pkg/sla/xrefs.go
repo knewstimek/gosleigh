@@ -188,6 +188,21 @@ func varnodeXrefLess(a, b VarnodeXrefEntry) bool {
 	return a.Size < b.Size
 }
 
+// RegisterByName returns the (spaceIndex, offset, size) of a named register,
+// and whether the register was found in the xref table.
+// C++ parity: SleighBase::getRegister (sleighbase.cc)
+func (x *XRefs) RegisterByName(name string) (spaceIndex int64, offset uint64, size int64, ok bool) {
+	if x == nil {
+		return 0, 0, 0, false
+	}
+	for _, entry := range x.VarnodeXref {
+		if entry.Name == name {
+			return entry.SpaceIndex, entry.Offset, entry.Size, true
+		}
+	}
+	return 0, 0, 0, false
+}
+
 // FindSpaceForVarnode resolves the address.Space for a VarnodeXrefEntry using metadata.
 func FindSpaceForVarnode(entry VarnodeXrefEntry, metadata *Metadata) *address.Space {
 	if metadata == nil {

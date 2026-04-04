@@ -195,6 +195,72 @@ func TestParseCspecEmpty(t *testing.T) {
 	}
 }
 
+// TestCspecX8664Gcc verifies that x86-64-gcc.cspec parses correctly:
+// IntegerRegParams returns the SysV integer register list, PointerSize=8,
+// and StackParamBaseOffset=8 (return address is 8 bytes on x86-64).
+func TestCspecX8664Gcc(t *testing.T) {
+	cs, err := ParseCspec("../../testdata/sla/x86-64-gcc.cspec")
+	if err != nil {
+		t.Fatalf("ParseCspec: %v", err)
+	}
+	if cs == nil {
+		t.Fatal("expected non-nil CspecData")
+	}
+
+	// Pointer size from <data_organization><pointer_size value="8"/>
+	if got := cs.PointerSize(); got != 8 {
+		t.Errorf("PointerSize() = %d, want 8", got)
+	}
+
+	// Stack param base offset: <addr offset="8" space="stack"/> in the default proto.
+	if got := cs.StackParamBaseOffset(); got != 8 {
+		t.Errorf("StackParamBaseOffset() = %d, want 8", got)
+	}
+
+	// Integer register params: SysV AMD64 ABI order (float XMM regs excluded).
+	want := []string{"RDI", "RSI", "RDX", "RCX", "R8", "R9"}
+	got := cs.IntegerRegParams()
+	if len(got) != len(want) {
+		t.Fatalf("IntegerRegParams() = %v (len %d), want %v (len %d)", got, len(got), want, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("IntegerRegParams()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
+// TestCspecX8664Win verifies that x86-64-win.cspec parses correctly:
+// IntegerRegParams returns the Windows x64 integer register list, PointerSize=8.
+// The Windows cspec uses <group> elements with paired float/integer pentries;
+// IntegerRegParams must extract only the integer (non-float) registers.
+func TestCspecX8664Win(t *testing.T) {
+	cs, err := ParseCspec("../../testdata/sla/x86-64-win.cspec")
+	if err != nil {
+		t.Fatalf("ParseCspec: %v", err)
+	}
+	if cs == nil {
+		t.Fatal("expected non-nil CspecData")
+	}
+
+	// Pointer size from <data_organization><pointer_size value="8"/>
+	if got := cs.PointerSize(); got != 8 {
+		t.Errorf("PointerSize() = %d, want 8", got)
+	}
+
+	// Integer register params: Windows x64 ABI order (XMM float regs excluded).
+	want := []string{"RCX", "RDX", "R8", "R9"}
+	got := cs.IntegerRegParams()
+	if len(got) != len(want) {
+		t.Fatalf("IntegerRegParams() = %v (len %d), want %v (len %d)", got, len(got), want, len(want))
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("IntegerRegParams()[%d] = %q, want %q", i, got[i], want[i])
+		}
+	}
+}
+
 // TestParseCspecMalformed verifies that structurally broken XML returns a
 // non-nil error that mentions "cspec" (matching our error-wrapping convention).
 func TestParseCspecMalformed(t *testing.T) {
