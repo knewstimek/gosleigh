@@ -198,6 +198,23 @@ func (s *printCState) collectSymbols() {
 		}
 		localIndex := 0
 		tmpIndex := 0
+		// First pass: assign one name per storage location for non-unique varnodes.
+		// Multiple SSA versions of the same register/slot share one local_ name.
+		locName := make(map[locationKey]string)
+		for _, vn := range s.locals {
+			if _, ok := s.names[vn]; ok {
+				continue
+			}
+			if vn.Space() != nil && vn.Space().IsUnique() {
+				continue
+			}
+			key := varnodeLocKey(vn)
+			if _, ok := locName[key]; !ok {
+				locName[key] = fmt.Sprintf("local_%d", localIndex)
+				localIndex++
+			}
+		}
+		// Second pass: fill names for all varnodes using location-shared names.
 		for _, vn := range s.locals {
 			if _, ok := s.names[vn]; ok {
 				continue
@@ -207,8 +224,7 @@ func (s *printCState) collectSymbols() {
 				tmpIndex++
 				continue
 			}
-			s.names[vn] = fmt.Sprintf("local_%d", localIndex)
-			localIndex++
+			s.names[vn] = locName[varnodeLocKey(vn)]
 		}
 		return
 	}
@@ -243,6 +259,23 @@ func (s *printCState) collectSymbols() {
 	}
 	localIndex := 0
 	tmpIndex := 0
+	// First pass: assign one name per storage location for non-unique varnodes.
+	// Multiple SSA versions of the same register/slot share one local_ name.
+	locName := make(map[locationKey]string)
+	for _, vn := range s.locals {
+		if _, ok := s.names[vn]; ok {
+			continue
+		}
+		if vn.Space() != nil && vn.Space().IsUnique() {
+			continue
+		}
+		key := varnodeLocKey(vn)
+		if _, ok := locName[key]; !ok {
+			locName[key] = fmt.Sprintf("local_%d", localIndex)
+			localIndex++
+		}
+	}
+	// Second pass: fill names for all varnodes using location-shared names.
 	for _, vn := range s.locals {
 		if _, ok := s.names[vn]; ok {
 			continue
@@ -252,9 +285,25 @@ func (s *printCState) collectSymbols() {
 			tmpIndex++
 			continue
 		}
-		s.names[vn] = fmt.Sprintf("local_%d", localIndex)
-		localIndex++
+		s.names[vn] = locName[varnodeLocKey(vn)]
 	}
+}
+
+// locationKey identifies a unique storage location by (spaceIndex, offset, size).
+// Used to merge SSA versions of the same register/stack slot into one local name.
+// unique-space varnodes are excluded because each is a genuinely distinct SSA temp.
+type locationKey struct {
+	spaceIdx uint16
+	offset   uint64
+	size     int32
+}
+
+func varnodeLocKey(vn *Varnode) locationKey {
+	var idx uint16
+	if vn.Space() != nil {
+		idx = vn.Space().Index
+	}
+	return locationKey{spaceIdx: idx, offset: vn.Offset(), size: vn.Size()}
 }
 
 func dedupVarnodes(in []*Varnode) []*Varnode {
@@ -337,8 +386,17 @@ func (s *printCState) renderFunctionSignature(retType Datatype) string {
 }
 
 func (s *printCState) emitLocalDeclarations() {
+	// Skip varnodes that share a name with an already-declared local.
+	// This arises when multiple SSA versions of the same storage location
+	// are merged to one local_ name by collectVarnodeNames.
+	declared := make(map[string]struct{})
 	for _, vn := range s.locals {
-		decl := CDeclString(s.normalizeTypeForDecl(vn.TypeDefFacing()), s.nameOf(vn))
+		name := s.nameOf(vn)
+		if _, seen := declared[name]; seen {
+			continue
+		}
+		declared[name] = struct{}{}
+		decl := CDeclString(s.normalizeTypeForDecl(vn.TypeDefFacing()), name)
 		s.lang.Statement(func() {
 			s.lang.Token(decl)
 		})
