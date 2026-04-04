@@ -1,0 +1,14 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "BRANCHIND",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": null
+	}
+]

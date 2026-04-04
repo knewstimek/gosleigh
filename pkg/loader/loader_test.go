@@ -755,3 +755,81 @@ func TestX86BranchlessMaxFunction(t *testing.T) {
 	}
 	t.Logf("BranchlessMax C output:\n%s", output)
 }
+
+// TestX86ClassifySignFunction exercises the full pipeline with a 3-path sign classifier:
+//
+//	PUSH EBP / MOV EBP,ESP / MOV EAX,[EBP+8]
+//	CMP EAX,0 / JE zero_path
+//	CMP EAX,0 / JG positive_path
+//	MOV EAX,-1 / JMP end       ; negative path
+//	XOR EAX,EAX / JMP end      ; zero path
+//	MOV EAX,1                  ; positive path
+//	POP EBP / RET
+//
+// Verifies that CMP imm8 (0x83 /7) and JE/JG branches decode correctly and
+// the 3-way branch produces non-empty PrintC output.
+func TestX86ClassifySignFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// Layout (byte offsets):
+	//  0: 55                    PUSH EBP
+	//  1: 89 E5                 MOV EBP, ESP
+	//  3: 8B 45 08              MOV EAX, [EBP+8]
+	//  6: 83 F8 00              CMP EAX, 0
+	//  9: 74 0C                 JE  +12 -> byte 23 (zero_path: XOR EAX,EAX)
+	// 11: 83 F8 00              CMP EAX, 0
+	// 14: 7F 0B                 JG  +11 -> byte 27 (positive_path: MOV EAX,1)
+	// 16: B8 FF FF FF FF        MOV EAX, -1   (negative path)
+	// 21: EB 09                 JMP +9  -> byte 32 (POP EBP)
+	// 23: 31 C0                 XOR EAX, EAX  (zero_path)
+	// 25: EB 05                 JMP +5  -> byte 32 (POP EBP)
+	// 27: B8 01 00 00 00        MOV EAX, 1    (positive_path)
+	// 32: 5D                    POP EBP
+	// 33: C3                    RET
+	prog := []byte{
+		0x55, 0x89, 0xE5, 0x8B, 0x45, 0x08,
+		0x83, 0xF8, 0x00, 0x74, 0x0C,
+		0x83, 0xF8, 0x00, 0x7F, 0x0B,
+		0xB8, 0xFF, 0xFF, 0xFF, 0xFF, 0xEB, 0x09,
+		0x31, 0xC0, 0xEB, 0x05,
+		0xB8, 0x01, 0x00, 0x00, 0x00,
+		0x5D, 0xC3,
+	}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "classify_sign", Entry: base, MaxInstructions: 30})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	if result.Graph == nil {
+		t.Fatal("expected non-nil CFG graph")
+	}
+	if len(result.Instructions) < 8 {
+		t.Fatalf("expected >= 8 instructions, got %d", len(result.Instructions))
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for classify_sign function")
+	}
+	t.Logf("ClassifySign C output:\n%s", output)
+}
