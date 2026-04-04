@@ -941,8 +941,14 @@ func resolveTranslateFrameSubtable(subtable *SubtableBoundary, frame ResolveFram
 		return nil, nil, nil
 	}
 	sym, ok := frame.Context.GetSymbolTable().FindSymbol(operand.DefiningSymbolID)
-	if !ok || sym.Body.Subtable == nil {
-		return nil, nil, fmt.Errorf("translate subtable: operand %d defining symbol %d is not a subtable", frame.Operand, operand.DefiningSymbolID)
+	if !ok {
+		return nil, nil, fmt.Errorf("translate subtable: operand %d defining symbol %d not found", frame.Operand, operand.DefiningSymbolID)
+	}
+	if sym.Body.Subtable == nil {
+		// Non-subtable defining symbol (e.g. VarnodeList, VarnodeSymbol): treat as a leaf operand.
+		// Mirrors Ghidra C++ SubtableSymbol::resolve() which only recurses into SubtableSymbol.
+		// Handle resolution for VarnodeList is deferred to ResolveHandles (resolve_handles.go).
+		return nil, nil, nil
 	}
 	return sym.Body.Subtable, operand, nil
 }
