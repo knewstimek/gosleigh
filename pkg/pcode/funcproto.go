@@ -155,7 +155,40 @@ func ApplyCallingConvention(fd *Funcdata, model *ProtoModel) {
 	if model.ReturnRegSpaceIndex < 0 || model.ReturnRegSize == 0 {
 		return
 	}
+	// Strip the indirect branch target from all RETURN ops before anchoring the
+	// return register. This severs the data-flow chain from the return address
+	// load (e.g. EIP = *ESP on x86 RET) so ActionDeadCode can remove those ops.
+	// C++ parity: ActionPrototypeTypes::apply() in coreaction.cc lines 4636-4646.
+	stripReturnIndirectRef(fd)
 	anchorReturnReg(fd, model)
+}
+
+// stripReturnIndirectRef replaces the indirect branch target (input[0]) of
+// every RETURN op with a zero constant of the same size. In x86 cdecl the
+// RET instruction reads the return address from the stack, which creates an
+// EIP = *ESP data-flow edge. Severing that edge lets ActionDeadCode prune the
+// epilogue assignments (ESP = ESP+4; EIP = *ESP) from the C output.
+//
+// C++ parity: ActionPrototypeTypes::apply() in coreaction.cc lines 4636-4646.
+func stripReturnIndirectRef(fd *Funcdata) {
+	for _, op := range fd.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN {
+			continue
+		}
+		if op.NumInput() == 0 {
+			continue
+		}
+		in0 := op.Input(0)
+		if in0 == nil || in0.IsConstant() {
+			// Already a constant -- nothing to do.
+			continue
+		}
+		// Replace the indirect branch target with a zero constant of the same
+		// size so that the data-flow chain it belongs to has no live consumers.
+		zeroConst := fd.NewConstant(in0.Size(), 0)
+		fd.OpUnsetInput(op, 0)
+		fd.OpSetInput(op, zeroConst, 0)
+	}
 }
 
 // anchorReturnReg wires the live return-register varnode into every RETURN op
