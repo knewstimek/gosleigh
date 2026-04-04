@@ -215,6 +215,12 @@ func TestGoldenX86(t *testing.T) {
 		{"x86_IMUL_EAX_EBX_imm8", []byte{0x6B, 0xC3, 0x05}},
 		{"x86_JMP_EAX",           []byte{0xFF, 0xE0}},
 		{"x86_JMP_mem_EAX",       []byte{0xFF, 0x20}},
+		{"x86_REP_MOVSB",         []byte{0xF3, 0xA4}},
+		{"x86_REP_MOVSD",         []byte{0xF3, 0xA5}},
+		{"x86_REP_STOSD",         []byte{0xF3, 0xAB}},
+		{"x86_REPNE_SCASB",       []byte{0xF2, 0xAE}},
+		{"x86_SCASB",             []byte{0xAE}},
+		{"x86_ENTER_8",           []byte{0xC8, 0x08, 0x00, 0x00}},
 	}
 
 	update := os.Getenv("GOSLEIGH_UPDATE_GOLDEN") == "1"

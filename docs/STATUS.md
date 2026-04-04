@@ -283,6 +283,11 @@
   - 7개 golden fixture 추가: OR_EAX_imm8, AND_EAX_imm8, XOR_EAX_imm8, CMP_EAX_imm8, IMUL_EAX_EBX_imm8, JMP_EAX, JMP_mem_EAX
   - 총 76개 golden subtest 통과
   - `TestX86ClassifySignFunction` E2E: 3-path sign classification (zero/positive/negative) -> PrintC 출력 검증
+- [x] D15: REP string ops + ENTER + switch E2E 완료 (2026-04-04)
+  - 6개 golden fixture 추가: REP_MOVSB (13 ops), REP_MOVSD (13 ops), REP_STOSD (7 ops), REPNE_SCASB (17 ops), SCASB (17 ops), ENTER_8 (5 ops)
+  - 총 82개 golden subtest 통과
+  - `TestX86SwitchFunction` E2E: 3-case CMP+JNE chain (4-way dispatch) -> Heritage+PrintC 파이프라인 검증
+  - REP-prefix string op (memcpy/memset/strlen 패턴) 및 ENTER 프롤로그 디코딩 검증
 
 ### 다음
 - [ ] **[우선순위 높음]** `DecisionNode::resolve()` 결함 수정: 6502 BRK 외 대부분 opcode (NOP 0xEA, LDA 0xA9 등)에서 발생하는 `"unable to resolve constructor"` 원인을 C++ `slghsymbol.cc` 대조로 찾아 수정. 수정 후 `GOSLEIGH_UPDATE_GOLDEN=1`로 golden fixture 재생성.

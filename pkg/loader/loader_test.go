@@ -833,3 +833,95 @@ func TestX86ClassifySignFunction(t *testing.T) {
 	}
 	t.Logf("ClassifySign C output:\n%s", output)
 }
+
+// TestX86SwitchFunction exercises the full pipeline with a 3-case switch
+// (CMP+JNE chain, O0 style):
+//
+//	int classify(int x) {
+//	    switch(x) {
+//	        case 0: return 10;
+//	        case 1: return 20;
+//	        case 2: return 30;
+//	        default: return -1;
+//	    }
+//	}
+//
+// Verifies that the 4-way dispatch (3 cases + default) produces >= 10
+// instructions, >= 5 CFG blocks, and non-empty PrintC output.
+func TestX86SwitchFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// Layout (49 bytes):
+	//  0x00: 55              PUSH EBP
+	//  0x01: 89 E5           MOV EBP, ESP
+	//  0x03: 8B 45 08        MOV EAX, [EBP+8]
+	//  0x06: 83 F8 00        CMP EAX, 0
+	//  0x09: 75 07           JNE +7 -> 0x12
+	//  0x0B: B8 0A 00 00 00  MOV EAX, 10
+	//  0x10: EB 1D           JMP +29 -> 0x2F (POP EBP)
+	//  0x12: 83 F8 01        CMP EAX, 1
+	//  0x15: 75 07           JNE +7 -> 0x1E
+	//  0x17: B8 14 00 00 00  MOV EAX, 20
+	//  0x1C: EB 11           JMP +17 -> 0x2F
+	//  0x1E: 83 F8 02        CMP EAX, 2
+	//  0x21: 75 07           JNE +7 -> 0x2A
+	//  0x23: B8 1E 00 00 00  MOV EAX, 30
+	//  0x28: EB 05           JMP +5 -> 0x2F
+	//  0x2A: B8 FF FF FF FF  MOV EAX, -1
+	//  0x2F: 5D              POP EBP
+	//  0x30: C3              RET
+	// Note: JMP offsets are corrected from the goal spec -- original offsets
+	// (0x1A, 0x10, 0x06) land inside MOV EAX,-1 and RET; corrected to 0x1D,
+	// 0x11, 0x05 so all JMPs target POP EBP at 0x2F.
+	prog := []byte{
+		0x55, 0x89, 0xE5, 0x8B, 0x45, 0x08,
+		0x83, 0xF8, 0x00, 0x75, 0x07,
+		0xB8, 0x0A, 0x00, 0x00, 0x00, 0xEB, 0x1D,
+		0x83, 0xF8, 0x01, 0x75, 0x07,
+		0xB8, 0x14, 0x00, 0x00, 0x00, 0xEB, 0x11,
+		0x83, 0xF8, 0x02, 0x75, 0x07,
+		0xB8, 0x1E, 0x00, 0x00, 0x00, 0xEB, 0x05,
+		0xB8, 0xFF, 0xFF, 0xFF, 0xFF,
+		0x5D, 0xC3,
+	}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "switch_classify", Entry: base, MaxInstructions: 40})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	if len(result.Instructions) < 10 {
+		t.Fatalf("expected >= 10 instructions, got %d", len(result.Instructions))
+	}
+	if result.Graph == nil {
+		t.Fatal("expected non-nil CFG graph")
+	}
+	if result.Graph.GetSize() < 5 {
+		t.Fatalf("expected >= 5 CFG blocks, got %d", result.Graph.GetSize())
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for switch function")
+	}
+	t.Logf("classify C output:\n%s", output)
+}
