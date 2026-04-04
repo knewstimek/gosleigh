@@ -1,0 +1,39 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "INT_SEXT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 411136,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "SUBPIECE",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 411136,
+				"size": 8
+			},
+			{
+				"space": "const",
+				"offset": 4,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 8,
+			"size": 4
+		}
+	}
+]

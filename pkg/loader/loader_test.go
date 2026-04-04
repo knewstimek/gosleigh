@@ -313,3 +313,103 @@ func TestX86MultiplyFunction(t *testing.T) {
 	}
 	t.Logf("PrintC output:\n%s", output)
 }
+
+// TestX86DivideFunction exercises the full pipeline with a divide function:
+//
+//	PUSH EBP / MOV EBP,ESP / MOV EAX,[EBP+8] / CDQ / IDIV [EBP+0xC] / POP EBP / RET
+//
+// Verifies that CDQ and IDIV (with memory operand) are decoded and translated,
+// producing >= 4 instructions and non-empty PrintC output.
+func TestX86DivideFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// PUSH EBP; MOV EBP,ESP; MOV EAX,[EBP+8]; CDQ; IDIV [EBP+0xC]; POP EBP; RET
+	prog := []byte{0x55, 0x89, 0xE5, 0x8B, 0x45, 0x08, 0x99, 0xF7, 0x7D, 0x0C, 0x5D, 0xC3}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "divide", Entry: base, MaxInstructions: 20})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	if result.Graph == nil {
+		t.Fatal("expected non-nil CFG graph")
+	}
+	if len(result.Instructions) < 4 {
+		t.Fatalf("expected >= 4 instructions, got %d", len(result.Instructions))
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for divide function")
+	}
+	t.Logf("Divide C output:\n%s", output)
+}
+
+// TestX86BitshiftFunction exercises the full pipeline with a bitshift function:
+//
+//	PUSH EBP / MOV EBP,ESP / MOV EAX,[EBP+8] / SHL EAX,2 / POP EBP / RET
+//
+// Verifies that SHL (imm8) is decoded and translated, producing >= 4 instructions
+// and non-empty PrintC output.
+func TestX86BitshiftFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// PUSH EBP; MOV EBP,ESP; MOV EAX,[EBP+8]; SHL EAX,2; POP EBP; RET
+	prog := []byte{0x55, 0x89, 0xE5, 0x8B, 0x45, 0x08, 0xC1, 0xE0, 0x02, 0x5D, 0xC3}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "shl2", Entry: base, MaxInstructions: 20})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	if result.Graph == nil {
+		t.Fatal("expected non-nil CFG graph")
+	}
+	if len(result.Instructions) < 4 {
+		t.Fatalf("expected >= 4 instructions, got %d", len(result.Instructions))
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for bitshift function")
+	}
+	t.Logf("Bitshift C output:\n%s", output)
+}

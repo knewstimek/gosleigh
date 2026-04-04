@@ -1,0 +1,176 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "INT_ZEXT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 4,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 455424,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_ZEXT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 8,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 455680,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_LEFT",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 455680,
+				"size": 8
+			},
+			{
+				"space": "const",
+				"offset": 32,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 455936,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_ZEXT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 456192,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_OR",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 455936,
+				"size": 8
+			},
+			{
+				"space": "unique",
+				"offset": 456192,
+				"size": 8
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 456704,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_DIV",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 456704,
+				"size": 8
+			},
+			{
+				"space": "unique",
+				"offset": 455424,
+				"size": 8
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 457216,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "SUBPIECE",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 457216,
+				"size": 8
+			},
+			{
+				"space": "const",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 0,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_REM",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 456704,
+				"size": 8
+			},
+			{
+				"space": "unique",
+				"offset": 455424,
+				"size": 8
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 457984,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "SUBPIECE",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 457984,
+				"size": 8
+			},
+			{
+				"space": "const",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 8,
+			"size": 4
+		}
+	}
+]
