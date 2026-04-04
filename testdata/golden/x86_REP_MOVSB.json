@@ -1,0 +1,251 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 28,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 86016,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_ADD",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 28,
+				"size": 4
+			},
+			{
+				"space": "const",
+				"offset": 1,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 86272,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_ZEXT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 522,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 86528,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_MULT",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 2,
+				"size": 4
+			},
+			{
+				"space": "unique",
+				"offset": 86528,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 86784,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SUB",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 86272,
+				"size": 4
+			},
+			{
+				"space": "unique",
+				"offset": 86784,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 28,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 24,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 76032,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_ADD",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 24,
+				"size": 4
+			},
+			{
+				"space": "const",
+				"offset": 1,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 76288,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_ZEXT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 522,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 76544,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_MULT",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 2,
+				"size": 4
+			},
+			{
+				"space": "unique",
+				"offset": 76544,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 76800,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SUB",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 76288,
+				"size": 4
+			},
+			{
+				"space": "unique",
+				"offset": 76800,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 24,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "LOAD",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 3,
+				"size": 8
+			},
+			{
+				"space": "unique",
+				"offset": 76032,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 77312,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 77312,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 87296,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "STORE",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 3,
+				"size": 8
+			},
+			{
+				"space": "unique",
+				"offset": 86016,
+				"size": 4
+			},
+			{
+				"space": "unique",
+				"offset": 87296,
+				"size": 1
+			}
+		],
+		"output": null
+	}
+]
