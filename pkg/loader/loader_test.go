@@ -855,7 +855,12 @@ func TestX86ClassifySignFunction(t *testing.T) {
 	}
 	pcode.ApplyCallingConvention(result.Funcdata, cdeclModel)
 
-	// 2. Fold flag conditions: CBRANCH(ZF) -> CBRANCH(INT_EQUAL(EAX,0)).
+	// 2a. Merge MULTIEQUAL/INDIRECT phi-nodes: force-merge output and all inputs
+	//     of each marker op into a single HighVariable so that MULTIEQUAL does not
+	//     appear verbatim in PrintC output.
+	pcode.NewMerge(result.Funcdata).MergeMarker()
+
+	// 2b. Fold flag conditions: CBRANCH(ZF) -> CBRANCH(INT_EQUAL(EAX,0)).
 	//    After folding, ZF writes have no consumers and ActionDeadCode removes them.
 	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
 
