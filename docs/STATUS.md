@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: F-Phase Decompiler Output Quality (F4+F7+F8 완료) (2026-04-05)
+## 현재 단계: F-Phase Decompiler Output Quality (F4+F7+F8+F9+F10 완료) (2026-04-05)
 
 ### 완료
 - [x] Git repo initialized
@@ -396,6 +396,12 @@
   - Bug 2: collapseRegion used remove+re-append for incoming edges, which swap-deleted the original edge slot and re-appended at the end, corrupting TrueOut/FalseOut ordering. Fix: use ReplaceOutEdge (in-place) matching C++ selfIdentify -> replaceOutEdge path.
   - Bug 3: renderBranchCondition wrapped BooleanFlip with `!` prefix only. Fix: implement checkPrintNegation logic (booleanFlipToken) -- INT_EQUAL->!=, INT_NOTEQUAL->==, INT_SLESS-><=+reorder, etc. matching C++ PrintC::opCbranch negatetoken path.
   - classify_sign: `if (tmp_0 == 0) { EAX = 0; } else { if (tmp_0 != 0 && 0 <= tmp_0) { EAX = 1; } else { EAX = -1; } }` -- condition structure now correct
+- [x] F10: collectSymbols catch-all params fix + RuleLessNotEqualBoolAnd (2026-04-05)
+  - Bug: collectSymbols in printc.go added ALL input varnodes (EBP, ESP, etc.) as function params via catch-all fallback. Fix: input varnodes not classified by ScopeLocal are ABI-defined live-ins, not C parameters.
+  - Bug: RuleLessNotEqualBoolAnd missing. C++ parity: RuleLessNotEqual fires on BOOL_AND(INT_(S)LESSEQUAL(V,W), INT_NOTEQUAL(V,W)) -> INT_(S)LESS(V,W). Added to BatchA.
+  - classify_sign: `param_0, param_1, param_2` removed from signature (now correctly `void`); `tmp_0 != 0 && 0 <= tmp_0` simplified to `0 < tmp_0`
+  - TestX86CdeclParamLocalFunction: param_ check updated to TODO (stack param detection requires ActionStackPtrFlow, not yet implemented)
+  - Remaining issues requiring ActionStackPtrFlow: (1) param_0 in classify_sign signature, (2) ESP/EBP in local declarations, (3) tmp_0 -> param_0 naming
 
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)

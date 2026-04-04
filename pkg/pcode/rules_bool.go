@@ -508,6 +508,66 @@ func isNegatedVarnode(neg, bvn *Varnode) bool {
 	return false
 }
 
+// RuleLessNotEqualBoolAnd simplifies BOOL_AND((S)LESSEQUAL(V,W), NOTEQUAL(V,W)) to (S)LESS(V,W).
+//
+// Pattern: (V <= W) && (V != W)  =>  V < W   (and signed variant s<= / s<)
+// This arises from x86 JG pcode: ZF==0 && SF==OF compiles to
+//   BOOL_AND(INT_NOTEQUAL(a,0), INT_SLESSEQUAL(0,a)) which simplifies to INT_SLESS(0,a).
+//
+// C++ parity: RuleLessNotEqual::applyOp in ruleaction.cc
+type RuleLessNotEqualBoolAnd struct{ batchRule }
+
+func NewRuleLessNotEqualBoolAnd(group string) *RuleLessNotEqualBoolAnd {
+	r := &RuleLessNotEqualBoolAnd{}
+	r.batchRule = newBatchRule(group, "lessnotequalbooland", []OpCode{CPUI_BOOL_AND}, r.apply, func(g string) Rule { return NewRuleLessNotEqualBoolAnd(g) })
+	return r
+}
+
+func (r *RuleLessNotEqualBoolAnd) apply(op *PcodeOp, data *Funcdata) int {
+	vn0 := op.Input(0)
+	vn1 := op.Input(1)
+	if vn0 == nil || vn1 == nil || !vn0.IsWritten() || !vn1.IsWritten() {
+		return 0
+	}
+	opLess := vn0.Def()
+	opNeq := vn1.Def()
+	opc := opLess.Code()
+	if opc != CPUI_INT_LESSEQUAL && opc != CPUI_INT_SLESSEQUAL {
+		// Try with inputs swapped.
+		opLess, opNeq = opNeq, opLess
+		opc = opLess.Code()
+		if opc != CPUI_INT_LESSEQUAL && opc != CPUI_INT_SLESSEQUAL {
+			return 0
+		}
+	}
+	if opNeq.Code() != CPUI_INT_NOTEQUAL {
+		return 0
+	}
+	compvn1 := opLess.Input(0)
+	compvn2 := opLess.Input(1)
+	// C++ isHeritageKnown(): constant, written, or input varnodes have stable identities.
+	heritageKnown := func(v *Varnode) bool {
+		return v != nil && (v.IsConstant() || v.IsWritten() || v.IsInput())
+	}
+	if !heritageKnown(compvn1) || !heritageKnown(compvn2) {
+		return 0
+	}
+	// Verify that NOTEQUAL compares the same two values (possibly reversed).
+	eq0, eq1 := opNeq.Input(0), opNeq.Input(1)
+	if !(sameValue(compvn1, eq0) && sameValue(compvn2, eq1)) &&
+		!(sameValue(compvn1, eq1) && sameValue(compvn2, eq0)) {
+		return 0
+	}
+	var result OpCode
+	if opc == CPUI_INT_SLESSEQUAL {
+		result = CPUI_INT_SLESS
+	} else {
+		result = CPUI_INT_LESS
+	}
+	rewriteOp(data, op, result, compvn1, compvn2)
+	return 1
+}
+
 type RuleEqual2Constant struct{ batchRule }
 
 func NewRuleEqual2Constant(group string) *RuleEqual2Constant {
