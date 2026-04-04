@@ -227,6 +227,16 @@ func TestGoldenX86(t *testing.T) {
 		{"x86_LEA_EAX_SIB",          []byte{0x8D, 0x04, 0x8B}},
 		{"x86_MOV_EAX_SIB_disp8",    []byte{0x8B, 0x44, 0x8D, 0x08}},
 		{"x86_MOV_EAX_EAX_EBX",      []byte{0x8B, 0x04, 0x03}},
+		// D17: disp32 memory + global var access + ESI/EDI
+		{"x86_MOV_EAX_EBX_disp32", []byte{0x8B, 0x83, 0x00, 0x01, 0x00, 0x00}},
+		{"x86_MOV_EBX_disp32_EAX", []byte{0x89, 0x83, 0x00, 0x01, 0x00, 0x00}},
+		{"x86_MOV_EAX_abs32",      []byte{0xA1, 0x78, 0x56, 0x34, 0x12}},
+		{"x86_MOV_abs32_EAX",      []byte{0xA3, 0x78, 0x56, 0x34, 0x12}},
+		{"x86_PUSH_ESI",            []byte{0x56}},
+		{"x86_POP_ESI",             []byte{0x5E}},
+		{"x86_PUSH_EDI",            []byte{0x57}},
+		{"x86_POP_EDI",             []byte{0x5F}},
+		{"x86_MOV_ESI_EAX",         []byte{0x89, 0xC6}},
 	}
 
 	update := os.Getenv("GOSLEIGH_UPDATE_GOLDEN") == "1"

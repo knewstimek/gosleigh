@@ -1027,3 +1027,61 @@ func TestX86ArrayIndexFunction(t *testing.T) {
 	}
 	t.Logf("get_elem C output:\n%s", output)
 }
+
+func TestX86LinkedListFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine test file path")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// sum_list: traverse linked list summing values (loop with back edge)
+	// struct Node { int val; Node* next; }
+	// int sum_list(Node* p) { int sum = 0; while (p) { sum += p->val; p = p->next; } return sum; }
+	prog := []byte{
+		0x55,             // PUSH EBP
+		0x89, 0xE5,       // MOV EBP, ESP
+		0x8B, 0x75, 0x08, // MOV ESI, [EBP+8]   -- p = arg0
+		0x31, 0xC0,       // XOR EAX, EAX        -- sum = 0
+		0x85, 0xF6,       // TEST ESI, ESI       -- loop: while (p != NULL)
+		0x74, 0x07,       // JZ +7 -> offset 19  -- jump to epilog
+		0x03, 0x06,       // ADD EAX, [ESI]      -- sum += p->val
+		0x8B, 0x76, 0x04, // MOV ESI, [ESI+4]   -- p = p->next
+		0xEB, 0xF5,       // JMP -11 -> offset 8 -- back edge to TEST ESI
+		0x5D,             // POP EBP
+		0xC3,             // RET
+	}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	result, err := bridge.Build(engine, bridge.BuildConfig{
+		Name:            "sum_list",
+		Entry:           base,
+		MaxInstructions: 30,
+	})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+	if len(result.Instructions) < 6 {
+		t.Fatalf("expected >= 6 instructions, got %d", len(result.Instructions))
+	}
+	if result.Graph.GetSize() < 3 {
+		t.Fatalf("expected >= 3 blocks (loop), got %d", result.Graph.GetSize())
+	}
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC output is empty")
+	}
+	t.Logf("sum_list C output:\n%s", output)
+}

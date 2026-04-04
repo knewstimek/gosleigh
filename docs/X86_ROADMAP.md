@@ -60,6 +60,9 @@
 13f. ~~Rules CMOVcc + BSWAP~~ -- done (D13: 69 golden subtests, TestX86BranchlessMaxFunction E2E, 2026-04-04)
 13g. ~~Rules OR/AND/XOR/CMP imm8 + IMUL 3-operand + JMP indirect~~ -- done (D14: 76 golden subtests, TestX86ClassifySignFunction E2E, 2026-04-04)
 13h. ~~REP string ops (MOVSB/MOVSD/STOSD) + REPNE SCASB + SCASB + ENTER~~ -- done (D15: 82 golden subtests, TestX86SwitchFunction E2E, 2026-04-04)
+13i. ~~SIB/reg+disp8 addressing mode golden fixtures + struct/array access E2E~~ -- done (D16: 88 golden subtests, TestX86StructAccess + TestX86ArrayIndex E2E, 2026-04-04)
+- Phase D16 완료 (2026-04-04): SIB/reg+disp8 addressing mode + struct/array access E2E
+- Phase D17 완료 (2026-04-04): disp32 memory + global var access + ESI/EDI registers + linked-list E2E
 13d. Rules 미완성 보완 -- float
 14. block structuring E2E 검증
 15. assembly printer (optional)
