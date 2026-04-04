@@ -1,0 +1,139 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 16392,
+				"size": 8
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 147200,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_CARRY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 16384,
+				"size": 8
+			},
+			{
+				"space": "unique",
+				"offset": 147200,
+				"size": 8
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 261,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SCARRY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 16384,
+				"size": 8
+			},
+			{
+				"space": "unique",
+				"offset": 147200,
+				"size": 8
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 262,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_ADD",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 16384,
+				"size": 8
+			},
+			{
+				"space": "unique",
+				"offset": 147200,
+				"size": 8
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 147712,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SLESS",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 147712,
+				"size": 8
+			},
+			{
+				"space": "const",
+				"offset": 0,
+				"size": 8
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 263,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_EQUAL",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 147712,
+				"size": 8
+			},
+			{
+				"space": "const",
+				"offset": 0,
+				"size": 8
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 264,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 147712,
+				"size": 8
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 16384,
+			"size": 8
+		}
+	}
+]
