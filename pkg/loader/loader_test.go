@@ -821,6 +821,10 @@ func TestX86ClassifySignFunction(t *testing.T) {
 	}
 
 	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	// Fold constant sub-expressions (e.g. POPCOUNT(0 & 0xff)) before
+	// dead-code elimination so that flag ops become trivial constants first.
+	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
+	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
@@ -833,6 +837,14 @@ func TestX86ClassifySignFunction(t *testing.T) {
 		t.Fatal("PrintC.Emit returned empty output for classify_sign function")
 	}
 	t.Logf("ClassifySign C output:\n%s", output)
+
+	// Flag-computing ops that are constant-foldable or have no consumers must
+	// not appear verbatim in the C output after constant fold + dead code.
+	for _, noise := range []string{"POPCOUNT", "INT_CARRY", "INT_SCARRY"} {
+		if strings.Contains(output, noise) {
+			t.Errorf("expected %s to be eliminated from classify_sign output, but found it:\n%s", noise, output)
+		}
+	}
 }
 
 // TestX86SwitchFunction exercises the full pipeline with a 3-case switch
