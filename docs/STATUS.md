@@ -292,6 +292,10 @@
   - 6개 golden fixture 추가: MOV_EAX_EBX_disp8, MOV_EBX_disp8_EAX, MOV_EAX_SIB_ECX_EAX4, LEA_EAX_SIB, MOV_EAX_SIB_disp8, MOV_EAX_EAX_EBX
   - 총 88개+ golden subtest 통과
   - `TestX86StructAccessFunction` E2E: struct field access (p->y) -> Heritage+PrintC 파이프라인 검증
+- [x] D17: disp32 memory + global var access + ESI/EDI registers + linked-list E2E 완료 (2026-04-04)
+  - 9개 golden fixture 추가: MOV_EAX_EBX_disp32, MOV_EBX_disp32_EAX, MOV_EAX_abs32, MOV_abs32_EAX, PUSH_ESI, POP_ESI, PUSH_EDI, POP_EDI, MOV_ESI_EAX
+  - 총 97개 golden subtest 통과
+  - `TestX86LinkedListFunction` E2E: linked list traversal (sum_list, back edge loop) -> Heritage+PrintC 파이프라인 검증
   - `TestX86ArrayIndexFunction` E2E: array index (arr[i], SIB scale*4) -> Heritage+PrintC 파이프라인 검증
 
 ### 다음
