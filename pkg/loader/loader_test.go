@@ -474,6 +474,67 @@ func TestX86Add3Function(t *testing.T) {
 	t.Logf("add3 C output:\n%s", output)
 }
 
+// TestX86LocalVarFunction exercises the full pipeline with a function that
+// uses a stack-allocated local variable:
+//
+//	PUSH EBP / MOV EBP,ESP / SUB ESP,4 / MOV EAX,[EBP+8] /
+//	SHL EAX,1 / MOV [EBP-4],EAX / MOV EAX,[EBP-4] /
+//	MOV ESP,EBP / POP EBP / RET
+//
+// Verifies that SUB ESP (stack frame allocation), MOV [EBP-4] (local var
+// store/load), and SHL EAX,1 are decoded and that the full Heritage+PrintC
+// pipeline produces non-empty C output.
+func TestX86LocalVarFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// double_it(int x): int local = x * 2; return local;
+	//   0x00: PUSH EBP        (55)
+	//   0x01: MOV EBP,ESP     (89 E5)
+	//   0x03: SUB ESP,4       (83 EC 04)
+	//   0x06: MOV EAX,[EBP+8] (8B 45 08)
+	//   0x09: SHL EAX,1       (D1 E0)
+	//   0x0B: MOV [EBP-4],EAX (89 45 FC)
+	//   0x0E: MOV EAX,[EBP-4] (8B 45 FC)
+	//   0x11: MOV ESP,EBP     (89 EC)
+	//   0x13: POP EBP         (5D)
+	//   0x14: RET             (C3)
+	prog := []byte{0x55, 0x89, 0xE5, 0x83, 0xEC, 0x04, 0x8B, 0x45, 0x08, 0xD1, 0xE0, 0x89, 0x45, 0xFC, 0x8B, 0x45, 0xFC, 0x89, 0xEC, 0x5D, 0xC3}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "double_it", Entry: base, MaxInstructions: 20})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	if len(result.Instructions) < 6 {
+		t.Fatalf("expected >= 6 instructions, got %d", len(result.Instructions))
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for local var function")
+	}
+	t.Logf("double_it C output:\n%s", output)
+}
+
 // TestX86BitshiftFunction exercises the full pipeline with a bitshift function:
 //
 //	PUSH EBP / MOV EBP,ESP / MOV EAX,[EBP+8] / SHL EAX,2 / POP EBP / RET

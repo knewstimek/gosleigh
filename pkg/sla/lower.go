@@ -4,7 +4,6 @@ import (
 	"errors"
 	"fmt"
 	"math/bits"
-	"reflect"
 
 	"gosleigh/pkg/address"
 	"gosleigh/pkg/pcode"
@@ -424,20 +423,15 @@ func lowerDynamicSpaceSelector(ctx LoweringContext, targetSpace *address.Space) 
 	if targetSpace == nil {
 		return pcode.VarnodeData{}, newUnimplError(ErrLoweringUnimplemented, "dynamic varnode handle is missing load/store target space")
 	}
-	// C++ counterpart: SleighBuilder::dump() writes (uintp)AddrSpace* into const-space input[0]
-	// for LOAD/STORE. Use pointer identity as the closest process-local payload model.
+	// C++ counterpart: SleighBuilder::dump() writes (uintp)AddrSpace* as the space selector into
+	// const-space input[0] for LOAD/STORE. We use the space index instead of a raw pointer so
+	// that the selector is deterministic across runs and matches the Ghidra p-code semantic
+	// (LOAD/STORE input[0] is logically the address space identifier, which is the index).
 	return pcode.VarnodeData{
 		Space:  ctx.ConstantSpace,
-		Offset: dynamicSpaceSelectorPayload(targetSpace),
+		Offset: uint64(targetSpace.Index),
 		Size:   dynamicSpaceSelectorSize(),
 	}, nil
-}
-
-func dynamicSpaceSelectorPayload(space *address.Space) uint64 {
-	if space == nil {
-		return 0
-	}
-	return uint64(reflect.ValueOf(space).Pointer())
 }
 
 func dynamicSpaceSelectorSize() uint32 {

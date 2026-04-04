@@ -201,6 +201,10 @@
 - [x] Phase 5 complete: WU7 완료. PrintC 기반 C 출력 경로와 선언 출력기가 구현됨
 - [x] 현재 저장소 기준 `go test ./...` 통과
 
+- [x] Phase D10 완료 (2026-04-04): PUSH imm8/imm32 + NOT + stack locals golden (50 subtests), TestX86LocalVarFunction (local vars E2E)
+  - `pkg/sla/x86_golden_test.go`: 7 new cases -- PUSH_imm8/imm32, NOT_EAX, MOV_EBP_minus4_EAX, MOV_EAX_EBP_minus4, SUB_ESP_imm8, SHL_EAX_1
+  - `pkg/sla/lower.go`: fixed dynamicSpaceSelectorPayload -- use space.Index instead of raw pointer (non-deterministic ASLR value)
+  - `pkg/loader/loader_test.go`: TestX86LocalVarFunction -- double_it() with SUB ESP + SHL EAX,1 + MOV [EBP-4] store/load, non-empty PrintC
 - [x] Phase D9 완료 (2026-04-04): PUSH/POP regs + DEC/XCHG + Jcc (JL/JLE/JG/JB/JA) + TestX86Add3Function
   - `pkg/sla/x86_golden_test.go`: 10 new cases -- 총 43 subtests
   - PUSH_EBX/PUSH_ECX/POP_EBX: COPY+INT_SUB+STORE/LOAD 패턴, DEC_EAX: INT_SUB+flags, XCHG: 3x COPY
