@@ -23,6 +23,11 @@ type HighVariable struct {
 	name      string
 	instances []*Varnode
 	datatype  Datatype // type annotation; nil means unknown
+
+	// cover is the union of live ranges of all member Varnodes.
+	// nil means the cover has not been computed yet (dirty).
+	// C++ parity: HighVariable::internalCover
+	cover *Cover
 }
 
 // NewHighVariable creates a HighVariable with the given name and zero instances.
@@ -97,4 +102,40 @@ func (hv *HighVariable) SetType(dt Datatype) {
 		return
 	}
 	hv.datatype = dt
+}
+
+// rebuildCover recomputes the union Cover from all member Varnodes.
+// Must be called before any Cover-based intersection test.
+// C++ parity: HighVariable::updateInternalCover
+func (hv *HighVariable) rebuildCover() {
+	if hv == nil {
+		return
+	}
+	c := &Cover{}
+	for _, vn := range hv.instances {
+		vnCover := &Cover{}
+		vnCover.Rebuild(vn)
+		c.Merge(vnCover)
+	}
+	hv.cover = c
+}
+
+// getCover returns the current Cover, rebuilding it if nil (dirty).
+// C++ parity: HighVariable::getCover / updateInternalCover
+func (hv *HighVariable) getCover() *Cover {
+	if hv == nil {
+		return nil
+	}
+	if hv.cover == nil {
+		hv.rebuildCover()
+	}
+	return hv.cover
+}
+
+// MarkCoverDirty invalidates the cached Cover so it is rebuilt on next access.
+// C++ parity: HighVariable::coverDirty
+func (hv *HighVariable) MarkCoverDirty() {
+	if hv != nil {
+		hv.cover = nil
+	}
 }

@@ -302,6 +302,32 @@ func (fd *Funcdata) OpInsertEnd(op *PcodeOp, bb *BlockBasic) {
 	bb.InsertOpEnd(op)
 }
 
+// OpInsertBefore inserts op immediately before follow in follow's basic block.
+// The op is marked alive and its parent block is set.
+// C++ parity: Funcdata::opInsertBefore
+func (fd *Funcdata) OpInsertBefore(op *PcodeOp, follow *PcodeOp) {
+	bb := follow.Parent()
+	if bb == nil {
+		return
+	}
+	fd.OpMarkAlive(op)
+	op.SetParent(bb)
+	bb.InsertOpBefore(op, follow)
+}
+
+// OpInsertAfter inserts op immediately after prev in prev's basic block.
+// The op is marked alive and its parent block is set.
+// C++ parity: Funcdata::opInsertAfter
+func (fd *Funcdata) OpInsertAfter(op *PcodeOp, prev *PcodeOp) {
+	bb := prev.Parent()
+	if bb == nil {
+		return
+	}
+	fd.OpMarkAlive(op)
+	op.SetParent(bb)
+	bb.InsertOpAfter(op, prev)
+}
+
 // VarnodesBySpace returns all varnodes in the given address space.
 func (fd *Funcdata) VarnodesBySpace(spc *address.Space) []*Varnode {
 	return fd.vbank.BySpace(spc)

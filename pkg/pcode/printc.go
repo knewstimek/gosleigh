@@ -879,6 +879,13 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 	if op == nil {
 		return nil
 	}
+	// MULTIEQUAL and INDIRECT are merge-marker ops. After MergeMarker() has
+	// coalesced their inputs/output into a single HighVariable, they carry no
+	// additional information and must not be printed as C statements.
+	// C++ parity: PrintC skips marker ops in the statement visitor.
+	if op.IsMarker() {
+		return nil
+	}
 	switch op.Code() {
 	case CPUI_STORE:
 		lhs, err := s.renderStoreLHS(storePointer(op), cPrecAssign)
