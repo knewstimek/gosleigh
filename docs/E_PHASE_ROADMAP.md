@@ -57,7 +57,7 @@ int classify2(int x, int y) {
   - RuleFloatCast / RuleIgnoreNan 등 기 구현된 float rules 연동
 - E2E: float 파라미터를 갖는 함수 디컴파일
 
-## E4: x86-64 지원
+## E4: x86-64 지원 [DONE 2026-04-04]
 
 **핵심 deliverable**: 64-bit x86 코드 디컴파일.
 - x86-64.sla 로드 + 64bit 레지스터 (RAX/RBX/RSI/RDI/R8-R15)

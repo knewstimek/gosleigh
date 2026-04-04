@@ -324,6 +324,12 @@
   - ActionSetCasts stub added for future cast insertion
   - `TestE2DeadCodeElimination`: SBORROW/POPCOUNT/INT_CARRY absent from classify2 output
 - [x] E3: FP Heritage type annotation + PrintC float literal emission (2026-04-04)
+- [x] E4: x86-64 support -- register ABI, 6 golden fixtures, 2 E2E tests (2026-04-04)
+  - CspecData: IntegerRegParams() / PointerSize() / Windows grouped pentries
+  - ProtoModel: RegParams/RegParamOffsets, pointer-size-aware local threshold, IsRegParam()
+  - ScopeLocal: register-space varnodes classified as params (RDI/RSI/... -> param_0/1/...)
+  - Engine.RegisterByName() for offset lookup
+  - TestGoldenX8664: 6 x86-64 golden subtests (121 total), TestX8664SimpleFunction + TestX8664CallingConvention (29 E2E total)
   - Heritage.AnnotateFloatTypes(): marks FLOAT_* op output varnodes as float/double
   - renderFloatLiteral(): IEEE-754 bit reinterpretation (0x3f800000 -> 1f, NaN/Inf handled)
   - ScopeLocal: float type propagated from Varnode to HighVariable
