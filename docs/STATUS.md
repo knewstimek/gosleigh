@@ -306,6 +306,12 @@
     - TEST EAX,imm32 (A9): INT_AND + ZF/SF/PF flags (AND 결과는 임시 unique에 기록, result 버림)
     - 66h prefix MOV (operand size override): INT_ADD+LOAD+COPY (Ghidra x86.sla opsize override 경로 정상)
   - `TestX86ComplexMultiArgFunction` E2E: sum_positive() -- ESI callee-save + SIB+disp8 array access + CMP+JL conditional + DEC+JNZ loop, >= 8 instructions, >= 3 CFG blocks, non-empty PrintC 출력
+- [x] D19: 66h prefix fix + new golden fixtures + nested if-else E2E 완료 (2026-04-04)
+  - 66h prefix (operand size override) LOAD/COPY size=2 fix 적용
+  - 6개 golden fixture 추가: JMP_rel32, PUSH_EAX, POP_EAX, PUSH_EDX, POP_EDX, JO_fwd
+  - 총 108개 golden subtest 통과 (기존 102 + 신규 6)
+  - `TestX86NestedIfFunction` E2E: classify2() -- nested if-else (x>0 -> y>x -> 2/1, else 0), >= 10 instructions, >= 4 CFG blocks, non-empty PrintC 출력
+  - E2E 총계: 20개 테스트
 
 ### 다음
 - [ ] **[우선순위 높음]** `DecisionNode::resolve()` 결함 수정: 6502 BRK 외 대부분 opcode (NOP 0xEA, LDA 0xA9 등)에서 발생하는 `"unable to resolve constructor"` 원인을 C++ `slghsymbol.cc` 대조로 찾아 수정. 수정 후 `GOSLEIGH_UPDATE_GOLDEN=1`로 golden fixture 재생성.

@@ -243,6 +243,13 @@ func TestGoldenX86(t *testing.T) {
 		{"x86_MOVZX_EAX_mem",     []byte{0x0F, 0xB6, 0x00}},
 		{"x86_TEST_EAX_imm32",    []byte{0xA9, 0xFF, 0xFF, 0xFF, 0xFF}},
 		{"x86_MOV_AX_EBP_disp8",  []byte{0x66, 0x8B, 0x45, 0x08}},
+		// D19: JMP rel32, PUSH/POP short form, JO
+		{"x86_JMP_rel32", []byte{0xE9, 0x00, 0x01, 0x00, 0x00}},
+		{"x86_PUSH_EAX",  []byte{0x50}},
+		{"x86_POP_EAX",   []byte{0x58}},
+		{"x86_PUSH_EDX",  []byte{0x52}},
+		{"x86_POP_EDX",   []byte{0x5A}},
+		{"x86_JO_fwd",    []byte{0x70, 0x08}},
 	}
 
 	update := os.Getenv("GOSLEIGH_UPDATE_GOLDEN") == "1"

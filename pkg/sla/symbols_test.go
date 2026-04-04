@@ -225,7 +225,9 @@ func TestDecodeBoundariesPayload(t *testing.T) {
 		t.Fatalf("unexpected context op count: got %d", len(constructor.ContextOps))
 	}
 	ctxOp := constructor.ContextOps[0]
-	if ctxOp.Num != 1 || ctxOp.Shift != 2 || ctxOp.Mask != 3 {
+	// Raw SLA attrI=1 (C++ 32-bit word index 1, odd = lower half of Go uint64[0]).
+	// decodeContextOp converts: goNum = 1/2 = 0; shift and mask are unchanged for odd words.
+	if ctxOp.Num != 0 || ctxOp.Shift != 2 || ctxOp.Mask != 3 {
 		t.Fatalf("unexpected context op num/shift/mask: %+v", ctxOp)
 	}
 	if ctxOp.Expression == nil || ctxOp.Expression.ElementID != elemOperandExp {

@@ -1,6 +1,65 @@
 [
 	{
 		"address": "0x0",
+		"opcode": "INT_EQUAL",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 4,
+				"size": 4
+			},
+			{
+				"space": "const",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 103168,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "CBRANCH",
+		"inputs": [
+			{
+				"space": "ram",
+				"offset": 2,
+				"size": 4
+			},
+			{
+				"space": "unique",
+				"offset": 103168,
+				"size": 1
+			}
+		],
+		"output": null
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SUB",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 4,
+				"size": 4
+			},
+			{
+				"space": "const",
+				"offset": 1,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 4,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
 		"opcode": "COPY",
 		"inputs": [
 			{
@@ -244,6 +303,18 @@
 				"space": "unique",
 				"offset": 87296,
 				"size": 1
+			}
+		],
+		"output": null
+	},
+	{
+		"address": "0x0",
+		"opcode": "BRANCH",
+		"inputs": [
+			{
+				"space": "ram",
+				"offset": 0,
+				"size": 4
 			}
 		],
 		"output": null
