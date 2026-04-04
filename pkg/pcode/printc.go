@@ -181,7 +181,11 @@ func (s *printCState) collectSymbols() {
 						continue
 					}
 				}
-				params = append(params, vn)
+				// Input varnodes not recognized by ScopeLocal are callee-saved
+				// registers or other ABI-defined live-ins -- not C parameters.
+				// Without ActionStackPtrFlow, stack params appear as LOAD results
+				// (not input varnodes), so emitting them here is always wrong.
+				// C++ parity: unclassified inputs are skipped by ActionPrototypeTypes.
 				continue
 			}
 			if vn.Def() == nil {

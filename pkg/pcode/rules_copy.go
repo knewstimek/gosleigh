@@ -198,6 +198,7 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRuleNegateNegate(group) },
 	func(group string) Rule { return NewRuleSubNormal(group) },
 	func(group string) Rule { return NewRuleSborrow(group) },
+	func(group string) Rule { return NewRuleLessNotEqualBoolAnd(group) },
 	func(group string) Rule { return NewRuleIdentityEl(group) },
 }
 
