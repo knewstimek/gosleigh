@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: E-Phase Decompiler Output Quality (E7 완료) (2026-04-05)
+## 현재 단계: E-Phase Decompiler Output Quality (E10 완료) (2026-04-05)
 
 ### 완료
 - [x] Git repo initialized
@@ -371,6 +371,9 @@
 - [ ] Continue from translation/runtime into the broader decompiler pipeline instead of stopping at a partial translator layer
 - [x] E6: symbol recovery -- SymbolTable, LoadELFSymbols, LoadDWARFFunctions, LoadPE32Exports/Imports, SetDisplayName, BuildConfig.SymbolName wiring, fixture generators, 6 unit tests + E2E (2026-04-05)
 - [x] E7: AArch64 E2E pipeline -- AARCH64.pspec, goldenEngineAARCH64, TestGoldenAARCH64 (4 subtests: ADD/RET/MOV/NOP), TestAARCH64SimpleFunction loader E2E, 4 golden fixtures (2026-04-05)
+- [x] E8: ActionConstantFold + dead code integration -- evaluates all-constant pure ops (INT_*/BOOL_*/POPCOUNT) to fixpoint; ActionDeadCode wired into x86 E2E pipelines; classify_sign output no longer contains POPCOUNT/CARRY/SCARRY (2026-04-05)
+- [x] E9: local variable explosion fix -- collectVarnodeNames() groups non-unique varnodes by (spaceIdx,offset,size); SSA versions of same register share one local_N name; unique-space temps stay as tmp_N (2026-04-05)
+- [x] E10: register name identification -- Engine.RegisterNamesByLocation() builds SLA VarnodeSymbol offset->name map; PrintC.SetRegisterNames() injects it; EAX/EBP/ZF etc. appear directly in output instead of local_N (2026-04-05)
 
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
