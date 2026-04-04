@@ -183,6 +183,21 @@ func propagateOneType(vn *Varnode, tf *TypeFactory) {
 		if def.NumInput() > 1 && def.Input(1) != nil {
 			trySetTempType(def.Input(1), derived)
 		}
+	case CPUI_COPY:
+		// Reverse: output type flows back to input[0].
+		// Allows TYPE_INT seeded by ActionSeedSignedOps to reach constant varnodes.
+		// C++ parity: TypeOpCopy propagation symmetry (typeop.cc)
+		if def.NumInput() > 0 && def.Input(0) != nil {
+			trySetTempType(def.Input(0), derived)
+		}
+	case CPUI_MULTIEQUAL:
+		// Reverse: output type flows back to all phi inputs.
+		// C++ parity: TypeOpMultiequal propagation (typeop.cc)
+		for i := 0; i < def.NumInput(); i++ {
+			if def.Input(i) != nil {
+				trySetTempType(def.Input(i), derived)
+			}
+		}
 	}
 }
 
