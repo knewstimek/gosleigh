@@ -8,7 +8,11 @@
 - CLI/ELF loader 미구현
 - x86.sla 확보 완료 -- testdata/sla/ (47개 파일, 6.1MB: x86/x86-64/ARM/AARCH64/MIPS/68k)
 - x86.sla 로드 성공 (4 spaces, 1630 UserOps, 43 ContextFields)
-- x86 translate 결과: 모든 opcode 0 ops 반환 (에러 없음). context 초기화 문제 추정
+- Phase B6+B7 완료 (2026-04-04): pspec context init (addrsize=1/opsize=1), RET/PUSH_EBP p-code 생성 확인
+- Phase B8 완료 (2026-04-04): MOV/ADD/SUB/XOR/POP/JMP golden fixtures (10개 총 opcode, 0 gaps)
+- Phase C1+C3+C4 완료 (2026-04-04): pkg/loader EngineBuilder, CLI, E2E pipeline (ADD+RET -> C 출력)
+- NOP (0x90) = Ghidra PCODE_NOP, 0 ops는 정상 동작
+- VarnodeList operand type translate.go에 추가 (PUSH EBP 지원)
 
 ## 실행 순서 (의존 관계 반영)
 
@@ -22,16 +26,16 @@
 ### Phase B: x86 진입
 
 5. ~~x86.sla 확보~~ -- 완료 (testdata/sla/, 2026-04-04)
-6. x86 context 초기화 -- .pspec에서 기본 context 값 읽어 backend에 설정 (addrsize/opsize 등)
-7. x86 golden fixture + 검증 -- 단순 opcode (NOP, MOV, PUSH, RET 등)
+6. ~~x86 context 초기화~~ -- 완료 (pspec.go + SetVariableDefault, 2026-04-04)
+7. ~~x86 golden fixture~~ -- 완료 (NOP=0/PCODE_NOP, RET=3 ops, PUSH_EBP=3 ops, 2026-04-04)
 8. x86에서 발견되는 추가 gap 수정 (반복)
 
 ### Phase C: E2E 인프라
 
-9. 파일 기반 입력 -- file path + offset + size로 직접 읽기 (MCP tool이 토큰 낭비 없이 호출 가능)
+9. ~~파일 기반 입력~~ -- 완료 (pkg/loader/loader.go EngineBuilder, 2026-04-04)
 10. ELF/PE section 추출 (optional) -- Go 표준 debug/elf, debug/pe 활용
-11. CLI 진입점 -- cmd/gosleigh/main.go (optional, MCP 우선)
-12. x86 단순 함수 (no loop) E2E: 파일 -> C 출력 검증
+11. ~~CLI 진입점~~ -- 완료 (cmd/gosleigh translate 서브커맨드, 2026-04-04)
+12. ~~x86 단순 함수 E2E~~ -- 완료 (ADD+RET -> C 출력, Heritage+PrintC 파이프라인 검증, 2026-04-04)
 
 ### Phase D: 실사용 수준
 
