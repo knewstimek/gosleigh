@@ -318,6 +318,16 @@
   - `TestX86CallChainFunction` E2E: caller -> callee1 -> callee2 multi-CALL chain through Heritage+PrintC
   - 총 113개 golden subtest 통과 (기존 108 + 신규 5), E2E 총계: 21개 테스트
 - [x] E1: cdecl calling convention + variable recovery -- named param/local output (2026-04-04)
+- [x] E2: ActionDeadCode dead store eliminator -- x86 flag varnodes (ZF/CF/SF/OF/PF) eliminated from PrintC output (2026-04-04)
+  - Iterative fixpoint DCE: removes ops with no-consumer outputs (INT_CARRY/SBORROW/BOOL_* chains)
+  - Fixed funcdata.go OpUnsetOutput/OpDestroy bugs (VarnodeBank unlink + BlockBasic removal)
+  - ActionSetCasts stub added for future cast insertion
+  - `TestE2DeadCodeElimination`: SBORROW/POPCOUNT/INT_CARRY absent from classify2 output
+- [x] E3: FP Heritage type annotation + PrintC float literal emission (2026-04-04)
+  - Heritage.AnnotateFloatTypes(): marks FLOAT_* op output varnodes as float/double
+  - renderFloatLiteral(): IEEE-754 bit reinterpretation (0x3f800000 -> 1f, NaN/Inf handled)
+  - ScopeLocal: float type propagated from Varnode to HighVariable
+  - `TestE3FloatLiteralEmit`: 10 subtests covering 0/1/neg/NaN/Inf for float32+float64
   - CSpec XML parser: `cspec.go` (Ghidra calling convention spec loader)
   - ProtoModel cdecl: EBP+8 -> param_0, EBP+12 -> param_1, EAX -> return
   - HighVariable layer: HighParam, HighLocal, HighGlobal, HighOther (variable.cc port)

@@ -36,7 +36,7 @@ int classify2(int x, int y) {
   - PrintC 연동: 함수 선언 파라미터 출력, 로컬 변수 선언
 - E2E: classify2 출력에 `int x, int y` 파라미터 명시
 
-## E2: Dead Code 제거 + Cast 삽입 + CoreAction 오케스트레이션
+## E2: Dead Code 제거 + Cast 삽입 + CoreAction 오케스트레이션 [DONE 2026-04-04]
 
 **핵심 deliverable**: 깔끔한 C 출력 (플래그 변수 제거, 타입 캐스트).
 - C++ 참조: `coreaction.cc` (ActionDeadCode, ActionSetCasts, ActionNormalizeSetup, ActionPrototypeTypes), `cast.cc` (CastStrategy/CastStrategyC)
@@ -46,7 +46,7 @@ int classify2(int x, int y) {
   - coreaction 전체 오케스트레이션 파이프라인 완성
 - E2E: 플래그 dead assign 없는 깔끔한 C 출력
 
-## E3: FP 타입 추론 레이어
+## E3: FP 타입 추론 레이어 [DONE 2026-04-04]
 
 **핵심 deliverable**: float/double 변수 C 출력.
 - x87 FP decode는 D20에서 완료 (FLD1/FLDZ/FSTP p-code 정상 동작 확인)
