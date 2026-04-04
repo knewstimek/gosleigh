@@ -311,6 +311,203 @@ func (r *RuleEqual2Zero) apply(op *PcodeOp, data *Funcdata) int {
 	return 0
 }
 
+// RuleSborrow simplifies INT_SBORROW expressions.
+//
+// Trivial case: sborrow(V, 0) => false (constant 0 of size 1).
+//
+// Full pattern (RuleSborrow::applyOp in ruleaction.cc lines 3381-3432):
+//   sborrow(V,W) != (V + W*-1 s< 0)  =>  V s< W
+//   sborrow(V,W) != (0 s< V + W*-1)  =>  W s< V
+//   sborrow(V,W) == (0 s< V + W*-1)  =>  V s<= W
+//   sborrow(V,W) == (V + W*-1 s< 0)  =>  W s<= V
+//
+// This fires on the SBORROW op itself: inspect consumers (INT_EQUAL /
+// INT_NOTEQUAL) whose other operand is an INT_SLESS over the same
+// add-expression, then replace the comparison with a direct signed compare.
+type RuleSborrow struct{ batchRule }
+
+func NewRuleSborrow(group string) *RuleSborrow {
+	r := &RuleSborrow{}
+	r.batchRule = newBatchRule(group, "sborrow", []OpCode{CPUI_INT_SBORROW},
+		r.apply, func(g string) Rule { return NewRuleSborrow(g) })
+	return r
+}
+
+func (r *RuleSborrow) apply(op *PcodeOp, data *Funcdata) int {
+	bvn := op.Input(1)
+	// Trivial case: sborrow(V, 0) => false
+	// This covers the common pattern from compilers that emit SBORROW with 0
+	// to detect signed overflow on subtraction from zero.
+	if isZeroConst(bvn) {
+		rewriteOp(data, op, CPUI_COPY, data.NewConstant(1, 0))
+		return 1
+	}
+
+	// Full pattern: look for INT_EQUAL or INT_NOTEQUAL consumers of this
+	// SBORROW output that compare against an INT_SLESS applied to the
+	// add-expression (avn + bvn*-1). When matched, replace the comparison
+	// with a direct signed comparison.
+	// C++ parity: RuleSborrow::applyOp in ruleaction.cc lines 3381-3432.
+	out := op.Output()
+	if out == nil {
+		return 0
+	}
+	avn := op.Input(0)
+
+	changed := 0
+	for _, cmp := range out.DescendIter() {
+		if cmp == nil || cmp.IsDead() {
+			continue
+		}
+		if cmp.Code() != CPUI_INT_EQUAL && cmp.Code() != CPUI_INT_NOTEQUAL {
+			continue
+		}
+		// Find the other input (not the SBORROW output).
+		var otherVn *Varnode
+		if cmp.Input(0) == out {
+			otherVn = cmp.Input(1)
+		} else if cmp.Input(1) == out {
+			otherVn = cmp.Input(0)
+		} else {
+			continue
+		}
+		if otherVn == nil {
+			continue
+		}
+		// The other input must come from an INT_SLESS.
+		sless := otherVn.Def()
+		if sless == nil || sless.Code() != CPUI_INT_SLESS {
+			continue
+		}
+		// Determine match variant. We expect one of:
+		//   (avn + bvn*-1) s< 0   (sless.Input(1) is zero const)
+		//   0 s< (avn + bvn*-1)   (sless.Input(0) is zero const)
+		addExprVn, zeroSlot, ok := matchSborrowAddExpr(sless, avn, bvn)
+		if !ok || addExprVn == nil {
+			continue
+		}
+		// Determine the resulting comparison opcode.
+		// C++ parity table:
+		//   NEQ + (add s< 0) => V s< W  (zeroSlot==1)
+		//   NEQ + (0 s< add) => W s< V  (zeroSlot==0)
+		//   EQ  + (0 s< add) => V s<= W (zeroSlot==0)
+		//   EQ  + (add s< 0) => W s<= V (zeroSlot==1)
+		var resultOpc OpCode
+		var lhsVn, rhsVn *Varnode
+		isNeq := cmp.Code() == CPUI_INT_NOTEQUAL
+		if isNeq && zeroSlot == 1 {
+			// NEQ + (add s< 0) => V s< W
+			resultOpc = CPUI_INT_SLESS
+			lhsVn = avn
+			rhsVn = bvn
+		} else if isNeq && zeroSlot == 0 {
+			// NEQ + (0 s< add) => W s< V
+			resultOpc = CPUI_INT_SLESS
+			lhsVn = bvn
+			rhsVn = avn
+		} else if !isNeq && zeroSlot == 0 {
+			// EQ + (0 s< add) => V s<= W
+			resultOpc = CPUI_INT_SLESSEQUAL
+			lhsVn = avn
+			rhsVn = bvn
+		} else {
+			// EQ + (add s< 0) => W s<= V
+			resultOpc = CPUI_INT_SLESSEQUAL
+			lhsVn = bvn
+			rhsVn = avn
+		}
+		rewriteOp(data, cmp, resultOpc, lhsVn, rhsVn)
+		changed = 1
+	}
+	return changed
+}
+
+// matchSborrowAddExpr checks whether the INT_SLESS op contains an add-expression
+// matching (avn + bvn*-1) on one side and zero on the other.
+// Returns the add-expression varnode, which slot (0 or 1) holds zero, and ok.
+// C++ parity: AddExpression::gatherTwoTermsSubtract in ruleaction.cc.
+func matchSborrowAddExpr(sless *PcodeOp, avn, bvn *Varnode) (*Varnode, int, bool) {
+	for zeroSlot := 0; zeroSlot <= 1; zeroSlot++ {
+		zeroVn := sless.Input(zeroSlot)
+		addVn := sless.Input(1 - zeroSlot)
+		if !isZeroConst(zeroVn) || addVn == nil {
+			continue
+		}
+		addOp := addVn.Def()
+		if addOp == nil || addOp.Code() != CPUI_INT_ADD {
+			continue
+		}
+		if isAddExprMatch(addOp, avn, bvn) {
+			return addVn, zeroSlot, true
+		}
+	}
+	return nil, 0, false
+}
+
+// isAddExprMatch returns true if the INT_ADD op computes (avn + bvn*-1),
+// i.e. one input is avn and the other is the negation of bvn.
+// C++ parity: AddExpression::gatherTwoTermsSubtract.
+func isAddExprMatch(addOp *PcodeOp, avn, bvn *Varnode) bool {
+	for slot := 0; slot < 2; slot++ {
+		if !sameValue(addOp.Input(slot), avn) {
+			continue
+		}
+		neg := addOp.Input(1 - slot)
+		if isNegatedVarnode(neg, bvn) {
+			return true
+		}
+	}
+	return false
+}
+
+// isNegatedVarnode returns true if neg represents (bvn * -1), i.e. the
+// two's-complement negation of bvn. Handles three sub-cases:
+//  1. bvn is a constant: neg is the constant equal to (-bvn) masked to size.
+//  2. neg is an INT_2COMP of bvn.
+//  3. neg is an INT_MULT of bvn by -1 constant.
+func isNegatedVarnode(neg, bvn *Varnode) bool {
+	if neg == nil || bvn == nil {
+		return false
+	}
+	// Case 1: both constants.
+	if neg.IsConstant() && bvn.IsConstant() {
+		bits := uint(bvn.Size() * 8)
+		var mask uint64
+		if bits >= 64 {
+			mask = ^uint64(0)
+		} else {
+			mask = (uint64(1) << bits) - 1
+		}
+		return ((-bvn.Offset()) & mask) == (neg.Offset() & mask)
+	}
+	// Case 2: INT_2COMP of bvn.
+	if twocomp := neg.Def(); twocomp != nil && twocomp.Code() == CPUI_INT_2COMP {
+		if sameValue(twocomp.Input(0), bvn) {
+			return true
+		}
+	}
+	// Case 3: INT_MULT of bvn by -1 constant.
+	if mult := neg.Def(); mult != nil && mult.Code() == CPUI_INT_MULT {
+		for slot := 0; slot < 2; slot++ {
+			cv, ok := constantValue(mult.Input(slot))
+			if !ok {
+				continue
+			}
+			bits := uint(bvn.Size() * 8)
+			var negOne uint64
+			if bits >= 64 {
+				negOne = ^uint64(0)
+			} else {
+				negOne = (uint64(1) << bits) - 1
+			}
+			if cv == negOne && sameValue(mult.Input(1-slot), bvn) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
 type RuleEqual2Constant struct{ batchRule }
 
 func NewRuleEqual2Constant(group string) *RuleEqual2Constant {

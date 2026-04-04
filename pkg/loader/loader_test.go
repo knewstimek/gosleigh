@@ -890,6 +890,21 @@ func TestX86ClassifySignFunction(t *testing.T) {
 		}
 	}
 
+	// SBORROW must be eliminated by RuleSborrow (sborrow(V,0) => false).
+	// C++ parity: RuleSborrow::applyOp in ruleaction.cc.
+	if strings.Contains(output, "SBORROW") {
+		t.Errorf("expected SBORROW to be eliminated from classify_sign output, but found it:\n%s", output)
+	}
+
+	// Epilogue assignments (ESP stack manipulation and EIP return address load)
+	// must be eliminated by stripReturnIndirectRef + ActionDeadCode.
+	// C++ parity: ActionPrototypeTypes::apply() in coreaction.cc.
+	for _, epilogue := range []string{"ESP = ESP", "ESP =", "EIP ="} {
+		if strings.Contains(output, epilogue) {
+			t.Errorf("expected epilogue assignment %q to be eliminated from classify_sign output, but found it:\n%s", epilogue, output)
+		}
+	}
+
 	// CPU flag registers must be folded away and must not appear in C output.
 	for _, flag := range []string{"ZF", "SF", "OF"} {
 		if strings.Contains(output, flag) {
