@@ -22,6 +22,7 @@ package pcode
 type HighVariable struct {
 	name      string
 	instances []*Varnode
+	datatype  Datatype // type annotation; nil means unknown
 }
 
 // NewHighVariable creates a HighVariable with the given name and zero instances.
@@ -71,4 +72,29 @@ func (hv *HighVariable) GetInstance(i int) *Varnode {
 		return nil
 	}
 	return hv.instances[i]
+}
+
+// Instances returns all associated low-level varnodes.
+func (hv *HighVariable) Instances() []*Varnode {
+	if hv == nil {
+		return nil
+	}
+	return hv.instances
+}
+
+// Type returns the type annotation for this high variable, or nil if unset.
+func (hv *HighVariable) Type() Datatype {
+	if hv == nil {
+		return nil
+	}
+	return hv.datatype
+}
+
+// SetType sets the type annotation for this high variable.
+// C++ parity: HighVariable::setType (partial)
+func (hv *HighVariable) SetType(dt Datatype) {
+	if hv == nil {
+		return
+	}
+	hv.datatype = dt
 }

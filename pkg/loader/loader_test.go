@@ -1402,3 +1402,91 @@ func TestX86CallChainFunction(t *testing.T) {
 	}
 	t.Logf("call_chain C output:\n%s", output)
 }
+
+func TestE2DeadCodeElimination(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
+
+	// classify2: CMP + conditional branches -- generates INT_SBORROW/INT_CARRY flag ops.
+	// CMP dword [EBP+8], 0; JL negative; CMP dword [EBP+8], 100; JG large;
+	// MOV EAX,0; POP EBP; RET; negative: MOV EAX,-1; POP EBP; RET;
+	// large: MOV EAX,1; POP EBP; RET
+	prog := []byte{
+		0x55,                               // PUSH EBP
+		0x89, 0xE5,                         // MOV EBP,ESP
+		0x83, 0x7D, 0x08, 0x00,             // CMP dword [EBP+8], 0
+		0x7C, 0x0C,                         // JL +12 (to negative)
+		0x81, 0x7D, 0x08, 0x64, 0x00, 0x00, 0x00, // CMP dword [EBP+8], 100
+		0x7F, 0x07,                         // JG +7 (to large)
+		0xB8, 0x00, 0x00, 0x00, 0x00,       // MOV EAX, 0
+		0x5D,                               // POP EBP
+		0xC3,                               // RET
+		// negative:
+		0xB8, 0xFF, 0xFF, 0xFF, 0xFF,       // MOV EAX, -1
+		0x5D,                               // POP EBP
+		0xC3,                               // RET
+		// large:
+		0xB8, 0x01, 0x00, 0x00, 0x00,       // MOV EAX, 1
+		0x5D,                               // POP EBP
+		0xC3,                               // RET
+	}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{
+		Name:            "classify2",
+		Entry:           base,
+		MaxInstructions: 40,
+		CspecPath:       cspecPath,
+	})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+
+	// Apply dead code elimination before BatchA so that flag ops with no
+	// consumers are removed before further processing.
+	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
+
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	var stackSpace *address.Space
+	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.Space() == nil {
+			continue
+		}
+		if vn.Space().Kind == address.SpaceKindStack || vn.Space().Name == "stack" {
+			stackSpace = vn.Space()
+			break
+		}
+	}
+
+	model := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace)
+	pcode.ApplyCallingConvention(result.Funcdata, model)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	t.Logf("classify2 C output:\n%s", output)
+
+	// After dead code elimination, flag ops like SBORROW/INT_CARRY/POPCOUNT
+	// should NOT appear in the C output.
+	for _, deadStr := range []string{"SBORROW", "POPCOUNT", "INT_CARRY"} {
+		if strings.Contains(output, deadStr) {
+			t.Errorf("expected %s to be eliminated from output, but found it:\n%s", deadStr, output)
+		}
+	}
+}
