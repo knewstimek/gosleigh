@@ -115,7 +115,7 @@ func TestX86ELFDecompile(t *testing.T) {
 		t.Fatalf("ActionFinalStructure.Apply returned %d", res)
 	}
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}

@@ -344,3 +344,28 @@ func cloneSectionID(section *int64) *int64 {
 	value := *section
 	return &value
 }
+
+// RegisterNamesByLocation returns a map of "spaceIdx:offset:size" -> register name
+// for all VarnodeSymbol entries in the SLA symbol table.
+// Key format matches the encoding used by PrintC.SetRegisterNames.
+// When multiple symbols map to the same location, the shortest name wins (prefer
+// canonical short names like "eax" over longer aliases).
+// C++ parity: AddrSpace/VarnodeSymbol name table in slghsymbol.cc
+func (e *Engine) RegisterNamesByLocation() map[string]string {
+	result := make(map[string]string)
+	if e == nil || e.symbols == nil {
+		return result
+	}
+	for i := range e.symbols.Symbols {
+		sym := &e.symbols.Symbols[i]
+		if sym.Body.Varnode == nil || sym.Name == "" {
+			continue
+		}
+		v := sym.Body.Varnode
+		key := fmt.Sprintf("%d:%d:%d", v.SpaceIndex, v.Offset, v.Size)
+		if existing, ok := result[key]; !ok || len(sym.Name) < len(existing) {
+			result[key] = sym.Name
+		}
+	}
+	return result
+}
