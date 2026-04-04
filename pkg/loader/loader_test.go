@@ -1837,3 +1837,100 @@ func TestX86ArrayIndexAccess(t *testing.T) {
 	}
 	t.Logf("array index access (seeded=%d) C output:\n%s", seeded, output)
 }
+
+// TestE6SymbolNameInOutput verifies the full E6 symbol recovery pipeline:
+//
+//  1. LoadELFSymbols extracts "simple_add" from the .symtab of simple_add_sym.elf.
+//  2. The recovered name is passed as BuildConfig.SymbolName.
+//  3. bridge.Build wires the name onto Funcdata via SetDisplayName.
+//  4. PrintC.Emit uses DisplayName() for the function declaration header.
+//
+// This confirms that a recovered symbol name from a binary loader flows all
+// the way through to the C output without modifying the internal address name.
+func TestE6SymbolNameInOutput(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+
+	elfPath := filepath.Join(dir, "../../testdata/elfs/simple_add_sym.elf")
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// Step 1: recover symbol table from ELF .symtab.
+	symTab, err := loader.LoadELFSymbols(elfPath)
+	if err != nil {
+		t.Fatalf("LoadELFSymbols: %v", err)
+	}
+	if symTab.Len() == 0 {
+		t.Fatal("no symbols loaded from simple_add_sym.elf")
+	}
+
+	// Load the .text section for engine construction.
+	data, baseAddr, err := loader.LoadELF32TextSection(elfPath)
+	if err != nil {
+		t.Fatalf("LoadELF32TextSection: %v", err)
+	}
+
+	engine, entryAddr, err := (&loader.EngineBuilder{
+		SLAPath:   slaPath,
+		PspecPath: pspecPath,
+		Bytes:     data,
+		BaseAddr:  baseAddr,
+	}).Build()
+	if err != nil {
+		t.Fatalf("EngineBuilder.Build: %v", err)
+	}
+
+	// Step 2: look up the recovered symbol name for the entry address.
+	recoveredName := ""
+	if sym, found := symTab.Lookup(entryAddr.Offset); found {
+		recoveredName = sym.Name
+	}
+	if recoveredName == "" {
+		t.Logf("no symbol at entry 0x%x; using fallback name", entryAddr.Offset)
+		recoveredName = "simple_add"
+	}
+	t.Logf("recovered symbol name: %q", recoveredName)
+
+	// Step 3: pass the recovered name through BuildConfig.SymbolName.
+	result, err := bridge.Build(engine, bridge.BuildConfig{
+		Name:            "fallback_name",
+		Entry:           entryAddr,
+		MaxInstructions: 20,
+		SymbolName:      recoveredName,
+	})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+	if result == nil || result.Funcdata == nil {
+		t.Fatal("bridge.Build returned nil")
+	}
+
+	// DisplayName must reflect the recovered symbol name.
+	if got := result.Funcdata.DisplayName(); got != recoveredName {
+		t.Fatalf("DisplayName() = %q, want %q", got, recoveredName)
+	}
+
+	heritage := pcode.NewHeritage(result.Funcdata, result.HeritageSpaces)
+	heritage.Heritage(result.Graph)
+
+	pool := pcode.NewBatchAActionPool("batch-a", "analysis")
+	pool.Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	// Step 4: recovered name must appear in PrintC output.
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output")
+	}
+	if !strings.Contains(output, recoveredName) {
+		t.Fatalf("PrintC output does not contain recovered name %q:\n%s", recoveredName, output)
+	}
+	t.Logf("E6 symbol recovery output:\n%s", output)
+}

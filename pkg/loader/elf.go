@@ -19,6 +19,42 @@ import (
 	"fmt"
 )
 
+// LoadELFSymbols reads both .symtab and .dynsym from an ELF file and merges
+// the results into a single SymbolTable. Both sections are always attempted;
+// errors from missing sections are silently ignored so stripped binaries
+// (dynsym-only) and non-shared binaries (symtab-only) are both handled.
+// Returns an empty table (not an error) when the file has no symbol sections.
+func LoadELFSymbols(path string) (*SymbolTable, error) {
+	f, err := elf.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("LoadELFSymbols: open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	st := NewSymbolTable()
+
+	// Merge both .symtab and .dynsym -- goal spec requires append, not fallback.
+	// f.Symbols returns nil slice (not error) when .symtab is absent.
+	// f.DynamicSymbols returns nil slice (not error) when .dynsym is absent.
+	syms, _ := f.Symbols()
+	dsyms, _ := f.DynamicSymbols()
+
+	for _, s := range syms {
+		if s.Name == "" {
+			continue
+		}
+		st.Add(Symbol{Name: s.Name, Address: s.Value, Size: s.Size})
+	}
+	for _, s := range dsyms {
+		if s.Name == "" {
+			continue
+		}
+		st.Add(Symbol{Name: s.Name, Address: s.Value, Size: s.Size})
+	}
+
+	return st, nil
+}
+
 // LoadELF32TextSection opens an ELF32 file and returns the raw bytes of the
 // .text section along with its virtual base address.
 //

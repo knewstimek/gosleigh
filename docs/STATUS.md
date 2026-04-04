@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: Decompiler Pipeline + PrintC (Phase 4-5 완료) (2026-04-02)
+## 현재 단계: E-Phase Decompiler Output Quality (E6 완료) (2026-04-05)
 
 ### 완료
 - [x] Git repo initialized
@@ -369,6 +369,7 @@
 - [ ] Finish `symbols.go` and `metadata.go` parity audit including `ContextSymbolBoundary` and `ContextOpBoundary` runtime usage
 - [ ] Reconcile Gosleigh package/module shape with standalone use plus downstream MCP integration
 - [ ] Continue from translation/runtime into the broader decompiler pipeline instead of stopping at a partial translator layer
+- [x] E6: symbol recovery -- SymbolTable, LoadELFSymbols, LoadDWARFFunctions, LoadPE32Exports/Imports, SetDisplayName, BuildConfig.SymbolName wiring, fixture generators, 6 unit tests + E2E (2026-04-05)
 
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
