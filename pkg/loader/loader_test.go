@@ -110,3 +110,56 @@ func TestX86SimpleFunction(t *testing.T) {
 	}
 	t.Logf("emitted C:\n%s", output)
 }
+
+// TestX86CountedLoop exercises the full pipeline with a counted loop:
+//
+//	MOV ECX,3 + DEC ECX + JNE -3 + RET
+//
+// Verifies that backward branch (JNE) produces >= 2 CFG blocks and that
+// PrintC emits non-empty C output for a loop-containing function.
+func TestX86CountedLoop(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	prog := []byte{0xB9, 0x03, 0x00, 0x00, 0x00, 0x49, 0x75, 0xFD, 0xC3}
+	// 0x00: MOV ECX,3
+	// 0x05: DEC ECX
+	// 0x06: JNE -3 (to 0x05)
+	// 0x08: RET
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "loop", Entry: base, MaxInstructions: 20})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	if len(result.Instructions) < 3 {
+		t.Fatalf("expected >= 3 instructions, got %d", len(result.Instructions))
+	}
+	if result.Graph.GetSize() < 2 {
+		t.Fatalf("expected >= 2 CFG blocks, got %d", result.Graph.GetSize())
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if output == "" {
+		t.Fatal("PrintC Emit returned empty string for loop function")
+	}
+	t.Logf("PrintC output:\n%s", output)
+}
