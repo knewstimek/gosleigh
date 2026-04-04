@@ -201,6 +201,12 @@
 - [x] Phase 5 complete: WU7 완료. PrintC 기반 C 출력 경로와 선언 출력기가 구현됨
 - [x] 현재 저장소 기준 `go test ./...` 통과
 
+- [x] Phase D7 완료 (2026-04-04): PE32 loader + TestX86PEDecompile E2E + CLI --pe flag
+  - `pkg/loader/pe.go`: LoadPE32TextSection (debug/pe stdlib, PE32+ 거부 포함)
+  - `pkg/loader/pe_test.go`: TestPELoader (len==13, data[0]==0x55, vma==0x401000) + TestX86PEDecompile (full pipeline)
+  - `testdata/elfs/simple_add.exe`: 1024-byte minimal PE32 (add() 함수, ImageBase=0x400000, .text@0x1000)
+  - `testdata/elfs/gen_pe.go`: PE32 binary generator (build tag ignore)
+  - `cmd/gosleigh/main.go`: --pe flag (--elf/--binary와 상호 배타)
 - [x] Phase D6 완료 (2026-04-04): IDIV/DIV/CDQ/SHL/SHR/SAR golden fixtures + E2E tests
   - `pkg/sla/x86_golden_test.go`: 6 new cases (CDQ, IDIV_ECX, DIV_ECX, SHL/SHR/SAR_EAX_imm8) -- 총 25 subtests
   - `testdata/golden/x86_CDQ.json`: INT_SEXT+SUBPIECE (Ghidra x86.sla sext(EAX)->EDX parity)
