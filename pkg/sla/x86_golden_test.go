@@ -237,6 +237,12 @@ func TestGoldenX86(t *testing.T) {
 		{"x86_PUSH_EDI",            []byte{0x57}},
 		{"x86_POP_EDI",             []byte{0x5F}},
 		{"x86_MOV_ESI_EAX",         []byte{0x89, 0xC6}},
+		// D18: misc opcode gaps -- MOVSX 16-bit reg, MOVSX/MOVZX memory, TEST imm32, 66h-prefix MOV
+		{"x86_MOVSX_EAX_AX",      []byte{0x0F, 0xBF, 0xC0}},
+		{"x86_MOVSX_EAX_mem",     []byte{0x0F, 0xBE, 0x00}},
+		{"x86_MOVZX_EAX_mem",     []byte{0x0F, 0xB6, 0x00}},
+		{"x86_TEST_EAX_imm32",    []byte{0xA9, 0xFF, 0xFF, 0xFF, 0xFF}},
+		{"x86_MOV_AX_EBP_disp8",  []byte{0x66, 0x8B, 0x45, 0x08}},
 	}
 
 	update := os.Getenv("GOSLEIGH_UPDATE_GOLDEN") == "1"

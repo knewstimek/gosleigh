@@ -297,6 +297,15 @@
   - 총 97개 golden subtest 통과
   - `TestX86LinkedListFunction` E2E: linked list traversal (sum_list, back edge loop) -> Heritage+PrintC 파이프라인 검증
   - `TestX86ArrayIndexFunction` E2E: array index (arr[i], SIB scale*4) -> Heritage+PrintC 파이프라인 검증
+- [x] D18: misc opcode gaps + complex multi-arg E2E 완료 (2026-04-04)
+  - 5개 golden fixture 추가: MOVSX_EAX_AX (0F BF C0), MOVSX_EAX_mem (0F BE 00), MOVZX_EAX_mem (0F B6 00), TEST_EAX_imm32 (A9 FF FF FF FF), MOV_AX_EBP_disp8 (66 8B 45 08)
+  - 총 102개 golden subtest 통과 (기존 97 + 신규 5)
+  - decode gap 없음: 5개 opcode 모두 기존 Sleigh 엔진에서 정상 처리
+    - MOVSX 16-bit reg form (0F BF): INT_SEXT AX->EAX (1 op)
+    - MOVSX/MOVZX memory forms (0F BE/B6): LOAD+INT_SEXT/INT_ZEXT (memory read path)
+    - TEST EAX,imm32 (A9): INT_AND + ZF/SF/PF flags (AND 결과는 임시 unique에 기록, result 버림)
+    - 66h prefix MOV (operand size override): INT_ADD+LOAD+COPY (Ghidra x86.sla opsize override 경로 정상)
+  - `TestX86ComplexMultiArgFunction` E2E: sum_positive() -- ESI callee-save + SIB+disp8 array access + CMP+JL conditional + DEC+JNZ loop, >= 8 instructions, >= 3 CFG blocks, non-empty PrintC 출력
 
 ### 다음
 - [ ] **[우선순위 높음]** `DecisionNode::resolve()` 결함 수정: 6502 BRK 외 대부분 opcode (NOP 0xEA, LDA 0xA9 등)에서 발생하는 `"unable to resolve constructor"` 원인을 C++ `slghsymbol.cc` 대조로 찾아 수정. 수정 후 `GOSLEIGH_UPDATE_GOLDEN=1`로 golden fixture 재생성.
