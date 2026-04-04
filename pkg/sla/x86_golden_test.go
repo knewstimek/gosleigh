@@ -139,9 +139,16 @@ func TestGoldenX86(t *testing.T) {
 		name string
 		prog []byte
 	}{
-		{"x86_NOP",      []byte{0x90}},
-		{"x86_RET",      []byte{0xC3}},
-		{"x86_PUSH_EBP", []byte{0x55}},
+		{"x86_NOP",           []byte{0x90}},
+		{"x86_RET",           []byte{0xC3}},
+		{"x86_PUSH_EBP",      []byte{0x55}},
+		{"x86_MOV_EBX_EAX",   []byte{0x89, 0xC3}},
+		{"x86_MOV_EAX_imm32", []byte{0xB8, 0x01, 0x00, 0x00, 0x00}},
+		{"x86_ADD_EAX_EBX",   []byte{0x01, 0xD8}},
+		{"x86_SUB_EAX_EBX",   []byte{0x29, 0xD8}},
+		{"x86_XOR_EAX_EAX",   []byte{0x31, 0xC0}},
+		{"x86_POP_EBP",       []byte{0x5D}},
+		{"x86_JMP_short",     []byte{0xEB, 0x00}},
 	}
 
 	update := os.Getenv("GOSLEIGH_UPDATE_GOLDEN") == "1"
@@ -159,9 +166,13 @@ func TestGoldenX86(t *testing.T) {
 				t.Fatalf("TranslateInstructionAt: %v", translateErr)
 			}
 
-			// 0 ops is a warning, not a hard failure -- NOP legitimately emits no p-code.
+			// NOP legitimately emits 0 ops; all other subtests must produce at least 1 op.
 			if len(translation.Ops) == 0 {
-				t.Logf("WARNING: 0 ops returned for %s -- may indicate missing context or an intentional no-op", tc.name)
+				if tc.name == "x86_NOP" {
+					t.Logf("WARNING: 0 ops returned for %s -- intentional no-op", tc.name)
+				} else {
+					t.Fatalf("0 ops returned for %s -- translation gap detected", tc.name)
+				}
 			}
 
 			got := opsToGolden(base, translation.Ops)

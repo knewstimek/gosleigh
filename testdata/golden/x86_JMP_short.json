@@ -1,0 +1,14 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "BRANCH",
+		"inputs": [
+			{
+				"space": "ram",
+				"offset": 2,
+				"size": 4
+			}
+		],
+		"output": null
+	}
+]
