@@ -16,6 +16,7 @@
 - Phase D3 완료 (2026-04-04): ELF32 loader (LoadELF32TextSection, debug/elf), simple_add.elf E2E, MOV [mem] 동작 확인
 - Phase D4 완료 (2026-04-04): if-else diamond CFG -- resolve.go length fix, bridge.go BFS worklist, TestX86IfElse E2E
 - Phase D5 완료 (2026-04-04): IMUL/MUL golden fixtures (19 subtests), CLI --elf flag, TestX86MultiplyFunction E2E
+- Phase D6 완료 (2026-04-04): IDIV/DIV/CDQ/SHL/SHR/SAR golden fixtures (25 subtests), TestX86DivideFunction + TestX86BitshiftFunction E2E
 - NOP (0x90) = Ghidra PCODE_NOP, 0 ops는 정상 동작
 - VarnodeList operand type translate.go에 추가 (PUSH EBP 지원)
 
@@ -46,7 +47,8 @@
 
 12. ~~Heritage SSA on real CFG 검증 -- 루프/switch~~ -- 완료 (loop CFG: 3 blocks, do-while PrintC, 2026-04-04)
 13. ~~Rules MUL/IMUL~~ -- 완료 (2026-04-04)
-13b. Rules 미완성 보완 -- div/switch/float
+13b. ~~Rules IDIV/DIV/CDQ/SHL/SHR/SAR~~ -- 완료 (2026-04-04)
+13c. Rules 미완성 보완 -- switch/float
 14. block structuring E2E 검증
 15. assembly printer (optional)
 16. DWARF/symtab 활용 (optional)
