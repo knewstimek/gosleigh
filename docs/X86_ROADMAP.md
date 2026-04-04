@@ -28,9 +28,10 @@
 
 ### Phase C: E2E 인프라
 
-9. ELF LoadImage 구현 -- code section 추출, entry point
-10. CLI 진입점 -- cmd/gosleigh/main.go
-11. x86 단순 함수 (no loop) E2E: ELF -> C 출력 검증
+9. 파일 기반 입력 -- file path + offset + size로 직접 읽기 (MCP tool이 토큰 낭비 없이 호출 가능)
+10. ELF/PE section 추출 (optional) -- Go 표준 debug/elf, debug/pe 활용
+11. CLI 진입점 -- cmd/gosleigh/main.go (optional, MCP 우선)
+12. x86 단순 함수 (no loop) E2E: 파일 -> C 출력 검증
 
 ### Phase D: 실사용 수준
 
