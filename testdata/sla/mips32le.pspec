@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<processor_spec>
+  <programcounter register="pc"/>
+  <context_data>
+    <context_set space="ram">
+      <!-- MIPS32 context defaults: standard MIPS32 mode, no microMIPS/MIPS16 -->
+      <set name="PAIR_INSTRUCTION_FLAG" val="0"/>
+      <set name="REL6" val="0"/>
+      <set name="ISA_MODE" val="0"/>
+    </context_set>
+  </context_data>
+</processor_spec>

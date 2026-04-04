@@ -1,0 +1,23 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "INT_ADD",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 16,
+				"size": 4
+			},
+			{
+				"space": "register",
+				"offset": 20,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 8,
+			"size": 4
+		}
+	}
+]
