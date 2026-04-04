@@ -43,6 +43,12 @@ type Funcdata struct {
 
 	// Minimum laned size
 	minLanedSize uint32
+
+	// Calling convention and local variable scope (set by ApplyCallingConvention).
+	// Both are nil until a cspec is attached.
+	// C++ parity: Funcdata::proto, Funcdata::localmap
+	funcProto  *FuncProto
+	scopeLocal *ScopeLocal
 }
 
 // NewFuncdata creates a Funcdata container for the named function.
@@ -79,6 +85,21 @@ func (fd *Funcdata) SetFlag(f uint32)             { fd.flags |= f }
 func (fd *Funcdata) ClearFlag(f uint32)           { fd.flags &^= f }
 func (fd *Funcdata) GetVarnodeBank() *VarnodeBank { return &fd.vbank }
 func (fd *Funcdata) GetPcodeOpBank() *PcodeOpBank { return &fd.obank }
+
+// GetFuncProto returns the calling convention prototype, or nil if not set.
+// C++ parity: Funcdata::getFuncProto
+func (fd *Funcdata) GetFuncProto() *FuncProto { return fd.funcProto }
+
+// SetFuncProto attaches a calling convention prototype.
+// C++ parity: Funcdata::getFuncProto (setter path)
+func (fd *Funcdata) SetFuncProto(fp *FuncProto) { fd.funcProto = fp }
+
+// GetScopeLocal returns the local variable scope, or nil if not set.
+// C++ parity: Funcdata::getScopeLocal
+func (fd *Funcdata) GetScopeLocal() *ScopeLocal { return fd.scopeLocal }
+
+// SetScopeLocal attaches a local variable scope.
+func (fd *Funcdata) SetScopeLocal(sl *ScopeLocal) { fd.scopeLocal = sl }
 
 // ---------------------------------------------------------------------------
 // Varnode creation

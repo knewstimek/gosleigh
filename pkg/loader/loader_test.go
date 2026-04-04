@@ -20,6 +20,7 @@ import (
 	"strings"
 	"testing"
 
+	"gosleigh/pkg/address"
 	"gosleigh/pkg/bridge"
 	"gosleigh/pkg/loader"
 	"gosleigh/pkg/pcode"
@@ -1246,6 +1247,106 @@ func TestX86NestedIfFunction(t *testing.T) {
 // TestX86CallChainFunction exercises the full pipeline with a function that
 // contains two sequential CALL instructions: caller -> callee1 -> callee2.
 // Verifies that multi-CALL chains are decoded correctly through Heritage+PrintC.
+// TestX86CdeclParamLocalFunction verifies that when a .cspec calling convention
+// is attached, PrintC emits named parameters (param_0, param_1) and named locals
+// (local_0) instead of raw stack offset names (stack_fffffffc_4 etc.).
+//
+// Function layout (22 bytes):
+//
+//	0x00: 55              PUSH EBP
+//	0x01: 89 E5           MOV EBP,ESP
+//	0x03: 83 EC 04        SUB ESP,4           (allocate local)
+//	0x06: 8B 45 08        MOV EAX,[EBP+8]     (param a)
+//	0x09: 03 45 0C        ADD EAX,[EBP+12]    (param b)
+//	0x0C: 89 45 FC        MOV [EBP-4],EAX     (local = a+b)
+//	0x0F: 8B 45 FC        MOV EAX,[EBP-4]     (return local)
+//	0x12: 89 EC           MOV ESP,EBP
+//	0x14: 5D              POP EBP
+//	0x15: C3              RET
+func TestX86CdeclParamLocalFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
+
+	prog := []byte{
+		0x55, 0x89, 0xE5, 0x83, 0xEC, 0x04,
+		0x8B, 0x45, 0x08,
+		0x03, 0x45, 0x0C,
+		0x89, 0x45, 0xFC,
+		0x8B, 0x45, 0xFC,
+		0x89, 0xEC, 0x5D, 0xC3,
+	}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{
+		Name:            "add_and_store",
+		Entry:           base,
+		MaxInstructions: 20,
+		CspecPath:       cspecPath,
+	})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+	if result.CspecData == nil {
+		t.Fatal("bridge.Build: CspecData is nil -- cspec was not parsed")
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	// Find the stack address space from all varnodes in the function.
+	// HeritageSpaces does not always include the stack space directly;
+	// the stack space is found by scanning varnodes post-Heritage.
+	var stackSpace *address.Space
+	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.Space() == nil {
+			continue
+		}
+		if vn.Space().Kind == address.SpaceKindStack || vn.Space().Name == "stack" {
+			stackSpace = vn.Space()
+			break
+		}
+	}
+	// stackSpace may still be nil for simple functions with no stack varnodes;
+	// NewProtoModelFromCspec handles nil by falling back to name-based matching.
+
+	// Build ProtoModel from cspec and apply calling convention.
+	model := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace)
+	pcode.ApplyCallingConvention(result.Funcdata, model)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output")
+	}
+	t.Logf("add_and_store C output:\n%s", output)
+
+	// Verify that ABI-aware names appear in the output.
+	if !strings.Contains(output, "param_") {
+		t.Errorf("expected param_ names in output, got:\n%s", output)
+	}
+	if !strings.Contains(output, "local_") {
+		t.Errorf("expected local_ names in output, got:\n%s", output)
+	}
+	// Verify that raw stack offset names are NOT present.
+	if strings.Contains(output, "stack_") {
+		t.Errorf("unexpected raw stack offset names in output (got stack_xxx instead of param_/local_):\n%s", output)
+	}
+}
+
 func TestX86CallChainFunction(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {

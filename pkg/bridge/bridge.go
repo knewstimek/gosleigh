@@ -14,6 +14,9 @@ type BuildConfig struct {
 	Entry           address.Address
 	End             address.Address
 	MaxInstructions int
+	// CspecPath is the optional path to a .cspec calling convention file.
+	// When non-empty, the cspec is parsed and stored in Result.CspecData.
+	CspecPath string
 }
 
 type Result struct {
@@ -22,6 +25,8 @@ type Result struct {
 	Instructions   []sla.InstructionTranslation
 	HeritageSpaces []*address.Space
 	Warnings       []string
+	// CspecData is set when BuildConfig.CspecPath is non-empty.
+	CspecData *pcode.CspecData
 }
 
 type instructionRecord struct {
@@ -121,13 +126,26 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		translations[i] = records[i].translation
 	}
 
-	return &Result{
+	result := &Result{
 		Funcdata:       fd,
 		Graph:          graph,
 		Instructions:   translations,
 		HeritageSpaces: summary.heritageSpaces,
 		Warnings:       warnings,
-	}, nil
+	}
+
+	// Parse cspec if provided. Store in result but do not apply -- callers
+	// may apply after Heritage via pcode.ApplyCallingConvention.
+	if cfg.CspecPath != "" {
+		cs, csErr := pcode.ParseCspec(cfg.CspecPath)
+		if csErr != nil {
+			result.Warnings = append(result.Warnings, fmt.Sprintf("cspec parse %q: %v", cfg.CspecPath, csErr))
+		} else {
+			result.CspecData = cs
+		}
+	}
+
+	return result, nil
 }
 
 func BuildFuncdata(engine *sla.Engine, cfg BuildConfig) (*pcode.Funcdata, error) {
