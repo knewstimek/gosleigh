@@ -288,6 +288,11 @@
   - 총 82개 golden subtest 통과
   - `TestX86SwitchFunction` E2E: 3-case CMP+JNE chain (4-way dispatch) -> Heritage+PrintC 파이프라인 검증
   - REP-prefix string op (memcpy/memset/strlen 패턴) 및 ENTER 프롤로그 디코딩 검증
+- [x] D16: SIB/reg+disp8 addressing mode golden fixtures + struct/array access E2E 완료 (2026-04-04)
+  - 6개 golden fixture 추가: MOV_EAX_EBX_disp8, MOV_EBX_disp8_EAX, MOV_EAX_SIB_ECX_EAX4, LEA_EAX_SIB, MOV_EAX_SIB_disp8, MOV_EAX_EAX_EBX
+  - 총 88개+ golden subtest 통과
+  - `TestX86StructAccessFunction` E2E: struct field access (p->y) -> Heritage+PrintC 파이프라인 검증
+  - `TestX86ArrayIndexFunction` E2E: array index (arr[i], SIB scale*4) -> Heritage+PrintC 파이프라인 검증
 
 ### 다음
 - [ ] **[우선순위 높음]** `DecisionNode::resolve()` 결함 수정: 6502 BRK 외 대부분 opcode (NOP 0xEA, LDA 0xA9 등)에서 발생하는 `"unable to resolve constructor"` 원인을 C++ `slghsymbol.cc` 대조로 찾아 수정. 수정 후 `GOSLEIGH_UPDATE_GOLDEN=1`로 golden fixture 재생성.
