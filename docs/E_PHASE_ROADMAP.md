@@ -24,7 +24,7 @@ int classify2(int x, int y) {
 }
 ```
 
-## E1: 호출 규약 + 변수 복원
+## E1: 호출 규약 + 변수 복원 [DONE 2026-04-04]
 
 **핵심 deliverable**: 함수 파라미터와 로컬 변수에 이름 붙이기.
 - C++ 참조: `fspec.cc` (ProtoModel/FuncProto/ParamEntry/cdecl), `variable.cc` (HighVariable/HighParam/HighLocal), `varmap.cc` (ScopeLocal/MapState/AliasChecker), `cover.cc` (Cover/LocationRange), `merge.cc` (Merge)

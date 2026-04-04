@@ -317,6 +317,15 @@
   - FP probes (FLD1/FLDZ/FSTP_m32) golden fixtures 추가 -- x87 FP 디코딩 정상 동작 확인 (skip 불필요)
   - `TestX86CallChainFunction` E2E: caller -> callee1 -> callee2 multi-CALL chain through Heritage+PrintC
   - 총 113개 golden subtest 통과 (기존 108 + 신규 5), E2E 총계: 21개 테스트
+- [x] E1: cdecl calling convention + variable recovery -- named param/local output (2026-04-04)
+  - CSpec XML parser: `cspec.go` (Ghidra calling convention spec loader)
+  - ProtoModel cdecl: EBP+8 -> param_0, EBP+12 -> param_1, EAX -> return
+  - HighVariable layer: HighParam, HighLocal, HighGlobal, HighOther (variable.cc port)
+  - ScopeLocal: stack frame variable name mapping (varmap.cc port)
+  - FuncProto: function prototype with named parameters
+  - PrintC: function signature with typed params + local variable declarations
+  - `TestX86CdeclParamLocalFunction` E2E: cdecl function output contains param_0/param_1/local_0
+  - 6 test files, 27 test/fuzz/benchmark functions covering all 5 new production files
 
 ### 다음
 - [ ] **[우선순위 높음]** `DecisionNode::resolve()` 결함 수정: 6502 BRK 외 대부분 opcode (NOP 0xEA, LDA 0xA9 등)에서 발생하는 `"unable to resolve constructor"` 원인을 C++ `slghsymbol.cc` 대조로 찾아 수정. 수정 후 `GOSLEIGH_UPDATE_GOLDEN=1`로 golden fixture 재생성.

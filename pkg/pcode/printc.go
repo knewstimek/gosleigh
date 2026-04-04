@@ -133,6 +133,86 @@ func (s *printCState) collectSymbols() {
 	if s.fd == nil {
 		return
 	}
+
+	// ABI-aware path: use FuncProto/ScopeLocal when a calling convention is attached.
+	// C++ parity: Funcdata::printRaw uses high-level variable names from ScopeLocal.
+	if fp := s.fd.GetFuncProto(); fp != nil {
+		sl := s.fd.GetScopeLocal()
+		all := s.fd.GetVarnodeBank().AllVarnodes()
+		params := make([]*Varnode, 0)
+		locals := make([]*Varnode, 0)
+		for _, vn := range all {
+			if vn == nil || vn.IsConstant() || vn.IsAnnotation() {
+				continue
+			}
+			// Classify via ScopeLocal/HighVariable assignment.
+			if hv := vn.High(); hv != nil {
+				name := hv.Name()
+				s.names[vn] = name
+				// Determine if param or local by name prefix.
+				if len(name) >= 6 && name[:6] == "param_" {
+					params = append(params, vn)
+				} else {
+					if vn.Def() != nil && s.shouldInline(vn.Def()) {
+						s.inline[vn.Def()] = true
+					} else {
+						locals = append(locals, vn)
+					}
+				}
+				continue
+			}
+			// Fallback for varnodes not classified by ScopeLocal.
+			if vn.IsInput() {
+				// Check ScopeLocal for this input varnode.
+				if sl != nil {
+					if hv := sl.FindEntry(vn); hv != nil {
+						s.names[vn] = hv.Name()
+						params = append(params, vn)
+						continue
+					}
+				}
+				params = append(params, vn)
+				continue
+			}
+			if vn.Def() == nil {
+				continue
+			}
+			if s.shouldInline(vn.Def()) {
+				s.inline[vn.Def()] = true
+				continue
+			}
+			locals = append(locals, vn)
+		}
+		sort.Slice(params, func(i, j int) bool { return CompareLocDef(params[i], params[j]) < 0 })
+		sort.Slice(locals, func(i, j int) bool { return CompareLocDef(locals[i], locals[j]) < 0 })
+		s.params = dedupVarnodes(params)
+		s.locals = dedupVarnodes(locals)
+		// Assign names for any params/locals not yet named.
+		paramIndex := 0
+		for _, vn := range s.params {
+			if _, ok := s.names[vn]; !ok {
+				s.names[vn] = fmt.Sprintf("param_%d", paramIndex)
+			}
+			paramIndex++
+		}
+		localIndex := 0
+		tmpIndex := 0
+		for _, vn := range s.locals {
+			if _, ok := s.names[vn]; ok {
+				continue
+			}
+			if vn.Space() != nil && vn.Space().IsUnique() {
+				s.names[vn] = fmt.Sprintf("tmp_%d", tmpIndex)
+				tmpIndex++
+				continue
+			}
+			s.names[vn] = fmt.Sprintf("local_%d", localIndex)
+			localIndex++
+		}
+		return
+	}
+
+	// Nil FuncProto path: original logic unchanged.
 	all := s.fd.GetVarnodeBank().AllVarnodes()
 	params := make([]*Varnode, 0)
 	locals := make([]*Varnode, 0)
@@ -1373,6 +1453,13 @@ func (s *printCState) nameOf(vn *Varnode) string {
 		return "0"
 	}
 	if name, ok := s.names[vn]; ok {
+		return name
+	}
+	// Check if a HighVariable name was assigned by ApplyCallingConvention.
+	// C++ parity: PrintC::pushSymbol uses high->getName() when available.
+	if hv := vn.High(); hv != nil && hv.Name() != "" {
+		name := hv.Name()
+		s.names[vn] = name
 		return name
 	}
 	spaceName := "var"

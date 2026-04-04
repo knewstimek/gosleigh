@@ -90,6 +90,10 @@ type Varnode struct {
 	// Non-zero mask and consumed bits
 	nzm      uint64 // bits known to possibly be non-zero
 	consumed uint64 // bits consumed by descendants
+
+	// High-level variable this varnode belongs to (set by ApplyCallingConvention).
+	// C++ parity: Varnode::high
+	high *HighVariable
 }
 
 // NewVarnode creates a Varnode. Initializes flags based on space type.
@@ -144,6 +148,14 @@ func (vn *Varnode) HasAddlFlags(fl uint16) bool { return vn.addlFlags&fl != 0 }
 func (vn *Varnode) IsActiveHeritage() bool      { return vn.addlFlags&VarnodeActiveHeritage != 0 }
 func (vn *Varnode) SetActiveHeritage()          { vn.addlFlags |= VarnodeActiveHeritage }
 func (vn *Varnode) ClearActiveHeritage()        { vn.addlFlags &^= VarnodeActiveHeritage }
+
+// High returns the high-level variable this varnode belongs to, or nil.
+// C++ parity: Varnode::getHigh
+func (vn *Varnode) High() *HighVariable { return vn.high }
+
+// SetHigh sets the high-level variable link.
+// C++ parity: Varnode::setHigh
+func (vn *Varnode) SetHigh(hv *HighVariable) { vn.high = hv }
 
 // ---------------------------------------------------------------------------
 // Flag operations
