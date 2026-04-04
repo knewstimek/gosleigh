@@ -1,0 +1,99 @@
+{
+  "_comment": "Provider presets for gorchera_start_job. Copy the desired block's fields into your gorchera_start_job call.",
+  "_note": "3-agent pipeline: director (planning/judgment) -> executor (implementation) -> evaluator (code review + gate). pipeline_mode controls evaluator depth, strictness_level controls judgment aggressiveness, ambition_level controls executor scope.",
+  "_pre_build_commands_note": "Copy pre_build_commands into your gorchera_start_job call to run setup steps before engine build/test. Examples by language:",
+  "_pre_build_examples": {
+    "go": ["go mod tidy"],
+    "node": ["npm install"],
+    "python": ["pip install -r requirements.txt"],
+    "rust": ["cargo fetch"],
+    "multi": ["go mod tidy", "go generate ./..."]
+  },
+
+  "cross-provider (recommended)": {
+    "_description": "GPT plans, Claude executes. Best quality/cost ratio.",
+    "provider": "codex",
+    "pipeline_mode": "balanced",
+    "role_overrides": {
+      "executor": {"provider": "claude", "model": "sonnet"}
+    }
+  },
+
+  "codex-only (GPT budget)": {
+    "_description": "All GPT default models. Director/evaluator use strong model, executor uses efficient model.",
+    "provider": "codex",
+    "pipeline_mode": "balanced",
+    "role_overrides": {}
+  },
+
+  "mini (budget)": {
+    "_description": "All gpt-5.4-mini. Low cost, decent quality.",
+    "provider": "codex",
+    "pipeline_mode": "light",
+    "role_overrides": {
+      "director": {"model": "gpt-5.4-mini"},
+      "executor": {"model": "gpt-5.4-mini"},
+      "evaluator": {"model": "gpt-5.4-mini"}
+    }
+  },
+
+  "spark (ultra-fast)": {
+    "_description": "All gpt-5.3-codex-spark. Near-instant coding, lowest latency. Pro subscription required.",
+    "provider": "codex",
+    "pipeline_mode": "balanced",
+    "pre_build_commands": ["go mod tidy"],
+    "role_overrides": {
+      "director": {"model": "gpt-5.3-codex-spark"},
+      "executor": {"model": "gpt-5.3-codex-spark"},
+      "evaluator": {"model": "gpt-5.3-codex-spark"}
+    }
+  },
+
+  "claude-only": {
+    "_description": "All Claude. Director/evaluator use Opus, executor uses Sonnet.",
+    "provider": "claude",
+    "pipeline_mode": "balanced",
+    "role_overrides": {}
+  },
+
+  "production (strict + extreme)": {
+    "_description": "Maximum quality. Strict adversarial evaluator + extreme ambition. GPT plans, Claude executes.",
+    "provider": "codex",
+    "pipeline_mode": "full",
+    "strictness_level": "strict",
+    "ambition_level": "extreme",
+    "role_overrides": {
+      "executor": {"provider": "claude", "model": "sonnet"},
+      "evaluator": {"provider": "claude", "model": "sonnet"}
+    }
+  },
+
+  "production-spark (strict + extreme, budget)": {
+    "_description": "Production quality with Spark models. Strict evaluator, extreme ambition, all Spark.",
+    "provider": "codex",
+    "pipeline_mode": "full",
+    "strictness_level": "strict",
+    "ambition_level": "extreme",
+    "role_overrides": {
+      "director": {"model": "gpt-5.3-codex-spark"},
+      "executor": {"model": "gpt-5.3-codex-spark"},
+      "evaluator": {"model": "gpt-5.3-codex-spark"}
+    }
+  },
+
+  "production-spark-claude-eval (recommended for quality)": {
+    "_description": "Spark executor for speed, Claude Sonnet evaluator for accurate judgment. Best strict-mode combo.",
+    "provider": "codex",
+    "pipeline_mode": "full",
+    "strictness_level": "strict",
+    "ambition_level": "extreme",
+    "role_overrides": {
+      "director": {"model": "gpt-5.3-codex-spark"},
+      "executor": {"model": "gpt-5.3-codex-spark"},
+      "evaluator": {"provider": "claude", "model": "sonnet"}
+    },
+    "prompt_overrides": {
+      "evaluator": "Pay special attention to domain completeness and extensible design."
+    }
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "planner":   { "provider": "claude", "model": "opus" },
+  "leader":    { "provider": "claude", "model": "opus" },
+  "executor":  { "provider": "claude", "model": "sonnet" },
+  "reviewer":  { "provider": "claude", "model": "sonnet" },
+  "tester":    { "provider": "claude", "model": "sonnet" },
+  "evaluator": { "provider": "claude", "model": "opus" }
+}

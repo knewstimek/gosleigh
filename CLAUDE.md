@@ -66,3 +66,10 @@ Ghidra decompiler/Sleigh runtime을 Go로 다시 구현하는 프로젝트. stan
 - 실사용 가능 = x86/ARM 등 주요 아키텍처의 .sla를 로드해서 디컴파일 C 출력까지 동작하는 수준.
 - 현재 우선순위는 SLEIGH 기반 translation/runtime이며, 이것도 전체 디컴파일 경로의 일부다.
 - 기존 host의 disassembler를 바로 대체한다고 가정하지 않는다.
+
+## Gorchera Quick Reference
+  - Production quality: pipeline_mode=full, strictness_level=strict, ambition_level=extreme
+  - Budget: evaluator에 가장 좋은 모델, executor는 저렴해도 됨
+  - Spark preset: director/executor=gpt-5.3-codex-spark, evaluator=claude sonnet
+  - Non-code projects: set engine_build_cmd and engine_test_cmd to "true" (a no-op shell command that always succeeds) to skip engine build/test verification
+  - See examples/role-profiles.sample.json for presets
