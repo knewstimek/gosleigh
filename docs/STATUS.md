@@ -201,6 +201,37 @@
 - [x] Phase 5 complete: WU7 완료. PrintC 기반 C 출력 경로와 선언 출력기가 구현됨
 - [x] 현재 저장소 기준 `go test ./...` 통과
 
+- [x] Phase D5 완료 (2026-04-04): IMUL/MUL golden fixtures + CLI --elf flag + TestX86MultiplyFunction E2E
+  - `cmd/gosleigh/main.go`: --elf flag 추가 (LoadELF32TextSection 연동, --binary와 상호 배타)
+  - `pkg/sla/x86_golden_test.go`: x86_IMUL_EAX_EBX (8 ops) + x86_MUL_EBX (7 ops) -- 총 19 subtests
+  - `testdata/golden/x86_IMUL_EAX_EBX.json`: INT_SEXT+INT_MULT+SUBPIECE 등 8 ops
+  - `testdata/golden/x86_MUL_EBX.json`: unsigned MUL semantics 7 ops
+  - `pkg/loader/loader_test.go`: TestX86MultiplyFunction -- IMUL EAX,[EBP+0xC] memory operand E2E, non-empty PrintC
+  - 0x0F prefix (two-byte opcode) 기존 Sleigh 엔진에서 정상 처리 확인
+- [x] Phase D4 완료 (2026-04-04): if-else diamond CFG + block structuring E2E
+  - `pkg/sla/resolve.go`: CRITICAL FIX -- instruction length ctx.GetLength() -> change.CalcCurrentLength() (disp8/imm 포함)
+  - `pkg/bridge/bridge.go`: CRITICAL FIX -- linear scan -> BFS worklist (unconditional JMP forward target 추적)
+  - `pkg/sla/x86_golden_test.go`: JE_fwd/TEST_EAX_EAX/JNS_fwd/NEG_EAX 추가 -- 총 17 subtests
+  - `pkg/loader/loader_test.go`: TestX86IfElse -- abs() 함수 ({85,C0,79,04,F7,D8}), 3+ CFG blocks, non-empty PrintC
+- [x] Phase D3 완료 (2026-04-04): ELF32 loader + simple_add.elf E2E
+  - `pkg/loader/elf.go`: LoadELF32TextSection -- debug/elf stdlib, .text section bytes+VMA 추출
+  - `testdata/elfs/simple_add.elf`: 200-byte ELF32, add() 함수 (11 bytes)
+  - `pkg/loader/elf_test.go`: TestELFLoader + TestX86ELFDecompile (full pipeline, non-empty C)
+- [x] Phase D2 완료 (2026-04-04): CALL instruction (0xE8) E2E
+  - `testdata/golden/x86_CALL_rel32.json`: 3 ops (INT_SUB + STORE + CALL)
+  - `pkg/loader/loader_test.go`: TestX86CallerFunction -- PUSH/MOV/CALL/POP/RET -> non-empty PrintC
+- [x] Phase D1 완료 (2026-04-04): Heritage SSA on real loop CFG + PrintC loop output
+  - `pkg/bridge/bridge.go`: RETURN/BRANCHIND hard terminator fix (collectInstructions past-end 방지)
+  - `pkg/sla/x86_golden_test.go`: DEC_ECX (8 ops) + JNE_back (2 ops) 추가 -- 총 12 subtests
+  - `testdata/golden/x86_DEC_ECX.json` + `x86_JNE_back.json`: golden fixture 생성
+  - `pkg/loader/loader_test.go`: TestX86CountedLoop -- {B9,03,00,00,00,49,75,FD,C3} -> 3 CFG blocks, do-while PrintC 출력
+- [x] Phase B6+B7 완료 (2026-04-04): x86 pspec context init + golden fixtures
+  - `pkg/sla/pspec.go`: ParsePspec() -- x86.pspec `<context_set>` 파싱, SetVariableDefault 적용
+  - `pkg/sla/x86_golden_test.go`: goldenEngineX86() + TestGoldenX86 (NOP/RET/PUSH_EBP)
+  - `pkg/sla/translate.go`: VarnodeList operand type 지원 (+8/-2 lines)
+  - `testdata/golden/x86_{NOP,RET,PUSH_EBP}.json`: golden fixture 생성
+  - RET: 3 ops (LOAD/INT_ADD/RETURN), PUSH_EBP: 3 ops (COPY/INT_SUB/STORE)
+  - NOP: 0 ops (Ghidra PCODE_NOP -- 정상)
 - [x] WU6 (Verification / Golden Testing / E2E Integration) 완료 (2026-04-04)
   - `pkg/sla/golden_test.go`: golden test harness 구현. `GOSLEIGH_UPDATE_GOLDEN=1` 환경변수로 update mode 전환.
   - `testdata/golden/`: 6502 fixture 3종 -- BRK (0x00, 29 ops, match), NOP_EA (unimplemented gap), LDA_imm (unimplemented gap).

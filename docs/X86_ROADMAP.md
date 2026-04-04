@@ -11,6 +11,11 @@
 - Phase B6+B7 완료 (2026-04-04): pspec context init (addrsize=1/opsize=1), RET/PUSH_EBP p-code 생성 확인
 - Phase B8 완료 (2026-04-04): MOV/ADD/SUB/XOR/POP/JMP golden fixtures (10개 총 opcode, 0 gaps)
 - Phase C1+C3+C4 완료 (2026-04-04): pkg/loader EngineBuilder, CLI, E2E pipeline (ADD+RET -> C 출력)
+- Phase D1 완료 (2026-04-04): loop CFG (DEC ECX/JNE) -- 3 CFG blocks, back edge, do-while PrintC 출력, bridge.go RETURN terminator fix
+- Phase D2 완료 (2026-04-04): CALL instruction (0xE8) -- 3 ops (INT_SUB+STORE+CALL), TestX86CallerFunction E2E
+- Phase D3 완료 (2026-04-04): ELF32 loader (LoadELF32TextSection, debug/elf), simple_add.elf E2E, MOV [mem] 동작 확인
+- Phase D4 완료 (2026-04-04): if-else diamond CFG -- resolve.go length fix, bridge.go BFS worklist, TestX86IfElse E2E
+- Phase D5 완료 (2026-04-04): IMUL/MUL golden fixtures (19 subtests), CLI --elf flag, TestX86MultiplyFunction E2E
 - NOP (0x90) = Ghidra PCODE_NOP, 0 ops는 정상 동작
 - VarnodeList operand type translate.go에 추가 (PUSH EBP 지원)
 
@@ -33,14 +38,15 @@
 ### Phase C: E2E 인프라
 
 9. ~~파일 기반 입력~~ -- 완료 (pkg/loader/loader.go EngineBuilder, 2026-04-04)
-10. ELF/PE section 추출 (optional) -- Go 표준 debug/elf, debug/pe 활용
+10. ~~ELF/PE section 추출~~ -- 완료 (pkg/loader/elf.go, debug/elf, ELF32 E2E 검증, 2026-04-04)
 11. ~~CLI 진입점~~ -- 완료 (cmd/gosleigh translate 서브커맨드, 2026-04-04)
 12. ~~x86 단순 함수 E2E~~ -- 완료 (ADD+RET -> C 출력, Heritage+PrintC 파이프라인 검증, 2026-04-04)
 
 ### Phase D: 실사용 수준
 
-12. Heritage SSA on real CFG 검증 -- 루프/switch
-13. Rules 미완성 보완 -- div/switch/float
+12. ~~Heritage SSA on real CFG 검증 -- 루프/switch~~ -- 완료 (loop CFG: 3 blocks, do-while PrintC, 2026-04-04)
+13. ~~Rules MUL/IMUL~~ -- 완료 (2026-04-04)
+13b. Rules 미완성 보완 -- div/switch/float
 14. block structuring E2E 검증
 15. assembly printer (optional)
 16. DWARF/symtab 활용 (optional)
