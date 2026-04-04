@@ -96,6 +96,35 @@ func (f *TypeFactory) GetEnum(size int32, enumMeta metatype, name string, values
 	return f.internEnum(key, value)
 }
 
+// GetPointerTo is a convenience wrapper around GetPointer for the common case
+// where wordSize defaults to 1. ptrSize is the byte-width of the pointer itself.
+func (f *TypeFactory) GetPointerTo(pointee Datatype, ptrSize int32) *Pointer {
+	return f.GetPointer(ptrSize, pointee, 1)
+}
+
+// GetExactType returns the interned Base type with the given size and metatype.
+// Only TYPE_INT, TYPE_UINT, TYPE_BOOL, and TYPE_UNKNOWN are meaningful here.
+// Returns nil for unsupported metatypes or zero size.
+func (f *TypeFactory) GetExactType(size int32, meta metatype) Datatype {
+	if size <= 0 {
+		return nil
+	}
+	var name string
+	switch meta {
+	case TYPE_INT:
+		name = "int"
+	case TYPE_UINT:
+		name = "uint"
+	case TYPE_BOOL:
+		name = "bool"
+	case TYPE_UNKNOWN:
+		name = "unknown"
+	default:
+		return nil
+	}
+	return f.GetBase(size, meta, name)
+}
+
 func (f *TypeFactory) GetCode(name string, returnType Datatype, params []Datatype, variadic bool) *Code {
 	var canonicalReturn Datatype
 	if returnType != nil {

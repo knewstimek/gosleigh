@@ -94,6 +94,12 @@ type Varnode struct {
 	// High-level variable this varnode belongs to (set by ApplyCallingConvention).
 	// C++ parity: Varnode::high
 	high *HighVariable
+
+	// tempType holds a provisional type assigned during ActionInferTypes propagation.
+	// It is separate from the committed type stored in pcodeMetadata.varTypes so that
+	// multi-pass propagation can accumulate candidates before committing.
+	// Not part of the C++ Varnode struct; Go-local inference scratch field.
+	tempType Datatype
 }
 
 // NewVarnode creates a Varnode. Initializes flags based on space type.
@@ -381,6 +387,40 @@ func (vn *Varnode) String() string {
 	}
 	return fmt.Sprintf("Varnode(%s:0x%x[%d] %s #%d)",
 		spaceName, vn.loc.Offset, vn.size, status, vn.createIndex)
+}
+
+// ---------------------------------------------------------------------------
+// SeqNum comparison (needed by VarnodeBank sort)
+// C++ parity: address.hh SeqNum::operator<
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
+// TempType -- inference scratch type (ActionInferTypes only)
+// ---------------------------------------------------------------------------
+
+// SetTempType sets the provisional type for this varnode during type inference.
+// Does not affect the committed type returned by Type() / TypeReadFacing().
+func (vn *Varnode) SetTempType(dt Datatype) {
+	if vn == nil {
+		return
+	}
+	vn.tempType = dt
+}
+
+// GetTempType returns the provisional type set during type inference, or nil.
+func (vn *Varnode) GetTempType() Datatype {
+	if vn == nil {
+		return nil
+	}
+	return vn.tempType
+}
+
+// ClearTempType resets the provisional type to nil.
+func (vn *Varnode) ClearTempType() {
+	if vn == nil {
+		return
+	}
+	vn.tempType = nil
 }
 
 // ---------------------------------------------------------------------------

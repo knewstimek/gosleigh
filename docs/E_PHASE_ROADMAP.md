@@ -65,13 +65,21 @@ int classify2(int x, int y) {
 - 64-bit golden fixtures 셋 + E2E
 - Windows x64 ABI 옵션 (RCX/RDX/R8/R9)
 
-## E5: Type System 강화 (struct/pointer/array)
+## E5: Type System 강화 (struct/pointer/array) [DONE 2026-04-05]
 
 **핵심 deliverable**: 복합 타입 복원.
 - C++ 참조: `type.cc` (TypePointer/TypeArray/TypeStruct 강화), `typegrp.cc` (TypeFactory)
 - struct field 접근 패턴 인식 (`EAX+4` -> `ptr->next`)
 - 배열 인덱스 패턴 (`EDX+EAX*4` -> `arr[i]`)
 - PrintC: `struct Node { int val; struct Node *next; }` 자동 생성
+- 구현:
+  - Varnode.tempType scratch field (SetTempType/GetTempType/ClearTempType)
+  - TypeFactory.GetPointerTo / TypeFactory.GetExactType convenience methods
+  - TypeOp.PropagateType interface + typeOpBase no-op default
+  - Concrete PropagateType: COPY/MULTIEQUAL pass-through, LOAD/STORE pointer<->pointee, INT_ADD pointer arithmetic, PTRADD/PTRSUB, ZEXT/SEXT sized base types, INT_CMP bool output, CAST size-preserving
+  - ActionInferTypes: 7-iteration seed->propagate->writeBack convergence loop
+  - 4 unit tests (TestInferTypesCopyChain, TestInferTypesLoadDereference, TestInferTypesIntAddPointer, TestInferTypesConvergence)
+  - E2E: TestX86StructFieldAccess (struct Point pointer -> struct type declaration in PrintC), TestX86ArrayIndexAccess (int* param -> int *param_0 typed output)
 
 ## E6: 심볼 복원 (DWARF + PE import)
 

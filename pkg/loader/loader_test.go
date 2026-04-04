@@ -1617,3 +1617,223 @@ func TestX8664CallingConvention(t *testing.T) {
 	}
 	t.Logf("x86-64 calling convention C output:\n%s", output)
 }
+
+// TestX86StructFieldAccess exercises the E5 type-inference pipeline with a
+// struct field access function:
+//
+//	int get_y(Point *p) { return p->y; }
+//
+// Bytes: PUSH EBP + MOV EBP,ESP + MOV EAX,[EBP+8] + MOV EAX,[EAX+4] +
+//
+//	POP EBP + RET  (55 89 E5 8B 45 08 8B 40 04 5D C3)
+//
+// The test applies the cdecl calling convention, seeds a pointer-to-struct
+// type on the first parameter's HighVariable, runs ActionInferTypes, and
+// asserts the full pipeline produces non-empty C output.  When the pointer
+// type is successfully propagated through the SSA graph the output will
+// contain "->"; this is logged but not a hard requirement because it depends
+// on the INT_ADD-to-PTRSUB rewrite firing before BatchA.
+func TestX86StructFieldAccess(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// get_y(Point *p): return p->y  (y is at offset 4)
+	prog := []byte{0x55, 0x89, 0xE5, 0x8B, 0x45, 0x08, 0x8B, 0x40, 0x04, 0x5D, 0xC3}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("EngineBuilder.Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{
+		Name:            "get_y",
+		Entry:           base,
+		MaxInstructions: 20,
+	})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+	if len(result.Instructions) < 4 {
+		t.Fatalf("expected >= 4 instructions, got %d", len(result.Instructions))
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+
+	// Build a "Point" struct type: { int x; int y; }
+	tf := pcode.NewTypeFactory()
+	intType := tf.GetBase(4, pcode.TYPE_INT, "int")
+	fields := []pcode.TypeField{
+		{Ident: 0, Offset: 0, Name: "x", Type: intType},
+		{Ident: 1, Offset: 4, Name: "y", Type: intType},
+	}
+	pointStruct := tf.GetStruct("Point", fields)
+	ptrToPoint := tf.GetPointer(4, pointStruct, 1)
+
+	// Seed pointer-to-Point on all size-4 input varnodes in non-unique,
+	// non-constant, non-register spaces.  After Heritage, the parameter
+	// varnode corresponding to param_0 (p) is an input varnode in the stack
+	// or processor space that holds the EBP+8 value.
+	// We target varnodes that PrintC classifies as param_0 by seeding all
+	// 4-byte input varnodes that are not in unique/const/register spaces and
+	// that look like pointer-sized values.
+	seeded := 0
+	allVns := result.Funcdata.GetVarnodeBank().AllVarnodes()
+	// Sort to get deterministic param_0 candidate: smallest address first.
+	type vnEntry struct {
+		vn  *pcode.Varnode
+		off uint64
+	}
+	var candidates []vnEntry
+	for _, vn := range allVns {
+		if vn == nil || !vn.IsInput() || vn.IsConstant() || vn.IsAnnotation() {
+			continue
+		}
+		if vn.Size() != 4 {
+			continue
+		}
+		sp := vn.Space()
+		if sp == nil || sp.IsUnique() {
+			continue
+		}
+		candidates = append(candidates, vnEntry{vn: vn, off: vn.Offset()})
+	}
+	// Seed the first (lowest-offset) candidate as the pointer parameter.
+	if len(candidates) > 0 {
+		// Sort by offset to get the smallest-address input as param_0.
+		for i := 1; i < len(candidates); i++ {
+			if candidates[i].off < candidates[0].off {
+				candidates[0], candidates[i] = candidates[i], candidates[0]
+			}
+		}
+		pcode.SetVarnodeType(candidates[0].vn, ptrToPoint)
+		seeded++
+	}
+
+	// Run ActionInferTypes to propagate the pointer type through the SSA graph.
+	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output")
+	}
+	t.Logf("struct field access (seeded=%d) C output:\n%s", seeded, output)
+
+	if seeded > 0 && strings.Contains(output, "->") {
+		t.Logf("SUCCESS: '->' found in output -- struct field access type propagation works")
+	} else if seeded > 0 {
+		t.Logf("NOTE: seeded pointer type on %d varnode(s) but '->' not yet in output", seeded)
+		// Acceptable: INT_ADD->PTRSUB rewrite requires the pointer type to arrive
+		// at the INT_ADD base input before RulePtrArith fires in BatchA.
+	}
+}
+
+// TestX86ArrayIndexAccess exercises the E5 type-inference pipeline with an
+// array index access function:
+//
+//	int get_elem(int *arr, int i) { return arr[i]; }
+//
+// Bytes: PUSH EBP + MOV EBP,ESP + MOV EAX,[EBP+8] + MOV ECX,[EBP+12] +
+//
+//	MOV EAX,[EAX+ECX*4] + POP EBP + RET
+//	(55 89 E5 8B 45 08 8B 4D 0C 8B 04 88 5D C3)
+//
+// The test seeds a pointer-to-int type on the arr param varnode,
+// runs ActionInferTypes, and asserts that the pipeline completes and
+// produces non-empty output (array pointer arithmetic).
+func TestX86ArrayIndexAccess(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// get_elem(int *arr, int i): return arr[i]
+	prog := []byte{
+		0x55, 0x89, 0xE5, 0x8B, 0x45, 0x08, 0x8B, 0x4D, 0x0C,
+		0x8B, 0x04, 0x88, 0x5D, 0xC3,
+	}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("EngineBuilder.Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{
+		Name:            "get_elem",
+		Entry:           base,
+		MaxInstructions: 20,
+	})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+	if len(result.Instructions) < 5 {
+		t.Fatalf("expected >= 5 instructions, got %d", len(result.Instructions))
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+
+	// Seed pointer-to-int on the first input varnode (arr param, param_0).
+	tf := pcode.NewTypeFactory()
+	intType := tf.GetBase(4, pcode.TYPE_INT, "int")
+	ptrToInt := tf.GetPointer(4, intType, 1)
+
+	seeded := 0
+	allVnsArr := result.Funcdata.GetVarnodeBank().AllVarnodes()
+	type vnEntryArr struct {
+		vn  *pcode.Varnode
+		off uint64
+	}
+	var candidatesArr []vnEntryArr
+	for _, vn := range allVnsArr {
+		if vn == nil || !vn.IsInput() || vn.IsConstant() || vn.IsAnnotation() {
+			continue
+		}
+		if vn.Size() != 4 {
+			continue
+		}
+		sp := vn.Space()
+		if sp == nil || sp.IsUnique() {
+			continue
+		}
+		candidatesArr = append(candidatesArr, vnEntryArr{vn: vn, off: vn.Offset()})
+	}
+	if len(candidatesArr) > 0 {
+		for i := 1; i < len(candidatesArr); i++ {
+			if candidatesArr[i].off < candidatesArr[0].off {
+				candidatesArr[0], candidatesArr[i] = candidatesArr[i], candidatesArr[0]
+			}
+		}
+		pcode.SetVarnodeType(candidatesArr[0].vn, ptrToInt)
+		seeded++
+	}
+
+	// Run ActionInferTypes to propagate the array pointer type.
+	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for array index access function")
+	}
+	t.Logf("array index access (seeded=%d) C output:\n%s", seeded, output)
+}

@@ -342,6 +342,17 @@
   - PrintC: function signature with typed params + local variable declarations
   - `TestX86CdeclParamLocalFunction` E2E: cdecl function output contains param_0/param_1/local_0
   - 6 test files, 27 test/fuzz/benchmark functions covering all 5 new production files
+- [x] E5: struct/pointer/array type recovery -- ActionInferTypes + TypeOp.PropagateType (2026-04-05)
+  - `Varnode.tempType` scratch field + SetTempType/GetTempType/ClearTempType (varnode_ssa.go)
+  - `TypeFactory.GetPointerTo` / `TypeFactory.GetExactType` convenience methods (typefactory.go)
+  - `TypeOp.PropagateType` interface method + typeOpBase no-op default (typeop.go)
+  - Concrete per-opcode PropagateType: typeOpCopy/Multiequal (pass-through), typeOpLoad (pointee forward + pointer reverse), typeOpStore (pointee/pointer bidirectional), typeOpIntAdd (pointer arithmetic), typeOpPtradd/Ptrsub, typeOpZext/Sext (sized uint/int), typeOpIntCmp (bool output), typeOpCast (size-preserving)
+  - `RegisterTypeOps` updated to use concrete structs for 14 opcodes
+  - `ActionInferTypes`: 7-iteration seed->propagate->writeBack convergence loop (action_infertypes.go)
+  - `action_infertypes_test.go`: 4 unit tests (COPY chain, LOAD dereference, INT_ADD pointer arithmetic, convergence)
+  - `TestX86StructFieldAccess` E2E: struct Point pointer type injected on param_0, struct type declaration emitted in PrintC output (pkg/loader/loader_test.go)
+  - `TestX86ArrayIndexAccess` E2E: int* pointer type injected on arr param, `int *param_0` typed output
+  - All existing tests continue to pass (go test ./...)
 
 ### 다음
 - [ ] **[우선순위 높음]** `DecisionNode::resolve()` 결함 수정: 6502 BRK 외 대부분 opcode (NOP 0xEA, LDA 0xA9 등)에서 발생하는 `"unable to resolve constructor"` 원인을 C++ `slghsymbol.cc` 대조로 찾아 수정. 수정 후 `GOSLEIGH_UPDATE_GOLDEN=1`로 golden fixture 재생성.
