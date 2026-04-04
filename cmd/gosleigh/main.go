@@ -23,6 +23,7 @@
 //	--sla    path to .sla file (required)
 //	--pspec  path to .pspec file (optional; sets context defaults)
 //	--binary path to raw binary image (optional)
+//	--elf    path to ELF32 binary (optional; extracts .text section)
 //	--offset byte offset into binary at which the image VMA starts (default 0)
 //	--size   number of bytes to map from binary (default 0 = all)
 //	--entry  entry address offset within the default address space (default 0)
@@ -68,6 +69,7 @@ func runTranslate(args []string) error {
 	slaPath := fs.String("sla", "", "path to .sla file (required)")
 	pspecPath := fs.String("pspec", "", "path to .pspec file (optional)")
 	binaryPath := fs.String("binary", "", "path to raw binary image (optional)")
+	elfPath := fs.String("elf", "", "path to ELF32 binary (optional)")
 	offsetFlag := fs.Uint64("offset", 0, "byte offset into binary where image VMA starts")
 	sizeFlag := fs.Uint64("size", 0, "bytes to map from binary (0 = all)")
 	entryFlag := fs.Uint64("entry", 0, "entry address offset within the default address space")
@@ -80,6 +82,10 @@ func runTranslate(args []string) error {
 	if *slaPath == "" {
 		fs.Usage()
 		return fmt.Errorf("--sla is required")
+	}
+
+	if *binaryPath != "" && *elfPath != "" {
+		return fmt.Errorf("--binary and --elf are mutually exclusive")
 	}
 
 	outputFmt := strings.ToLower(*outputFlag)
@@ -95,6 +101,16 @@ func runTranslate(args []string) error {
 		BaseAddr:   *entryFlag,
 		BaseOffset: *offsetFlag,
 		ReadSize:   *sizeFlag,
+	}
+
+	// --elf: load .text section from ELF32 binary and override Bytes/BaseAddr.
+	if *elfPath != "" {
+		data, base, elfErr := loader.LoadELF32TextSection(*elfPath)
+		if elfErr != nil {
+			return fmt.Errorf("--elf: %w", elfErr)
+		}
+		b.Bytes = data
+		b.BaseAddr = base
 	}
 	engine, entryAddr, err := b.Build()
 	if err != nil {
