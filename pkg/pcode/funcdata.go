@@ -198,13 +198,32 @@ func (fd *Funcdata) OpSetInput(op *PcodeOp, vn *Varnode, slot int) {
 
 // OpUnsetOutput disconnects the output Varnode from a PcodeOp.
 // Clears the varnode's def link and the op's output pointer.
+// If the varnode is bank-managed (VarnodeWritten), it is properly removed
+// from or transitioned in the VarnodeBank while its def is still valid for
+// sorting -- clearing def before removal would corrupt CompareDefLoc.
 // C++ parity: Funcdata::opUnsetOutput
 func (fd *Funcdata) OpUnsetOutput(op *PcodeOp) {
 	vn := op.Output()
-	if vn != nil {
-		vn.SetDef(nil)
-		op.SetOutput(nil)
+	if vn == nil {
+		return
 	}
+	op.SetOutput(nil)
+	if vn.IsWritten() {
+		// Varnode is in VarnodeBank's defTree. Must remove/transition while
+		// vn.def is still valid so CompareDefLoc can sort during removal.
+		if vn.NumDescend() == 0 {
+			// No consumers: fully destroy from bank, then clear def.
+			fd.vbank.Destroy(vn)
+			vn.SetDef(nil)
+		} else {
+			// Still has consumers: transition to free so they remain valid.
+			// MakeFree internally clears def and VarnodeWritten.
+			fd.vbank.MakeFree(vn)
+		}
+		return
+	}
+	// Non-bank-managed varnode (free or directly assigned def): just clear.
+	vn.SetDef(nil)
 }
 
 // OpUnsetInput disconnects an input Varnode from a PcodeOp at the given slot.
@@ -231,8 +250,14 @@ func (fd *Funcdata) OpMarkDead(op *PcodeOp) {
 }
 
 // OpDestroy destroys a PcodeOp and disconnects all its Varnodes.
+// Removes the op from its parent basic block so it is no longer emitted.
 // C++ parity: Funcdata::opDestroy
 func (fd *Funcdata) OpDestroy(op *PcodeOp) {
+	// Remove from parent basic block first so it is no longer iterable.
+	// Ghidra: op->getParent()->removeOp(op)
+	if p := op.Parent(); p != nil {
+		p.RemoveOp(op)
+	}
 	// Disconnect output
 	fd.OpUnsetOutput(op)
 	// Disconnect all inputs

@@ -564,4 +564,51 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 
 	h.disjoint.Clear()
 	h.pass++
+	h.AnnotateFloatTypes()
+}
+
+// AnnotateFloatTypes marks output varnodes of FLOAT_* ops with float type.
+// This is a post-Heritage additive pass -- it does not change SSA placement or renaming.
+// C++ parity: heritage.cc Heritage::analyzeNewVarnodes (simplified float subset)
+func (h *Heritage) AnnotateFloatTypes() {
+	for _, op := range h.fd.GetPcodeOpBank().AllOps() {
+		if op.IsDead() {
+			continue
+		}
+		if !isFloatOpcode(op.Code()) {
+			continue
+		}
+		out := op.Output()
+		if out == nil {
+			continue
+		}
+		// Determine float size from output varnode size.
+		// Comparison ops (FLOAT_EQUAL etc.) produce size-1 boolean outputs --
+		// those fall through the default case and are intentionally skipped.
+		sz := out.Size()
+		var dt Datatype
+		switch sz {
+		case 4:
+			dt = NewBase(4, TYPE_FLOAT, "float")
+		case 8:
+			dt = NewBase(8, TYPE_FLOAT, "double")
+		default:
+			continue // unusual float size or boolean comparison result, skip
+		}
+		SetVarnodeType(out, dt)
+	}
+}
+
+// isFloatOpcode returns true for opcodes that compute floating-point results.
+func isFloatOpcode(code OpCode) bool {
+	switch code {
+	case CPUI_FLOAT_EQUAL, CPUI_FLOAT_NOTEQUAL, CPUI_FLOAT_LESS,
+		CPUI_FLOAT_LESSEQUAL, CPUI_FLOAT_NAN,
+		CPUI_FLOAT_ADD, CPUI_FLOAT_DIV, CPUI_FLOAT_MULT, CPUI_FLOAT_SUB,
+		CPUI_FLOAT_NEG, CPUI_FLOAT_ABS, CPUI_FLOAT_SQRT,
+		CPUI_FLOAT_INT2FLOAT, CPUI_FLOAT_FLOAT2FLOAT,
+		CPUI_FLOAT_TRUNC, CPUI_FLOAT_CEIL, CPUI_FLOAT_FLOOR, CPUI_FLOAT_ROUND:
+		return true
+	}
+	return false
 }

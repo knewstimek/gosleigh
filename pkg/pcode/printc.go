@@ -2,6 +2,7 @@ package pcode
 
 import (
 	"fmt"
+	"math"
 	"sort"
 	"strings"
 )
@@ -993,12 +994,48 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 			case 8:
 				return fmt.Sprintf("%dLL", int64(vn.Offset()))
 			}
+		case TYPE_FLOAT:
+			return renderFloatLiteral(vn.Offset(), uint32(typed.Size()))
 		}
 	}
 	if vn.Offset() < 10 {
 		return fmt.Sprintf("%d", vn.Offset())
 	}
 	return fmt.Sprintf("0x%x", vn.Offset())
+}
+
+// renderFloatLiteral reinterprets raw bits as IEEE 754 float/double and
+// returns the C literal string.
+// C++ parity: PrintC::push_float (simplified)
+func renderFloatLiteral(bits uint64, size uint32) string {
+	switch size {
+	case 4:
+		f := math.Float32frombits(uint32(bits))
+		if math.IsInf(float64(f), 1) {
+			return "INFINITY"
+		}
+		if math.IsInf(float64(f), -1) {
+			return "-INFINITY"
+		}
+		if math.IsNaN(float64(f)) {
+			return "NAN"
+		}
+		return fmt.Sprintf("%gf", f)
+	case 8:
+		f := math.Float64frombits(bits)
+		if math.IsInf(f, 1) {
+			return "INFINITY"
+		}
+		if math.IsInf(f, -1) {
+			return "-INFINITY"
+		}
+		if math.IsNaN(f) {
+			return "NAN"
+		}
+		return fmt.Sprintf("%g", f)
+	default:
+		return fmt.Sprintf("0x%x", bits)
+	}
 }
 
 func (s *printCState) renderOpExpr(op *PcodeOp, parentPrec ExprPrecedence) (string, error) {

@@ -132,6 +132,33 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 			fp.AddLocal(hv)
 		}
 	}
+
+	// Propagate float type from Varnode to HighVariable.
+	// If any instance varnode of a HighVariable has TYPE_FLOAT type,
+	// set the HighVariable type to float.
+	// C++ parity: ScopeLocal::restructureHigh (float subset)
+	for _, hv := range sl.localByVn {
+		for _, inst := range hv.Instances() {
+			dt := inst.TypeDefFacing()
+			if dt != nil {
+				if base, ok := dt.(*Base); ok && base.Metatype() == TYPE_FLOAT {
+					hv.SetType(dt)
+					break
+				}
+			}
+		}
+	}
+	for _, hv := range sl.paramByVn {
+		for _, inst := range hv.Instances() {
+			dt := inst.TypeDefFacing()
+			if dt != nil {
+				if base, ok := dt.(*Base); ok && base.Metatype() == TYPE_FLOAT {
+					hv.SetType(dt)
+					break
+				}
+			}
+		}
+	}
 }
 
 // FindEntry returns the HighVariable associated with the given varnode, if any.
