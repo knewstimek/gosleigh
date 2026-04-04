@@ -201,6 +201,11 @@
 - [x] Phase 5 complete: WU7 완료. PrintC 기반 C 출력 경로와 선언 출력기가 구현됨
 - [x] 현재 저장소 기준 `go test ./...` 통과
 
+- [x] Phase D9 완료 (2026-04-04): PUSH/POP regs + DEC/XCHG + Jcc (JL/JLE/JG/JB/JA) + TestX86Add3Function
+  - `pkg/sla/x86_golden_test.go`: 10 new cases -- 총 43 subtests
+  - PUSH_EBX/PUSH_ECX/POP_EBX: COPY+INT_SUB+STORE/LOAD 패턴, DEC_EAX: INT_SUB+flags, XCHG: 3x COPY
+  - JL/JLE/JG/JB/JA_fwd: 각 Jcc flag 조합 + CBRANCH. 모든 케이스 decode gap 없음.
+  - `pkg/loader/loader_test.go`: TestX86Add3Function -- PUSH EBX + 3x ADD[mem] + POP EBX, non-empty PrintC
 - [x] Phase D8 완료 (2026-04-04): LEA/MOVZX/MOVSX/OR/AND/INC/CMP/JGE golden fixtures + TestX86ComplexFunction
   - `pkg/sla/x86_golden_test.go`: 8 new cases (OR_EAX_EBX, AND_EAX_EBX, INC_EAX, CMP_EAX_EBX, MOVZX_EAX_AL, MOVSX_EAX_AL, LEA_EAX_disp8, JGE_fwd) -- 총 33 subtests
   - `testdata/golden/`: OR(INT_OR+flags), AND(INT_AND+flags), INC(INT_ADD+OF), CMP(INT_SUB+flags), MOVZX(INT_ZEXT), MOVSX(INT_SEXT), LEA(INT_ADD+COPY), JGE(INT_EQUAL(SF,OF)+CBRANCH)
