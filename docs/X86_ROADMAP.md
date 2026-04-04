@@ -21,6 +21,9 @@
 - Phase D8 완료 (2026-04-04): OR/AND/INC/CMP/MOVZX/MOVSX/LEA/JGE golden (33 subtests), TestX86ComplexFunction (max() CMP+JGE)
 - Phase D9 완료 (2026-04-04): PUSH/POP regs + DEC/XCHG + JL/JLE/JG/JB/JA Jcc variants (43 subtests), TestX86Add3Function
 - Phase D10 완료 (2026-04-04): PUSH imm + NOT + stack local MOV golden (50 subtests), TestX86LocalVarFunction (local var E2E)
+- Phase D11 완료 (2026-04-04): CALL indirect + SETcc + MOVZX 16->32 golden (57 subtests), TestX86IndirectCallFunction E2E
+- Phase D12 완료 (2026-04-04): ADC/SBB + ROR/ROL + LEAVE + CWDE golden (63 subtests), TestX86ClampFunction E2E
+- Phase D13 완료 (2026-04-04): CMOVcc (CMOVE/CMOVNE/CMOVGE/CMOVL/CMOVG) + BSWAP golden (69 subtests), TestX86BranchlessMaxFunction E2E
 - NOP (0x90) = Ghidra PCODE_NOP, 0 ops는 정상 동작
 - VarnodeList operand type translate.go에 추가 (PUSH EBP 지원)
 
@@ -54,6 +57,7 @@
 13b. ~~Rules IDIV/DIV/CDQ/SHL/SHR/SAR~~ -- 완료 (2026-04-04)
 13c. ~~Rules CALL indirect + SETcc + MOVZX 16->32~~ -- 완료 (D11: 57 golden subtests, TestX86IndirectCallFunction E2E, 2026-04-04)
 13e. ~~Rules ADC/SBB + ROR/ROL + LEAVE + CWDE~~ -- done (D12: 63 golden subtests, TestX86ClampFunction E2E, 2026-04-04)
+13f. ~~Rules CMOVcc + BSWAP~~ -- done (D13: 69 golden subtests, TestX86BranchlessMaxFunction E2E, 2026-04-04)
 13d. Rules 미완성 보완 -- switch/float
 14. block structuring E2E 검증
 15. assembly printer (optional)
