@@ -1007,6 +1007,35 @@ func (s *printCState) renderStoreLHS(ptr *Varnode, parentPrec ExprPrecedence) (s
 	return s.lang.ExprString(lhs, parentPrec, ExprPosNone, ExprAssocNone), nil
 }
 
+// booleanFlipToken returns the negated binary operator token, precedence, and
+// whether to reorder operands for a negateable comparison op.
+// C++ parity: opcodes.cc get_booleanflip
+func booleanFlipToken(opc OpCode) (token string, prec ExprPrecedence, reorder bool, ok bool) {
+	switch opc {
+	case CPUI_INT_EQUAL:
+		return "!=", cPrecEquality, false, true
+	case CPUI_INT_NOTEQUAL:
+		return "==", cPrecEquality, false, true
+	case CPUI_INT_SLESS:
+		return "<=", cPrecRelational, true, true // !(a < b) = b <= a
+	case CPUI_INT_SLESSEQUAL:
+		return "<", cPrecRelational, true, true // !(a <= b) = b < a
+	case CPUI_INT_LESS:
+		return "<=", cPrecRelational, true, true
+	case CPUI_INT_LESSEQUAL:
+		return "<", cPrecRelational, true, true
+	case CPUI_FLOAT_EQUAL:
+		return "!=", cPrecEquality, false, true
+	case CPUI_FLOAT_NOTEQUAL:
+		return "==", cPrecEquality, false, true
+	case CPUI_FLOAT_LESS:
+		return "<=", cPrecRelational, true, true
+	case CPUI_FLOAT_LESSEQUAL:
+		return "<", cPrecRelational, true, true
+	}
+	return "", 0, false, false
+}
+
 func (s *printCState) renderBranchCondition(op *PcodeOp) (string, error) {
 	if op == nil {
 		return "0", nil
@@ -1016,6 +1045,42 @@ func (s *printCState) renderBranchCondition(op *PcodeOp) (string, error) {
 		cond = op.Input(1)
 	} else if op.NumInput() == 1 {
 		cond = op.Input(0)
+	}
+	if op.HasFlag(PcodeOpBooleanFlip) && cond != nil && cond.IsWritten() {
+		// C++ parity: PrintC::opCbranch checkPrintNegation path -- if the inner
+		// comparison op can be negated as a token, render the negated form directly
+		// instead of wrapping with !. C++ uses OpToken::negate for this.
+		defOp := cond.Def()
+		if defOp.Code() == CPUI_BOOL_NEGATE {
+			// !(BOOL_NEGATE(x)) = x
+			inner, err := s.renderVarnodeExpr(defOp.Input(0))
+			if err != nil {
+				return "", err
+			}
+			return inner.Text, nil
+		}
+		if negTok, prec, reorder, ok := booleanFlipToken(defOp.Code()); ok {
+			var left, right ExprFragment
+			var err error
+			if reorder {
+				// !(a op b) expressed with negated op and swapped inputs.
+				left, err = s.renderVarnodeExpr(defOp.Input(1))
+				if err != nil {
+					return "", err
+				}
+				right, err = s.renderVarnodeExpr(defOp.Input(0))
+			} else {
+				left, err = s.renderVarnodeExpr(defOp.Input(0))
+				if err != nil {
+					return "", err
+				}
+				right, err = s.renderVarnodeExpr(defOp.Input(1))
+			}
+			if err != nil {
+				return "", err
+			}
+			return s.lang.BinaryExpr(left, negTok, right, prec, ExprAssocLeft).Text, nil
+		}
 	}
 	frag, err := s.renderVarnodeExpr(cond)
 	if err != nil {
@@ -1071,6 +1136,18 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 			return name
 		}
 	}
+	// When the constant carries only a generic TYPE_UINT (the default for untyped
+	// constants), check if any consumer's storage location is signed. If so, the
+	// constant lives in a signed context and should be rendered as a signed literal.
+	// This handles e.g. MOV EAX, 0xFFFFFFFF -> "-1" when EAX is used in INT_SLESS.
+	// Ghidra C++ propagates TYPE_INT into constant varnodes directly; Go's metatype
+	// ordering (TYPE_UINT=13 < TYPE_INT=14) prevents that path, so we infer from context.
+	// Only triggers when signed vs unsigned representations differ (i.e. high bit set).
+	if base, ok := dt.(*Base); ok && base.Metatype() == TYPE_UINT {
+		if signedDt := s.inferSignedConstType(vn); signedDt != nil {
+			dt = signedDt
+		}
+	}
 	switch typed := dt.(type) {
 	case *Base:
 		switch typed.Metatype() {
@@ -1094,6 +1171,97 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 		return fmt.Sprintf("%d", vn.Offset())
 	}
 	return fmt.Sprintf("0x%x", vn.Offset())
+}
+
+// inferSignedConstType returns a TYPE_INT base type for a constant varnode whose
+// committed type is generic TYPE_UINT, when the constant's high bit is set AND
+// at least one consumer op writes to a storage location that is signed anywhere in
+// the function. This resolves the signed rendering gap:
+//
+// Problem: Go's metatype ordering (TYPE_UINT=13 < TYPE_INT=14) prevents TYPE_INT
+// from propagating into constants whose tempType was initialized as TYPE_UINT.
+// Meanwhile, TYPE_UINT from the constant propagates forward (COPY/MULTIEQUAL),
+// giving the output varnode (e.g. EAX_1) TYPE_UINT -- even though another SSA
+// version of the same register (e.g. EAX_0, input to INT_SLESS) has TYPE_INT.
+//
+// Solution: check if ANY varnode at the same storage location (same space/offset/
+// size) as the consumer's output has TYPE_INT committed. If yes, the storage
+// location is signed in this function context and the constant should render signed.
+//
+// C++ parity: Ghidra propagates TYPE_INT into constants via TypeOpCopy; this is
+// the rendering-time fallback for that behaviour.
+func (s *printCState) inferSignedConstType(vn *Varnode) Datatype {
+	// Only matters when signed and unsigned representations differ (high bit set).
+	highBitSet := false
+	switch vn.Size() {
+	case 1:
+		highBitSet = int8(vn.Offset()) < 0
+	case 2:
+		highBitSet = int16(vn.Offset()) < 0
+	case 4:
+		highBitSet = int32(vn.Offset()) < 0
+	case 8:
+		highBitSet = int64(vn.Offset()) < 0
+	}
+	if !highBitSet {
+		return nil
+	}
+	for _, op := range vn.DescendIter() {
+		if op == nil || op.IsDead() {
+			continue
+		}
+		out := op.Output()
+		if out == nil {
+			continue
+		}
+		if s.locationIsSigned(out) {
+			return sharedTypeFactory.GetExactType(vn.Size(), TYPE_INT)
+		}
+	}
+	return nil
+}
+
+// locationIsSigned returns true if any varnode at the same storage location
+// (space, offset, size) as ref has TYPE_INT committed. This is needed because
+// TYPE_UINT propagated from a constant can mask the TYPE_INT of another SSA
+// version of the same register (e.g. EAX_0 TYPE_INT vs EAX_1 TYPE_UINT).
+// C++ parity: in Ghidra, TYPE_INT would have been propagated directly into the
+// constant; this is the fallback location-based check.
+func (s *printCState) locationIsSigned(ref *Varnode) bool {
+	if ref == nil {
+		return false
+	}
+	// Fast path: direct committed type check.
+	if dt := ref.Type(); dt != nil && dt.Metatype() == TYPE_INT {
+		return true
+	}
+	// HighVariable check.
+	if hv := ref.High(); hv != nil {
+		if dt := hv.Type(); dt != nil && dt.Metatype() == TYPE_INT {
+			return true
+		}
+	}
+	// Location-based check: scan all varnodes at the same storage location.
+	// Handles the case where EAX_0 (input to INT_SLESS) has TYPE_INT but
+	// EAX_1 (COPY output receiving the constant) has TYPE_UINT from propagation.
+	if s.fd == nil {
+		return false
+	}
+	spc := ref.Space()
+	off := ref.Offset()
+	sz := ref.Size()
+	for _, other := range s.fd.GetVarnodeBank().AllVarnodes() {
+		if other == nil || other == ref {
+			continue
+		}
+		if other.Space() != spc || other.Offset() != off || other.Size() != sz {
+			continue
+		}
+		if dt := other.Type(); dt != nil && dt.Metatype() == TYPE_INT {
+			return true
+		}
+	}
+	return false
 }
 
 // renderFloatLiteral reinterprets raw bits as IEEE 754 float/double and

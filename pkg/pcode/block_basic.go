@@ -101,19 +101,20 @@ func (bb *BlockBasic) Ops() []*PcodeOp {
 }
 
 // NegateCondition flips PcodeOpBooleanFlip and PcodeOpFallthruTrue on the
-// conditional branch op. If top is true, the first op is toggled; otherwise
-// the last op is toggled.
-// C++ parity: block.cc BlockBasic::negateCondition
+// CBRANCH (last) op, then swaps the two outgoing edges if present.
+// C++ parity: block.cc BlockBasic::negateCondition -- always uses op.back()
+// regardless of the top parameter, then calls FlowBlock::negateCondition(true)
+// which swaps edges.
 func (bb *BlockBasic) NegateCondition(top bool) {
 	if len(bb.ops) == 0 {
 		return
 	}
-	var target *PcodeOp
-	if top {
-		target = bb.ops[0]
-	} else {
-		target = bb.ops[len(bb.ops)-1]
-	}
+	// C++ always flips the last op (CBRANCH), ignoring the top parameter.
+	target := bb.ops[len(bb.ops)-1]
 	target.FlipFlag(PcodeOpBooleanFlip)
 	target.FlipFlag(PcodeOpFallthruTrue)
+	// C++ FlowBlock::negateCondition(true) -> swapEdges(); only valid with 2 edges.
+	if bb.FlowBlock.SizeOut() == 2 {
+		bb.FlowBlock.SwapEdges()
+	}
 }
