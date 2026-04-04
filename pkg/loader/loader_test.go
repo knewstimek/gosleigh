@@ -584,6 +584,76 @@ func TestX86LocalVarFunction(t *testing.T) {
 	t.Logf("double_it C output:\n%s", output)
 }
 
+// TestX86ClampFunction exercises the full pipeline with a 3-branch clamp function:
+//
+//	PUSH EBP / MOV EBP,ESP / MOV EAX,[EBP+8] / CMP EAX,[EBP+0C] / JGE +3 /
+//	MOV EAX,[EBP+0C] / CMP EAX,[EBP+10] / JLE +3 / MOV EAX,[EBP+10] / POP EBP / RET
+//
+// Verifies 3-branch clamp pattern (CMP+JGE, CMP+JLE) producing >= 4 CFG blocks
+// and non-empty PrintC output.
+func TestX86ClampFunction(t *testing.T) {
+	_, thisFile, _, _ := runtime.Caller(0)
+	projectRoot := filepath.Dir(filepath.Dir(thisFile))
+	slaPath := filepath.Join(projectRoot, "sla", "testdata", "x86-packed.sla")
+	pspecPath := filepath.Join(projectRoot, "..", "testdata", "sla", "x86.pspec")
+
+	// clamp(int x, int lo, int hi):
+	//   0x00: PUSH EBP           (55)
+	//   0x01: MOV EBP,ESP        (89 E5)
+	//   0x03: MOV EAX,[EBP+8]   (8B 45 08)
+	//   0x06: CMP EAX,[EBP+0C]  (3B 45 0C)
+	//   0x09: JGE +3             (7D 03)
+	//   0x0B: MOV EAX,[EBP+0C]  (8B 45 0C)
+	//   0x0E: CMP EAX,[EBP+10]  (3B 45 10)
+	//   0x11: JLE +3             (7E 03)
+	//   0x13: MOV EAX,[EBP+10]  (8B 45 10)
+	//   0x16: POP EBP            (5D)
+	//   0x17: RET                (C3)
+	prog := []byte{
+		0x55, 0x89, 0xE5,
+		0x8B, 0x45, 0x08,
+		0x3B, 0x45, 0x0C,
+		0x7D, 0x03,
+		0x8B, 0x45, 0x0C,
+		0x3B, 0x45, 0x10,
+		0x7E, 0x03,
+		0x8B, 0x45, 0x10,
+		0x5D, 0xC3,
+	}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "clamp", Entry: base, MaxInstructions: 30})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	if len(result.Instructions) < 6 {
+		t.Fatalf("expected >= 6 instructions, got %d", len(result.Instructions))
+	}
+	// CMP+JGE and CMP+JLE produce at least 4 basic blocks.
+	if result.Graph.GetSize() < 4 {
+		t.Fatalf("expected >= 4 CFG blocks for 3-branch clamp, got %d", result.Graph.GetSize())
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for clamp function")
+	}
+	t.Logf("clamp C output:\n%s", output)
+}
+
 // TestX86BitshiftFunction exercises the full pipeline with a bitshift function:
 //
 //	PUSH EBP / MOV EBP,ESP / MOV EAX,[EBP+8] / SHL EAX,2 / POP EBP / RET
