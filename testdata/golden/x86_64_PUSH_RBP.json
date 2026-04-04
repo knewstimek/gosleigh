@@ -1,0 +1,61 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 40,
+				"size": 8
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 325888,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SUB",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 32,
+				"size": 8
+			},
+			{
+				"space": "const",
+				"offset": 8,
+				"size": 8
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 32,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "STORE",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 3,
+				"size": 8
+			},
+			{
+				"space": "register",
+				"offset": 32,
+				"size": 8
+			},
+			{
+				"space": "unique",
+				"offset": 325888,
+				"size": 8
+			}
+		],
+		"output": null
+	}
+]

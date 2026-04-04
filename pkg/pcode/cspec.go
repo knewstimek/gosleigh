@@ -43,9 +43,17 @@ type CspecRegister struct {
 	Name string `xml:"name,attr"`
 }
 
+// CspecGroup holds a <group> element inside an <input> block.
+// C++ parity: compiler.hh ParamEntryGroup (Windows x64 ABI grouped registers)
+type CspecGroup struct {
+	Pentries []CspecPentry `xml:"pentry"`
+}
+
 // CspecInput holds the <input> block of a prototype.
+// Groups are flattened into Pentries during XML unmarshalling.
 type CspecInput struct {
 	Pentries []CspecPentry `xml:"pentry"`
+	Groups   []CspecGroup  `xml:"group"`
 }
 
 // CspecOutput holds the <output> block of a prototype.
@@ -93,6 +101,16 @@ type CspecVarnodeRef struct {
 	Size   int    `xml:"size,attr"`
 }
 
+// xmlDataOrg mirrors the <data_organization> XML element.
+type xmlDataOrg struct {
+	PointerSize xmlPointerSize `xml:"pointer_size"`
+}
+
+// xmlPointerSize mirrors the <pointer_size> element inside <data_organization>.
+type xmlPointerSize struct {
+	Value int `xml:"value,attr"`
+}
+
 // CspecData is the parsed contents of a .cspec XML file.
 // C++ parity: Architecture::parseBuildSpec (compiler.cc)
 type CspecData struct {
@@ -106,6 +124,9 @@ type CspecData struct {
 	StackPointerSpace string
 	// ReturnAddressStack is the stack offset of the return address (0 for x86 cdecl).
 	ReturnAddressOffset int64
+	// PointerSizeVal is the pointer size in bytes from <data_organization><pointer_size/>.
+	// 0 means unset (use default 4).
+	PointerSizeVal int
 }
 
 // xmlCompilerSpec mirrors the top-level <compiler_spec> XML element.
@@ -115,6 +136,7 @@ type xmlCompilerSpec struct {
 	ReturnAddr   CspecReturnAddress `xml:"returnaddress"`
 	DefaultProto CspecDefaultProto  `xml:"default_proto"`
 	Prototypes   []CspecPrototype   `xml:"prototype"`
+	DataOrg      *xmlDataOrg        `xml:"data_organization"`
 }
 
 // ParseCspec reads and parses a .cspec XML file.
@@ -141,6 +163,9 @@ func ParseCspecBytes(data []byte) (*CspecData, error) {
 	}
 	if raw.ReturnAddr.Varnode != nil {
 		cs.ReturnAddressOffset = raw.ReturnAddr.Varnode.Offset
+	}
+	if raw.DataOrg != nil && raw.DataOrg.PointerSize.Value > 0 {
+		cs.PointerSizeVal = raw.DataOrg.PointerSize.Value
 	}
 
 	proto := raw.DefaultProto.Prototype
@@ -184,4 +209,55 @@ func (cs *CspecData) StackParamAlign() int64 {
 		}
 	}
 	return 4
+}
+
+// PointerSize returns the pointer size in bytes from <data_organization>.
+// Returns 4 if unset (default for x86-32 cdecl).
+func (cs *CspecData) PointerSize() int {
+	if cs == nil || cs.PointerSizeVal == 0 {
+		return 4
+	}
+	return cs.PointerSizeVal
+}
+
+// allInputPentries returns all pentry elements from the default proto's input,
+// including those nested inside <group> elements.
+// C++ parity: ProtoModel::getPentries -- groups flatten into the pentry list.
+func (cs *CspecData) allInputPentries() []CspecPentry {
+	if cs == nil || cs.DefaultProto == nil {
+		return nil
+	}
+	// Start with top-level pentries (direct children of <input>).
+	result := make([]CspecPentry, 0, len(cs.DefaultProto.Input.Pentries))
+	result = append(result, cs.DefaultProto.Input.Pentries...)
+	// Append pentries nested inside <group> elements.
+	for _, g := range cs.DefaultProto.Input.Groups {
+		result = append(result, g.Pentries...)
+	}
+	return result
+}
+
+// IntegerRegParams returns the ordered list of integer/pointer register parameter
+// names from the default calling convention prototype. Float-metatype and stack
+// pentries are excluded. For grouped entries (Windows x64 ABI), only non-float
+// registers within groups are included.
+//
+// Examples:
+//   - x86-64 gcc (SysV):  ["RDI","RSI","RDX","RCX","R8","R9"]
+//   - x86-64 win (__fastcall):  ["RCX","RDX","R8","R9"]
+//   - x86-32 (no register params): nil
+//
+// C++ parity: ProtoModel::assignMap / ParamActive::isParamable (register subset)
+func (cs *CspecData) IntegerRegParams() []string {
+	if cs == nil || cs.DefaultProto == nil {
+		return nil
+	}
+	var regs []string
+	for _, pe := range cs.allInputPentries() {
+		// Only register pentries without float metatype and without an addr element.
+		if pe.Register != nil && pe.Addr == nil && pe.Metatype != "float" {
+			regs = append(regs, pe.Register.Name)
+		}
+	}
+	return regs
 }

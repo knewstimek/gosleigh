@@ -56,16 +56,20 @@ func (sl *ScopeLocal) ResetLocalWindow() {
 	sl.localByVn = make(map[*Varnode]*HighVariable)
 }
 
-// BuildFromVarnodes scans all varnodes, classifies stack-space ones as params
-// or locals, creates HighVariables for each, and populates both ScopeLocal and
-// FuncProto.
+// BuildFromVarnodes scans all varnodes, classifies register-space and stack-space
+// ones as params or locals, creates HighVariables for each, and populates both
+// ScopeLocal and FuncProto.
 //
 // Naming convention:
-//   - Parameters: small positive offsets (>= paramBaseOffset) -> param_0, param_1, ...
-//     sorted ascending by offset.
-//   - Locals: large unsigned offsets (>= 0x80000000, negative frame offsets) ->
-//     local_0, local_1, ... sorted descending by offset (0xfffffffc = local_0,
-//     0xfffffff8 = local_1, etc. matching Ghidra's frame layout).
+//   - Register parameters (x86-64 ABI): register-space varnodes whose byte offset
+//     matches a known IntegerRegParam slot -> param_0, param_1, ... in ABI order.
+//   - Stack parameters: small positive stack offsets (>= paramBaseOffset) ->
+//     param_N where N starts after register param count, sorted ascending by offset.
+//   - Locals: large unsigned stack offsets (>= localThreshold, negative frame offsets)
+//     -> local_0, local_1, ... sorted descending by offset.
+//
+// When RegParamOffsets is nil/empty (x86-32 stack-only ABI), the register param
+// loop is a no-op and stack params are numbered from 0 -- identical to prior behavior.
 //
 // C++ parity: ScopeLocal::buildFromVarnodes / ScopeLocal::restructureHigh
 func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
@@ -73,7 +77,54 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 		return
 	}
 
-	// Collect stack-space varnodes that are input (params) or written (locals).
+	// --- Register parameters (x86-64 SysV / Win64 ABI) ---
+	// Collect register-space varnodes that match a known integer param register.
+	// Each slot is tracked by param index so duplicates are collapsed and order
+	// is determined by the ABI slot index (not varnode discovery order).
+	type regParamSlot struct {
+		vn  *Varnode
+		idx int
+	}
+	var regParamSlots []regParamSlot
+	seenRegIdx := make(map[int]bool)
+
+	if len(sl.model.RegParamOffsets) > 0 {
+		for _, vn := range varnodes {
+			if vn == nil || vn.Space() == nil {
+				continue
+			}
+			if !isRegisterSpace(vn) {
+				continue
+			}
+			idx, ok := sl.model.IsRegParam(vn.Offset())
+			if !ok {
+				continue
+			}
+			if seenRegIdx[idx] {
+				continue // deduplicate: one HighVariable per ABI slot
+			}
+			seenRegIdx[idx] = true
+			regParamSlots = append(regParamSlots, regParamSlot{vn, idx})
+		}
+		// Sort by ABI index so param_0 always matches the first argument register.
+		sort.Slice(regParamSlots, func(i, j int) bool {
+			return regParamSlots[i].idx < regParamSlots[j].idx
+		})
+	}
+
+	// Create HighVariables for register parameters.
+	regParamCount := len(regParamSlots)
+	for _, slot := range regParamSlots {
+		name := GetParamName(slot.idx)
+		hv := NewHighVariable(name)
+		hv.AddInstance(slot.vn)
+		sl.paramByVn[slot.vn] = hv
+		if fp != nil {
+			fp.AddParam(hv)
+		}
+	}
+
+	// --- Stack parameters and locals ---
 	var paramEntries []stackEntry
 	var localEntries []stackEntry
 
@@ -100,20 +151,22 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 	paramEntries = deduplicateByOffset(paramEntries)
 	localEntries = deduplicateByOffset(localEntries)
 
-	// Sort params ascending by offset: offset 4 < 8 < 12 -> param_0, param_1, ...
+	// Sort params ascending by offset: offset 8 < 16 < 24 -> param_N, param_N+1, ...
 	sort.Slice(paramEntries, func(i, j int) bool {
 		return paramEntries[i].offset < paramEntries[j].offset
 	})
 
 	// Sort locals descending by offset: 0xfffffffc > 0xfffffff8 -> local_0, local_1, ...
-	// This matches Ghidra's frame layout where the first local below EBP is local_0.
+	// This matches Ghidra's frame layout where the first local below the frame pointer is local_0.
 	sort.Slice(localEntries, func(i, j int) bool {
 		return localEntries[i].offset > localEntries[j].offset
 	})
 
-	// Create HighVariables for params.
+	// Create HighVariables for stack params.
+	// Stack param numbering starts AFTER register params so the combined
+	// param_0..param_N sequence is contiguous and ABI-ordered.
 	for i, e := range paramEntries {
-		name := GetParamName(i)
+		name := GetParamName(regParamCount + i)
 		hv := NewHighVariable(name)
 		hv.AddInstance(e.vn)
 		sl.paramByVn[e.vn] = hv
@@ -174,6 +227,17 @@ func (sl *ScopeLocal) FindEntry(vn *Varnode) *HighVariable {
 		return hv
 	}
 	return nil
+}
+
+// isRegisterSpace reports whether vn lives in the register address space.
+// In Ghidra's model, the register space is a processor-kind space named "register".
+// We match by name because SpaceKindProcessor is also used for general RAM spaces.
+// C++ parity: AddrSpace::getName() == "register" check in ScopeLocal
+func isRegisterSpace(vn *Varnode) bool {
+	if vn == nil || vn.Space() == nil {
+		return false
+	}
+	return vn.Space().Name == "register"
 }
 
 // isStackSpace reports whether vn lives in the stack address space according
