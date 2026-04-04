@@ -1,0 +1,77 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "BOOL_NEGATE",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 518,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 101632,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_EQUAL",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 523,
+				"size": 1
+			},
+			{
+				"space": "register",
+				"offset": 519,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 101888,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "BOOL_AND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 101632,
+				"size": 1
+			},
+			{
+				"space": "unique",
+				"offset": 101888,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 102400,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "CBRANCH",
+		"inputs": [
+			{
+				"space": "ram",
+				"offset": 4,
+				"size": 4
+			},
+			{
+				"space": "unique",
+				"offset": 102400,
+				"size": 1
+			}
+		],
+		"output": null
+	}
+]

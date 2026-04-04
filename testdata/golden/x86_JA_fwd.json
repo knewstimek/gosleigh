@@ -1,0 +1,56 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "BOOL_OR",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 512,
+				"size": 1
+			},
+			{
+				"space": "register",
+				"offset": 518,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 98048,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "BOOL_NEGATE",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 98048,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 98560,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "CBRANCH",
+		"inputs": [
+			{
+				"space": "ram",
+				"offset": 4,
+				"size": 4
+			},
+			{
+				"space": "unique",
+				"offset": 98560,
+				"size": 1
+			}
+		],
+		"output": null
+	}
+]
