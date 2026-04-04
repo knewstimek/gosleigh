@@ -287,8 +287,15 @@ func (r *RuleSub2Add) apply(op *PcodeOp, data *Funcdata) int {
 	// re-trigger RuleAddUnsigned on the resulting INT_ADD, causing an infinite
 	// rewrite cycle. Instead, introduce a CPUI_INT_MULT op so the result is a
 	// non-constant varnode from RuleAddUnsigned's perspective.
+	//
+	// Skip INT_SUB(x, 0): RuleIdentityEl handles this directly as COPY(x).
+	// If we converted it here we would produce INT_ADD(x, INT_MULT(0, allOnes))
+	// which requires a second sweep to collapse.
 	vn := op.Input(1)
 	if vn == nil {
+		return 0
+	}
+	if isZeroConst(vn) {
 		return 0
 	}
 	size := vn.Size()
@@ -447,3 +454,47 @@ func (r *RuleNegateNegate) apply(op *PcodeOp, data *Funcdata) int {
 	}
 	return 0
 }
+
+// RuleIdentityEl collapses identity-element operations:
+//   INT_ADD(x,0)->x, INT_SUB(x,0)->x, INT_XOR(x,0)->x, INT_OR(x,0)->x,
+//   BOOL_XOR(x,0)->x, BOOL_OR(x,0)->x,
+//   INT_MULT(x,1)->x, INT_MULT(x,0)->0
+// C++ parity: RuleIdentityEl::applyOp (ruleaction.cc ~line 3696)
+type RuleIdentityEl struct{ batchRule }
+
+func NewRuleIdentityEl(group string) *RuleIdentityEl {
+	opcodes := []OpCode{
+		CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_XOR, CPUI_INT_OR,
+		CPUI_BOOL_XOR, CPUI_BOOL_OR, CPUI_INT_MULT,
+	}
+	r := &RuleIdentityEl{}
+	r.batchRule = newBatchRule(group, "identityel", opcodes, r.apply,
+		func(g string) Rule { return NewRuleIdentityEl(g) })
+	return r
+}
+
+func (r *RuleIdentityEl) apply(op *PcodeOp, data *Funcdata) int {
+	if op.NumInput() < 2 {
+		return 0
+	}
+	constvn := op.Input(1)
+	if constvn == nil || !constvn.IsConstant() {
+		return 0
+	}
+	val, _ := constantValue(constvn)
+	switch op.Code() {
+	case CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_XOR, CPUI_INT_OR, CPUI_BOOL_XOR, CPUI_BOOL_OR:
+		if val == 0 {
+			return rewriteToCopy(data, op, op.Input(0))
+		}
+	case CPUI_INT_MULT:
+		if val == 1 {
+			return rewriteToCopy(data, op, op.Input(0))
+		}
+		if val == 0 {
+			return rewriteToConst(data, op, 0)
+		}
+	}
+	return 0
+}
+

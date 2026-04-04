@@ -45,8 +45,15 @@ func (a *ActionConstantFold) Clone(groups ActionGroupList) Action {
 }
 
 // Apply folds constant-input pure ops to COPY(const) until no more change.
+// Phase 2 then handles identity-element simplifications (e.g. INT_ADD(x, 0))
+// using foldedConstantValue so that patterns like INT_ADD(x, COPY(0)) -- where
+// the zero was itself produced by phase 1 constant-folding INT_2COMP(0) -- are
+// also eliminated.  Without phase 2, RuleIdentityEl in BatchA would miss these
+// because its guard requires IsConstant(), which is false for COPY outputs.
 func (a *ActionConstantFold) Apply(data *Funcdata) int {
 	total := 0
+
+	// Phase 1: fold ops whose every input resolves to a constant.
 	for {
 		count := 0
 		for _, op := range data.allOpsOrdered() {
@@ -71,10 +78,69 @@ func (a *ActionConstantFold) Apply(data *Funcdata) int {
 			break
 		}
 	}
+
+	// Phase 2: identity-element simplifications via foldedConstantValue.
+	// Handles cases such as INT_ADD(x, COPY(0)) that arise after phase 1
+	// converts INT_2COMP(0) -> COPY(0), where the zero is hidden behind a COPY.
+	// C++ parity: RuleIdentityEl::applyOp covers the direct-constant cases;
+	// this phase extends that to COPY-forwarded constants.
+	for {
+		count := 0
+		for _, op := range data.allOpsOrdered() {
+			if op.IsDead() || op.NumInput() < 2 {
+				continue
+			}
+			if applyIdentityFold(data, op) {
+				count++
+			}
+		}
+		total += count
+		if count == 0 {
+			break
+		}
+	}
+
 	if total > 0 {
 		return 1
 	}
 	return 0
+}
+
+// applyIdentityFold simplifies binary ops whose second operand resolves (via
+// foldedConstantValue) to the identity element for that operation.
+// Returns true if the op was rewritten.
+func applyIdentityFold(data *Funcdata, op *PcodeOp) bool {
+	if op.NumInput() < 2 {
+		return false
+	}
+	b, bok := foldedConstantValue(op.Input(1))
+	if !bok {
+		return false
+	}
+	switch op.Code() {
+	case CPUI_INT_ADD, CPUI_INT_XOR, CPUI_INT_OR:
+		if b == 0 {
+			rewriteToCopy(data, op, op.Input(0))
+			return true
+		}
+	case CPUI_INT_SUB:
+		// INT_SUB(x, 0) -> COPY(x).
+		// RuleIdentityEl does not handle INT_SUB; cover it here.
+		if b == 0 {
+			rewriteToCopy(data, op, op.Input(0))
+			return true
+		}
+	case CPUI_INT_MULT:
+		if b == 1 {
+			rewriteToCopy(data, op, op.Input(0))
+			return true
+		}
+		if b == 0 {
+			rewriteToConst(data, op, 0)
+			return true
+		}
+	}
+	return false
 }
 
 // evalConstOp attempts to constant-fold op.
