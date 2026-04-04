@@ -51,6 +51,19 @@ type ProtoModel struct {
 	// PointerSize is the pointer size in bytes from the cspec data_organization.
 	// 0 means unset; treat as 4.
 	PointerSize int
+
+	// ReturnRegOffset is the byte offset of the integer return register in the
+	// register address space. 0 for x86-32 (EAX) and x86-64 (RAX).
+	// TODO: derive this from cspec <output> tag in NewProtoModelFromCspec.
+	ReturnRegOffset uint64
+
+	// ReturnRegSize is the size in bytes of the return register.
+	// 0 means unset; ApplyCallingConvention treats 0 as no return-register anchoring.
+	ReturnRegSize int32
+
+	// ReturnRegSpaceIndex is the address-space index of the return register.
+	// -1 means unset; ApplyCallingConvention skips return anchoring when -1.
+	ReturnRegSpaceIndex int
 }
 
 // RegLookupFunc is an optional callback for looking up a register's byte offset
@@ -67,11 +80,12 @@ type RegLookupFunc func(name string) (offset uint64, ok bool)
 // C++ parity: Architecture::setPrimitiveMethods / PrototypeModel construction
 func NewProtoModelFromCspec(cs *CspecData, stackSpace *address.Space, regLookup RegLookupFunc) *ProtoModel {
 	pm := &ProtoModel{
-		StackSpace:       stackSpace,
-		ParamBaseOffset:  4, // default for x86 cdecl
-		ParamAlign:       4,
-		UnaffectedRegs:   make(map[string]bool),
-		KilledByCallRegs: make(map[string]bool),
+		StackSpace:          stackSpace,
+		ParamBaseOffset:     4, // default for x86 cdecl
+		ParamAlign:          4,
+		UnaffectedRegs:      make(map[string]bool),
+		KilledByCallRegs:    make(map[string]bool),
+		ReturnRegSpaceIndex: -1, // unset; caller must call WithReturnReg to enable anchoring
 	}
 	if cs == nil {
 		return pm
@@ -175,4 +189,17 @@ func (pm *ProtoModel) IsKilledByCall(regName string) bool {
 		return false
 	}
 	return pm.KilledByCallRegs[regName]
+}
+
+// WithReturnReg sets the integer return register location on the ProtoModel.
+// spaceIdx is the address-space index of the register space, offset is the
+// byte offset of the register within that space, size is the byte width.
+// For x86-32 cdecl, call WithReturnReg(regSpaceIdx, 0, 4) to anchor EAX.
+// Returns pm for chaining.
+// C++ parity: PrototypeModel return value slot (partial)
+func (pm *ProtoModel) WithReturnReg(spaceIdx int, offset uint64, size int32) *ProtoModel {
+	pm.ReturnRegSpaceIndex = spaceIdx
+	pm.ReturnRegOffset = offset
+	pm.ReturnRegSize = size
+	return pm
 }
