@@ -1,0 +1,18 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 518,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 0,
+			"size": 1
+		}
+	}
+]

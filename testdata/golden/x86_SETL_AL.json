@@ -1,0 +1,39 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "INT_NOTEQUAL",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 523,
+				"size": 1
+			},
+			{
+				"space": "register",
+				"offset": 519,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 100096,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 100096,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 0,
+			"size": 1
+		}
+	}
+]
