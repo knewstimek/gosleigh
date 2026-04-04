@@ -1,0 +1,39 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "LOAD",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 3,
+				"size": 8
+			},
+			{
+				"space": "register",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 94208,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_ZEXT",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 94208,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 0,
+			"size": 4
+		}
+	}
+]

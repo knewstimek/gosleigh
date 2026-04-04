@@ -1028,6 +1028,98 @@ func TestX86ArrayIndexFunction(t *testing.T) {
 	t.Logf("get_elem C output:\n%s", output)
 }
 
+// TestX86ComplexMultiArgFunction exercises the full pipeline with a positive-sum
+// function that combines ESI callee-save, SIB array access with disp8, CMP+JL
+// conditional accumulate, and DEC+JNZ counted loop:
+//
+//	int sum_positive(int *arr, int n) {
+//	    int sum = 0;
+//	    for (; n > 0; n--) { if (arr[n-1] > 0) sum += arr[n-1]; }
+//	    return sum;
+//	}
+//
+// Layout (29 bytes):
+//
+//	0x00: 55              PUSH EBP
+//	0x01: 89 E5           MOV EBP,ESP
+//	0x03: 56              PUSH ESI           (callee-save)
+//	0x04: 8B 75 08        MOV ESI,[EBP+8]    (arr)
+//	0x07: 8B 4D 0C        MOV ECX,[EBP+0xC]  (n)
+//	0x0A: 31 C0           XOR EAX,EAX        (sum=0)
+//	0x0C: 8B 54 8E FC     MOV EDX,[ESI+ECX*4-4]  (arr[n-1], SIB+disp8)
+//	0x10: 83 FA 00        CMP EDX,0
+//	0x13: 7C 02           JL  +2             (skip ADD if negative)
+//	0x15: 01 D0           ADD EAX,EDX
+//	0x17: 49              DEC ECX
+//	0x18: 75 F2           JNZ -14            (back edge -> 0x0C)
+//	0x1A: 5E              POP ESI
+//	0x1B: 5D              POP EBP
+//	0x1C: C3              RET
+//
+// Verifies that ESI callee-save (PUSH/POP ESI), SIB+disp8 array access,
+// CMP+JL conditional, and DEC+JNZ loop all decode and produce >= 3 CFG blocks
+// with non-empty PrintC output.
+func TestX86ComplexMultiArgFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	prog := []byte{
+		0x55,                    // PUSH EBP
+		0x89, 0xE5,              // MOV EBP,ESP
+		0x56,                    // PUSH ESI (callee-save)
+		0x8B, 0x75, 0x08,        // MOV ESI,[EBP+8]      (arr)
+		0x8B, 0x4D, 0x0C,        // MOV ECX,[EBP+0xC]    (n)
+		0x31, 0xC0,              // XOR EAX,EAX           (sum=0)
+		0x8B, 0x54, 0x8E, 0xFC,  // MOV EDX,[ESI+ECX*4-4] (arr[n-1])
+		0x83, 0xFA, 0x00,        // CMP EDX,0
+		0x7C, 0x02,              // JL  +2                (skip ADD)
+		0x01, 0xD0,              // ADD EAX,EDX
+		0x49,                    // DEC ECX
+		0x75, 0xF2,              // JNZ -14               (back to 0x0C)
+		0x5E,                    // POP ESI
+		0x5D,                    // POP EBP
+		0xC3,                    // RET
+	}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "sum_positive", Entry: base, MaxInstructions: 40})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	// ESI prologue + XOR + loop body (SIB MOV + CMP + JL + ADD + DEC + JNZ) + epilogue.
+	if len(result.Instructions) < 8 {
+		t.Fatalf("expected >= 8 instructions, got %d", len(result.Instructions))
+	}
+	// Loop with conditional: at least 3 basic blocks (entry, loop-body, exit).
+	if result.Graph.GetSize() < 3 {
+		t.Fatalf("expected >= 3 CFG blocks, got %d", result.Graph.GetSize())
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for sum_positive function")
+	}
+	t.Logf("sum_positive C output:\n%s", output)
+}
+
 func TestX86LinkedListFunction(t *testing.T) {
 	_, file, _, ok := runtime.Caller(0)
 	if !ok {
