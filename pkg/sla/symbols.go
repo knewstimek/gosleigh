@@ -711,7 +711,22 @@ func decodeContextOp(elem packedElement) (ContextOpBoundary, error) {
 			return ContextOpBoundary{}, fmt.Errorf("read context op expression: %w", err)
 		}
 	}
-	return ContextOpBoundary{Num: num, Shift: shift, Mask: mask, Expression: expr}, nil
+	// The SLA file encodes ContextOp using Ghidra C++ 32-bit context word
+	// semantics (ContextOp::decode() in slghsymbol.cc). Go uses 64-bit uint64
+	// words, where each Go word holds two C++ 32-bit words in big-endian order:
+	// C++ word 0 -> upper 32 bits of Go word 0 (most significant half)
+	// C++ word 1 -> lower 32 bits of Go word 0 (least significant half)
+	//
+	// Convert the SLA 32-bit word index and shift/mask to 64-bit equivalents so
+	// that ApplyContextOps writes to the correct bit positions in ContextWords.
+	goNum := num / 2
+	if num%2 == 0 {
+		// Upper half of the Go uint64: add 32 to shift, shift mask left by 32.
+		shift += 32
+		mask <<= 32
+	}
+	// Odd num: lower half; shift and mask are already in the correct position.
+	return ContextOpBoundary{Num: goNum, Shift: shift, Mask: mask, Expression: expr}, nil
 }
 
 func decodeContextCommit(elem packedElement) (ContextCommitBoundary, error) {

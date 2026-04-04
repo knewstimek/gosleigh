@@ -1177,3 +1177,68 @@ func TestX86LinkedListFunction(t *testing.T) {
 	}
 	t.Logf("sum_list C output:\n%s", output)
 }
+
+func TestX86NestedIfFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("cannot determine test file path")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// classify2: nested if-else (x>0 -> y>x -> return 2/1, else return 0)
+	// int classify2(int x, int y) {
+	//   if (x > 0) { if (y > x) return 2; else return 1; } else return 0;
+	// }
+	prog := []byte{
+		0x55,                   // PUSH EBP
+		0x89, 0xE5,             // MOV EBP, ESP
+		0x8B, 0x45, 0x08,       // MOV EAX, [EBP+8]    (x)
+		0x85, 0xC0,             // TEST EAX, EAX
+		0x7E, 0x15,             // JLE +21 -> 0x1F (XOR EAX,EAX)
+		0x8B, 0x4D, 0x0C,       // MOV ECX, [EBP+12]   (y)
+		0x3B, 0xC8,             // CMP ECX, EAX
+		0x7E, 0x07,             // JLE +7  -> 0x18 (MOV EAX,1)
+		0xB8, 0x02, 0x00, 0x00, 0x00, // MOV EAX, 2
+		0xEB, 0x09,             // JMP +9  -> 0x21 (POP EBP)
+		0xB8, 0x01, 0x00, 0x00, 0x00, // MOV EAX, 1
+		0xEB, 0x02,             // JMP +2  -> 0x21 (POP EBP)
+		0x31, 0xC0,             // XOR EAX, EAX (return 0)
+		0x5D,                   // POP EBP
+		0xC3,                   // RET
+	}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	result, err := bridge.Build(engine, bridge.BuildConfig{
+		Name:            "classify2",
+		Entry:           base,
+		MaxInstructions: 40,
+	})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+	if len(result.Instructions) < 10 {
+		t.Fatalf("expected >= 10 instructions, got %d", len(result.Instructions))
+	}
+	if result.Graph.GetSize() < 4 {
+		t.Fatalf("expected >= 4 CFG blocks (nested if-else), got %d", result.Graph.GetSize())
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC output is empty")
+	}
+	t.Logf("classify2 C output:\n%s", output)
+}
