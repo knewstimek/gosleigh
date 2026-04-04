@@ -91,11 +91,14 @@ func TestResolveBuildsShellStateAndReservations(t *testing.T) {
 	if ctx.GetDelaySlot() != 3 {
 		t.Fatalf("Resolve() delay slot = %d, want 3", ctx.GetDelaySlot())
 	}
-	if ctx.GetLength() != 4 {
-		t.Fatalf("Resolve() length = %d, want 4", ctx.GetLength())
+	// CalcCurrentLength propagates child operand offsets into the root length:
+	// child is at offset=4 with length=1, so total = 5.
+	// C++ ref: ParserWalker::calcCurrentLength() takes max over child ends.
+	if ctx.GetLength() != 5 {
+		t.Fatalf("Resolve() length = %d, want 5", ctx.GetLength())
 	}
-	if got := ctx.GetNaddr(); got != ctx.GetAddr().Add(4) {
-		t.Fatalf("Resolve() naddr = %v, want %v", got, ctx.GetAddr().Add(4))
+	if got := ctx.GetNaddr(); got != ctx.GetAddr().Add(5) {
+		t.Fatalf("Resolve() naddr = %v, want %v", got, ctx.GetAddr().Add(5))
 	}
 	if got := ctx.GetRefAddr(); got != (address.Address{Space: ram, Offset: 0x4444}) {
 		t.Fatalf("Resolve() refaddr = %v, want %v", got, address.Address{Space: ram, Offset: 0x4444})
