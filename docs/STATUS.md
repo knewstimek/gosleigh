@@ -201,6 +201,14 @@
 - [x] Phase 5 complete: WU7 완료. PrintC 기반 C 출력 경로와 선언 출력기가 구현됨
 - [x] 현재 저장소 기준 `go test ./...` 통과
 
+- [x] Phase D6 완료 (2026-04-04): IDIV/DIV/CDQ/SHL/SHR/SAR golden fixtures + E2E tests
+  - `pkg/sla/x86_golden_test.go`: 6 new cases (CDQ, IDIV_ECX, DIV_ECX, SHL/SHR/SAR_EAX_imm8) -- 총 25 subtests
+  - `testdata/golden/x86_CDQ.json`: INT_SEXT+SUBPIECE (Ghidra x86.sla sext(EAX)->EDX parity)
+  - `testdata/golden/x86_IDIV_ECX.json`: INT_SDIV+INT_SREM signed division ops
+  - `testdata/golden/x86_DIV_ECX.json`: INT_DIV+INT_REM unsigned division ops
+  - `testdata/golden/x86_SHL/SHR/SAR_EAX_imm8.json`: INT_LEFT/INT_RIGHT/INT_SRIGHT (logical/arithmetic correct)
+  - `pkg/loader/loader_test.go`: TestX86DivideFunction (CDQ+IDIV full pipeline) + TestX86BitshiftFunction (SHL E2E)
+  - No translator fixes required; existing Sleigh engine handles all 6 opcodes
 - [x] Phase D5 완료 (2026-04-04): IMUL/MUL golden fixtures + CLI --elf flag + TestX86MultiplyFunction E2E
   - `cmd/gosleigh/main.go`: --elf flag 추가 (LoadELF32TextSection 연동, --binary와 상호 배타)
   - `pkg/sla/x86_golden_test.go`: x86_IMUL_EAX_EBX (8 ops) + x86_MUL_EBX (7 ops) -- 총 19 subtests
