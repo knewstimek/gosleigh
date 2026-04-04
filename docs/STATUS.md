@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: E-Phase Decompiler Output Quality (E10 완료) (2026-04-05)
+## 현재 단계: F-Phase Decompiler Output Quality (F4+F7 완료) (2026-04-05)
 
 ### 완료
 - [x] Git repo initialized
@@ -374,6 +374,18 @@
 - [x] E8: ActionConstantFold + dead code integration -- evaluates all-constant pure ops (INT_*/BOOL_*/POPCOUNT) to fixpoint; ActionDeadCode wired into x86 E2E pipelines; classify_sign output no longer contains POPCOUNT/CARRY/SCARRY (2026-04-05)
 - [x] E9: local variable explosion fix -- collectVarnodeNames() groups non-unique varnodes by (spaceIdx,offset,size); SSA versions of same register share one local_N name; unique-space temps stay as tmp_N (2026-04-05)
 - [x] E10: register name identification -- Engine.RegisterNamesByLocation() builds SLA VarnodeSymbol offset->name map; PrintC.SetRegisterNames() injects it; EAX/EBP/ZF etc. appear directly in output instead of local_N (2026-04-05)
+- [x] E11: return register anchoring + flag folding -- AnchorReturnReg (EAX anchor so MOV EAX,1/-1/0 survive DCE), ActionFoldFlagConditions (ZF/SF/OF -> unique temps so flag register writes die), stripReturnIndirectRef (RETURN input[0] zeroed to break ESP/EIP epilogue chain) (2026-04-05)
+- [x] E12: MIPS32 LE E2E -- mips32le.pspec, 4 golden fixtures (LW/SW/ADDIU/JR), TestGoldenMIPS32LE, TestMIPS32LESimpleFunction loader E2E (2026-04-05)
+- [x] F1: merge.cc port -- Cover/CoverBlock live range tracking, Merge.MergeOp/MergeMarker, HighIntersectTest cache, MULTIEQUAL -> single HighVariable, OpInsertBefore/After for COPY insertion during TrimOpInput (2026-04-05)
+- [x] F2+F3+F5: stripReturnIndirectRef (RETURN input[0] zeroed, breaks EIP chain), RuleSborrow (sborrow(V,0)->false), funcproto epilogue cleanup (2026-04-05)
+- [x] F4+F7: RuleIdentityEl + ActionSeedSignedOps + INT_SUB reverse type propagation (2026-04-05)
+  - RuleIdentityEl: INT_ADD/SUB/XOR/OR(x,0)->x, INT_MULT(x,1)->x, INT_MULT(x,0)->0 (C++ ruleaction.cc RuleIdentityEl::applyOp)
+  - RuleSub2Add guarded to skip INT_SUB(x,0) so RuleIdentityEl can fire in-pass without multi-sweep cycle
+  - Root cause: RuleSub2Add converted INT_SUB->INT_ADD+INT_MULT before IdentityEl; fix: zero-const guard
+  - ActionSeedSignedOps: seeds TYPE_INT on inputs of INT_SLESS/SLESSEQUAL/SRIGHT/SDIV/SREM/SBORROW/SCARRY/2COMP (C++ typeop.cc TypeOpIntSless::propagateType)
+  - ActionInferTypes extended: COPY/MULTIEQUAL reverse propagation for TYPE_INT (signed constant rendering)
+  - classify_sign output: tmp_X variables now typed as `int`, `+ -0` artifact eliminated
+  - Known incomplete: 0xffffffff->-1 requires INT_SUB reverse type propagation (pending)
 
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
