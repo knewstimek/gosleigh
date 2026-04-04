@@ -703,3 +703,55 @@ func TestX86BitshiftFunction(t *testing.T) {
 	}
 	t.Logf("Bitshift C output:\n%s", output)
 }
+
+// TestX86BranchlessMaxFunction exercises the full pipeline with a branchless max:
+//
+//	PUSH EBP / MOV EBP,ESP / MOV EAX,[EBP+8] / MOV ECX,[EBP+0Ch]
+//	CMP EAX,ECX / CMOVL EAX,ECX / POP EBP / RET
+//
+// Verifies that CMOVL (0F 4C) is decoded and the branchless conditional move
+// produces non-empty PrintC output.
+func TestX86BranchlessMaxFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// bytes: PUSH EBP; MOV EBP,ESP; MOV EAX,[EBP+8]; MOV ECX,[EBP+0Ch];
+	//        CMP EAX,ECX; CMOVL EAX,ECX; POP EBP; RET
+	prog := []byte{0x55, 0x89, 0xE5, 0x8B, 0x45, 0x08, 0x8B, 0x4D, 0x0C, 0x3B, 0xC1, 0x0F, 0x4C, 0xC1, 0x5D, 0xC3}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "branchless_max", Entry: base, MaxInstructions: 20})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	if result.Graph == nil {
+		t.Fatal("expected non-nil CFG graph")
+	}
+	if len(result.Instructions) < 6 {
+		t.Fatalf("expected >= 6 instructions, got %d", len(result.Instructions))
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for branchless_max function")
+	}
+	t.Logf("BranchlessMax C output:\n%s", output)
+}
