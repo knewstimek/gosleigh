@@ -312,6 +312,11 @@
   - 총 108개 golden subtest 통과 (기존 102 + 신규 6)
   - `TestX86NestedIfFunction` E2E: classify2() -- nested if-else (x>0 -> y>x -> 2/1, else 0), >= 10 instructions, >= 4 CFG blocks, non-empty PrintC 출력
   - E2E 총계: 20개 테스트
+- [x] D20: missing integer opcodes (JNO, XCHG mem) + FP basic decode probes + call chain E2E -- x86 32-bit integer opcode coverage complete (2026-04-04)
+  - JNO (0x71), XCHG r/m32 (0x87) golden fixtures 추가
+  - FP probes (FLD1/FLDZ/FSTP_m32) golden fixtures 추가 -- x87 FP 디코딩 정상 동작 확인 (skip 불필요)
+  - `TestX86CallChainFunction` E2E: caller -> callee1 -> callee2 multi-CALL chain through Heritage+PrintC
+  - 총 113개 golden subtest 통과 (기존 108 + 신규 5), E2E 총계: 21개 테스트
 
 ### 다음
 - [ ] **[우선순위 높음]** `DecisionNode::resolve()` 결함 수정: 6502 BRK 외 대부분 opcode (NOP 0xEA, LDA 0xA9 등)에서 발생하는 `"unable to resolve constructor"` 원인을 C++ `slghsymbol.cc` 대조로 찾아 수정. 수정 후 `GOSLEIGH_UPDATE_GOLDEN=1`로 golden fixture 재생성.

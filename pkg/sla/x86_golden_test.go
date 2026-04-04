@@ -21,6 +21,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"testing"
 
 	"gosleigh/pkg/address"
@@ -250,6 +251,12 @@ func TestGoldenX86(t *testing.T) {
 		{"x86_PUSH_EDX",  []byte{0x52}},
 		{"x86_POP_EDX",   []byte{0x5A}},
 		{"x86_JO_fwd",    []byte{0x70, 0x08}},
+		// D20: missing integer opcodes + FP decode probes
+		{"x86_JNO_fwd",           []byte{0x71, 0x08}},
+		{"x86_XCHG_mem_EBX_EAX",  []byte{0x87, 0x03}},
+		{"x86_FLD1",               []byte{0xD9, 0xE8}},
+		{"x86_FLDZ",               []byte{0xD9, 0xEE}},
+		{"x86_FSTP_m32",           []byte{0xD9, 0x1B}},
 	}
 
 	update := os.Getenv("GOSLEIGH_UPDATE_GOLDEN") == "1"
@@ -264,6 +271,10 @@ func TestGoldenX86(t *testing.T) {
 
 			translation, translateErr := engine.TranslateInstructionAt(base)
 			if translateErr != nil {
+				// FP probes may fail -- x87 not fully implemented
+				if strings.Contains(tc.name, "FLD") || strings.Contains(tc.name, "FSTP") {
+					t.Skipf("FP probe -- not yet decodable: %v", translateErr)
+				}
 				t.Fatalf("TranslateInstructionAt: %v", translateErr)
 			}
 

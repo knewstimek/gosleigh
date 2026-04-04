@@ -1242,3 +1242,62 @@ func TestX86NestedIfFunction(t *testing.T) {
 	}
 	t.Logf("classify2 C output:\n%s", output)
 }
+
+// TestX86CallChainFunction exercises the full pipeline with a function that
+// contains two sequential CALL instructions: caller -> callee1 -> callee2.
+// Verifies that multi-CALL chains are decoded correctly through Heritage+PrintC.
+func TestX86CallChainFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// PUSH EBP; MOV EBP,ESP; CALL +0x10 (callee1); CALL +0x20 (callee2); POP EBP; RET
+	prog := []byte{
+		0x55,                         // PUSH EBP
+		0x89, 0xE5,                   // MOV EBP,ESP
+		0xE8, 0x10, 0x00, 0x00, 0x00, // CALL callee1 (+0x10)
+		0xE8, 0x20, 0x00, 0x00, 0x00, // CALL callee2 (+0x20)
+		0x5D,                         // POP EBP
+		0xC3,                         // RET
+	}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "call_chain", Entry: base, MaxInstructions: 20})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	if len(result.Instructions) < 6 {
+		t.Fatalf("expected >= 6 instructions, got %d", len(result.Instructions))
+	}
+	if result.Graph.GetSize() < 1 {
+		t.Fatalf("expected >= 1 CFG block, got %d", result.Graph.GetSize())
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for call chain function")
+	}
+	// PrintC emits C code: CALLs become C function-call expressions (e.g. "ram_18_4();").
+	// Verify at least 2 call-sites are present in the output.
+	if callCount := strings.Count(output, "();"); callCount < 2 {
+		t.Fatalf("expected >= 2 function call expressions in PrintC output (got %d) -- multi-call chain not represented:\n%s", callCount, output)
+	}
+	t.Logf("call_chain C output:\n%s", output)
+}
