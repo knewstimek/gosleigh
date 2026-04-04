@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: F-Phase Decompiler Output Quality (F4+F7 완료) (2026-04-05)
+## 현재 단계: F-Phase Decompiler Output Quality (F4+F7+F8 완료) (2026-04-05)
 
 ### 완료
 - [x] Git repo initialized
@@ -385,7 +385,17 @@
   - ActionSeedSignedOps: seeds TYPE_INT on inputs of INT_SLESS/SLESSEQUAL/SRIGHT/SDIV/SREM/SBORROW/SCARRY/2COMP (C++ typeop.cc TypeOpIntSless::propagateType)
   - ActionInferTypes extended: COPY/MULTIEQUAL reverse propagation for TYPE_INT (signed constant rendering)
   - classify_sign output: tmp_X variables now typed as `int`, `+ -0` artifact eliminated
-  - Known incomplete: 0xffffffff->-1 requires INT_SUB reverse type propagation (pending)
+- [x] F8: condition normalization -- BatchA second pass (2026-04-05)
+  - Root cause: RuleBooleanNegate tried INT_EQUAL(SF, SBORROW_out) before RulePropagateCopy replaced SBORROW_out with const:0; since opcode didn't change, RuleBooleanNegate wasn't retried
+  - Fix: run BatchA twice in the pipeline (C++ Ghidra re-runs batch action group until stabilization)
+  - Effect: INT_EQUAL(const:0, INT_SLESS_result) -> BOOL_NEGATE(INT_SLESS_result) -> INT_SLESSEQUAL(0, tmp_0)
+  - classify_sign condition: `0 == tmp_0 < 0` eliminated; now `0 <= tmp_0`
+  - F7 also resolved: INT_SLESSEQUAL seeds TYPE_INT on its inputs, propagates to EAX -> 0xffffffff rendered as -1
+- [x] F9: if-body inversion fix -- NegateCondition + collapseRegion edge ordering + renderBranchCondition (2026-04-05)
+  - Bug 1: NegateCondition set BooleanFlip on first op instead of last (CBRANCH), and did not call SwapEdges. C++ parity: BlockBasic::negateCondition always uses op.back() and calls FlowBlock::negateCondition(true) which swaps edges.
+  - Bug 2: collapseRegion used remove+re-append for incoming edges, which swap-deleted the original edge slot and re-appended at the end, corrupting TrueOut/FalseOut ordering. Fix: use ReplaceOutEdge (in-place) matching C++ selfIdentify -> replaceOutEdge path.
+  - Bug 3: renderBranchCondition wrapped BooleanFlip with `!` prefix only. Fix: implement checkPrintNegation logic (booleanFlipToken) -- INT_EQUAL->!=, INT_NOTEQUAL->==, INT_SLESS-><=+reorder, etc. matching C++ PrintC::opCbranch negatetoken path.
+  - classify_sign: `if (tmp_0 == 0) { EAX = 0; } else { if (tmp_0 != 0 && 0 <= tmp_0) { EAX = 1; } else { EAX = -1; } }` -- condition structure now correct
 
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)

@@ -260,13 +260,15 @@ func TestBlockBasic_NegateConditionTop(t *testing.T) {
 	bb.AddOp(first)
 	bb.AddOp(last)
 
+	// C++ parity: BlockBasic::negateCondition always flips op.back() (the last
+	// op, i.e. the CBRANCH) regardless of the top parameter.
 	bb.NegateCondition(true)
 
-	if !first.HasFlag(PcodeOpBooleanFlip) {
-		t.Fatal("top=true should flip first op")
+	if first.HasFlag(PcodeOpBooleanFlip) {
+		t.Fatal("NegateCondition should NOT flip the first op")
 	}
-	if last.HasFlag(PcodeOpBooleanFlip) {
-		t.Fatal("top=true should NOT flip last op")
+	if !last.HasFlag(PcodeOpBooleanFlip) {
+		t.Fatal("NegateCondition should flip the last op (CBRANCH)")
 	}
 }
 

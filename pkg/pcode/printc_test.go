@@ -277,7 +277,9 @@ func TestPrintCEndToEndRawPcodeToStructuredC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
-	want := "unsigned int sample(unsigned int param_0) {\n    if (param_0 == 0) {\n        return 1;\n    }\n    return param_0 + 1;\n}\n"
+	// C++ parity: ruleBlockIfNoExit fires at i=0 (FalseOut=param_0+1 path),
+	// negates condition (param_0==0 -> param_0!=0), and makes that the if-body.
+	want := "unsigned int sample(unsigned int param_0) {\n    if (param_0 != 0) {\n        return param_0 + 1;\n    }\n    return 1;\n}\n"
 	if got != want {
 		t.Fatalf("unexpected emitted C:\n%s", got)
 	}

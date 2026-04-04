@@ -870,6 +870,10 @@ func TestX86ClassifySignFunction(t *testing.T) {
 	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
 	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	// Run BatchA a second time: PropagateCopy may have updated inputs to constants during
+	// the first pass, enabling BooleanNegate/BoolNegate to fire on the next pass.
+	// C++ Ghidra's pipeline re-runs the batch action group until stabilization.
+	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
 	// Seed signed types on inputs of signed opcodes, then propagate through COPY/MULTIEQUAL.
 	// This makes constant varnodes (e.g. 0xffffffff) inherit TYPE_INT so PrintC emits -1.
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
@@ -931,11 +935,14 @@ func TestX86ClassifySignFunction(t *testing.T) {
 		t.Errorf("F4: expected '+ -0' to be eliminated by RuleIdentityEl, but found it:\n%s", output)
 	}
 
-	// F7: signed constant rendering (0xffffffff -> -1) requires TYPE_INT to propagate
-	// through the INT_SUB chain into the EAX varnode. This is not yet implemented;
-	// the assertion is relaxed to a log until INT_SUB reverse type propagation is added.
+	// F7: signed constant must print as -1, not 0xffffffff.
 	if strings.Contains(output, "0xffffffff") {
-		t.Logf("F7 known incomplete: 0xffffffff not yet rendered as -1 (needs INT_SUB reverse type propagation):\n%s", output)
+		t.Errorf("F7: expected 0xffffffff to be rendered as -1 (signed), but found hex literal:\n%s", output)
+	}
+
+	// F7: the output should contain -1 as a signed constant (from MOV EAX, 0xFFFFFFFF).
+	if !strings.Contains(output, "-1") {
+		t.Errorf("F7: expected -1 in output (signed constant rendering), but not found:\n%s", output)
 	}
 }
 

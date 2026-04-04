@@ -291,6 +291,10 @@ func (bg *BlockGraph) collapseRegion(nodes []*FlowBlock, tp BlockType) *FlowBloc
 		newBlock.SetFlag(BlockFlagSwitchOut)
 	}
 
+	// Collect incoming edges from outside the region. These will be redirected
+	// to newBlock in-place (preserving outEdge position in the source block).
+	// C++ parity: BlockGraph::replaceNode -- in-place target replacement so that
+	// the source block's TrueOut/FalseOut ordering is not disturbed.
 	incomingRaw := make([]edgeRecord, 0, 4)
 	outgoingRaw := make([]edgeRecord, 0, 4)
 	for _, node := range nodes {
@@ -310,18 +314,8 @@ func (bg *BlockGraph) collapseRegion(nodes []*FlowBlock, tp BlockType) *FlowBloc
 		}
 	}
 
-	incoming := make([]edgeRecord, 0, len(incomingRaw))
 	outgoing := make([]edgeRecord, 0, len(outgoingRaw))
-	incomingSeen := make(map[string]struct{})
 	outgoingSeen := make(map[string]struct{})
-	for _, edge := range incomingRaw {
-		key := fmt.Sprintf("%p:%d", edge.other, edge.label)
-		if _, ok := incomingSeen[key]; ok {
-			continue
-		}
-		incomingSeen[key] = struct{}{}
-		incoming = append(incoming, edge)
-	}
 	for _, edge := range outgoingRaw {
 		key := fmt.Sprintf("%p:%d", edge.other, edge.label)
 		if _, ok := outgoingSeen[key]; ok {
@@ -353,11 +347,17 @@ func (bg *BlockGraph) collapseRegion(nodes []*FlowBlock, tp BlockType) *FlowBloc
 		}
 	}
 
+	// Redirect incoming edges in-place: replace the old region-node target with
+	// newBlock without changing the slot in the source's outEdges. This preserves
+	// TrueOut/FalseOut (outEdges[1]/outEdges[0]) ordering for conditional blocks.
+	// If the same source has multiple edges into the region, each is handled once
+	// (GetOutIndex returns -1 after the first replacement).
 	for _, edge := range incomingRaw {
-		idx := edge.other.GetOutIndex(edge.node)
-		if idx >= 0 {
-			edge.other.RemoveOutEdge(idx)
+		outIdx := edge.other.GetOutIndex(edge.node)
+		if outIdx < 0 {
+			continue // already replaced (duplicate source)
 		}
+		edge.other.ReplaceOutEdge(outIdx, newBlock)
 	}
 	for _, edge := range outgoingRaw {
 		idx := edge.node.GetOutIndex(edge.other)
@@ -389,9 +389,6 @@ func (bg *BlockGraph) collapseRegion(nodes []*FlowBlock, tp BlockType) *FlowBloc
 	filtered[firstIndex] = newBlock
 	bg.blocks = filtered
 
-	for _, edge := range incoming {
-		bg.AddEdge(edge.other, newBlock, edge.label)
-	}
 	for _, edge := range outgoing {
 		bg.AddEdge(newBlock, edge.other, edge.label)
 	}
