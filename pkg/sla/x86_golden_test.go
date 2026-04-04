@@ -149,6 +149,8 @@ func TestGoldenX86(t *testing.T) {
 		{"x86_XOR_EAX_EAX",   []byte{0x31, 0xC0}},
 		{"x86_POP_EBP",       []byte{0x5D}},
 		{"x86_JMP_short",     []byte{0xEB, 0x00}},
+		{"x86_DEC_ECX",       []byte{0x49}},
+		{"x86_JNE_back",      []byte{0x75, 0xFE}},
 	}
 
 	update := os.Getenv("GOSLEIGH_UPDATE_GOLDEN") == "1"

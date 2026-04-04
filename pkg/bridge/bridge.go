@@ -183,6 +183,21 @@ func collectInstructions(engine *sla.Engine, cfg BuildConfig) ([]instructionReco
 		if translation.Next == cur {
 			break
 		}
+		// When no explicit End address is given, stop linear scan on an unconditional terminator
+		// (RETURN, BRANCHIND, or BRANCH). Without this guard the scanner follows translation.Next
+		// past the end of the function into uninitialised bytes, collecting garbage instructions
+		// and corrupting the knownAddrs set used by resolveTarget.
+		//
+		// When End is set the caller defines the exact byte range to collect (e.g. bridge_test.go
+		// BRK_BRK), so we honour the range boundary instead and let the loop continue.
+		//
+		// CBRANCH is excluded: its fall-through edge always points to the next sequential address,
+		// so we must continue collecting that instruction.
+		//
+		// C++ ref: FlowInfo::setRange / FlowInfo::hasTerminator in FlowInfo.cc.
+		if cfg.End.IsInvalid() && hasHardTerminator(translation) {
+			break
+		}
 		cur = translation.Next
 	}
 
@@ -589,4 +604,21 @@ func min(left int, right int) int {
 		return left
 	}
 	return right
+}
+
+// hasHardTerminator reports whether translation contains an unconditional terminating op
+// (RETURN, BRANCHIND, or BRANCH). CBRANCH is excluded because its fall-through edge
+// continues to the next sequential instruction, which must still be collected.
+// C++ ref: FlowInfo::hasTerminator / BasicBlock successor discovery in FlowInfo.cc.
+func hasHardTerminator(translation sla.InstructionTranslation) bool {
+	for _, op := range translation.Ops {
+		switch op.OpCode {
+		case pcode.CPUI_RETURN, pcode.CPUI_BRANCHIND:
+			return true
+		case pcode.CPUI_BRANCH:
+			// Unconditional branch: no fall-through.
+			return true
+		}
+	}
+	return false
 }
