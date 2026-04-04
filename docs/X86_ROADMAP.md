@@ -17,6 +17,7 @@
 - Phase D4 완료 (2026-04-04): if-else diamond CFG -- resolve.go length fix, bridge.go BFS worklist, TestX86IfElse E2E
 - Phase D5 완료 (2026-04-04): IMUL/MUL golden fixtures (19 subtests), CLI --elf flag, TestX86MultiplyFunction E2E
 - Phase D6 완료 (2026-04-04): IDIV/DIV/CDQ/SHL/SHR/SAR golden fixtures (25 subtests), TestX86DivideFunction + TestX86BitshiftFunction E2E
+- Phase D7 완료 (2026-04-04): PE32 loader (debug/pe stdlib), simple_add.exe fixture, TestX86PEDecompile E2E, CLI --pe flag
 - NOP (0x90) = Ghidra PCODE_NOP, 0 ops는 정상 동작
 - VarnodeList operand type translate.go에 추가 (PUSH EBP 지원)
 
