@@ -13,8 +13,10 @@ func assertDynamicSpaceSelector(t *testing.T, got pcode.VarnodeData, constSpace 
 	if got.Space != constSpace {
 		t.Fatalf("space selector constant-space mismatch: got=%v want=%v", got.Space, constSpace)
 	}
-	if got.Offset != dynamicSpaceSelectorPayload(targetSpace) {
-		t.Fatalf("space selector payload mismatch: got=0x%x want=0x%x", got.Offset, dynamicSpaceSelectorPayload(targetSpace))
+	// Space selector payload is the space index (deterministic across runs).
+	wantOffset := uint64(targetSpace.Index)
+	if got.Offset != wantOffset {
+		t.Fatalf("space selector payload mismatch: got=0x%x want=0x%x (space index)", got.Offset, wantOffset)
 	}
 	if got.Size != dynamicSpaceSelectorSize() {
 		t.Fatalf("space selector size mismatch: got=%d want=%d", got.Size, dynamicSpaceSelectorSize())
