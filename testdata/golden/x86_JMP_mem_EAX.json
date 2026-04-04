@@ -1,0 +1,35 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "LOAD",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 3,
+				"size": 8
+			},
+			{
+				"space": "register",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 94720,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "BRANCHIND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 94720,
+				"size": 4
+			}
+		],
+		"output": null
+	}
+]

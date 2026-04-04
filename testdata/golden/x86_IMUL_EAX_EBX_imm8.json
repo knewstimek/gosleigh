@@ -1,0 +1,150 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "INT_SEXT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 12,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 498944,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SEXT",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 5,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 499200,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_MULT",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 498944,
+				"size": 8
+			},
+			{
+				"space": "unique",
+				"offset": 499200,
+				"size": 8
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 499712,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "SUBPIECE",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 499712,
+				"size": 8
+			},
+			{
+				"space": "const",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 0,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "SUBPIECE",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 499712,
+				"size": 8
+			},
+			{
+				"space": "const",
+				"offset": 4,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 500480,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SEXT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 308992,
+			"size": 8
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_NOTEQUAL",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 308992,
+				"size": 8
+			},
+			{
+				"space": "unique",
+				"offset": 499712,
+				"size": 8
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 512,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 512,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 523,
+			"size": 1
+		}
+	}
+]
