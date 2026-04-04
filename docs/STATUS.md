@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: E-Phase Decompiler Output Quality (E6 완료) (2026-04-05)
+## 현재 단계: E-Phase Decompiler Output Quality (E7 완료) (2026-04-05)
 
 ### 완료
 - [x] Git repo initialized
@@ -370,6 +370,7 @@
 - [ ] Reconcile Gosleigh package/module shape with standalone use plus downstream MCP integration
 - [ ] Continue from translation/runtime into the broader decompiler pipeline instead of stopping at a partial translator layer
 - [x] E6: symbol recovery -- SymbolTable, LoadELFSymbols, LoadDWARFFunctions, LoadPE32Exports/Imports, SetDisplayName, BuildConfig.SymbolName wiring, fixture generators, 6 unit tests + E2E (2026-04-05)
+- [x] E7: AArch64 E2E pipeline -- AARCH64.pspec, goldenEngineAARCH64, TestGoldenAARCH64 (4 subtests: ADD/RET/MOV/NOP), TestAARCH64SimpleFunction loader E2E, 4 golden fixtures (2026-04-05)
 
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)

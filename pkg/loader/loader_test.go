@@ -1934,3 +1934,67 @@ func TestE6SymbolNameInOutput(t *testing.T) {
 	}
 	t.Logf("E6 symbol recovery output:\n%s", output)
 }
+
+// TestAARCH64SimpleFunction exercises the full AArch64 E2E pipeline:
+//
+//	EngineBuilder.Build -> bridge.Build -> Heritage -> PrintC
+//
+// Bytes: ADD X0, X0, X1 (00 00 01 8B) + RET (C0 03 5F D6).
+// AArch64 is little-endian; all instructions are 4-byte LE words.
+// Verifies that AArch64 instructions produce non-empty PrintC output end-to-end.
+// Unknown pspec context variables (ShowPAC, ShowBTI, etc.) are skipped gracefully.
+func TestAARCH64SimpleFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+
+	// AARCH64.sla lives at testdata/sla/ in the repo root (two levels above pkg/loader/).
+	slaPath := filepath.Join(dir, "../../testdata/sla/AARCH64.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/AARCH64.pspec")
+
+	// ADD X0, X0, X1; RET
+	prog := []byte{
+		0x00, 0x00, 0x01, 0x8B, // ADD X0, X0, X1
+		0xC0, 0x03, 0x5F, 0xD6, // RET
+	}
+
+	engine, entryAddr, err := (&loader.EngineBuilder{
+		SLAPath:   slaPath,
+		PspecPath: pspecPath,
+		Bytes:     prog,
+	}).Build()
+	if err != nil {
+		t.Fatalf("EngineBuilder.Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{
+		Name:            "aarch64_add_ret",
+		Entry:           entryAddr,
+		MaxInstructions: 10,
+	})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+	if result == nil {
+		t.Fatal("bridge.Build returned nil result")
+	}
+	if len(result.Instructions) == 0 {
+		t.Fatal("bridge returned no instructions")
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for AArch64 function")
+	}
+	t.Logf("AArch64 simple function C output:\n%s", output)
+}

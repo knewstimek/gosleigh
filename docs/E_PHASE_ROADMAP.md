@@ -99,6 +99,18 @@ int classify2(int x, int y) {
   - `pkg/loader/symbols_test.go`: 6 unit tests (SymbolTable + all loaders)
   - `pkg/loader/loader_test.go`: TestE6SymbolNameInOutput E2E (ELF symtab -> PrintC)
 
+## E7: AARCH64 E2E 파이프라인 [DONE 2026-04-05]
+
+**핵심 deliverable**: AArch64 명령어 golden 테스트 + 전체 디컴파일 E2E.
+- `testdata/sla/AARCH64.pspec`: ShowPAC/PAC_clobber/ShowBTI/ShowMemTag context_set
+- `pkg/sla/aarch64_golden_test.go`: goldenEngineAARCH64 (unknown pspec vars graceful skip), TestGoldenAARCH64 (4 subtests)
+  - ADD X0, X0, X1 (00 00 01 8B)
+  - RET (C0 03 5F D6)
+  - MOV X0, X1 / ORR X0, XZR, X1 (E0 03 01 AA)
+  - NOP (1F 20 03 D5) -- empty p-code body, fixture = []
+- 4 golden fixtures: testdata/golden/aarch64_{ADD_X0_X0_X1,RET,MOV_X0_X1,NOP}.json
+- `pkg/loader/loader_test.go`: TestAARCH64SimpleFunction (ADD X0,X0,X1 + RET -> bridge -> Heritage -> PrintC)
+
 ## 우선순위 및 의존성
 
 ```
