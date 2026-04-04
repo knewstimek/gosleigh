@@ -1,0 +1,412 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "INT_AND",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 3,
+				"size": 4
+			},
+			{
+				"space": "const",
+				"offset": 31,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 656896,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_RIGHT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 0,
+				"size": 4
+			},
+			{
+				"space": "unique",
+				"offset": 656896,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 657152,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SUB",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 32,
+				"size": 4
+			},
+			{
+				"space": "unique",
+				"offset": 656896,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 657408,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_LEFT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 0,
+				"size": 4
+			},
+			{
+				"space": "unique",
+				"offset": 657408,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 657664,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_OR",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 657152,
+				"size": 4
+			},
+			{
+				"space": "unique",
+				"offset": 657664,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 0,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_NOTEQUAL",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 656896,
+				"size": 4
+			},
+			{
+				"space": "const",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 314624,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SLESS",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 0,
+				"size": 4
+			},
+			{
+				"space": "const",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 315136,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "BOOL_NEGATE",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 314624,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 315392,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_AND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 315392,
+				"size": 1
+			},
+			{
+				"space": "register",
+				"offset": 512,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 315648,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_AND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 314624,
+				"size": 1
+			},
+			{
+				"space": "unique",
+				"offset": 315136,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 315904,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_OR",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 315648,
+				"size": 1
+			},
+			{
+				"space": "unique",
+				"offset": 315904,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 512,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_EQUAL",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 656896,
+				"size": 4
+			},
+			{
+				"space": "const",
+				"offset": 1,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 316672,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SLESS",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 0,
+				"size": 4
+			},
+			{
+				"space": "const",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 316928,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_LEFT",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 0,
+				"size": 4
+			},
+			{
+				"space": "const",
+				"offset": 1,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 317184,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SLESS",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 317184,
+				"size": 4
+			},
+			{
+				"space": "const",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 317440,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_XOR",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 316928,
+				"size": 1
+			},
+			{
+				"space": "unique",
+				"offset": 317440,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 317952,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "BOOL_NEGATE",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 316672,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 318208,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_AND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 318208,
+				"size": 1
+			},
+			{
+				"space": "register",
+				"offset": 523,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 318464,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_AND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 316672,
+				"size": 1
+			},
+			{
+				"space": "unique",
+				"offset": 317952,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 318720,
+			"size": 1
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_OR",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 318464,
+				"size": 1
+			},
+			{
+				"space": "unique",
+				"offset": 318720,
+				"size": 1
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 523,
+			"size": 1
+		}
+	}
+]

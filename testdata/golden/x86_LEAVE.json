@@ -1,0 +1,60 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 20,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 16,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "LOAD",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 3,
+				"size": 8
+			},
+			{
+				"space": "register",
+				"offset": 16,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 20,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_ADD",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 16,
+				"size": 4
+			},
+			{
+				"space": "const",
+				"offset": 4,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 16,
+			"size": 4
+		}
+	}
+]

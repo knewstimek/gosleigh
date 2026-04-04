@@ -204,6 +204,9 @@
 - [x] Phase D11 완료 (2026-04-04): CALL indirect (FF /2 register + memory) + SETcc (SETE/SETNE/SETL/SETGE) + MOVZX 16-to-32 golden (57 subtests), TestX86IndirectCallFunction E2E
   - `pkg/sla/x86_golden_test.go`: 7 new cases -- CALL_EAX (FF D0), CALL_mem_EAX (FF 10), SETE_AL, SETNE_AL, SETL_AL, SETGE_AL, MOVZX_EAX_AX (0F B7 r/m16) -- 총 57 subtests
   - `testdata/golden/`: CALL_EAX -> CALLIND p-code; CALL_mem_EAX -> LOAD+CALLIND; SETcc -> INT_EQUAL/INT_NOTEQUAL/INT_SLESS/INT_SLESSEQUAL+COPY to byte; MOVZX_EAX_AX -> INT_ZEXT 16->32
+- [x] D12: ADC/SBB + ROR/ROL + LEAVE + CWDE golden fixtures + 3-branch clamp E2E (2026-04-04)
+  - 6 new golden subtests: ADC_EAX_EBX, SBB_EAX_EBX, ROR_EAX_imm8, ROL_EAX_imm8, LEAVE, CWDE (total: 63 subtests)
+  - TestX86ClampFunction: 3-branch clamp(x,lo,hi) E2E -- CMP+JGE+CMP+JLE, 4+ CFG blocks, PrintC output
   - `pkg/loader/loader_test.go`: TestX86IndirectCallFunction -- PUSH EBP + MOV EBP,ESP + MOV EAX,[EBP+8] + CALL EAX + POP EBP + RET, >= 4 instructions, non-empty PrintC
   - No engine fixes required; all 7 opcodes decoded correctly by existing Sleigh engine
 - [x] Phase D10 완료 (2026-04-04): PUSH imm8/imm32 + NOT + stack locals golden (50 subtests), TestX86LocalVarFunction (local vars E2E)

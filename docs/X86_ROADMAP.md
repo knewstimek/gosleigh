@@ -53,6 +53,7 @@
 13. ~~Rules MUL/IMUL~~ -- 완료 (2026-04-04)
 13b. ~~Rules IDIV/DIV/CDQ/SHL/SHR/SAR~~ -- 완료 (2026-04-04)
 13c. ~~Rules CALL indirect + SETcc + MOVZX 16->32~~ -- 완료 (D11: 57 golden subtests, TestX86IndirectCallFunction E2E, 2026-04-04)
+13e. ~~Rules ADC/SBB + ROR/ROL + LEAVE + CWDE~~ -- done (D12: 63 golden subtests, TestX86ClampFunction E2E, 2026-04-04)
 13d. Rules 미완성 보완 -- switch/float
 14. block structuring E2E 검증
 15. assembly printer (optional)
