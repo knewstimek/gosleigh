@@ -925,3 +925,105 @@ func TestX86SwitchFunction(t *testing.T) {
 	}
 	t.Logf("classify C output:\n%s", output)
 }
+
+func TestX86StructAccessFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// get_y(Point *p): return p->y (offset 4)
+	//  0x00: 55              PUSH EBP
+	//  0x01: 89 E5           MOV EBP, ESP
+	//  0x03: 8B 45 08        MOV EAX, [EBP+8]    (p)
+	//  0x06: 8B 40 04        MOV EAX, [EAX+4]    (p->y)
+	//  0x09: 5D              POP EBP
+	//  0x0A: C3              RET
+	prog := []byte{
+		0x55, 0x89, 0xE5, 0x8B, 0x45, 0x08,
+		0x8B, 0x40, 0x04, 0x5D, 0xC3,
+	}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "get_y", Entry: base, MaxInstructions: 20})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	if len(result.Instructions) < 4 {
+		t.Fatalf("expected >= 4 instructions, got %d", len(result.Instructions))
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for struct access function")
+	}
+	t.Logf("get_y C output:\n%s", output)
+}
+
+func TestX86ArrayIndexFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// get_elem(int *arr, int i): return arr[i]
+	//  0x00: 55              PUSH EBP
+	//  0x01: 89 E5           MOV EBP, ESP
+	//  0x03: 8B 45 08        MOV EAX, [EBP+8]    (arr)
+	//  0x06: 8B 4D 0C        MOV ECX, [EBP+12]   (i)
+	//  0x09: 8B 04 88        MOV EAX, [EAX+ECX*4] (arr[i])
+	//  0x0C: 5D              POP EBP
+	//  0x0D: C3              RET
+	prog := []byte{
+		0x55, 0x89, 0xE5, 0x8B, 0x45, 0x08,
+		0x8B, 0x4D, 0x0C, 0x8B, 0x04, 0x88,
+		0x5D, 0xC3,
+	}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "get_elem", Entry: base, MaxInstructions: 20})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	if len(result.Instructions) < 5 {
+		t.Fatalf("expected >= 5 instructions, got %d", len(result.Instructions))
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for array index function")
+	}
+	t.Logf("get_elem C output:\n%s", output)
+}
