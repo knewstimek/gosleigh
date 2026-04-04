@@ -201,6 +201,10 @@
 - [x] Phase 5 complete: WU7 완료. PrintC 기반 C 출력 경로와 선언 출력기가 구현됨
 - [x] 현재 저장소 기준 `go test ./...` 통과
 
+- [x] Phase D8 완료 (2026-04-04): LEA/MOVZX/MOVSX/OR/AND/INC/CMP/JGE golden fixtures + TestX86ComplexFunction
+  - `pkg/sla/x86_golden_test.go`: 8 new cases (OR_EAX_EBX, AND_EAX_EBX, INC_EAX, CMP_EAX_EBX, MOVZX_EAX_AL, MOVSX_EAX_AL, LEA_EAX_disp8, JGE_fwd) -- 총 33 subtests
+  - `testdata/golden/`: OR(INT_OR+flags), AND(INT_AND+flags), INC(INT_ADD+OF), CMP(INT_SUB+flags), MOVZX(INT_ZEXT), MOVSX(INT_SEXT), LEA(INT_ADD+COPY), JGE(INT_EQUAL(SF,OF)+CBRANCH)
+  - `pkg/loader/loader_test.go`: TestX86ComplexFunction -- max() CMP+JGE+conditional MOV, >= 2 CFG blocks, non-empty PrintC
 - [x] Phase D7 완료 (2026-04-04): PE32 loader + TestX86PEDecompile E2E + CLI --pe flag
   - `pkg/loader/pe.go`: LoadPE32TextSection (debug/pe stdlib, PE32+ 거부 포함)
   - `pkg/loader/pe_test.go`: TestPELoader (len==13, data[0]==0x55, vma==0x401000) + TestX86PEDecompile (full pipeline)
