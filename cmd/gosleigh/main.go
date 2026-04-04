@@ -24,6 +24,7 @@
 //	--pspec  path to .pspec file (optional; sets context defaults)
 //	--binary path to raw binary image (optional)
 //	--elf    path to ELF32 binary (optional; extracts .text section)
+//	--pe     path to PE32 binary (optional; extracts .text section)
 //	--offset byte offset into binary at which the image VMA starts (default 0)
 //	--size   number of bytes to map from binary (default 0 = all)
 //	--entry  entry address offset within the default address space (default 0)
@@ -70,6 +71,7 @@ func runTranslate(args []string) error {
 	pspecPath := fs.String("pspec", "", "path to .pspec file (optional)")
 	binaryPath := fs.String("binary", "", "path to raw binary image (optional)")
 	elfPath := fs.String("elf", "", "path to ELF32 binary (optional)")
+	pePath := fs.String("pe", "", "path to PE32 binary (optional)")
 	offsetFlag := fs.Uint64("offset", 0, "byte offset into binary where image VMA starts")
 	sizeFlag := fs.Uint64("size", 0, "bytes to map from binary (0 = all)")
 	entryFlag := fs.Uint64("entry", 0, "entry address offset within the default address space")
@@ -86,6 +88,12 @@ func runTranslate(args []string) error {
 
 	if *binaryPath != "" && *elfPath != "" {
 		return fmt.Errorf("--binary and --elf are mutually exclusive")
+	}
+	if *binaryPath != "" && *pePath != "" {
+		return fmt.Errorf("--binary and --pe are mutually exclusive")
+	}
+	if *elfPath != "" && *pePath != "" {
+		return fmt.Errorf("--elf and --pe are mutually exclusive")
 	}
 
 	outputFmt := strings.ToLower(*outputFlag)
@@ -112,6 +120,17 @@ func runTranslate(args []string) error {
 		b.Bytes = data
 		b.BaseAddr = base
 	}
+
+	// --pe: load .text section from PE32 binary and override Bytes/BaseAddr.
+	if *pePath != "" {
+		data, base, peErr := loader.LoadPE32TextSection(*pePath)
+		if peErr != nil {
+			return fmt.Errorf("--pe: %w", peErr)
+		}
+		b.Bytes = data
+		b.BaseAddr = base
+	}
+
 	engine, entryAddr, err := b.Build()
 	if err != nil {
 		return fmt.Errorf("build engine: %w", err)
