@@ -1,0 +1,162 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 4268,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "FLOAT_INT2FLOAT",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 760064,
+			"size": 10
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 4448,
+				"size": 10
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 4464,
+			"size": 10
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 4432,
+				"size": 10
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 4448,
+			"size": 10
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 4416,
+				"size": 10
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 4432,
+			"size": 10
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 4400,
+				"size": 10
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 4416,
+			"size": 10
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 4384,
+				"size": 10
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 4400,
+			"size": 10
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 4368,
+				"size": 10
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 4384,
+			"size": 10
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 4352,
+				"size": 10
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 4368,
+			"size": 10
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 760064,
+				"size": 10
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 4352,
+			"size": 10
+		}
+	}
+]
