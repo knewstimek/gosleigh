@@ -1,0 +1,94 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "LOAD",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 3,
+				"size": 8
+			},
+			{
+				"space": "register",
+				"offset": 0,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 94720,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "COPY",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 94720,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "unique",
+			"offset": 406784,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "INT_SUB",
+		"inputs": [
+			{
+				"space": "register",
+				"offset": 16,
+				"size": 4
+			},
+			{
+				"space": "const",
+				"offset": 4,
+				"size": 4
+			}
+		],
+		"output": {
+			"space": "register",
+			"offset": 16,
+			"size": 4
+		}
+	},
+	{
+		"address": "0x0",
+		"opcode": "STORE",
+		"inputs": [
+			{
+				"space": "const",
+				"offset": 3,
+				"size": 8
+			},
+			{
+				"space": "register",
+				"offset": 16,
+				"size": 4
+			},
+			{
+				"space": "const",
+				"offset": 2,
+				"size": 4
+			}
+		],
+		"output": null
+	},
+	{
+		"address": "0x0",
+		"opcode": "CALLIND",
+		"inputs": [
+			{
+				"space": "unique",
+				"offset": 406784,
+				"size": 4
+			}
+		],
+		"output": null
+	}
+]

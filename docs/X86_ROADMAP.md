@@ -52,7 +52,8 @@
 12. ~~Heritage SSA on real CFG 검증 -- 루프/switch~~ -- 완료 (loop CFG: 3 blocks, do-while PrintC, 2026-04-04)
 13. ~~Rules MUL/IMUL~~ -- 완료 (2026-04-04)
 13b. ~~Rules IDIV/DIV/CDQ/SHL/SHR/SAR~~ -- 완료 (2026-04-04)
-13c. Rules 미완성 보완 -- switch/float
+13c. ~~Rules CALL indirect + SETcc + MOVZX 16->32~~ -- 완료 (D11: 57 golden subtests, TestX86IndirectCallFunction E2E, 2026-04-04)
+13d. Rules 미완성 보완 -- switch/float
 14. block structuring E2E 검증
 15. assembly printer (optional)
 16. DWARF/symtab 활용 (optional)

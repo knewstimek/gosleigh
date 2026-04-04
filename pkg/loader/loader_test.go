@@ -161,6 +161,55 @@ func TestX86CallerFunction(t *testing.T) {
 	t.Logf("PrintC output:\n%s", output)
 }
 
+// TestX86IndirectCallFunction exercises the full pipeline with a function
+// containing an indirect CALL via register (CALL EAX):
+//
+//	PUSH EBP (55) + MOV EBP,ESP (89 E5) + MOV EAX,[EBP+8] (8B 45 08) +
+//	CALL EAX (FF D0) + POP EBP (5D) + RET (C3)
+//
+// Verifies that indirect CALL (CALLIND p-code) is decoded and that
+// Heritage+PrintC produces non-empty C output.
+func TestX86IndirectCallFunction(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// PUSH EBP; MOV EBP,ESP; MOV EAX,[EBP+8]; CALL EAX; POP EBP; RET
+	prog := []byte{0x55, 0x89, 0xE5, 0x8B, 0x45, 0x08, 0xFF, 0xD0, 0x5D, 0xC3}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "indirect_call", Entry: base, MaxInstructions: 20})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	if len(result.Instructions) < 4 {
+		t.Fatalf("expected >= 4 instructions, got %d", len(result.Instructions))
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for indirect_call function")
+	}
+	t.Logf("PrintC output:\n%s", output)
+}
+
 // TestX86CountedLoop exercises the full pipeline with a counted loop:
 //
 //	MOV ECX,3 + DEC ECX + JNE -3 + RET
