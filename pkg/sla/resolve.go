@@ -104,7 +104,17 @@ func Resolve(ctx *ParserContext, hooks ResolveHooks) (*ResolveResult, error) {
 		return nil, normalizeResolveUnimpl(err)
 	}
 
-	if length := ctx.GetLength(); length > 0 {
+	// Use CalcCurrentLength (mirrors C++ walker.calcCurrentLength) to include
+	// child-operand lengths in the total.  ctx.GetLength() only returns
+	// BaseState.Length, which holds the root constructor's MinimumLength and
+	// does not account for disp8/disp32/imm operands that extend the encoding.
+	// C++ ref: Sleigh::resolve() calls walker.calcCurrentLength() after operand
+	// recursion to propagate child lengths up to the root.
+	if length, err := change.CalcCurrentLength(); err == nil && length > 0 {
+		ctx.SetNaddr(ctx.GetAddr().Add(uint64(length)))
+		// Keep BaseState.Length in sync so GetLength() is consistent.
+		ctx.BaseState.Length = length
+	} else if length := ctx.GetLength(); length > 0 {
 		ctx.SetNaddr(ctx.GetAddr().Add(uint64(length)))
 	} else {
 		ctx.SetNaddr(ctx.GetAddr())

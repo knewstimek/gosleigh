@@ -146,59 +146,87 @@ func collectInstructions(engine *sla.Engine, cfg BuildConfig) ([]instructionReco
 
 	known := make(map[address.Address]int)
 	records := make([]instructionRecord, 0, min(limit, 16))
-	cur := cfg.Entry
 
-	for len(records) < limit {
-		if !cfg.End.IsInvalid() {
-			if !sameSpace(cur, cfg.End) {
-				return nil, nil, fmt.Errorf("build bridge: end address %v is not in entry space %v", cfg.End, cfg.Entry.Space)
+	// pending holds addresses yet to be scanned. We use a worklist so that
+	// branch targets reachable only via a forward/unconditional branch are also
+	// collected. The entry point is always the first item.
+	//
+	// C++ ref: FlowInfo::generate / FlowInfo::setRange in FlowInfo.cc collects
+	// all reachable addresses by following branch targets recursively.
+	pending := []address.Address{cfg.Entry}
+	pendingSeen := map[address.Address]struct{}{cfg.Entry: {}}
+
+	for len(pending) > 0 && len(records) < limit {
+		cur := pending[0]
+		pending = pending[1:]
+
+		// Linear scan from cur until a hard terminator, range boundary, or limit.
+		for len(records) < limit {
+			if !cfg.End.IsInvalid() {
+				if !sameSpace(cur, cfg.End) {
+					return nil, nil, fmt.Errorf("build bridge: end address %v is not in entry space %v", cfg.End, cfg.Entry.Space)
+				}
+				if !cur.Less(cfg.End) {
+					break
+				}
 			}
-			if !cur.Less(cfg.End) {
+			if _, exists := known[cur]; exists {
+				// Already collected via another path; stop this linear scan.
 				break
 			}
-		}
-		if _, exists := known[cur]; exists {
-			return nil, nil, fmt.Errorf("build bridge: repeated instruction address %v", cur)
-		}
 
-		translation, err := engine.TranslateInstructionAt(cur)
-		if err != nil {
-			var unimplErr *sla.UnimplError
-			if errors.As(err, &unimplErr) {
-				warn := fmt.Sprintf("unimplemented at %v: %v", cur, err)
-				return records, []string{warn}, nil
+			translation, err := engine.TranslateInstructionAt(cur)
+			if err != nil {
+				var unimplErr *sla.UnimplError
+				if errors.As(err, &unimplErr) {
+					warn := fmt.Sprintf("unimplemented at %v: %v", cur, err)
+					return records, []string{warn}, nil
+				}
+				return nil, nil, fmt.Errorf("build bridge: translate instruction at %v: %w", cur, err)
 			}
-			return nil, nil, fmt.Errorf("build bridge: translate instruction at %v: %w", cur, err)
-		}
-		if len(translation.Ops) == 0 {
-			return nil, nil, fmt.Errorf("build bridge: instruction %v has no raw ops", cur)
-		}
-		if translation.Length <= 0 && translation.Next == cur {
-			return nil, nil, fmt.Errorf("build bridge: instruction %v did not advance", cur)
-		}
+			if len(translation.Ops) == 0 {
+				return nil, nil, fmt.Errorf("build bridge: instruction %v has no raw ops", cur)
+			}
+			if translation.Length <= 0 && translation.Next == cur {
+				return nil, nil, fmt.Errorf("build bridge: instruction %v did not advance", cur)
+			}
 
-		records = append(records, instructionRecord{translation: translation})
-		known[cur] = len(records) - 1
+			records = append(records, instructionRecord{translation: translation})
+			known[cur] = len(records) - 1
 
-		if translation.Next == cur {
-			break
+			if translation.Next == cur {
+				break
+			}
+
+			// Enqueue any direct branch target for later worklist processing.
+			// We enqueue now (before building knownAddrs) so that the target is
+			// added even when this linear scan terminates early.
+			if cfg.End.IsInvalid() {
+				if target, ok := extractBranchTarget(translation, cfg.Entry.Space); ok {
+					if _, seen := pendingSeen[target]; !seen {
+						pendingSeen[target] = struct{}{}
+						pending = append(pending, target)
+					}
+				}
+			}
+
+			// When no explicit End address is given, stop linear scan on an unconditional terminator
+			// (RETURN, BRANCHIND, or BRANCH). Without this guard the scanner follows translation.Next
+			// past the end of the function into uninitialised bytes, collecting garbage instructions
+			// and corrupting the knownAddrs set used by resolveTarget.
+			//
+			// When End is set the caller defines the exact byte range to collect (e.g. bridge_test.go
+			// BRK_BRK), so we honour the range boundary instead and let the loop continue.
+			//
+			// CBRANCH is excluded: its fall-through edge always points to the next sequential address,
+			// so we must continue collecting that instruction.
+			//
+			// C++ ref: FlowInfo::setRange / FlowInfo::hasTerminator in FlowInfo.cc.
+			if cfg.End.IsInvalid() && hasHardTerminator(translation) {
+				break
+			}
+			cur = translation.Next
 		}
-		// When no explicit End address is given, stop linear scan on an unconditional terminator
-		// (RETURN, BRANCHIND, or BRANCH). Without this guard the scanner follows translation.Next
-		// past the end of the function into uninitialised bytes, collecting garbage instructions
-		// and corrupting the knownAddrs set used by resolveTarget.
-		//
-		// When End is set the caller defines the exact byte range to collect (e.g. bridge_test.go
-		// BRK_BRK), so we honour the range boundary instead and let the loop continue.
-		//
-		// CBRANCH is excluded: its fall-through edge always points to the next sequential address,
-		// so we must continue collecting that instruction.
-		//
-		// C++ ref: FlowInfo::setRange / FlowInfo::hasTerminator in FlowInfo.cc.
-		if cfg.End.IsInvalid() && hasHardTerminator(translation) {
-			break
-		}
-		cur = translation.Next
 	}
 
 	if len(records) == 0 {
@@ -214,6 +242,35 @@ func collectInstructions(engine *sla.Engine, cfg BuildConfig) ([]instructionReco
 	}
 
 	return records, nil, nil
+}
+
+// extractBranchTarget returns the branch target address embedded in a BRANCH or
+// CBRANCH op, if one exists. Used by the worklist to enqueue unreachable-by-
+// linear-scan targets before knownAddrs is built.
+func extractBranchTarget(translation sla.InstructionTranslation, entrySpace *address.Space) (address.Address, bool) {
+	for _, raw := range translation.Ops {
+		switch raw.OpCode {
+		case pcode.CPUI_BRANCH, pcode.CPUI_CBRANCH:
+			if len(raw.Inputs) == 0 {
+				continue
+			}
+			input := raw.Inputs[0]
+			if input.Space == nil {
+				continue
+			}
+			if input.Space.Kind != address.SpaceKindConstant {
+				return input.Address(), true
+			}
+			// Constant-space operand: interpret as relative offset from Next.
+			if target, ok := addSignedOffset(translation.Next, int64(int8(input.Offset))); ok {
+				return target, true
+			}
+			if entrySpace != nil {
+				return address.Address{Space: entrySpace, Offset: input.Offset}, true
+			}
+		}
+	}
+	return address.Address{}, false
 }
 
 func summarizeSpaces(records []instructionRecord, entrySpace *address.Space) spaceSummary {

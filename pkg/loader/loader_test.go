@@ -213,3 +213,53 @@ func TestX86CountedLoop(t *testing.T) {
 	}
 	t.Logf("PrintC output:\n%s", output)
 }
+
+// TestX86IfElse exercises the full pipeline with an abs() function containing
+// a diamond (if-else) CFG:
+//
+//	PUSH EBP / MOV EBP,ESP / MOV EAX,[EBP+8] / TEST EAX,EAX / JNS +4 / NEG EAX / JMP +0 / POP EBP / RET
+//
+// Verifies that a conditional forward branch (JNS) produces >= 3 CFG blocks
+// (entry -> taken-path AND entry -> NEG -> merge -> exit) and that
+// PrintC emits non-empty C output for an if-else-containing function.
+func TestX86IfElse(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// PUSH EBP; MOV EBP,ESP; MOV EAX,[EBP+8]; TEST EAX,EAX; JNS +4; NEG EAX; JMP +0; POP EBP; RET
+	bytes := []byte{0x55, 0x89, 0xE5, 0x8B, 0x45, 0x08, 0x85, 0xC0, 0x79, 0x04, 0xF7, 0xD8, 0xEB, 0x00, 0x5D, 0xC3}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: bytes}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "abs", Entry: base, MaxInstructions: 20})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	// Diamond CFG: entry -> JNS-taken (skip NEG) AND entry -> NEG -> merge -> exit
+	if result.Graph.GetSize() < 3 {
+		t.Fatalf("expected >= 3 CFG blocks for if-else diamond, got %d", result.Graph.GetSize())
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for if-else function")
+	}
+	t.Logf("PrintC output:\n%s", output)
+}
