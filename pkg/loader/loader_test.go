@@ -415,6 +415,65 @@ func TestX86DivideFunction(t *testing.T) {
 	t.Logf("Divide C output:\n%s", output)
 }
 
+// TestX86Add3Function exercises the full pipeline with a 3-argument add function
+// that uses PUSH/POP EBX (callee-saved register convention):
+//
+//	PUSH EBP / MOV EBP,ESP / PUSH EBX / MOV EBX,[EBP+8] /
+//	ADD EBX,[EBP+12] / ADD EBX,[EBP+16] / MOV EAX,EBX / POP EBX / POP EBP / RET
+//
+// Verifies that PUSH/POP general-purpose registers (EBX) are decoded and
+// that the full Heritage+PrintC pipeline produces non-empty C output.
+func TestX86Add3Function(t *testing.T) {
+	_, file, _, ok := runtime.Caller(0)
+	if !ok {
+		t.Fatal("runtime.Caller(0) failed")
+	}
+	dir := filepath.Dir(file)
+	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
+	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+
+	// int add3(int a, int b, int c):
+	//   0x00: PUSH EBP        (55)
+	//   0x01: MOV EBP,ESP     (89 E5)
+	//   0x03: PUSH EBX        (53)
+	//   0x04: MOV EBX,[EBP+8] (8B 5D 08)
+	//   0x07: ADD EBX,[EBP+12](03 5D 0C)
+	//   0x0A: ADD EBX,[EBP+16](03 5D 10)
+	//   0x0D: MOV EAX,EBX     (89 D8)
+	//   0x0F: POP EBX         (5B)
+	//   0x10: POP EBP         (5D)
+	//   0x11: RET             (C3)
+	prog := []byte{0x55, 0x89, 0xE5, 0x53, 0x8B, 0x5D, 0x08, 0x03, 0x5D, 0x0C, 0x03, 0x5D, 0x10, 0x89, 0xD8, 0x5B, 0x5D, 0xC3}
+
+	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "add3", Entry: base, MaxInstructions: 20})
+	if err != nil {
+		t.Fatalf("bridge.Build: %v", err)
+	}
+
+	if len(result.Instructions) < 6 {
+		t.Fatalf("expected >= 6 instructions, got %d", len(result.Instructions))
+	}
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
+	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+
+	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	if err != nil {
+		t.Fatalf("PrintC.Emit: %v", err)
+	}
+	if strings.TrimSpace(output) == "" {
+		t.Fatal("PrintC.Emit returned empty output for add3 function")
+	}
+	t.Logf("add3 C output:\n%s", output)
+}
+
 // TestX86BitshiftFunction exercises the full pipeline with a bitshift function:
 //
 //	PUSH EBP / MOV EBP,ESP / MOV EAX,[EBP+8] / SHL EAX,2 / POP EBP / RET

@@ -1,0 +1,19 @@
+[
+	{
+		"address": "0x0",
+		"opcode": "CBRANCH",
+		"inputs": [
+			{
+				"space": "ram",
+				"offset": 4,
+				"size": 4
+			},
+			{
+				"space": "register",
+				"offset": 512,
+				"size": 1
+			}
+		],
+		"output": null
+	}
+]
