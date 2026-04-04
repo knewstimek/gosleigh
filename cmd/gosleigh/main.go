@@ -41,6 +41,7 @@ import (
 	"gosleigh/pkg/bridge"
 	"gosleigh/pkg/loader"
 	"gosleigh/pkg/pcode"
+	"gosleigh/pkg/sla"
 )
 
 func main() {
@@ -169,13 +170,13 @@ func runTranslate(args []string) error {
 	case "json":
 		return emitJSON(result)
 	default:
-		return emitC(result.Funcdata)
+		return emitC(engine, result.Funcdata)
 	}
 }
 
 // emitC prints the decompiled C output to stdout.
-func emitC(fd *pcode.Funcdata) error {
-	output, err := pcode.NewPrintC().Emit(fd)
+func emitC(eng *sla.Engine, fd *pcode.Funcdata) error {
+	output, err := pcode.NewPrintC().SetRegisterNames(eng.RegisterNamesByLocation()).Emit(fd)
 	if err != nil {
 		return fmt.Errorf("PrintC.Emit: %w", err)
 	}

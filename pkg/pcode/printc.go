@@ -26,11 +26,20 @@ const (
 )
 
 type PrintC struct {
-	indentStep string
+	indentStep    string
+	registerNames map[string]string // "spaceIdx:offset:size" -> reg name; nil = disabled
 }
 
 func NewPrintC() *PrintC {
 	return &PrintC{indentStep: "    "}
+}
+
+// SetRegisterNames installs a location-to-name map for register identification.
+// Key format: "spaceIdx:offset:size" (matches Engine.RegisterNamesByLocation output).
+// When set, known register locations are named by their SLA symbol name instead of local_N.
+func (p *PrintC) SetRegisterNames(names map[string]string) *PrintC {
+	p.registerNames = names
+	return p
 }
 
 func (p *PrintC) Emit(fd *Funcdata) (string, error) {
@@ -199,7 +208,8 @@ func (s *printCState) collectSymbols() {
 		localIndex := 0
 		tmpIndex := 0
 		// First pass: assign one name per storage location for non-unique varnodes.
-		// Multiple SSA versions of the same register/slot share one local_ name.
+		// Multiple SSA versions of the same register/slot share one name.
+		// Register locations are resolved from registerNames first; fallback is local_N.
 		locName := make(map[locationKey]string)
 		for _, vn := range s.locals {
 			if _, ok := s.names[vn]; ok {
@@ -210,6 +220,14 @@ func (s *printCState) collectSymbols() {
 			}
 			key := varnodeLocKey(vn)
 			if _, ok := locName[key]; !ok {
+				// Check if this storage location has a known register name.
+				if s.printer.registerNames != nil {
+					regKey := fmt.Sprintf("%d:%d:%d", key.spaceIdx, key.offset, key.size)
+					if regName, ok := s.printer.registerNames[regKey]; ok {
+						locName[key] = regName
+						continue
+					}
+				}
 				locName[key] = fmt.Sprintf("local_%d", localIndex)
 				localIndex++
 			}
@@ -260,7 +278,8 @@ func (s *printCState) collectSymbols() {
 	localIndex := 0
 	tmpIndex := 0
 	// First pass: assign one name per storage location for non-unique varnodes.
-	// Multiple SSA versions of the same register/slot share one local_ name.
+	// Multiple SSA versions of the same register/slot share one name.
+	// Register locations are resolved from registerNames first; fallback is local_N.
 	locName := make(map[locationKey]string)
 	for _, vn := range s.locals {
 		if _, ok := s.names[vn]; ok {
@@ -271,6 +290,14 @@ func (s *printCState) collectSymbols() {
 		}
 		key := varnodeLocKey(vn)
 		if _, ok := locName[key]; !ok {
+			// Check if this storage location has a known register name.
+			if s.printer.registerNames != nil {
+				regKey := fmt.Sprintf("%d:%d:%d", key.spaceIdx, key.offset, key.size)
+				if regName, ok := s.printer.registerNames[regKey]; ok {
+					locName[key] = regName
+					continue
+				}
+			}
 			locName[key] = fmt.Sprintf("local_%d", localIndex)
 			localIndex++
 		}

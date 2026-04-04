@@ -102,7 +102,7 @@ func TestX86SimpleFunction(t *testing.T) {
 	}
 
 	// PrintC emission.
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -152,7 +152,7 @@ func TestX86CallerFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -201,7 +201,7 @@ func TestX86IndirectCallFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -254,7 +254,7 @@ func TestX86CountedLoop(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -304,7 +304,7 @@ func TestX86IfElse(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -355,7 +355,7 @@ func TestX86ComplexFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -405,7 +405,7 @@ func TestX86MultiplyFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -455,7 +455,7 @@ func TestX86DivideFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -514,7 +514,7 @@ func TestX86Add3Function(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -575,7 +575,7 @@ func TestX86LocalVarFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -645,7 +645,7 @@ func TestX86ClampFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -695,7 +695,7 @@ func TestX86BitshiftFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -747,7 +747,7 @@ func TestX86BranchlessMaxFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -829,7 +829,7 @@ func TestX86ClassifySignFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -929,7 +929,7 @@ func TestX86SwitchFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -979,7 +979,7 @@ func TestX86StructAccessFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -1031,7 +1031,7 @@ func TestX86ArrayIndexFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -1123,7 +1123,7 @@ func TestX86ComplexMultiArgFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -1181,7 +1181,7 @@ func TestX86LinkedListFunction(t *testing.T) {
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC: %v", err)
 	}
@@ -1246,7 +1246,7 @@ func TestX86NestedIfFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC: %v", err)
 	}
@@ -1337,7 +1337,7 @@ func TestX86CdeclParamLocalFunction(t *testing.T) {
 	model := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace, nil)
 	pcode.ApplyCallingConvention(result.Funcdata, model)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -1350,8 +1350,14 @@ func TestX86CdeclParamLocalFunction(t *testing.T) {
 	if !strings.Contains(output, "param_") {
 		t.Errorf("expected param_ names in output, got:\n%s", output)
 	}
-	if !strings.Contains(output, "local_") {
-		t.Errorf("expected local_ names in output, got:\n%s", output)
+	// With register names injected (E10), register-backed locals now appear as EAX/ESP/EBP
+	// rather than local_N. Verify at least one named local (register or local_) is present.
+	hasLocal := strings.Contains(output, "local_") ||
+		strings.Contains(output, "EAX") ||
+		strings.Contains(output, "ESP") ||
+		strings.Contains(output, "EBP")
+	if !hasLocal {
+		t.Errorf("expected named locals (local_ or register names) in output, got:\n%s", output)
 	}
 	// Verify that raw stack offset names are NOT present.
 	if strings.Contains(output, "stack_") {
@@ -1400,7 +1406,7 @@ func TestX86CallChainFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -1488,7 +1494,7 @@ func TestE2DeadCodeElimination(t *testing.T) {
 	model := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace, nil)
 	pcode.ApplyCallingConvention(result.Funcdata, model)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -1552,7 +1558,7 @@ func TestX8664SimpleFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -1620,7 +1626,7 @@ func TestX8664CallingConvention(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -1733,7 +1739,7 @@ func TestX86StructFieldAccess(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -1840,7 +1846,7 @@ func TestX86ArrayIndexAccess(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -1934,7 +1940,7 @@ func TestE6SymbolNameInOutput(t *testing.T) {
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
 	// Step 4: recovered name must appear in PrintC output.
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
@@ -2001,7 +2007,7 @@ func TestAARCH64SimpleFunction(t *testing.T) {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	output, err := pcode.NewPrintC().Emit(result.Funcdata)
+	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
