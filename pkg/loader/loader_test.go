@@ -821,8 +821,47 @@ func TestX86ClassifySignFunction(t *testing.T) {
 	}
 
 	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
-	// Fold constant sub-expressions (e.g. POPCOUNT(0 & 0xff)) before
-	// dead-code elimination so that flag ops become trivial constants first.
+
+	// 1. Apply x86-32 cdecl calling convention BEFORE dead-code elimination.
+	//    This anchors EAX as the return register so that MOV EAX,1 / MOV EAX,-1 /
+	//    XOR EAX,EAX assignments are not pruned as dead stores (the x86 RET p-code
+	//    does not explicitly read EAX, so without anchoring they have no consumer).
+	//    Find the register address space by scanning varnode bank for a register-space
+	//    varnode; register space is SpaceKindProcessor with name "register".
+	var regSpaceIdx int = -1
+	var stackSpaceClassify *address.Space
+	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.Space() == nil {
+			continue
+		}
+		sp := vn.Space()
+		if sp.Kind == address.SpaceKindStack || sp.Name == "stack" {
+			if stackSpaceClassify == nil {
+				stackSpaceClassify = sp
+			}
+		}
+		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" {
+			if regSpaceIdx < 0 {
+				regSpaceIdx = int(sp.Index)
+			}
+		}
+	}
+	// Build x86-32 cdecl ProtoModel. CspecPath is not set in this test so
+	// CspecData is nil; use defaults (ParamBaseOffset=4, stack ABI).
+	cdeclModel := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceClassify, nil)
+	if regSpaceIdx >= 0 {
+		// EAX: offset 0, size 4 bytes in the register space.
+		cdeclModel.WithReturnReg(regSpaceIdx, 0, 4)
+	}
+	pcode.ApplyCallingConvention(result.Funcdata, cdeclModel)
+
+	// 2. Fold flag conditions: CBRANCH(ZF) -> CBRANCH(INT_EQUAL(EAX,0)).
+	//    After folding, ZF writes have no consumers and ActionDeadCode removes them.
+	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
+
+	// 3. Constant-fold then dead-code eliminate.
+	//    Run constant fold first so that POPCOUNT(0 & 0xff) simplifies before
+	//    dead-code pruning propagates backwards through the chain.
 	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
 	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
@@ -844,6 +883,23 @@ func TestX86ClassifySignFunction(t *testing.T) {
 		if strings.Contains(output, noise) {
 			t.Errorf("expected %s to be eliminated from classify_sign output, but found it:\n%s", noise, output)
 		}
+	}
+
+	// CPU flag registers must be folded away and must not appear in C output.
+	for _, flag := range []string{"ZF", "SF", "OF"} {
+		if strings.Contains(output, flag) {
+			t.Errorf("expected CPU flag %s to be folded/eliminated from output, but found it:\n%s", flag, output)
+		}
+	}
+
+	// The if-branch bodies must not be empty: at least one assignment value
+	// (= 1, = -1, or = 0) should appear in the output, confirming that the
+	// return register anchoring kept the EAX write ops alive.
+	hasReturnValue := strings.Contains(output, "= 1") ||
+		strings.Contains(output, "= -1") ||
+		strings.Contains(output, "= 0")
+	if !hasReturnValue {
+		t.Errorf("expected EAX assignment values (= 1 / = -1 / = 0) in output but found none:\n%s", output)
 	}
 }
 

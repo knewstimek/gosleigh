@@ -14,7 +14,9 @@
 
 package pcode
 
-import "fmt"
+import (
+	"fmt"
+)
 
 // FuncProto holds the calling convention information attached to a single
 // function. It references a ProtoModel for ABI rules and records the
@@ -125,6 +127,11 @@ func GetLocalName(index int) string {
 // as either parameters or locals according to model, creates HighVariables
 // for each group, and stores the result on fd's FuncProto and ScopeLocal.
 //
+// When model.ReturnRegSpaceIndex >= 0, it also anchors the integer return
+// register to each RETURN op as an additional input. This prevents
+// ActionDeadCode from eliminating stores to the return register (e.g. EAX
+// in x86-32 cdecl) whose only consumer is the implicit function return.
+//
 // This is called after Heritage so SSA input varnodes are available.
 // C++ parity: Funcdata::startProcessing / ScopeLocal::resetLocalWindow
 func ApplyCallingConvention(fd *Funcdata, model *ProtoModel) {
@@ -138,4 +145,81 @@ func ApplyCallingConvention(fd *Funcdata, model *ProtoModel) {
 	fd.SetScopeLocal(sl)
 
 	sl.BuildFromVarnodes(fd.GetVarnodeBank().AllVarnodes(), fp)
+
+	// Anchor return register to RETURN ops so that stores to the return register
+	// are not eliminated as dead by ActionDeadCode.
+	// Without this, x86 EAX writes before RET have no visible consumer after SSA
+	// construction (RETURN only reads the return address from the stack), so
+	// ActionDeadCode prunes them and the if-branches disappear.
+	// C++ parity: FuncProto::resolveReturnType / ParameterSymbol return slot
+	if model.ReturnRegSpaceIndex < 0 || model.ReturnRegSize == 0 {
+		return
+	}
+	anchorReturnReg(fd, model)
+}
+
+// anchorReturnReg wires the live return-register varnode into every RETURN op
+// in fd as an additional input. The register is identified by
+// (model.ReturnRegSpaceIndex, model.ReturnRegOffset, model.ReturnRegSize).
+//
+// Strategy: among all varnodes at that location, prefer the output of a
+// MULTIEQUAL (phi) node -- it is the post-Heritage merge of all assignment
+// paths. Failing that, pick any written varnode. If neither exists, skip.
+// Input varnodes (SSA live-in with no def) are intentionally skipped: they
+// indicate the register was never assigned inside the function body, so there
+// is nothing to anchor.
+func anchorReturnReg(fd *Funcdata, model *ProtoModel) {
+	retSize := model.ReturnRegSize
+	retOffset := model.ReturnRegOffset
+	retSpaceIdx := model.ReturnRegSpaceIndex
+
+	// Collect candidate return-register varnodes.
+	var best *Varnode
+	for _, vn := range fd.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.Space() == nil {
+			continue
+		}
+		if int(vn.Space().Index) != retSpaceIdx {
+			continue
+		}
+		if vn.Offset() != retOffset || vn.Size() != retSize {
+			continue
+		}
+		if !vn.IsWritten() {
+			continue // skip input/free; only written (SSA-defined) varnodes
+		}
+		// Prefer MULTIEQUAL output (phi-merge of all paths) over plain writes.
+		if vn.Def() != nil && vn.Def().Code() == CPUI_MULTIEQUAL {
+			best = vn
+			break
+		}
+		if best == nil {
+			best = vn
+		}
+	}
+	if best == nil {
+		return
+	}
+
+	// Wire best into each RETURN op that does not already consume it.
+	for _, op := range fd.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN {
+			continue
+		}
+		// Check if best is already an input of this RETURN.
+		alreadyWired := false
+		for i := 0; i < op.NumInput(); i++ {
+			if op.Input(i) == best {
+				alreadyWired = true
+				break
+			}
+		}
+		if alreadyWired {
+			continue
+		}
+		// Grow the input slice by one and wire best into the new slot.
+		slot := op.NumInput()
+		op.SetNumInputs(slot + 1)
+		fd.OpSetInput(op, best, slot)
+	}
 }
