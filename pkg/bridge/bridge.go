@@ -17,6 +17,11 @@ type BuildConfig struct {
 	// CspecPath is the optional path to a .cspec calling convention file.
 	// When non-empty, the cspec is parsed and stored in Result.CspecData.
 	CspecPath string
+	// SymbolName overrides the display name on the resulting Funcdata when
+	// non-empty. This allows callers to wire in a recovered symbol name
+	// (e.g. from DWARF or a PE import table) without changing the internal
+	// name used for address resolution.
+	SymbolName string
 }
 
 type Result struct {
@@ -132,6 +137,12 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		Instructions:   translations,
 		HeritageSpaces: summary.heritageSpaces,
 		Warnings:       warnings,
+	}
+
+	// Wire recovered symbol name onto Funcdata when provided.
+	// This sets the display name used by PrintC for the function declaration.
+	if cfg.SymbolName != "" {
+		fd.SetDisplayName(cfg.SymbolName)
 	}
 
 	// Parse cspec if provided. Store in result but do not apply -- callers

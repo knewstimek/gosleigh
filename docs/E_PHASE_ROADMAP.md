@@ -81,12 +81,23 @@ int classify2(int x, int y) {
   - 4 unit tests (TestInferTypesCopyChain, TestInferTypesLoadDereference, TestInferTypesIntAddPointer, TestInferTypesConvergence)
   - E2E: TestX86StructFieldAccess (struct Point pointer -> struct type declaration in PrintC), TestX86ArrayIndexAccess (int* param -> int *param_0 typed output)
 
-## E6: 심볼 복원 (DWARF + PE import)
+## E6: 심볼 복원 (DWARF + PE import) [DONE 2026-04-05]
 
 **핵심 deliverable**: 함수명/변수명 복원.
-- DWARF debug info 파싱 → 함수명, 변수명, 타입
-- PE import table → API 함수명 (MessageBoxA, CreateFileW 등)
-- ELF symbol table → 함수명
+- DWARF debug info 파싱 -> 함수명, 변수명, 타입
+- PE import table -> API 함수명 (MessageBoxA, CreateFileW 등)
+- ELF symbol table -> 함수명
+- 구현:
+  - `pkg/loader/symbols.go`: Symbol/SymbolTable (Add/Lookup/All/Len)
+  - `pkg/loader/dwarf.go`: LoadDWARFFunctions (ELF+PE DWARF DW_TAG_subprogram)
+  - `pkg/loader/elf.go`: LoadELFSymbols (.symtab/.dynsym STT_FUNC)
+  - `pkg/loader/pe.go`: LoadPE32Exports (EAT), LoadPE32Imports (ILT/IAT hint/name)
+  - `pkg/pcode/funcdata.go`: SetDisplayName setter
+  - `pkg/bridge/bridge.go`: BuildConfig.SymbolName -> fd.SetDisplayName wiring
+  - `testdata/elfs/gen_sym_elf.go`: simple_add_sym.elf (.symtab STT_FUNC fixture)
+  - `testdata/elfs/gen_import_pe.go`: simple_add_sym.exe (.idata import table fixture)
+  - `pkg/loader/symbols_test.go`: 6 unit tests (SymbolTable + all loaders)
+  - `pkg/loader/loader_test.go`: TestE6SymbolNameInOutput E2E (ELF symtab -> PrintC)
 
 ## 우선순위 및 의존성
 

@@ -77,6 +77,7 @@ func NewFuncdata(name string, addr address.Address, uniqSpace *address.Space, un
 
 func (fd *Funcdata) Name() string                 { return fd.name }
 func (fd *Funcdata) DisplayName() string          { return fd.displayName }
+func (fd *Funcdata) SetDisplayName(n string)      { fd.displayName = n }
 func (fd *Funcdata) BaseAddr() address.Address    { return fd.baseAddr }
 func (fd *Funcdata) Size() int32                  { return fd.size }
 func (fd *Funcdata) Flags() uint32                { return fd.flags }
