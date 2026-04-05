@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: F-Phase Decompiler Output Quality (F4+F7+F8+F9+F10+F11 완료) (2026-04-05)
+## 현재 단계: F-Phase + Ghidra Golden 인프라 (F11+tmp_N fix+ghidra_golden 완료) (2026-04-05)
 
 ### 완료
 - [x] Git repo initialized
@@ -409,7 +409,14 @@
   - Exposes StackSpace() accessor so test code can pass the space to NewProtoModelFromCspec.
   - classify_sign: signature now shows `(int param_0)` and body uses `param_0` in comparisons.
   - add_and_store: signature now shows `(unsigned int param_0, unsigned int param_1)`.
-  - Remaining: many tmp_0..tmp_N unique-space locals from flag ops not yet pruned (needs extra ActionDeadCode pass after BatchA).
+  - tmp_N fix: collectSymbols now skips unique-space varnodes with numDescend==0 (dead stores created by BatchA after ActionDeadCode ran). classify_sign output is now clean: no spurious tmp_N declarations.
+  - classify_sign final output: `unsigned int classify_sign(int param_0) { int EAX; unsigned int ESP; if/else with EAX=0/1/-1; return EAX; }`
+- [x] Ghidra golden infrastructure (2026-04-05)
+  - JDK 21 installed at C:\Program Files\Java\jdk-21
+  - C:\ghidra12 junction created (avoids Korean path issue with log4j)
+  - gen_golden.py script: builds ELF32/ELF64/AARCH64 from test byte sequences, runs Ghidra 12 headless, saves output
+  - testdata/ghidra_golden/ghidra_golden.json: 6 entries (classify_sign, complex_max, multiply, add3 x86-32; x64_add_ret x86-64; aarch64_add_ret AARCH64)
+  - Key Ghidra parity observations: x86-32 entry has 2 ghost params (param_1/param_2=argc/argv) before real params; x86-64 no-prologue uses in_RDI/in_RSI prefix; AARCH64 cleanly detects param_1/param_2; Ghidra emits else-if chain; 0xffffffff not -1 without signed type info
 
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
