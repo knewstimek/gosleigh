@@ -1,0 +1,56 @@
+{
+  "classify_sign_x86_32": {
+    "arch": "x86_32",
+    "functions": [
+      {
+        "name": "entry",
+        "c": "\nundefined4 processEntry entry(undefined4 param_1,undefined4 param_2,int param_3)\n\n{\nundefined4 uVar1;\n\nif (param_3 == 0) {\nuVar1 = 0;\n}\nelse if (param_3 < 1) {\nuVar1 = 0xffffffff;\n}\nelse {\nuVar1 = 1;\n}\nreturn uVar1;\n}\n"
+      }
+    ]
+  },
+  "complex_max_x86_32": {
+    "arch": "x86_32",
+    "functions": [
+      {
+        "name": "entry",
+        "c": "\n/* WARNING: Instruction at (ram,0x0804900d) overlaps instruction at (ram,0x0804900b)\n*/\n\nuint processEntry entry(undefined4 param_1,undefined4 param_2,uint param_3,uint param_4)\n\n{\nif ((int)param_4 <= (int)param_3) {\nparam_4 = param_3 | 0x5d;\n}\nreturn param_4;\n}\n"
+      }
+    ]
+  },
+  "multiply_x86_32": {
+    "arch": "x86_32",
+    "functions": [
+      {
+        "name": "entry",
+        "c": "\nint processEntry entry(undefined4 param_1,undefined4 param_2,int param_3,int param_4)\n\n{\nreturn param_3 * param_4;\n}\n"
+      }
+    ]
+  },
+  "add3_x86_32": {
+    "arch": "x86_32",
+    "functions": [
+      {
+        "name": "entry",
+        "c": "\nint processEntry entry(undefined4 param_1,undefined4 param_2,int param_3,int param_4,int param_5)\n\n{\nreturn param_3 + param_4 + param_5;\n}\n"
+      }
+    ]
+  },
+  "x64_add_ret": {
+    "arch": "x86_64",
+    "functions": [
+      {
+        "name": "entry",
+        "c": "\nlong processEntry entry(void)\n\n{\nlong in_RSI;\nlong in_RDI;\n\nreturn in_RDI + in_RSI;\n}\n"
+      }
+    ]
+  },
+  "aarch64_add_ret": {
+    "arch": "aarch64",
+    "functions": [
+      {
+        "name": "entry",
+        "c": "\nlong entry(long param_1,long param_2)\n\n{\nreturn param_1 + param_2;\n}\n"
+      }
+    ]
+  }
+}
