@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: F-Phase Decompiler Output Quality (F4+F7+F8+F9+F10 완료) (2026-04-05)
+## 현재 단계: F-Phase Decompiler Output Quality (F4+F7+F8+F9+F10+F11 완료) (2026-04-05)
 
 ### 완료
 - [x] Git repo initialized
@@ -402,6 +402,14 @@
   - classify_sign: `param_0, param_1, param_2` removed from signature (now correctly `void`); `tmp_0 != 0 && 0 <= tmp_0` simplified to `0 < tmp_0`
   - TestX86CdeclParamLocalFunction: param_ check updated to TODO (stack param detection requires ActionStackPtrFlow, not yet implemented)
   - Remaining issues requiring ActionStackPtrFlow: (1) param_0 in classify_sign signature, (2) ESP/EBP in local declarations, (3) tmp_0 -> param_0 naming
+- [x] F11: ActionStackPtrFlow -- stack parameter detection via LOAD-to-COPY conversion (2026-04-05)
+  - Added `pkg/pcode/action_stack_ptr_flow.go`: scans for frame pointer setup pattern (FP = COPY(INT_SUB(ESP_input, push_size)) or COPY(INT_ADD(SP_input, negative_delta))), then replaces each LOAD(ram, INT_ADD(FP, offset)) with COPY(stack_input_vn) at stack offset = offset + push_delta.
+  - Key implementation detail: x86 Sleigh encodes PUSH as INT_SUB(ESP, unique_const) where the "4" is a unique-space temp, not a constant-space varnode. Delta is derived from the frame pointer register's size instead.
+  - Creates a synthetic SpaceKindStack address space; ScopeLocal.BuildFromVarnodes then classifies stack-offset-4 as param_0, stack-offset-8 as param_1, etc.
+  - Exposes StackSpace() accessor so test code can pass the space to NewProtoModelFromCspec.
+  - classify_sign: signature now shows `(int param_0)` and body uses `param_0` in comparisons.
+  - add_and_store: signature now shows `(unsigned int param_0, unsigned int param_1)`.
+  - Remaining: many tmp_0..tmp_N unique-space locals from flag ops not yet pruned (needs extra ActionDeadCode pass after BatchA).
 
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)

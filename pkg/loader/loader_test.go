@@ -822,14 +822,25 @@ func TestX86ClassifySignFunction(t *testing.T) {
 
 	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
 
-	// 1. Apply x86-32 cdecl calling convention BEFORE dead-code elimination.
+	// 1a. ActionStackPtrFlow: convert LOAD(ram, INT_ADD(FP, offset)) patterns into
+	//     COPY(stack_input_vn) so that ScopeLocal.BuildFromVarnodes can classify the
+	//     stack varnodes as named parameters (param_0, param_1, ...).
+	//     Must run after Heritage (SSA is needed to trace the FP definition chain)
+	//     and before ApplyCallingConvention (which calls BuildFromVarnodes).
+	//     C++ parity: ActionStackPtrFlow in coreaction.cc
+	spfAction := pcode.NewActionStackPtrFlow("analysis")
+	spfAction.Apply(result.Funcdata)
+
+	// 1b. Apply x86-32 cdecl calling convention BEFORE dead-code elimination.
 	//    This anchors EAX as the return register so that MOV EAX,1 / MOV EAX,-1 /
 	//    XOR EAX,EAX assignments are not pruned as dead stores (the x86 RET p-code
 	//    does not explicitly read EAX, so without anchoring they have no consumer).
 	//    Find the register address space by scanning varnode bank for a register-space
 	//    varnode; register space is SpaceKindProcessor with name "register".
 	var regSpaceIdx int = -1
-	var stackSpaceClassify *address.Space
+	// ActionStackPtrFlow already created the stack space; use it directly so
+	// the scan below does not need to find it from varnodes.
+	stackSpaceClassify := spfAction.StackSpace()
 	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
 		if vn == nil || vn.Space() == nil {
 			continue
@@ -943,6 +954,15 @@ func TestX86ClassifySignFunction(t *testing.T) {
 	// F7: the output should contain -1 as a signed constant (from MOV EAX, 0xFFFFFFFF).
 	if !strings.Contains(output, "-1") {
 		t.Errorf("F7: expected -1 in output (signed constant rendering), but not found:\n%s", output)
+	}
+
+	// ActionStackPtrFlow must have converted LOAD(ram, EBP+8) into a stack-space
+	// input varnode that ScopeLocal classifies as param_0. The function signature
+	// and/or body must contain a named parameter.
+	// C++ parity: ScopeLocal::buildFromVarnodes recognises positive stack offsets
+	// as parameters when ActionStackPtrFlow has created the stack input varnodes.
+	if !strings.Contains(output, "param_") {
+		t.Errorf("expected param_ in classify_sign output (ActionStackPtrFlow should have enabled param detection), but not found:\n%s", output)
 	}
 }
 
@@ -1412,25 +1432,32 @@ func TestX86CdeclParamLocalFunction(t *testing.T) {
 	}
 
 	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+
+	// ActionStackPtrFlow: convert LOAD(ram, INT_ADD(FP, offset)) into COPY(stack_input_vn)
+	// so ScopeLocal can classify stack parameters and locals by name.
+	// Must run after Heritage (SSA) and before ApplyCallingConvention.
+	// C++ parity: ActionStackPtrFlow in coreaction.cc
+	spfCdecl := pcode.NewActionStackPtrFlow("analysis")
+	spfCdecl.Apply(result.Funcdata)
+
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
-	// Find the stack address space from all varnodes in the function.
-	// HeritageSpaces does not always include the stack space directly;
-	// the stack space is found by scanning varnodes post-Heritage.
-	var stackSpace *address.Space
-	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		if vn.Space().Kind == address.SpaceKindStack || vn.Space().Name == "stack" {
-			stackSpace = vn.Space()
-			break
+	// Use the stack space created by ActionStackPtrFlow.
+	// Fall back to scanning if ActionStackPtrFlow found no frame-pointer pattern.
+	stackSpace := spfCdecl.StackSpace()
+	if stackSpace == nil {
+		for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
+			if vn == nil || vn.Space() == nil {
+				continue
+			}
+			if vn.Space().Kind == address.SpaceKindStack || vn.Space().Name == "stack" {
+				stackSpace = vn.Space()
+				break
+			}
 		}
 	}
-	// stackSpace may still be nil for simple functions with no stack varnodes;
-	// NewProtoModelFromCspec handles nil by falling back to name-based matching.
 
 	// Build ProtoModel from cspec and apply calling convention.
 	model := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace, nil)
@@ -1445,23 +1472,10 @@ func TestX86CdeclParamLocalFunction(t *testing.T) {
 	}
 	t.Logf("add_and_store C output:\n%s", output)
 
-	// TODO(ActionStackPtrFlow): param_ names in the signature require ActionStackPtrFlow to
-	// convert LOAD(ram, EBP+8) into stack-space varnodes so ScopeLocal can classify them.
-	// Until then, params are not detected and the signature shows void. The test below only
-	// verifies that no raw stack offset names appear and that some output was produced.
-	//
-	// Note: the old check (strings.Contains(output, "param_")) was inadvertently passing
-	// because the catch-all in collectSymbols added register inputs (EBP/ESP) as params.
-	// That catch-all has been removed as it was incorrect. See pkg/pcode/printc.go.
-
-	// With register names injected, register-backed locals appear as EAX/ESP/EBP/etc.
-	// Verify at least one named variable is present.
-	hasLocal := strings.Contains(output, "local_") ||
-		strings.Contains(output, "EAX") ||
-		strings.Contains(output, "ESP") ||
-		strings.Contains(output, "EBP")
-	if !hasLocal {
-		t.Errorf("expected named locals (local_ or register names) in output, got:\n%s", output)
+	// ActionStackPtrFlow converts LOAD(ram, EBP+8) and LOAD(ram, EBP+12) into
+	// stack-space input varnodes; ScopeLocal classifies them as param_0 and param_1.
+	if !strings.Contains(output, "param_") {
+		t.Errorf("expected param_ in add_and_store output (ActionStackPtrFlow should have enabled param detection), but not found:\n%s", output)
 	}
 	// Verify that raw stack offset names are NOT present.
 	if strings.Contains(output, "stack_") {
