@@ -163,6 +163,14 @@ func (s *printCState) collectSymbols() {
 				if len(name) >= 6 && name[:6] == "param_" {
 					params = append(params, vn)
 				} else {
+					// If the writing op was destroyed by ActionDeadCode (Def==nil)
+					// after MergeMarker already assigned High(), skip this varnode.
+					// Declaring it would produce an unreachable tmp_N declaration with
+					// no corresponding assignment in the function body.
+					// Input varnodes (IsInput) handled in the fallback path below.
+					if vn.Def() == nil && !vn.IsInput() {
+						continue
+					}
 					if vn.Def() != nil && s.shouldInline(vn.Def()) {
 						s.inline[vn.Def()] = true
 					} else {
@@ -189,6 +197,12 @@ func (s *printCState) collectSymbols() {
 				continue
 			}
 			if vn.Def() == nil {
+				continue
+			}
+			// Skip unique-space varnodes with no consumers: these are dead stores
+			// created or left over by BatchA rules after ActionDeadCode already ran.
+			// Declaring them produces empty tmp_N declarations with no body assignment.
+			if vn.Space() != nil && vn.Space().IsUnique() && vn.NumDescend() == 0 {
 				continue
 			}
 			if s.shouldInline(vn.Def()) {
@@ -264,6 +278,11 @@ func (s *printCState) collectSymbols() {
 			continue
 		}
 		if vn.Def() == nil {
+			continue
+		}
+		// Skip unique-space dead stores (no consumers): BatchA may leave these
+		// after ActionDeadCode has already run.
+		if vn.Space() != nil && vn.Space().IsUnique() && vn.NumDescend() == 0 {
 			continue
 		}
 		if s.shouldInline(vn.Def()) {
