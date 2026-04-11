@@ -1,6 +1,6 @@
 # Ghidra Golden vs Gosleigh Output Diff
 
-최종 갱신: 2026-04-11 (commit fd269f7)
+최종 갱신: 2026-04-11 (commit 1e81d5b)
 갱신 방법: `go test ./pkg/loader/... -v -run "TestX86ClassifySign|TestX86Multiply|TestX86Add3|TestX86Complex$|TestAARCH64Simple"` 실행 후 수동 기록
 
 ---
@@ -17,6 +17,7 @@
 | EAX -> uVar1 rename 없음 | classify_sign | ActionReturnSplit 미구현 | **완료** |
 | else-if 대신 중첩 if | classify_sign | PrintC 블록 출력 | **완료** |
 | undefined4 대신 unsigned int | 전체 | TypeFactory 기본 타입 표현 | **완료** |
+| AArch64 unsigned long long 대신 long | aarch64 | TYPE_INT seeding + LP64 표현 | **완료** |
 | ghost params (param_1, param_2) 없음 | 전체 x86-32 | ABI/cspec | 미구현 (Known Mismatch) |
 | processEntry 함수명 | 전체 x86-32 | ABI/cspec | 미구현 (Known Mismatch) |
 | x86 리턴 타입 int | multiply, add3 | processEntry context 타입 | 미구현 (Known Mismatch) |
@@ -150,28 +151,28 @@ long entry(long param_1,long param_2)
 }
 ```
 
-### Gosleigh 현재 출력 (2026-04-11 fd269f7)
+### Gosleigh 현재 출력 (2026-04-11 1e81d5b)
 ```c
-undefined8 aarch64_add_ret(unsigned long long param_0, unsigned long long param_1) {
+long aarch64_add_ret(long param_0, long param_1) {
     return param_0 + param_1;
 }
 ```
 
 ### 차이 (잔여)
-- 리턴 타입: `undefined8` vs `long` (Ghidra는 TYPE_INT 64-bit, Gosleigh는 TYPE_UNKNOWN)
-- 파라미터 타입: `unsigned long long` vs `long` (TYPE_UINT vs TYPE_INT)
-- 함수명: `aarch64_add_ret` vs `entry`
+- 함수명: `aarch64_add_ret` vs `entry` (processEntry Known Mismatch)
+- 파라미터 번호: `param_0/1` vs `param_1/2` (processEntry ghost params 없어서 번호 차이)
 
 ### 완료된 항목
 - [x] 플래그 변수 제거 -- 완료
 - [x] return 값 정상 -- 완료
 - [x] 파라미터 수 정상 -- 완료
 - [x] unique_* 제거 -- 완료
+- [x] 리턴 타입: `long` (LP64 TYPE_INT 64-bit) -- 완료 (1e81d5b)
+- [x] 파라미터 타입: `long` (TYPE_INT, LP64 convention) -- 완료 (1e81d5b)
 
 ---
 
 ## 우선순위 수정 목록 (현재 잔여)
 
 1. **[높음] processEntry wrapper** -- x86-32 entry 함수에 `processEntry entry(undefined4 param_1, undefined4 param_2, ...)` ghost params 추가. ABI/cspec 변경 필요.
-2. **[중간] AArch64 파라미터/리턴 타입 long** -- BuildFromVarnodes에서 register params를 TYPE_UINT 대신 TYPE_INT로 시딩하면 AArch64에서 `long` 타입 출력. 단, 현재 테스트가 `unsigned long long`을 기대하므로 테스트 변경 필요.
-3. **[낮음] x86 리턴 타입 int** -- processEntry wrapper 구현 후 자동으로 해결될 가능성 높음.
+2. **[낮음] x86 리턴 타입 int** -- processEntry wrapper 구현 후 자동으로 해결될 가능성 높음.
