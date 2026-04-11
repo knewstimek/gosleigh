@@ -250,7 +250,37 @@ func TestX86CountedLoop(t *testing.T) {
 	}
 
 	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+
+	spfLoop := pcode.NewActionStackPtrFlow("analysis")
+	spfLoop.Apply(result.Funcdata)
+
+	var regSpaceIdxLoop int = -1
+	stackSpaceLoop := spfLoop.StackSpace()
+	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.Space() == nil {
+			continue
+		}
+		sp := vn.Space()
+		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpaceLoop == nil {
+			stackSpaceLoop = sp
+		}
+		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxLoop < 0 {
+			regSpaceIdxLoop = int(sp.Index)
+		}
+	}
+	cdeclLoop := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceLoop, nil)
+	if regSpaceIdxLoop >= 0 {
+		cdeclLoop.WithReturnReg(regSpaceIdxLoop, 0, 4)
+	}
+	pcode.ApplyCallingConvention(result.Funcdata, cdeclLoop)
+	pcode.NewMerge(result.Funcdata).MergeMarker()
+	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
+	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
+	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
+	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -300,7 +330,37 @@ func TestX86IfElse(t *testing.T) {
 	}
 
 	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+
+	spfIfElse := pcode.NewActionStackPtrFlow("analysis")
+	spfIfElse.Apply(result.Funcdata)
+
+	var regSpaceIdxIfElse int = -1
+	stackSpaceIfElse := spfIfElse.StackSpace()
+	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.Space() == nil {
+			continue
+		}
+		sp := vn.Space()
+		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpaceIfElse == nil {
+			stackSpaceIfElse = sp
+		}
+		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxIfElse < 0 {
+			regSpaceIdxIfElse = int(sp.Index)
+		}
+	}
+	cdeclIfElse := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceIfElse, nil)
+	if regSpaceIdxIfElse >= 0 {
+		cdeclIfElse.WithReturnReg(regSpaceIdxIfElse, 0, 4)
+	}
+	pcode.ApplyCallingConvention(result.Funcdata, cdeclIfElse)
+	pcode.NewMerge(result.Funcdata).MergeMarker()
+	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
+	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
+	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
+	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -1166,7 +1226,37 @@ func TestX86SwitchFunction(t *testing.T) {
 	}
 
 	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+
+	spfSwitch := pcode.NewActionStackPtrFlow("analysis")
+	spfSwitch.Apply(result.Funcdata)
+
+	var regSpaceIdxSwitch int = -1
+	stackSpaceSwitch := spfSwitch.StackSpace()
+	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.Space() == nil {
+			continue
+		}
+		sp := vn.Space()
+		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpaceSwitch == nil {
+			stackSpaceSwitch = sp
+		}
+		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxSwitch < 0 {
+			regSpaceIdxSwitch = int(sp.Index)
+		}
+	}
+	cdeclSwitch := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceSwitch, nil)
+	if regSpaceIdxSwitch >= 0 {
+		cdeclSwitch.WithReturnReg(regSpaceIdxSwitch, 0, 4)
+	}
+	pcode.ApplyCallingConvention(result.Funcdata, cdeclSwitch)
+	pcode.NewMerge(result.Funcdata).MergeMarker()
+	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
+	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
+	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
+	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -1216,7 +1306,37 @@ func TestX86StructAccessFunction(t *testing.T) {
 	}
 
 	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+
+	spfStruct := pcode.NewActionStackPtrFlow("analysis")
+	spfStruct.Apply(result.Funcdata)
+
+	var regSpaceIdxStruct int = -1
+	stackSpaceStruct := spfStruct.StackSpace()
+	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.Space() == nil {
+			continue
+		}
+		sp := vn.Space()
+		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpaceStruct == nil {
+			stackSpaceStruct = sp
+		}
+		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxStruct < 0 {
+			regSpaceIdxStruct = int(sp.Index)
+		}
+	}
+	cdeclStruct := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceStruct, nil)
+	if regSpaceIdxStruct >= 0 {
+		cdeclStruct.WithReturnReg(regSpaceIdxStruct, 0, 4)
+	}
+	pcode.ApplyCallingConvention(result.Funcdata, cdeclStruct)
+	pcode.NewMerge(result.Funcdata).MergeMarker()
+	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
+	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
+	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
+	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -1268,7 +1388,37 @@ func TestX86ArrayIndexFunction(t *testing.T) {
 	}
 
 	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+
+	spfArray := pcode.NewActionStackPtrFlow("analysis")
+	spfArray.Apply(result.Funcdata)
+
+	var regSpaceIdxArray int = -1
+	stackSpaceArray := spfArray.StackSpace()
+	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.Space() == nil {
+			continue
+		}
+		sp := vn.Space()
+		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpaceArray == nil {
+			stackSpaceArray = sp
+		}
+		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxArray < 0 {
+			regSpaceIdxArray = int(sp.Index)
+		}
+	}
+	cdeclArray := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceArray, nil)
+	if regSpaceIdxArray >= 0 {
+		cdeclArray.WithReturnReg(regSpaceIdxArray, 0, 4)
+	}
+	pcode.ApplyCallingConvention(result.Funcdata, cdeclArray)
+	pcode.NewMerge(result.Funcdata).MergeMarker()
+	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
+	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
+	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
+	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 

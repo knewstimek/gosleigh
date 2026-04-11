@@ -200,6 +200,20 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRuleSubNormal(group) },
 	func(group string) Rule { return NewRuleSborrow(group) },
 	func(group string) Rule { return NewRuleLessNotEqualBoolAnd(group) },
+	// pointer rules -- C++ ActionPool::registerRule equivalents; inserted before identityel
+	func(group string) Rule { return NewRulePtrArith(group) },
+	func(group string) Rule { return NewRulePtraddUndo(group) },
+	func(group string) Rule { return NewRulePtrsubUndo(group) },
+	func(group string) Rule { return NewRuleStructOffset0(group) },
+	func(group string) Rule { return NewRuleSegment(group) },
+	func(group string) Rule { return NewRulePtrFlow(group) },
+	func(group string) Rule { return NewRulePtrsubCharConstant(group) },
+	func(group string) Rule { return NewRulePtraddZero(group) },
+	func(group string) Rule { return NewRulePtraddConstantIndex(group) },
+	func(group string) Rule { return NewRulePtrsubZero(group) },
+	func(group string) Rule { return NewRulePtrsubAddConst(group) },
+	func(group string) Rule { return NewRulePtrsubCollapse(group) },
+	func(group string) Rule { return NewRulePtrFlowCopy(group) },
 	func(group string) Rule { return NewRuleIdentityEl(group) },
 }
 
