@@ -5,6 +5,8 @@ import (
 	"math"
 	"sort"
 	"strings"
+
+	"gosleigh/pkg/address"
 )
 
 const (
@@ -67,21 +69,34 @@ type printCState struct {
 	emittedTypes map[uint64]bool
 	activeExpr   map[*PcodeOp]bool
 	blockLabels  map[*FlowBlock]string
+
+	// prologueOps is the set of ops that are part of the callee-saved register
+	// save/restore frame: PUSH EBP/EBX in the prologue and POP in the epilogue.
+	// These are STORE ops whose value is a non-param register-space input varnode,
+	// plus the address-computing ops (INT_ADD etc.) that feed their pointer input.
+	// C++ parity: ActionPrototypeTypes marks callee-saved regs dead; we approximate
+	// this at render time by suppressing these ops from C output.
+	prologueOps map[*PcodeOp]bool
+	// prologueVarnodes is the set of register-space input varnodes used only as
+	// values in prologueOps. They are excluded from locals declarations.
+	prologueVarnodes map[*Varnode]bool
 }
 
 func newPrintCState(printer *PrintC, fd *Funcdata) *printCState {
 	emitter := NewTextEmitterWithIndent(printer.indentStep)
 	return &printCState{
-		printer:      printer,
-		fd:           fd,
-		emitter:      emitter,
-		lang:         NewPrintLanguage(emitter),
-		decls:        NewCDeclRenderer(),
-		names:        make(map[*Varnode]string),
-		inline:       make(map[*PcodeOp]bool),
-		emittedTypes: make(map[uint64]bool),
-		activeExpr:   make(map[*PcodeOp]bool),
-		blockLabels:  make(map[*FlowBlock]string),
+		printer:          printer,
+		fd:               fd,
+		emitter:          emitter,
+		lang:             NewPrintLanguage(emitter),
+		decls:            NewCDeclRenderer(),
+		names:            make(map[*Varnode]string),
+		inline:           make(map[*PcodeOp]bool),
+		emittedTypes:     make(map[uint64]bool),
+		activeExpr:       make(map[*PcodeOp]bool),
+		blockLabels:      make(map[*FlowBlock]string),
+		prologueOps:      make(map[*PcodeOp]bool),
+		prologueVarnodes: make(map[*Varnode]bool),
 	}
 }
 
@@ -119,7 +134,22 @@ func (s *printCState) emit() (string, error) {
 		s.lang.Token(s.renderFunctionSignature(retType))
 	})
 	s.emitLocalDeclarations()
-	if len(s.locals) > 0 && s.graph != nil && s.graph.GetSize() != 0 {
+	// Emit blank line between declarations and body only when at least one
+	// non-suppressed local was actually declared. Unique-space temps and
+	// prologue varnodes are skipped in emitLocalDeclarations; count only
+	// the varnodes that will produce a "type name;" declaration.
+	hasVisibleLocal := false
+	for _, vn := range s.locals {
+		if s.prologueVarnodes[vn] {
+			continue
+		}
+		if vn.Space() != nil && vn.Space().IsUnique() {
+			continue
+		}
+		hasVisibleLocal = true
+		break
+	}
+	if hasVisibleLocal && s.graph != nil && s.graph.GetSize() != 0 {
 		s.lang.Newline()
 	}
 	if s.graph != nil && s.graph.GetSize() != 0 {
@@ -143,6 +173,11 @@ func (s *printCState) collectSymbols() {
 	if s.fd == nil {
 		return
 	}
+
+	// Identify and mark prologue/epilogue register-save ops before classifying locals.
+	// This prevents callee-saved register spills (PUSH EBP/EBX) from appearing as
+	// C statements or local variable declarations.
+	s.markPrologueOps()
 
 	regNameByLoc := s.printer.registerNames
 
@@ -183,7 +218,9 @@ func (s *printCState) collectSymbols() {
 					}
 					if vn.Def() != nil && s.shouldInline(vn.Def()) {
 						s.inline[vn.Def()] = true
-					} else {
+					} else if !s.prologueVarnodes[vn] {
+						// Skip varnodes that are only used in prologue register-save ops.
+						// C++ parity: ActionPrototypeTypes marks callee-saved inputs dead.
 						locals = append(locals, vn)
 					}
 				}
@@ -212,6 +249,11 @@ func (s *printCState) collectSymbols() {
 				continue
 			}
 			if vn.Def() == nil {
+				continue
+			}
+			// Skip varnodes used only in prologue register-save ops.
+			// C++ parity: ActionPrototypeTypes marks callee-saved reg chains dead.
+			if s.prologueVarnodes[vn] {
 				continue
 			}
 			// Skip unique-space varnodes with no consumers: these are dead stores
@@ -270,10 +312,13 @@ func (s *printCState) collectSymbols() {
 			}
 			s.names[vn] = locName[varnodeLocKey(vn)]
 		}
+		// After s.inline is populated, identify COPY ops that are only consumed
+		// by the return chain. This must run after shouldInline has been applied.
+		s.markReturnOnlyCopies()
 		return
 	}
 
-	// Nil FuncProto path: original logic unchanged.
+	// Nil FuncProto path: original logic with prologue-op filtering.
 	all := s.fd.GetVarnodeBank().AllVarnodes()
 	params := make([]*Varnode, 0)
 	locals := make([]*Varnode, 0)
@@ -285,10 +330,18 @@ func (s *printCState) collectSymbols() {
 			if s.isSpecialInputRegister(vn, regNameByLoc) {
 				continue
 			}
+			// Skip callee-saved register inputs used only in prologue store ops.
+			if s.prologueVarnodes[vn] {
+				continue
+			}
 			params = append(params, vn)
 			continue
 		}
 		if vn.Def() == nil {
+			continue
+		}
+		// Skip varnodes used only in prologue register-save ops.
+		if s.prologueVarnodes[vn] {
 			continue
 		}
 		// Skip unique-space dead stores (no consumers): BatchA may leave these
@@ -344,6 +397,9 @@ func (s *printCState) collectSymbols() {
 		}
 		s.names[vn] = locName[varnodeLocKey(vn)]
 	}
+	// After s.inline is populated, identify COPY ops that are only consumed
+	// by the return chain. This must run after shouldInline has been applied.
+	s.markReturnOnlyCopies()
 }
 
 // locationKey identifies a unique storage location by (spaceIndex, offset, size).
@@ -468,6 +524,21 @@ func (s *printCState) emitLocalDeclarations() {
 	// are merged to one local_ name by collectVarnodeNames.
 	declared := make(map[string]struct{})
 	for _, vn := range s.locals {
+		// Skip varnodes that were identified as prologue/return-chain only
+		// after collectSymbols ran (markReturnOnlyCopies runs post-collect).
+		if s.prologueVarnodes[vn] {
+			continue
+		}
+		// Skip unique-space varnodes: their defining ops are always suppressed
+		// by emitOps (unique-space ops are SSA intermediates, not C variables).
+		// A unique varnode with ndesc>1 ends up in locals only because shouldInline
+		// rejected it (ndesc!=1), but its tmp_N name is never used in any emitted
+		// statement since the op is suppressed. Declaring it produces a spurious
+		// "unsigned long long tmp_0;" with no corresponding assignment.
+		// C++ parity: Ghidra suppresses unique temps via ActionMarkImplied.
+		if vn.Space() != nil && vn.Space().IsUnique() {
+			continue
+		}
 		name := s.nameOf(vn)
 		if _, seen := declared[name]; seen {
 			continue
@@ -937,6 +1008,14 @@ func (s *printCState) emitBasicBlock(bl *FlowBlock) error {
 func (s *printCState) emitOps(bb *BlockBasic, suppressControl bool) error {
 	for _, op := range bb.Ops() {
 		if op == nil || op.IsDead() || s.inline[op] {
+			continue
+		}
+		// Skip prologue/epilogue register-save ops (PUSH EBP, PUSH EBX, etc.)
+		// and the address-computing chains that feed them. These are identified
+		// during collectSymbols and represent callee-saved register spills that
+		// Ghidra's ActionPrototypeTypes would eliminate.
+		// C++ parity: ActionPrototypeTypes marks these as dead before printing.
+		if s.prologueOps[op] {
 			continue
 		}
 		if out := op.Output(); out != nil {
@@ -2092,6 +2171,212 @@ func (s *printCState) isMachineGeneratedName(name string) bool {
 		return true
 	}
 	return s.isKnownRegisterName(name)
+}
+
+// markPrologueOps identifies callee-saved register save/restore sequences
+// (PUSH EBP, PUSH EBX, etc.) and marks them in prologueOps so they are
+// suppressed from C output. Also marks the intermediate varnodes that are
+// used only as operands to prologue ops in prologueVarnodes.
+//
+// Detection heuristic: a STORE op is a register-save prologue op when:
+//  1. Its value (storeValue) is a register-space input varnode, AND
+//  2. That varnode is not classified as a C parameter by ScopeLocal.
+//
+// The address-computing ops (INT_ADD/COPY feeding the pointer input) are also
+// marked as prologue ops if their output is only consumed by prologue STOREs.
+//
+// C++ parity: ActionPrototypeTypes::apply marks callee-saved inputs/outputs;
+// this is a render-time approximation that avoids modifying the p-code graph.
+func (s *printCState) markPrologueOps() {
+	if s.fd == nil {
+		return
+	}
+
+	// Build a set of varnode pointers that are classified as params.
+	// We need this to avoid suppressing actual function parameter registers.
+	paramVns := make(map[*Varnode]bool)
+	if sl := s.fd.GetScopeLocal(); sl != nil {
+		for _, vn := range s.fd.GetVarnodeBank().AllVarnodes() {
+			if vn == nil || !vn.IsInput() {
+				continue
+			}
+			if hv := sl.FindEntry(vn); hv != nil {
+				if name := hv.Name(); len(name) >= 6 && name[:6] == "param_" {
+					paramVns[vn] = true
+				}
+			}
+		}
+	}
+	// Also check FuncProto params (set by ApplyCallingConvention).
+	if fp := s.fd.GetFuncProto(); fp != nil {
+		for i := 0; i < fp.NumParams(); i++ {
+			hv := fp.GetParam(i)
+			if hv == nil {
+				continue
+			}
+			// Mark all varnodes belonging to this param HighVariable.
+			for _, vn := range s.fd.GetVarnodeBank().AllVarnodes() {
+				if vn != nil && vn.High() == hv {
+					paramVns[vn] = true
+				}
+			}
+		}
+	}
+
+	// First pass: find STORE ops that save callee-saved registers to the stack.
+	// These are STORE ops where the value is a register-space input varnode that
+	// is not a function parameter.
+	for _, op := range s.fd.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() || op.Code() != CPUI_STORE {
+			continue
+		}
+		val := storeValue(op)
+		if val == nil || !val.IsInput() {
+			continue
+		}
+		if val.Space() == nil || val.Space().IsUnique() || val.Space().Kind == address.SpaceKindStack {
+			continue
+		}
+		// val is a register-space (or ram-space) input varnode. If it's a param, keep it.
+		if paramVns[val] {
+			continue
+		}
+		// This is a callee-saved register store. Mark it.
+		s.prologueOps[op] = true
+		s.prologueVarnodes[val] = true
+	}
+
+	// Second pass: mark address-computing ops whose output is only consumed by
+	// prologue STOREs (as the pointer argument). These produce the "*(local_N + -4)"
+	// style pointer chain that should not appear as a local declaration or statement.
+	for {
+		changed := false
+		for _, op := range s.fd.GetPcodeOpBank().AllOps() {
+			if op == nil || op.IsDead() || op.Output() == nil {
+				continue
+			}
+			if s.prologueOps[op] {
+				continue // already marked
+			}
+			out := op.Output()
+			// Check if every consumer of this op's output is a prologue op.
+			allPrologue := true
+			if out.NumDescend() == 0 {
+				allPrologue = false // no consumers; don't suppress
+			}
+			for _, consumer := range out.DescendIter() {
+				if !s.prologueOps[consumer] {
+					allPrologue = false
+					break
+				}
+			}
+			if allPrologue {
+				s.prologueOps[op] = true
+				s.prologueVarnodes[out] = true
+				changed = true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
+}
+
+// markReturnOnlyCopies identifies COPY (and similar transparent) ops whose
+// output varnode is consumed exclusively by RETURN ops (anchored return register)
+// or by other suppressible transparent ops. When all consumers of a COPY output
+// are in this "return-only" category, the COPY statement is redundant: the return
+// value is already rendered inline from the actual computation op.
+//
+// Example: after anchorReturnReg, EAX has two consumers: IMUL (computation) and
+// RETURN (return anchor). The COPY that loaded param_0 into EAX now has EAX as
+// output with consumers = {IMUL, RETURN}. IMUL is inlined into "return ...", so
+// the standalone "local_0 = param_0" is dead from C's perspective.
+//
+// Suppression criterion for a COPY op: every consumer of its output is one of:
+//   - a RETURN op
+//   - another op already in prologueOps
+//   - another COPY op whose output also passes this test (iterated to fixpoint)
+//   - already in s.inline (will be inlined into its consumer's expression)
+//
+// C++ parity: ActionMarkImplied / PrintC::isImplied suppresses single-use defs;
+// this extends that to the return-anchor pattern where NumDescend==2 blocks
+// normal inlining but the extra consumer is the return anchor (not real C use).
+func (s *printCState) markReturnOnlyCopies() {
+	if s.fd == nil {
+		return
+	}
+	// Iterate to fixpoint: suppressing one COPY may reveal another.
+	for {
+		changed := false
+		for _, op := range s.fd.GetPcodeOpBank().AllOps() {
+			if op == nil || op.IsDead() || op.Output() == nil {
+				continue
+			}
+			if s.prologueOps[op] || s.inline[op] {
+				continue // already handled
+			}
+			// Only suppress COPY ops in this pass; multi-input ops are more complex.
+			if op.Code() != CPUI_COPY {
+				continue
+			}
+			out := op.Output()
+			if out.NumDescend() == 0 {
+				// Suppress COPY ops that write to register space from a unique-space
+				// source and have no live consumers. These are dead register stores left
+				// by PropagateCopy after redirecting all consumers to use the unique
+				// source directly (e.g. RETURN now directly uses the INT_ADD result).
+				// Constant->register COPYs (branch assignments like "local_0 = 0") are
+				// intentionally NOT suppressed: their consumers were propagated but the
+				// assignment is still the semantic content of the branch.
+				// C++ parity: ActionDeadCode kills these in a second pass; we handle
+				// this at render time since no second dead-code pass runs.
+				if inp := op.Input(0); inp != nil && inp.Space() != nil && inp.Space().IsUnique() {
+					s.prologueOps[op] = true
+					s.prologueVarnodes[out] = true
+				}
+				continue
+			}
+			// Check that all consumers are return-chain or already-suppressed.
+			// A consumer is "transparent" (produces no standalone C statement) if:
+			//   - it is RETURN (anchor does not produce a statement)
+			//   - it is MULTIEQUAL or INDIRECT (marker ops, suppressed by IsMarker)
+			//   - it is already in prologueOps (will be suppressed)
+			//   - it is already in s.inline (will be inlined at its consumer's site)
+			allReturnChain := true
+			for _, consumer := range out.DescendIter() {
+				if consumer == nil {
+					continue
+				}
+				switch consumer.Code() {
+				case CPUI_RETURN:
+					// Return anchor consumer: does not produce a C statement.
+				case CPUI_MULTIEQUAL, CPUI_INDIRECT:
+					// Marker ops: suppressed by IsMarker() check in emitStatement.
+					// They do not produce standalone C statements.
+				default:
+					if s.prologueOps[consumer] {
+						// Already suppressed prologue consumer.
+					} else if s.inline[consumer] {
+						// Will be inlined; doesn't produce a standalone statement.
+					} else {
+						allReturnChain = false
+					}
+				}
+				if !allReturnChain {
+					break
+				}
+			}
+			if allReturnChain {
+				s.prologueOps[op] = true
+				s.prologueVarnodes[out] = true
+				changed = true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
 }
 
 func (s *printCState) isSpecialInputRegister(vn *Varnode, regNameByLoc map[string]string) bool {
