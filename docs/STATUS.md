@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: F-Phase + Ghidra Golden 인프라 + undefined4/uVar1 parity (2026-04-11)
+## 현재 단계: F-Phase + Ghidra Golden 인프라 + AArch64 long 타입 parity (2026-04-11)
 
 ### 완료
 - [x] Git repo initialized
@@ -452,7 +452,17 @@
   - Known mismatches (not yet implemented):
     - processEntry wrapper: Ghidra wraps x86 entry functions as `processEntry entry(undefined4 param_1, undefined4 param_2, ...)` with 2 ghost argc/argv params. Requires significant calling-convention changes.
     - x86 return type: multiply/add3 return `undefined4` (Ghidra shows `int` due to processEntry context).
-    - AArch64 return type: `undefined8` (Ghidra shows `long` via TYPE_INT -- would require seeding TYPE_INT on AArch64 register params instead of TYPE_UINT).
+
+- [x] printc: AArch64 long type + stability fixes (2026-04-11, commit 1e81d5b)
+  - scopelocal: register-space params now seeded with TYPE_INT (was TYPE_UINT); AArch64 X0/X1 render as "long param_0, long param_1" matching Ghidra 12 LP64 golden.
+  - printc: normalizedBaseType TYPE_INT size=8 -> "long" (was "long long"); LP64 convention: Ghidra uses "long" for 64-bit signed integer on 64-bit targets.
+  - typeop: INT_ADD now propagates TYPE_INT input to output; signed-integer arithmetic preserves signedness through ActionInferTypes (C++ parity: TypeOpIntAdd::propagateType).
+  - printc: removed renameReturnOnlyLocals from nil-FuncProto path; was non-deterministic due to unordered AllVarnodes() iteration without ABI context.
+  - printc: fallback TYPE_UINT for unique-space return varnodes from arithmetic ops when committed type is nil/TYPE_UNKNOWN; fixes flaky undefined4 return type in TestPrintCEndToEnd.
+  - AArch64 golden: `long aarch64_add_ret(long param_0, long param_1) { return param_0 + param_1; }` -- type matches Ghidra 12 golden exactly.
+  - Known mismatches (not yet implemented):
+    - processEntry wrapper: function name and ghost params (param_1/2 -> param_0/1 numbering shift).
+    - x86 return type: multiply/add3 return `undefined4` (Ghidra shows `int` due to processEntry context).
 
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
