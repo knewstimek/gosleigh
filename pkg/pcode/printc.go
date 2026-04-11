@@ -410,8 +410,11 @@ func (s *printCState) collectSymbols() {
 	// After s.inline is populated, identify COPY ops that are only consumed
 	// by the return chain. This must run after shouldInline has been applied.
 	s.markReturnOnlyCopies()
-	// Rename return-only locals to Ghidra's uVar1/iVar1/lVar1 convention.
-	s.renameReturnOnlyLocals()
+	// NOTE: renameReturnOnlyLocals is intentionally NOT called on the nil-FuncProto
+	// path. Without ABI information (calling convention, return register) the
+	// return-only detection is unreliable and non-deterministic because AllVarnodes()
+	// iteration order is map-based. Ghidra parity for uVar1/iVar1 naming is only
+	// meaningful when a proper ProtoModel is attached.
 }
 
 // locationKey identifies a unique storage location by (spaceIndex, offset, size).
@@ -512,7 +515,26 @@ func (s *printCState) inferReturnType() Datatype {
 				return sharedTypeFactory.GetBase(int32(vn.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", vn.Size()))
 			}
 		}
-		return vn.TypeReadFacing(op)
+		dt := vn.TypeReadFacing(op)
+		// For unique-space varnodes (SSA intermediates), TypeReadFacing returns
+		// TYPE_UNKNOWN when the committed type was never set (e.g. ActionInferTypes
+		// ran in a different iteration order). In that case, follow the defining op
+		// to get the semantically correct type.
+		// C++ parity: Ghidra's type propagation ensures unique varnodes always carry
+		// a committed type; our iterative propagation is order-dependent, so we fall
+		// back to the def op's output type when the committed type is generic.
+		if dt != nil && dt.Metatype() == TYPE_UNKNOWN && vn.Space() != nil && vn.Space().IsUnique() && vn.Def() != nil {
+			if defOut := vn.Def().Output(); defOut != nil && defOut == vn {
+				// The defining op's output IS vn; try to determine type from opcode.
+				switch vn.Def().Code() {
+				case CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_MULT, CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR,
+					CPUI_INT_LEFT, CPUI_INT_RIGHT:
+					// Arithmetic ops produce unsigned output by convention.
+					dt = sharedTypeFactory.GetBase(vn.Size(), TYPE_UINT, "")
+				}
+			}
+		}
+		return dt
 	}
 	return sharedTypeFactory.GetVoid()
 }
@@ -665,7 +687,9 @@ func normalizedBaseType(base *Base) Datatype {
 		case 4:
 			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "int")
 		case 8:
-			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "long long")
+			// LP64 model: long is 64-bit signed integer (same as Ghidra's default).
+			// C++ parity: Ghidra uses "long" for 8-byte signed integer on LP64 targets.
+			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "long")
 		default:
 			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "int")
 		}

@@ -2300,7 +2300,11 @@ func TestAARCH64SimpleFunction(t *testing.T) {
 	if !strings.Contains(output, wantBody) {
 		t.Errorf("G1: expected %q in output, not found:\n%s", wantBody, output)
 	}
-	wantSig := "aarch64_add_ret(unsigned long long param_0, unsigned long long param_1)"
+	// Ghidra 12 golden: "long entry(long param_1, long param_2)".
+	// Known mismatch: function name (entry vs aarch64_add_ret) and param numbering
+	// (param_1/2 vs param_0/1) depend on processEntry wrapper not yet implemented.
+	// Type is now correctly "long" (TYPE_INT, 8 bytes, LP64) matching Ghidra.
+	wantSig := "aarch64_add_ret(long param_0, long param_1)"
 	if !strings.Contains(output, wantSig) {
 		t.Errorf("G2: expected signature %q in output, not found:\n%s", wantSig, output)
 	}

@@ -132,24 +132,27 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 	}
 
 	// Create HighVariables for register parameters.
-	// Assign a concrete TYPE_UINT type based on register size so the parameter is
-	// rendered as "unsigned int" / "unsigned long long" rather than "undefined%d".
+	// Assign a concrete TYPE_INT type based on register size so the parameter is
+	// rendered as "int" / "long" rather than "undefined%d".
 	// C++ parity: Ghidra infers param types from the ABI model (ParameterSymbol);
-	// our model does not carry explicit type info, so we default to unsigned.
+	// Ghidra defaults to signed integer for register params (e.g. AArch64 X0 -> long).
+	// TYPE_INT produces "int" (4 bytes) or "long" (8 bytes) via normalizedBaseType.
 	regParamCount := len(regParamSlots)
 	for _, slot := range regParamSlots {
 		name := GetParamName(slot.idx)
 		hv := NewHighVariable(name)
 		hv.AddInstance(slot.vn)
 		sl.paramByVn[slot.vn] = hv
-		// Seed a concrete unsigned type onto the varnode so normalizedBaseType
-		// renders it as "unsigned int" / "unsigned long long" (not "undefined%d").
+		// Seed a concrete signed type onto the varnode so normalizedBaseType
+		// renders it as "int" / "long" (not "undefined%d").
+		// C++ parity: Ghidra uses TYPE_INT for register params when no explicit
+		// type is known from the prototype; "long" = 8-byte signed on LP64.
 		if slot.vn.Type() == nil {
 			sz := slot.vn.Size()
 			if sz <= 0 {
 				sz = 4
 			}
-			SetVarnodeType(slot.vn, sharedTypeFactory.GetBase(int32(sz), TYPE_UINT, ""))
+			SetVarnodeType(slot.vn, sharedTypeFactory.GetBase(int32(sz), TYPE_INT, ""))
 		}
 		if fp != nil {
 			fp.AddParam(hv)
