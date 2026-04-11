@@ -199,7 +199,7 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 
 	// Create HighVariables for stack params.
 	// Stack param numbering starts AFTER register params so the combined
-	// param_0..param_N sequence is contiguous and ABI-ordered.
+	// param_1..param_N sequence is contiguous and ABI-ordered.
 	for i, e := range paramEntries {
 		name := GetParamName(regParamCount + i)
 		hv := NewHighVariable(name)
@@ -207,6 +207,16 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 		sl.paramByVn[e.vn] = hv
 		if fp != nil {
 			fp.AddParam(hv)
+		}
+		// Seed TYPE_INT for untyped stack params, matching register param treatment.
+		// C++ parity: Ghidra assigns signed integer as default type for ABI stack slots;
+		// ActionInferTypes then propagates this through INT_ADD/INT_MULT chains.
+		if e.vn.Type() == nil {
+			sz := e.vn.Size()
+			if sz <= 0 {
+				sz = 4
+			}
+			SetVarnodeType(e.vn, sharedTypeFactory.GetBase(int32(sz), TYPE_INT, ""))
 		}
 	}
 
