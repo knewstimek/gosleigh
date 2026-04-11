@@ -37,6 +37,14 @@ type TranslateInput struct {
 	Resolve        ResolveHooks
 	ResolveHandles ResolveHandlesHooks
 	Commits        ApplyCommitsHooks
+	// PcodeContext, when non-nil, is filled with the parser context obtained
+	// by ObtainPcodeContext after a successful translation. Callers that need the
+	// parser context (e.g. to read NAddr/Length without a cache re-lookup) can
+	// pass a pointer here instead of calling GetPcodeParserContext after the fact.
+	// The cache re-lookup is unsafe: the circular parser-context buffer may evict
+	// and reuse the instruction's slot during translation, making the hash entry
+	// stale by the time the caller looks it up.
+	PcodeContext **ParserContext
 }
 
 func hasSeededTranslateMatch(match MatchInput) bool {
@@ -416,6 +424,13 @@ func TranslateSubtable(subtable *SubtableBoundary, input TranslateInput) ([]pcod
 	ctx, err := ObtainPcodeContext(cache, translatePcodeContextRequest(subtable, input, input.Lowering.Instruction))
 	if err != nil {
 		return nil, err
+	}
+	// Expose the parser context to the caller before any further cache evictions
+	// can reuse this slot. The circular buffer may recycle the context's slot
+	// (changing its stored address) while building p-code, so a post-translation
+	// GetPcodeParserContext(addr) lookup is unreliable.
+	if input.PcodeContext != nil {
+		*input.PcodeContext = ctx
 	}
 	if input.Symbols != nil && ctx.GetSymbolTable() == nil {
 		ctx.SetSymbolTable(input.Symbols)

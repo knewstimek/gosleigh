@@ -52,5 +52,41 @@
         "c": "\nlong entry(long param_1,long param_2)\n\n{\nreturn param_1 + param_2;\n}\n"
       }
     ]
+  },
+  "counted_loop_x86_32": {
+    "arch": "x86_32_c",
+    "functions": [
+      {
+        "name": "entry",
+        "c": "\nint processEntry entry(void)\n\n{\nundefined4 local_c;\nundefined4 local_8;\n\nlocal_c = 0;\nfor (local_8 = 0; local_8 < 5; local_8 = local_8 + 1) {\nlocal_c = local_c + local_8;\n}\nreturn local_c;\n}\n"
+      }
+    ]
+  },
+  "sum_list_x86_32": {
+    "arch": "x86_32_c",
+    "functions": [
+      {
+        "name": "entry",
+        "c": "\nint processEntry entry(undefined4 param_1,undefined4 param_2,int *param_3)\n\n{\nint local_8;\n\nlocal_8 = 0;\nfor (; param_3 != (int *)0x0; param_3 = (int *)param_3[1]) {\nlocal_8 = local_8 + *param_3;\n}\nreturn local_8;\n}\n"
+      }
+    ]
+  },
+  "abs_ifelse_x86_32": {
+    "arch": "x86_32_c",
+    "functions": [
+      {
+        "name": "entry",
+        "c": "\nint processEntry entry(undefined4 param_1,undefined4 param_2,int param_3)\n\n{\nif (param_3 < 0) {\nparam_3 = -param_3;\n}\nreturn param_3;\n}\n"
+      }
+    ]
+  },
+  "nested_if_x86_32": {
+    "arch": "x86_32_c",
+    "functions": [
+      {
+        "name": "entry",
+        "c": "\nundefined4 processEntry entry(undefined4 param_1,undefined4 param_2,int param_3,int param_4)\n\n{\nundefined4 uVar1;\n\nif (param_3 < 1) {\nuVar1 = 0;\n}\nelse if (param_3 < param_4) {\nuVar1 = 2;\n}\nelse {\nuVar1 = 1;\n}\nreturn uVar1;\n}\n"
+      }
+    ]
   }
 }

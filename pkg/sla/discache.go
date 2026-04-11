@@ -230,6 +230,13 @@ func (c *DisassemblyCache) ObtainParserContext(addr address.Address, constSpace 
 		// Mirrors ParserContext::setAddr() in context.hh clearing cached n2addr.
 		ctx.SetN2addr(address.Address{})
 		ctx.SetParserState(ParseStateUninitialized)
+		// Reset the constructor tree so stale Children/Constructor pointers from a
+		// previous instruction do not leak into the new decode cycle.
+		// EnsureOperand reuses existing children when non-nil; without this reset,
+		// a leaf operand that returns Constructor==nil from resolve() (e.g. a
+		// VarnodeList/token-field node) would leave the old Constructor in place,
+		// causing ResolveHandles to traverse the stale subtable and corrupt handles.
+		ctx.BaseState = NewConstructState()
 		if ctx.GetConstSpace() == nil && constSpace != nil {
 			ctx.Initialize(constSpace)
 		}
