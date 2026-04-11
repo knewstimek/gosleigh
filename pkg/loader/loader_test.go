@@ -401,7 +401,48 @@ func TestX86MultiplyFunction(t *testing.T) {
 	}
 
 	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+
+	// ActionStackPtrFlow: convert LOAD(ram, INT_ADD(FP, offset)) into COPY(stack_input_vn)
+	// so ScopeLocal can classify stack parameters. Must run after Heritage, before ApplyCallingConvention.
+	// C++ parity: ActionStackPtrFlow in coreaction.cc
+	spfMultiply := pcode.NewActionStackPtrFlow("analysis")
+	spfMultiply.Apply(result.Funcdata)
+
+	// Find register address space index for EAX return register anchoring.
+	var regSpaceIdxMultiply int = -1
+	stackSpaceMultiply := spfMultiply.StackSpace()
+	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.Space() == nil {
+			continue
+		}
+		sp := vn.Space()
+		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpaceMultiply == nil {
+			stackSpaceMultiply = sp
+		}
+		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxMultiply < 0 {
+			regSpaceIdxMultiply = int(sp.Index)
+		}
+	}
+	// Apply x86-32 cdecl calling convention: anchors EAX as return register and strips EIP ref.
+	cdeclMultiply := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceMultiply, nil)
+	if regSpaceIdxMultiply >= 0 {
+		cdeclMultiply.WithReturnReg(regSpaceIdxMultiply, 0, 4)
+	}
+	pcode.ApplyCallingConvention(result.Funcdata, cdeclMultiply)
+
+	// Merge MULTIEQUAL/INDIRECT phi-nodes so they don't appear verbatim in PrintC output.
+	pcode.NewMerge(result.Funcdata).MergeMarker()
+
+	// Fold flag conditions: CF/OF writes with only flag-safe consumers become dead.
+	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
+
+	// Constant-fold then dead-code eliminate flag chains and epilogue ops.
+	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
+	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
+	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -413,6 +454,21 @@ func TestX86MultiplyFunction(t *testing.T) {
 		t.Fatal("PrintC.Emit returned empty output for multiply function")
 	}
 	t.Logf("PrintC output:\n%s", output)
+
+	// CF/OF flag registers must not appear in output after FoldFlagConditions + DeadCode.
+	for _, flag := range []string{"CF", "OF"} {
+		if strings.Contains(output, flag) {
+			t.Errorf("expected %s to be eliminated from multiply output, but found it:\n%s", flag, output)
+		}
+	}
+	// unique_* temporaries from PUSH epilogue p-code may still appear;
+	// full elimination requires ActionPrototypeTypes (callee-saved register recognition)
+	// which is not yet implemented. Known mismatch -- do not assert on unique_* here.
+
+	// EIP is the return address, not the return value -- must not appear as return.
+	if strings.Contains(output, "return EIP") {
+		t.Errorf("expected 'return EIP' to be eliminated (EAX is the return register), but found it:\n%s", output)
+	}
 }
 
 // TestX86DivideFunction exercises the full pipeline with a divide function:
@@ -510,7 +566,48 @@ func TestX86Add3Function(t *testing.T) {
 	}
 
 	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+
+	// ActionStackPtrFlow: convert LOAD(ram, INT_ADD(FP, offset)) into COPY(stack_input_vn)
+	// so ScopeLocal can classify stack parameters. Must run after Heritage, before ApplyCallingConvention.
+	// C++ parity: ActionStackPtrFlow in coreaction.cc
+	spfAdd3 := pcode.NewActionStackPtrFlow("analysis")
+	spfAdd3.Apply(result.Funcdata)
+
+	// Find register address space index for EAX return register anchoring.
+	var regSpaceIdxAdd3 int = -1
+	stackSpaceAdd3 := spfAdd3.StackSpace()
+	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.Space() == nil {
+			continue
+		}
+		sp := vn.Space()
+		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpaceAdd3 == nil {
+			stackSpaceAdd3 = sp
+		}
+		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxAdd3 < 0 {
+			regSpaceIdxAdd3 = int(sp.Index)
+		}
+	}
+	// Apply x86-32 cdecl calling convention: anchors EAX as return register and strips EIP ref.
+	cdeclAdd3 := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceAdd3, nil)
+	if regSpaceIdxAdd3 >= 0 {
+		cdeclAdd3.WithReturnReg(regSpaceIdxAdd3, 0, 4)
+	}
+	pcode.ApplyCallingConvention(result.Funcdata, cdeclAdd3)
+
+	// Merge MULTIEQUAL/INDIRECT phi-nodes.
+	pcode.NewMerge(result.Funcdata).MergeMarker()
+
+	// Fold flag conditions: CF/OF/SF/ZF/PF writes with only flag-safe consumers become dead.
+	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
+
+	// Constant-fold then dead-code eliminate. Flags from ADD/CARRY/SCARRY/POPCOUNT are removed.
+	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
+	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
+	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -522,6 +619,27 @@ func TestX86Add3Function(t *testing.T) {
 		t.Fatal("PrintC.Emit returned empty output for add3 function")
 	}
 	t.Logf("add3 C output:\n%s", output)
+
+	// Flag-computing ops must not appear verbatim in output.
+	for _, noise := range []string{"CARRY", "SCARRY", "POPCOUNT"} {
+		if strings.Contains(output, noise) {
+			t.Errorf("expected %s to be eliminated from add3 output, but found it:\n%s", noise, output)
+		}
+	}
+	// Named flag registers must not appear.
+	for _, flag := range []string{"CF", "OF", "SF", "ZF", "PF"} {
+		if strings.Contains(output, flag) {
+			t.Errorf("expected flag %s to be eliminated from add3 output, but found it:\n%s", flag, output)
+		}
+	}
+	// unique_* temporaries from PUSH epilogue p-code may still appear;
+	// full elimination requires ActionPrototypeTypes (callee-saved register recognition)
+	// which is not yet implemented. Known mismatch -- do not assert on unique_* here.
+
+	// EIP is the return address, not the return value.
+	if strings.Contains(output, "return EIP") {
+		t.Errorf("expected 'return EIP' to be eliminated from add3 output, but found it:\n%s", output)
+	}
 }
 
 // TestX86LocalVarFunction exercises the full pipeline with a function that

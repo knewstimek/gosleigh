@@ -204,6 +204,108 @@ func (r *RuleSubExtComm) apply(op *PcodeOp, data *Funcdata) int {
 	return 0
 }
 
+// RuleSubCommute pushes SUBPIECE earlier into arithmetic/bitwise expressions,
+// commuting it past INT_MULT, INT_ADD, INT_XOR, INT_AND, INT_OR, INT_NEGATE.
+// Only the low-part (offset==0) truncation commutes with INT_MULT and INT_ADD.
+// After commuting, RuleSubExtComm or constant folding can cancel the SEXT/ZEXT.
+// C++ parity: RuleSubCommute::applyOp in ruleaction.cc
+type RuleSubCommute struct{ batchRule }
+
+func NewRuleSubCommute(group string) *RuleSubCommute {
+	r := &RuleSubCommute{}
+	r.batchRule = newBatchRule(group, "subcommute", []OpCode{CPUI_SUBPIECE}, r.apply, func(g string) Rule { return NewRuleSubCommute(g) })
+	return r
+}
+
+func (r *RuleSubCommute) apply(op *PcodeOp, data *Funcdata) int {
+	base := op.Input(0)
+	if base == nil || !base.IsWritten() {
+		return 0
+	}
+	offset, ok := constantValue(op.Input(1))
+	if !ok {
+		return 0
+	}
+	outvn := op.Output()
+	if outvn == nil {
+		return 0
+	}
+	// Precis lo/hi varnodes are managed by PIECE reconstruction -- do not disturb.
+	if outvn.IsPrecisLo() || outvn.IsPrecisHi() {
+		return 0
+	}
+	longform := base.Def()
+	if longform == nil {
+		return 0
+	}
+	// Determine whether SUBPIECE commutes through this opcode.
+	// INT_MULT and INT_ADD only commute when truncating the low part (offset==0).
+	// Bitwise ops commute regardless of offset.
+	switch longform.Code() {
+	case CPUI_INT_MULT, CPUI_INT_ADD:
+		if offset != 0 {
+			return 0
+		}
+		// Deconflict INT_ADD with RulePtrArith: skip if input 0 is spacebase.
+		if longform.Code() == CPUI_INT_ADD && longform.Input(0) != nil && longform.Input(0).IsSpaceBase() {
+			return 0
+		}
+	case CPUI_INT_NEGATE, CPUI_INT_XOR, CPUI_INT_AND, CPUI_INT_OR:
+		// commutes for any offset
+	default:
+		return 0
+	}
+
+	// base must be consumed only by this SUBPIECE.
+	if base.LoneDescend() != op {
+		return 0
+	}
+
+	// Overlap check with RuleSubZext: if the sole consumer of outvn is an INT_ZEXT
+	// that restores the original size, let RuleSubZext handle it instead.
+	if offset == 0 {
+		next := outvn.LoneDescend()
+		if next != nil && next.Code() == CPUI_INT_ZEXT && next.Output() != nil &&
+			next.Output().Size() == int32(base.Size()) {
+			return 0
+		}
+	}
+
+	// Push SUBPIECE through each input of longform.
+	// Track the last input varnode so we can reuse the same SUBPIECE op when
+	// both inputs are the same varnode (INT_MULT x,x corner case).
+	var lastIn *Varnode
+	var newVn *Varnode
+	outSize := outvn.Size()
+	for i := 0; i < longform.NumInput(); i++ {
+		vn := longform.Input(i)
+		if vn == nil {
+			return 0
+		}
+		if lastIn != vn || newVn == nil {
+			newsub := data.NewOp(2, op.Seq().Address)
+			data.OpSetOpcode(newsub, CPUI_SUBPIECE)
+			newVn = data.NewUniqueOut(outSize, newsub)
+			// Set the new varnode as the ith input of longform before wiring newsub
+			// inputs, because vn may still be free (not yet in the bank).
+			data.OpSetInput(longform, newVn, i)
+			data.OpSetInput(newsub, vn, 0)
+			data.OpSetInput(newsub, data.NewConstant(4, offset), 1)
+			data.OpInsertBefore(newsub, longform)
+		} else {
+			// Same varnode -- reuse the already-created SUBPIECE output.
+			data.OpSetInput(longform, newVn, i)
+		}
+		lastIn = vn
+	}
+	// Redirect longform's output to reuse outvn (which is the SUBPIECE output).
+	data.OpUnsetOutput(longform)
+	data.OpSetOutput(longform, outvn)
+	// Destroy the now-redundant SUBPIECE.
+	data.OpDestroy(op)
+	return 1
+}
+
 type RuleBoolZext struct{ batchRule }
 
 func NewRuleBoolZext(group string) *RuleBoolZext {
