@@ -2282,31 +2282,69 @@ func (s *printCState) markPrologueOps() {
 	}
 }
 
-// markReturnOnlyCopies identifies COPY (and similar transparent) ops whose
-// output varnode is consumed exclusively by RETURN ops (anchored return register)
-// or by other suppressible transparent ops. When all consumers of a COPY output
-// are in this "return-only" category, the COPY statement is redundant: the return
-// value is already rendered inline from the actual computation op.
+// markReturnOnlyCopies identifies ops whose output varnode is consumed exclusively
+// by RETURN ops or by other suppressible ops. When all effective consumers of an op
+// are in this "return-only" category, the standalone assignment statement is
+// redundant: the return value is already rendered inline from the actual computation.
 //
 // Example: after anchorReturnReg, EAX has two consumers: IMUL (computation) and
 // RETURN (return anchor). The COPY that loaded param_0 into EAX now has EAX as
 // output with consumers = {IMUL, RETURN}. IMUL is inlined into "return ...", so
 // the standalone "local_0 = param_0" is dead from C's perspective.
 //
-// Suppression criterion for a COPY op: every consumer of its output is one of:
+// Suppression criteria for an op: every consumer of its output is one of:
 //   - a RETURN op
-//   - another op already in prologueOps
-//   - another COPY op whose output also passes this test (iterated to fixpoint)
-//   - already in s.inline (will be inlined into its consumer's expression)
+//   - a MULTIEQUAL or INDIRECT marker op (always suppressed)
+//   - already in prologueOps (will be suppressed)
+//   - already in s.inline (will be inlined at its consumer's site)
+//   - an op whose output has ndesc==0 (dead store, itself suppressible)
+//
+// This function iterates to fixpoint: suppressing one op may reveal others.
 //
 // C++ parity: ActionMarkImplied / PrintC::isImplied suppresses single-use defs;
-// this extends that to the return-anchor pattern where NumDescend==2 blocks
-// normal inlining but the extra consumer is the return anchor (not real C use).
+// this extends that to the return-anchor pattern where NumDescend>1 blocks
+// normal inlining but the extra consumers are return anchors or dead stores.
 func (s *printCState) markReturnOnlyCopies() {
 	if s.fd == nil {
 		return
 	}
-	// Iterate to fixpoint: suppressing one COPY may reveal another.
+	// First pass: suppress COPY ops whose output has ndesc==0 and whose input
+	// is NOT a constant. When input is constant the COPY is a branch-assignment
+	// (e.g. "EAX = 0xffffffff" in classify_sign) and must stay as a C statement.
+	// When input is non-constant (param, stack slot, register), the COPY is a
+	// dead intermediate that PropagateCopy already bypassed -- safe to suppress.
+	// C++ parity: ActionDeadCode kills these in a second pass.
+	for _, op := range s.fd.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() || op.Output() == nil {
+			continue
+		}
+		if s.prologueOps[op] || s.inline[op] {
+			continue
+		}
+		if op.Code() != CPUI_COPY {
+			continue
+		}
+		out := op.Output()
+		if out.NumDescend() != 0 || out.Space() == nil {
+			continue
+		}
+		// Skip if input is a constant: branch-assignment must remain visible.
+		if op.NumInput() > 0 {
+			inp := op.Input(0)
+			if inp != nil && inp.IsConstant() {
+				continue
+			}
+		}
+		// Dead-store COPY with non-constant input: suppress.
+		s.prologueOps[op] = true
+		s.prologueVarnodes[out] = true
+	}
+
+	// Fixpoint pass: suppress any op all of whose consumers are transparent
+	// (return-chain, marker, already-suppressed, already-inline, or dead-store).
+	// This handles chains like: INT_ADD(ndesc=2) consumed by [COPY(ndesc=0), RETURN].
+	// After COPY(ndesc=0) is suppressed above, INT_ADD's only live consumer is RETURN,
+	// making it inline-eligible at the return site.
 	for {
 		changed := false
 		for _, op := range s.fd.GetPcodeOpBank().AllOps() {
@@ -2316,58 +2354,52 @@ func (s *printCState) markReturnOnlyCopies() {
 			if s.prologueOps[op] || s.inline[op] {
 				continue // already handled
 			}
-			// Only suppress COPY ops in this pass; multi-input ops are more complex.
-			if op.Code() != CPUI_COPY {
+			// Skip ops that produce side effects not captured by their output.
+			switch op.Code() {
+			case CPUI_BRANCH, CPUI_CBRANCH, CPUI_BRANCHIND, CPUI_STORE, CPUI_RETURN,
+				CPUI_MULTIEQUAL, CPUI_INDIRECT, CPUI_CALL, CPUI_CALLIND, CPUI_CALLOTHER:
 				continue
 			}
 			out := op.Output()
 			if out.NumDescend() == 0 {
-				// Suppress COPY ops that write to register space from a unique-space
-				// source and have no live consumers. These are dead register stores left
-				// by PropagateCopy after redirecting all consumers to use the unique
-				// source directly (e.g. RETURN now directly uses the INT_ADD result).
-				// Constant->register COPYs (branch assignments like "local_0 = 0") are
-				// intentionally NOT suppressed: their consumers were propagated but the
-				// assignment is still the semantic content of the branch.
-				// C++ parity: ActionDeadCode kills these in a second pass; we handle
-				// this at render time since no second dead-code pass runs.
-				if inp := op.Input(0); inp != nil && inp.Space() != nil && inp.Space().IsUnique() {
-					s.prologueOps[op] = true
-					s.prologueVarnodes[out] = true
-				}
+				// Already handled in dead-store pass above; skip to avoid re-processing.
 				continue
 			}
-			// Check that all consumers are return-chain or already-suppressed.
-			// A consumer is "transparent" (produces no standalone C statement) if:
-			//   - it is RETURN (anchor does not produce a statement)
-			//   - it is MULTIEQUAL or INDIRECT (marker ops, suppressed by IsMarker)
-			//   - it is already in prologueOps (will be suppressed)
-			//   - it is already in s.inline (will be inlined at its consumer's site)
-			allReturnChain := true
+			// Check that all consumers are transparent (return-chain or suppressed).
+			// A consumer is transparent if:
+			//   - RETURN: return anchor, does not produce a C statement
+			//   - MULTIEQUAL, INDIRECT: marker ops, suppressed by IsMarker()
+			//   - prologueOps: already suppressed
+			//   - s.inline: will be inlined at consumer's site
+			//   - consumer output has ndesc==0: dead store (suppressible)
+			allTransparent := true
+			hasReturnOrInline := false // must have at least one meaningful transparent consumer
 			for _, consumer := range out.DescendIter() {
 				if consumer == nil {
 					continue
 				}
 				switch consumer.Code() {
 				case CPUI_RETURN:
-					// Return anchor consumer: does not produce a C statement.
+					hasReturnOrInline = true
 				case CPUI_MULTIEQUAL, CPUI_INDIRECT:
-					// Marker ops: suppressed by IsMarker() check in emitStatement.
-					// They do not produce standalone C statements.
+					// Marker ops, always suppressed.
 				default:
 					if s.prologueOps[consumer] {
-						// Already suppressed prologue consumer.
+						// Already suppressed; transparent.
 					} else if s.inline[consumer] {
-						// Will be inlined; doesn't produce a standalone statement.
+						hasReturnOrInline = true
+					} else if consumer.Output() != nil && consumer.Output().NumDescend() == 0 {
+						// Dead-store consumer: suppressible (handled in dead-store pass or
+						// will be suppressed when we process it below).
 					} else {
-						allReturnChain = false
+						allTransparent = false
 					}
 				}
-				if !allReturnChain {
+				if !allTransparent {
 					break
 				}
 			}
-			if allReturnChain {
+			if allTransparent && hasReturnOrInline {
 				s.prologueOps[op] = true
 				s.prologueVarnodes[out] = true
 				changed = true
