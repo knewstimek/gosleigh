@@ -185,6 +185,7 @@ func (e *Engine) TranslateInstructionAt(addr address.Address) (InstructionTransl
 		return InstructionTranslation{}, fmt.Errorf("engine translate instruction: address: %w", err)
 	}
 	resolveHooks := e.backendResolveHooks()
+	var pcodeCtx *ParserContext
 	ops, err := TranslateSubtable(e.rootSubtable, TranslateInput{
 		Payloads: TranslatePayloadSource{
 			Loader: enginePayloadLoader(e.backend.LoadMatchInput, resolveHooks),
@@ -197,12 +198,18 @@ func (e *Engine) TranslateInstructionAt(addr address.Address) (InstructionTransl
 		Resolve:        resolveHooks,
 		ResolveHandles: e.backend.ResolveHandles,
 		Commits:        e.backend.Commits,
+		PcodeContext:   &pcodeCtx,
 	})
 	if err != nil {
 		return InstructionTranslation{}, err
 	}
-	ctx, ok := cache.GetPcodeParserContext(addr)
-	if !ok || ctx == nil {
+	// Use the parser context captured during translation rather than re-looking it
+	// up from the cache. The circular parser-context buffer may have evicted and
+	// reused the instruction's slot while building p-code, so a post-translation
+	// cache lookup is unreliable. TranslateSubtable fills PcodeContext before any
+	// further slot evictions can occur.
+	ctx := pcodeCtx
+	if ctx == nil {
 		return InstructionTranslation{}, fmt.Errorf("engine translate instruction: missing pcode parser context for %v", addr)
 	}
 	length, err := instructionLengthFromPcodeContext(addr, ctx)
