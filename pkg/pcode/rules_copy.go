@@ -181,6 +181,7 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRuleXorCollapse(group) },
 	func(group string) Rule { return NewRuleAddMultCollapse(group) },
 	func(group string) Rule { return NewRuleSubExtComm(group) },
+	func(group string) Rule { return NewRuleSubCommute(group) },
 	func(group string) Rule { return NewRuleConcatZext(group) },
 	func(group string) Rule { return NewRuleZextCommute(group) },
 	func(group string) Rule { return NewRuleZextShiftZext(group) },

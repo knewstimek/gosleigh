@@ -171,6 +171,12 @@ func (s *printCState) collectSymbols() {
 					if vn.Def() == nil && !vn.IsInput() {
 						continue
 					}
+					// Skip unique-space dead stores even when High() is set:
+					// MergeMarker may assign a HighVariable before ActionDeadCode runs,
+					// leaving a zero-consumer unique with a stale High() pointer.
+					if vn.Space() != nil && vn.Space().IsUnique() && vn.NumDescend() == 0 {
+						continue
+					}
 					if vn.Def() != nil && s.shouldInline(vn.Def()) {
 						s.inline[vn.Def()] = true
 					} else {

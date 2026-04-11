@@ -207,6 +207,12 @@ func anchorReturnReg(fd *Funcdata, model *ProtoModel) {
 	retSpaceIdx := model.ReturnRegSpaceIndex
 
 	// Collect candidate return-register varnodes.
+	// Priority: MULTIEQUAL (phi-merge of all paths) > latest written varnode.
+	// In straight-line code (no phi), the register is written multiple times as
+	// distinct SSA versions; we must pick the one that is live at the RETURN op.
+	// The last written varnode in program order is the one consumed by RETURN.
+	// C++ parity: anchorReturnReg / Funcdata::warningHeader -- Ghidra uses
+	// Heritage-computed phi merges; without a phi, it finds the def reaching RETURN.
 	var best *Varnode
 	for _, vn := range fd.GetVarnodeBank().AllVarnodes() {
 		if vn == nil || vn.Space() == nil {
@@ -226,7 +232,12 @@ func anchorReturnReg(fd *Funcdata, model *ProtoModel) {
 			best = vn
 			break
 		}
-		if best == nil {
+		// Among non-phi candidates, prefer the one defined latest in program order.
+		// Use SeqNumLess to compare across instruction addresses and within-instruction
+		// order so that later SSA definitions (e.g. IMUL result) win over earlier ones
+		// (e.g. the MOV EAX that feeds IMUL) when there is no phi merge node.
+		if best == nil || (vn.Def() != nil && best.Def() != nil &&
+			SeqNumLess(best.Def().Seq(), vn.Def().Seq())) {
 			best = vn
 		}
 	}
