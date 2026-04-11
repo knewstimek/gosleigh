@@ -433,6 +433,15 @@
   - classify_sign: correct else-if chain, correct return (was already working)
   - AArch64: 'return;' void (stale LR reference removed)
   - Known mismatch: callee-save STORE artifacts (*(local_N + -4) = local_M) require ActionPrototypeTypes for proper suppression
+- [x] AArch64 E2E: Heritage varnode reuse fix + AArch64 calling convention (2026-04-11, commit 31b7898)
+  - `pkg/bridge/bridge.go` resolveInput: 읽기 varnodes를 defs map에 저장하지 않음. 동일 레지스터 복수 읽기시 하나의 varnode 객체를 공유하던 버그 수정. Heritage SSA renaming이 각 read를 독립적으로 rename. C++ Ghidra SLEIGH builder와 동일하게 read마다 새 varnode 생성.
+  - `pkg/pcode/protomodel.go`: WithRegParams() 메서드 추가 -- regLookup callback 없이 테스트 코드에서 레지스터 ABI 파라미터 오프셋 직접 지정 가능 (X0=16384, X1=16392).
+  - `pkg/pcode/scopelocal.go` BuildFromVarnodes: 레지스터 파라미터 분류를 single-pass에서 two-pass로 변경. isinput=true (function live-in) varnode 우선 선택.
+  - `pkg/pcode/printc.go` markReturnOnlyCopies: unique-space 소스 + ndesc=0 output인 COPY만 dead-store로 억제. const->register COPY (branch assignment)는 억제하지 않음.
+  - `pkg/pcode/printc.go` emitLocalDeclarations: unique-space varnodes 선언 제외 (ops 억제되므로 unreferenced declaration 방지).
+  - `pkg/pcode/printc.go` blank line separator: 보이는 (non-unique, non-prologue) local이 있을 때만 빈 줄 출력.
+  - `pkg/loader/loader_test.go` TestAARCH64SimpleFunction: WithRegParams 호출 + golden assertions. AArch64 `unsigned long long aarch64_add_ret(unsigned long long param_0, unsigned long long param_1) { return param_0 + param_1; }` Ghidra 출력과 완전 일치.
+  - 알려진 미스매치 (pre-existing): multiply `local_0 = param_0` 잉여 assignment, add3 `local_0`/`local_1` 잉여 declarations, classify_sign `0 < param_0` vs Ghidra `param_3 < 1` CFG 순서 차이. 테스트는 통과.
 
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
