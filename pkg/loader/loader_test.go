@@ -1009,6 +1009,9 @@ func TestX86ClassifySignFunction(t *testing.T) {
 	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
+	// Normalize if-else condition direction to match Ghidra's preferComplement pass.
+	// C++ parity: BlockIf::preferComplement in blockaction.cc
+	pcode.NewActionPreferComplement("analysis").Apply(result.Funcdata)
 
 	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
