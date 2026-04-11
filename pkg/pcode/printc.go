@@ -480,24 +480,37 @@ func (s *printCState) inferReturnType() Datatype {
 			if defOp := s.findDefiningOpForFreeVarnode(vn); defOp != nil && defOp.Output() != nil {
 				live := defOp.Output()
 				if s.returnOnlyLocs[varnodeLocKey(live)] {
-					return sharedTypeFactory.GetBase(int32(live.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", live.Size()))
+					dt := live.TypeReadFacing(op)
+					if dt == nil || dt.Metatype() == TYPE_UINT || dt.Metatype() == TYPE_UNKNOWN {
+						return sharedTypeFactory.GetBase(int32(live.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", live.Size()))
+					}
 				}
 				return live.TypeReadFacing(op)
 			}
 			if live := s.findLiveReturnVarnode(vn); live != nil {
 				if s.returnOnlyLocs[varnodeLocKey(live)] {
-					return sharedTypeFactory.GetBase(int32(live.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", live.Size()))
+					dt := live.TypeReadFacing(op)
+					if dt == nil || dt.Metatype() == TYPE_UINT || dt.Metatype() == TYPE_UNKNOWN {
+						return sharedTypeFactory.GetBase(int32(live.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", live.Size()))
+					}
 				}
 				return live.TypeReadFacing(op)
 			}
 			continue // could not recover type; skip this RETURN
 		}
 		// If the return varnode's location was identified as return-only by
-		// renameReturnOnlyLocals, render the return type as undefined%d.
-		// C++ parity: Ghidra's ActionReturnSplit sets TYPE_UNKNOWN on the
-		// return-value carrier; undefined4/undefined8 is the printed form.
+		// renameReturnOnlyLocals AND its committed type is untyped (TYPE_UINT
+		// from constant propagation, or TYPE_UNKNOWN), render the return type
+		// as undefined%d. TYPE_INT (signed) and TYPE_FLOAT are kept as-is --
+		// they were inferred from a typed op (e.g. IMUL/FADD) and should
+		// propagate to the C return type.
+		// C++ parity: Ghidra's ActionReturnSplit uses TYPE_UNKNOWN for the
+		// return-value carrier only when no specific type could be recovered.
 		if vn.Space() != nil && !vn.IsConstant() && s.returnOnlyLocs[varnodeLocKey(vn)] {
-			return sharedTypeFactory.GetBase(int32(vn.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", vn.Size()))
+			dt := vn.TypeReadFacing(op)
+			if dt == nil || dt.Metatype() == TYPE_UINT || dt.Metatype() == TYPE_UNKNOWN {
+				return sharedTypeFactory.GetBase(int32(vn.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", vn.Size()))
+			}
 		}
 		return vn.TypeReadFacing(op)
 	}
