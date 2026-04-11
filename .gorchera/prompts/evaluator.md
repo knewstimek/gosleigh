@@ -8,7 +8,11 @@ Tests passing is necessary but not sufficient. Every condition below must hold. 
 
 ## STEP 1: Build and test gate
 
-Run `go test ./...`. If it fails for any reason: `EVALUATION_RESULT: FAIL`. Stop.
+Run tests with a writable cache path (the default Go cache may be read-only in isolated worktrees):
+```
+GOCACHE=$(pwd)/.gocache go test ./... 2>&1
+```
+If the command fails for any reason: `EVALUATION_RESULT: FAIL`. Stop.
 
 ---
 
@@ -16,67 +20,18 @@ Run `go test ./...`. If it fails for any reason: `EVALUATION_RESULT: FAIL`. Stop
 
 Run:
 ```
-go test ./pkg/loader/... -v -run "TestX86MultiplyFunction|TestX86Add3Function|TestX86ClassifySignFunction|TestAARCH64SimpleFunction"
+GOCACHE=$(pwd)/.gocache go test ./pkg/loader/... -v -run "TestX86MultiplyFunction|TestX86Add3Function|TestX86ClassifySignFunction|TestAARCH64SimpleFunction" 2>&1
 ```
 
 Save the full C output block from each test's log line. You will check every condition below against this output.
 
 ---
 
-## STEP 3: Ghidra ground truth
-
-These are the Ghidra 12 actual outputs. Any deviation not listed as `known mismatch` in `docs/GOLDEN_DIFF.md` is a defect.
-
-### multiply (target)
-```c
-int processEntry entry(undefined4 param_1,undefined4 param_2,int param_3,int param_4)
-{
-  return param_3 * param_4;
-}
-```
-
-### add3 (target)
-```c
-int processEntry entry(undefined4 param_1,undefined4 param_2,int param_3,int param_4,int param_5)
-{
-  return param_3 + param_4 + param_5;
-}
-```
-
-### classify_sign (target)
-```c
-undefined4 processEntry entry(undefined4 param_1,undefined4 param_2,int param_3)
-{
-  undefined4 uVar1;
-
-  if (param_3 == 0) {
-    uVar1 = 0;
-  }
-  else if (param_3 < 1) {
-    uVar1 = 0xffffffff;
-  }
-  else {
-    uVar1 = 1;
-  }
-  return uVar1;
-}
-```
-
-### aarch64_add_ret (target)
-```c
-long processEntry entry(long param_1,long param_2)
-{
-  return param_1 + param_2;
-}
-```
-
----
-
-## STEP 4: Forbidden pattern check -- any match = immediate FAIL
+## STEP 3: Forbidden pattern check -- any match = immediate FAIL
 
 Search the collected output for each pattern below. One match anywhere = FAIL. Quote the exact line.
 
-**CPU flag registers as locals (applies to all functions):**
+**CPU flag registers as locals:**
 - `unsigned char CF`
 - `unsigned char OF`
 - `unsigned char SF`
@@ -87,8 +42,9 @@ Search the collected output for each pattern below. One match anywhere = FAIL. Q
 - `unsigned char tmpNG`
 - `unsigned char tmpZR`
 
-**Unique-space dead stores:**
-- Any variable name beginning with `unique_` (match regex `unique_[0-9a-f]`)
+**Unique-space dead stores (PRIMARY target of current job):**
+- Any identifier beginning with `unique_` followed by hex digits (regex: `unique_[0-9a-f]`)
+  Check both variable declarations AND assignment statements in the function body.
 
 **Raw p-code operators not reduced by rules:**
 - The token `SUBPIECE(`
@@ -96,46 +52,32 @@ Search the collected output for each pattern below. One match anywhere = FAIL. Q
 - The token `SCARRY(`
 - The token `POPCOUNT(`
 
-**Wrong return value:**
-- `return EIP`
-- `return PC`
-- `return pc`
-- `return register_` (any register_ prefixed return)
-
-**Callee-saved registers as fake locals (applies to multiply, add3):**
-- `unsigned int EBP` declared as local
-- `unsigned int ESP` declared as local
-- `unsigned int EBX` declared as local (add3)
-
 **AArch64 specific:**
-- `unsigned long long pc` declared as local
 - `register_4000_8` appearing anywhere
 
----
-
-## STEP 5: Required pattern check -- any missing = FAIL
-
-If the goal's stated scope included fixing these functions, the following must be present.
-
-**multiply:** The function body must contain exactly one `*` between two param-derived values, and the return must be that product. Accept `return param_0 * param_1` or `return localVar` where `localVar = param_0 * param_1`. Do not accept `return register_0_4`.
-
-**add3:** The function body must contain `+` between param-derived values at least twice, and the function must return the accumulated sum. Do not accept `return EBX` or similar raw register name.
-
-**classify_sign:** Must contain an `if` branch testing `param` against 0. The return must be a named local or direct constant, not a raw register name (`EAX` is a FAIL here).
-
-**aarch64_add_ret:** The return must be a `+` expression of two params or a local holding their sum. `return param_2` alone is a FAIL.
-
-Note: if the goal's scope did NOT claim to fix a specific function, skip its required-pattern check but still enforce forbidden patterns.
+Note: callee-saved register locals (EBP, ESP, EBX as locals) and raw register return values
+(return register_N_M) are known-missing features requiring ActionPrototypeTypes and
+ActionReturnSplit. Do NOT fail for these until those Actions are implemented.
 
 ---
 
-## STEP 6: Regression check
+## STEP 4: Required pattern check
 
-If classify_sign previously had correct `if (param == 0)` / `else if` structure and this job broke it, that is a FAIL regardless of other improvements.
+If the goal's stated scope included eliminating unique_* from a specific function, verify:
+- The function body contains NO identifier matching `unique_[0-9a-f]`
+
+If the goal did NOT claim to fix other patterns, skip those required-pattern checks.
 
 ---
 
-## STEP 7: Verdict
+## STEP 5: Regression check
+
+If classify_sign previously had correct `if (param == 0)` / `else if` structure and this job broke it,
+that is a FAIL regardless of other improvements.
+
+---
+
+## STEP 6: Verdict
 
 If every condition above passed: `EVALUATION_RESULT: PASS`
 
@@ -146,6 +88,7 @@ On FAIL list every violated condition in this format:
 FAIL [function] [condition] -- found: "<exact quoted text>"
 ```
 
-On PASS list any remaining deviations from Ghidra golden that were NOT in scope for this job, so the next job knows what to target.
+On PASS list any remaining deviations from Ghidra golden that were NOT in scope for this job,
+so the next job knows what to target.
 
 Your final line must be exactly `EVALUATION_RESULT: PASS` or `EVALUATION_RESULT: FAIL`. No hedging.
