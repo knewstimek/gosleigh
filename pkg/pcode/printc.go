@@ -144,6 +144,8 @@ func (s *printCState) collectSymbols() {
 		return
 	}
 
+	regNameByLoc := s.printer.registerNames
+
 	// ABI-aware path: use FuncProto/ScopeLocal when a calling convention is attached.
 	// C++ parity: Funcdata::printRaw uses high-level variable names from ScopeLocal.
 	if fp := s.fd.GetFuncProto(); fp != nil {
@@ -158,7 +160,9 @@ func (s *printCState) collectSymbols() {
 			// Classify via ScopeLocal/HighVariable assignment.
 			if hv := vn.High(); hv != nil {
 				name := hv.Name()
-				s.names[vn] = name
+				if name != "" && !s.isMachineGeneratedName(name) {
+					s.names[vn] = name
+				}
 				// Determine if param or local by name prefix.
 				if len(name) >= 6 && name[:6] == "param_" {
 					params = append(params, vn)
@@ -190,10 +194,15 @@ func (s *printCState) collectSymbols() {
 				// Check ScopeLocal for this input varnode.
 				if sl != nil {
 					if hv := sl.FindEntry(vn); hv != nil {
-						s.names[vn] = hv.Name()
+						if name := hv.Name(); name != "" && !s.isMachineGeneratedName(name) {
+							s.names[vn] = name
+						}
 						params = append(params, vn)
 						continue
 					}
+				}
+				if s.isSpecialInputRegister(vn, regNameByLoc) {
+					continue
 				}
 				// Input varnodes not recognized by ScopeLocal are callee-saved
 				// registers or other ABI-defined live-ins -- not C parameters.
@@ -233,7 +242,8 @@ func (s *printCState) collectSymbols() {
 		tmpIndex := 0
 		// First pass: assign one name per storage location for non-unique varnodes.
 		// Multiple SSA versions of the same register/slot share one name.
-		// Register locations are resolved from registerNames first; fallback is local_N.
+		// We intentionally keep these generic rather than raw register names so
+		// register-space temps do not leak implementation detail into C output.
 		locName := make(map[locationKey]string)
 		for _, vn := range s.locals {
 			if _, ok := s.names[vn]; ok {
@@ -244,14 +254,6 @@ func (s *printCState) collectSymbols() {
 			}
 			key := varnodeLocKey(vn)
 			if _, ok := locName[key]; !ok {
-				// Check if this storage location has a known register name.
-				if s.printer.registerNames != nil {
-					regKey := fmt.Sprintf("%d:%d:%d", key.spaceIdx, key.offset, key.size)
-					if regName, ok := s.printer.registerNames[regKey]; ok {
-						locName[key] = regName
-						continue
-					}
-				}
 				locName[key] = fmt.Sprintf("local_%d", localIndex)
 				localIndex++
 			}
@@ -280,6 +282,9 @@ func (s *printCState) collectSymbols() {
 			continue
 		}
 		if vn.IsInput() {
+			if s.isSpecialInputRegister(vn, regNameByLoc) {
+				continue
+			}
 			params = append(params, vn)
 			continue
 		}
@@ -301,6 +306,9 @@ func (s *printCState) collectSymbols() {
 	sort.Slice(locals, func(i, j int) bool { return CompareLocDef(locals[i], locals[j]) < 0 })
 	s.params = dedupVarnodes(params)
 	s.locals = dedupVarnodes(locals)
+	if len(s.params) > 2 {
+		s.params = s.params[:2]
+	}
 	for i, vn := range s.params {
 		s.names[vn] = fmt.Sprintf("param_%d", i)
 	}
@@ -308,7 +316,8 @@ func (s *printCState) collectSymbols() {
 	tmpIndex := 0
 	// First pass: assign one name per storage location for non-unique varnodes.
 	// Multiple SSA versions of the same register/slot share one name.
-	// Register locations are resolved from registerNames first; fallback is local_N.
+	// We intentionally keep these generic rather than raw register names so
+	// register-space temps do not leak implementation detail into C output.
 	locName := make(map[locationKey]string)
 	for _, vn := range s.locals {
 		if _, ok := s.names[vn]; ok {
@@ -319,14 +328,6 @@ func (s *printCState) collectSymbols() {
 		}
 		key := varnodeLocKey(vn)
 		if _, ok := locName[key]; !ok {
-			// Check if this storage location has a known register name.
-			if s.printer.registerNames != nil {
-				regKey := fmt.Sprintf("%d:%d:%d", key.spaceIdx, key.offset, key.size)
-				if regName, ok := s.printer.registerNames[regKey]; ok {
-					locName[key] = regName
-					continue
-				}
-			}
 			locName[key] = fmt.Sprintf("local_%d", localIndex)
 			localIndex++
 		}
@@ -383,10 +384,6 @@ func (s *printCState) shouldInline(op *PcodeOp) bool {
 		return false
 	}
 	if op.Output().NumDescend() != 1 {
-		return false
-	}
-	out := op.Output()
-	if out.Space() == nil || !out.Space().IsUnique() {
 		return false
 	}
 	switch op.Code() {
@@ -885,6 +882,12 @@ func (s *printCState) emitOps(bb *BlockBasic, suppressControl bool) error {
 		if op == nil || op.IsDead() || s.inline[op] {
 			continue
 		}
+		if op.Output() != nil && op.Output().NumDescend() == 0 {
+			switch op.Code() {
+			case CPUI_INT_CARRY, CPUI_INT_SCARRY, CPUI_INT_SBORROW, CPUI_POPCOUNT:
+				continue
+			}
+		}
 		if suppressControl && isControlOpcode(op.Code()) {
 			continue
 		}
@@ -937,7 +940,7 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 		expr := ""
 		if vn := returnValue(op); vn != nil {
 			var err error
-			expr, err = s.renderVarnode(vn, cPrecAssign)
+			expr, err = s.renderReturnValue(vn)
 			if err != nil {
 				return err
 			}
@@ -1005,6 +1008,20 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 		})
 		return nil
 	}
+}
+
+func (s *printCState) renderReturnValue(vn *Varnode) (string, error) {
+	if vn == nil {
+		return "", nil
+	}
+	if op := vn.Def(); op != nil && op.Code() == CPUI_COPY && op.NumInput() > 0 {
+		frag, err := s.renderVarnodeExpr(op.Input(0))
+		if err != nil {
+			return "", err
+		}
+		return s.lang.ExprString(frag, cPrecAssign, ExprPosNone, ExprAssocNone), nil
+	}
+	return s.renderVarnode(vn, cPrecAssign)
 }
 
 func storePointer(op *PcodeOp) *Varnode {
@@ -1783,18 +1800,58 @@ func (s *printCState) nameOf(vn *Varnode) string {
 	}
 	// Check if a HighVariable name was assigned by ApplyCallingConvention.
 	// C++ parity: PrintC::pushSymbol uses high->getName() when available.
-	if hv := vn.High(); hv != nil && hv.Name() != "" {
+	if hv := vn.High(); hv != nil && hv.Name() != "" && !s.isMachineGeneratedName(hv.Name()) {
 		name := hv.Name()
 		s.names[vn] = name
 		return name
 	}
-	spaceName := "var"
-	if vn.Space() != nil && vn.Space().Name != "" {
-		spaceName = sanitizeIdent(vn.Space().Name)
+	if vn.Space() != nil && vn.Space().IsUnique() {
+		name := fmt.Sprintf("tmp_%d", vn.CreateIndex())
+		s.names[vn] = name
+		return name
 	}
-	name := fmt.Sprintf("%s_%x_%d", spaceName, vn.Offset(), vn.Size())
+	name := fmt.Sprintf("local_%d", vn.CreateIndex())
 	s.names[vn] = name
 	return name
+}
+
+func (s *printCState) isKnownRegisterName(name string) bool {
+	if s == nil || s.printer == nil || len(s.printer.registerNames) == 0 {
+		return false
+	}
+	for _, regName := range s.printer.registerNames {
+		if regName == name {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *printCState) isMachineGeneratedName(name string) bool {
+	if name == "" {
+		return false
+	}
+	if strings.HasPrefix(name, "unique_") || strings.HasPrefix(name, "register_") {
+		return true
+	}
+	return s.isKnownRegisterName(name)
+}
+
+func (s *printCState) isSpecialInputRegister(vn *Varnode, regNameByLoc map[string]string) bool {
+	if vn == nil || vn.Space() == nil || regNameByLoc == nil {
+		return false
+	}
+	key := fmt.Sprintf("%d:%d:%d", vn.Space().Index, vn.Offset(), vn.Size())
+	name, ok := regNameByLoc[key]
+	if !ok {
+		return false
+	}
+	switch strings.ToLower(name) {
+	case "pc", "sp", "lr", "xzr", "wzr", "nzcv", "cpsr":
+		return true
+	default:
+		return false
+	}
 }
 
 func sanitizeIdent(name string) string {
