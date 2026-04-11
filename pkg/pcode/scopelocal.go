@@ -132,12 +132,25 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 	}
 
 	// Create HighVariables for register parameters.
+	// Assign a concrete TYPE_UINT type based on register size so the parameter is
+	// rendered as "unsigned int" / "unsigned long long" rather than "undefined%d".
+	// C++ parity: Ghidra infers param types from the ABI model (ParameterSymbol);
+	// our model does not carry explicit type info, so we default to unsigned.
 	regParamCount := len(regParamSlots)
 	for _, slot := range regParamSlots {
 		name := GetParamName(slot.idx)
 		hv := NewHighVariable(name)
 		hv.AddInstance(slot.vn)
 		sl.paramByVn[slot.vn] = hv
+		// Seed a concrete unsigned type onto the varnode so normalizedBaseType
+		// renders it as "unsigned int" / "unsigned long long" (not "undefined%d").
+		if slot.vn.Type() == nil {
+			sz := slot.vn.Size()
+			if sz <= 0 {
+				sz = 4
+			}
+			SetVarnodeType(slot.vn, sharedTypeFactory.GetBase(int32(sz), TYPE_UINT, ""))
+		}
 		if fp != nil {
 			fp.AddParam(hv)
 		}

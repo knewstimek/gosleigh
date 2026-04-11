@@ -80,6 +80,11 @@ type printCState struct {
 	// prologueVarnodes is the set of register-space input varnodes used only as
 	// values in prologueOps. They are excluded from locals declarations.
 	prologueVarnodes map[*Varnode]bool
+	// returnOnlyLocs is the set of storage locations (locationKey) that were
+	// renamed to Ghidra's uVar1/iVar1/lVar1 convention. Locals at these locations
+	// are rendered with undefined%d type rather than their committed type, matching
+	// Ghidra's ActionReturnSplit behaviour (return-value carrier -> TYPE_UNKNOWN).
+	returnOnlyLocs map[locationKey]bool
 }
 
 func newPrintCState(printer *PrintC, fd *Funcdata) *printCState {
@@ -97,6 +102,7 @@ func newPrintCState(printer *PrintC, fd *Funcdata) *printCState {
 		blockLabels:      make(map[*FlowBlock]string),
 		prologueOps:      make(map[*PcodeOp]bool),
 		prologueVarnodes: make(map[*Varnode]bool),
+		returnOnlyLocs:   make(map[locationKey]bool),
 	}
 }
 
@@ -315,6 +321,10 @@ func (s *printCState) collectSymbols() {
 		// After s.inline is populated, identify COPY ops that are only consumed
 		// by the return chain. This must run after shouldInline has been applied.
 		s.markReturnOnlyCopies()
+		// Rename return-only locals to Ghidra's uVar1/iVar1/lVar1 convention.
+		// C++ parity: ActionReturnSplit names the return-value variable with a
+		// prefix derived from its type (u=undefined/unsigned, i=signed, l=long).
+		s.renameReturnOnlyLocals()
 		return
 	}
 
@@ -400,6 +410,8 @@ func (s *printCState) collectSymbols() {
 	// After s.inline is populated, identify COPY ops that are only consumed
 	// by the return chain. This must run after shouldInline has been applied.
 	s.markReturnOnlyCopies()
+	// Rename return-only locals to Ghidra's uVar1/iVar1/lVar1 convention.
+	s.renameReturnOnlyLocals()
 }
 
 // locationKey identifies a unique storage location by (spaceIndex, offset, size).
@@ -466,12 +478,26 @@ func (s *printCState) inferReturnType() Datatype {
 		// recover the type from the live defining op or live varnode at the same location.
 		if vn.IsFree() && !vn.IsConstant() && vn.Space() != nil {
 			if defOp := s.findDefiningOpForFreeVarnode(vn); defOp != nil && defOp.Output() != nil {
-				return defOp.Output().TypeReadFacing(op)
+				live := defOp.Output()
+				if s.returnOnlyLocs[varnodeLocKey(live)] {
+					return sharedTypeFactory.GetBase(int32(live.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", live.Size()))
+				}
+				return live.TypeReadFacing(op)
 			}
 			if live := s.findLiveReturnVarnode(vn); live != nil {
+				if s.returnOnlyLocs[varnodeLocKey(live)] {
+					return sharedTypeFactory.GetBase(int32(live.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", live.Size()))
+				}
 				return live.TypeReadFacing(op)
 			}
 			continue // could not recover type; skip this RETURN
+		}
+		// If the return varnode's location was identified as return-only by
+		// renameReturnOnlyLocals, render the return type as undefined%d.
+		// C++ parity: Ghidra's ActionReturnSplit sets TYPE_UNKNOWN on the
+		// return-value carrier; undefined4/undefined8 is the printed form.
+		if vn.Space() != nil && !vn.IsConstant() && s.returnOnlyLocs[varnodeLocKey(vn)] {
+			return sharedTypeFactory.GetBase(int32(vn.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", vn.Size()))
 		}
 		return vn.TypeReadFacing(op)
 	}
@@ -544,7 +570,16 @@ func (s *printCState) emitLocalDeclarations() {
 			continue
 		}
 		declared[name] = struct{}{}
-		decl := CDeclString(s.normalizeTypeForDecl(vn.TypeDefFacing()), name)
+		// Return-only locals are rendered with undefined%d regardless of their
+		// committed type. Ghidra's ActionReturnSplit assigns TYPE_UNKNOWN to the
+		// return-value carrier; we approximate this at render time.
+		var dt Datatype
+		if !vn.Space().IsUnique() && s.returnOnlyLocs[varnodeLocKey(vn)] {
+			dt = sharedTypeFactory.GetBase(int32(vn.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", vn.Size()))
+		} else {
+			dt = s.normalizeTypeForDecl(vn.TypeDefFacing())
+		}
+		decl := CDeclString(dt, name)
 		s.lang.Statement(func() {
 			s.lang.Token(decl)
 		})
@@ -621,7 +656,13 @@ func normalizedBaseType(base *Base) Datatype {
 		default:
 			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "int")
 		}
-	case TYPE_UINT, TYPE_UNKNOWN:
+	case TYPE_UNKNOWN:
+		// Preserve TYPE_UNKNOWN as Ghidra's "undefined%d" type.
+		// C++ parity: Ghidra uses TYPE_UNKNOWN for untyped bytes; prints as undefined1/2/4/8.
+		// normalizeTypeForDecl must NOT coerce this to TYPE_UINT -- that would lose the
+		// distinction between a typed unsigned and an untyped/undefined slot.
+		return sharedTypeFactory.GetBase(base.Size(), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", base.Size()))
+	case TYPE_UINT:
 		switch base.Size() {
 		case 1:
 			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "unsigned char")
@@ -2461,6 +2502,138 @@ func sanitizeIdent(name string) string {
 		return "var"
 	}
 	return builder.String()
+}
+
+// renameReturnOnlyLocals scans the local variable set and renames any local
+// whose sole non-marker consumers are RETURN ops to Ghidra's uVar1/iVar1/lVar1
+// convention. Must be called after markReturnOnlyCopies so prologueOps and
+// s.inline are fully populated.
+//
+// C++ parity: ActionReturnSplit::apply in coreaction.cc assigns a dedicated
+// symbol name to the return-value carrier varnode. This is our equivalent
+// without actually splitting the return path.
+func (s *printCState) renameReturnOnlyLocals() {
+	// Count existing Ghidra-style names by prefix to determine the next index.
+	prefixCount := make(map[string]int)
+
+	// Collect location keys of locals that are return-only.
+	// Multiple SSA versions of the same register/slot share a location key;
+	// we rename the whole group together.
+	type retOnlyEntry struct {
+		key    locationKey
+		prefix string
+	}
+	var retOnlyKeys []retOnlyEntry
+	seenLoc := make(map[locationKey]bool)
+
+	for _, vn := range s.locals {
+		if vn.Space() != nil && vn.Space().IsUnique() {
+			continue
+		}
+		if s.prologueVarnodes[vn] {
+			continue
+		}
+		// Only check non-unique varnodes that are return-only.
+		if !s.isReturnOnlyVarnode(vn) {
+			continue
+		}
+		key := varnodeLocKey(vn)
+		if seenLoc[key] {
+			continue
+		}
+		seenLoc[key] = true
+		prefix := ghidraVarPrefix(vn)
+		prefixCount[prefix]++
+		retOnlyKeys = append(retOnlyKeys, retOnlyEntry{key, prefix})
+	}
+
+	if len(retOnlyKeys) == 0 {
+		return
+	}
+
+	// Assign Ghidra-style names, starting from 1 (uVar1, iVar1, ...).
+	// Re-count per prefix starting from 1.
+	prefixIdx := make(map[string]int)
+	for p := range prefixCount {
+		prefixIdx[p] = 1
+	}
+
+	// Build a location-key -> newName map.
+	keyName := make(map[locationKey]string)
+	for _, e := range retOnlyKeys {
+		name := fmt.Sprintf("%s%d", e.prefix, prefixIdx[e.prefix])
+		prefixIdx[e.prefix]++
+		keyName[e.key] = name
+	}
+
+	// Apply new names to all locals at those location keys, and record the
+	// location as return-only so the type is rendered as undefined%d.
+	for _, vn := range s.locals {
+		if vn.Space() != nil && vn.Space().IsUnique() {
+			continue
+		}
+		key := varnodeLocKey(vn)
+		if newName, ok := keyName[key]; ok {
+			s.names[vn] = newName
+			s.returnOnlyLocs[key] = true
+		}
+	}
+}
+
+// ghidraVarPrefix returns the Ghidra variable name prefix for a local based on
+// the varnode's type and size. Ghidra names are: uVar (undefined/unsigned, <=4),
+// iVar (signed int), lVar (signed long 8-byte), puVar/piVar (pointer etc.).
+// C++ parity: Ghidra uses HighVariable::getSymbol().getName() assigned by
+// ActionReturnSplit / Symbol::nameType convention.
+func ghidraVarPrefix(vn *Varnode) string {
+	if vn == nil {
+		return "uVar"
+	}
+	dt := vn.TypeDefFacing()
+	if dt == nil {
+		return "uVar"
+	}
+	switch dt.Metatype() {
+	case TYPE_INT:
+		if dt.Size() >= 8 {
+			return "lVar"
+		}
+		return "iVar"
+	case TYPE_FLOAT:
+		return "fVar"
+	default:
+		// TYPE_UINT, TYPE_UNKNOWN, TYPE_BOOL, and all others -> uVar
+		return "uVar"
+	}
+}
+
+// isReturnOnlyVarnode reports whether vn's only non-marker, non-suppressed
+// consumers are RETURN ops. Such a varnode is the function's return value
+// carrier and should be named with Ghidra's uVar1/iVar1/lVar1 convention.
+// Must be called after s.inline and s.prologueOps are fully populated.
+func (s *printCState) isReturnOnlyVarnode(vn *Varnode) bool {
+	if vn == nil || vn.NumDescend() == 0 {
+		return false
+	}
+	hasReturn := false
+	for _, consumer := range vn.DescendIter() {
+		if consumer == nil {
+			continue
+		}
+		switch consumer.Code() {
+		case CPUI_RETURN:
+			hasReturn = true
+		case CPUI_MULTIEQUAL, CPUI_INDIRECT:
+			// Marker ops; transparent.
+		default:
+			if s.prologueOps[consumer] || s.inline[consumer] {
+				// Suppressed or inlined; transparent.
+				continue
+			}
+			return false
+		}
+	}
+	return hasReturn
 }
 
 func maxInt(a, b int) int {
