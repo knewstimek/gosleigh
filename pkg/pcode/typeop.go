@@ -107,12 +107,21 @@ func (t *typeOpStore) PropagateType(op *PcodeOp, slot int, inType Datatype, tf *
 }
 
 // typeOpIntAdd: if inType is a pointer, propagate it to the output.
-// Only pointer inputs trigger type propagation (pointer arithmetic).
+// typeOpIntAdd propagates pointer and signed-integer types.
+// C++ parity: TypeOpIntAdd::propagateType (typeop.cc) --
+//   pointer input -> pointer output (pointer arithmetic)
+//   signed/int input -> signed/int output (preserves signedness)
 type typeOpIntAdd struct{ typeOpBase }
 
-func (t *typeOpIntAdd) PropagateType(_ *PcodeOp, slot int, inType Datatype, _ *TypeFactory) Datatype {
+func (t *typeOpIntAdd) PropagateType(_ *PcodeOp, slot int, inType Datatype, tf *TypeFactory) Datatype {
 	if slot >= 0 {
+		// Forward: input -> output
 		if _, ok := inType.(*Pointer); ok {
+			return inType
+		}
+		// Propagate signed integer type to output (LP64: long/int).
+		// C++ parity: TypeOpIntAdd propagates TYPE_INT through arithmetic.
+		if base, ok := inType.(*Base); ok && base.Metatype() == TYPE_INT {
 			return inType
 		}
 	}
