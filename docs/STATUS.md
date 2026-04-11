@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: F-Phase + Ghidra Golden 인프라 (F11+tmp_N fix+ghidra_golden 완료) (2026-04-05)
+## 현재 단계: F-Phase + Ghidra Golden 인프라 + return value rendering (2026-04-11)
 
 ### 완료
 - [x] Git repo initialized
@@ -417,6 +417,22 @@
   - gen_golden.py script: builds ELF32/ELF64/AARCH64 from test byte sequences, runs Ghidra 12 headless, saves output
   - testdata/ghidra_golden/ghidra_golden.json: 6 entries (classify_sign, complex_max, multiply, add3 x86-32; x64_add_ret x86-64; aarch64_add_ret AARCH64)
   - Key Ghidra parity observations: x86-32 entry has 2 ghost params (param_1/param_2=argc/argv) before real params; x86-64 no-prologue uses in_RDI/in_RSI prefix; AARCH64 cleanly detects param_1/param_2; Ghidra emits else-if chain; 0xffffffff not -1 without signed type info
+- [x] printc: suppress unique-space top-level statements + else-if chain rendering (2026-04-11)
+  - emitOps: unique-space varnode output statements suppressed (tmp_N = ... eliminated)
+  - emitIfBlockChain: recursive else-if chain (was else { if (...) { } })
+  - returnValue: skip IsAnnotation/IsInput varnodes (ABI machinery like EIP/LR)
+- [x] printc: return value rendering from free varnodes (2026-04-11)
+  - Root cause: anchorReturnReg wires latest-seq EAX SSA version (SUBPIECE/INT_MULT output) into RETURN; ActionDeadCode runs after and frees that varnode via MakeFree. RETURN holds stale free reference.
+  - returnValue(): aligned with Ghidra C++ input[1] convention for RETURN (printc.cc:783); input[0]=return-address, input[1]=C return value. Raw p-code (no anchorReturnReg) uses input[0].
+  - emitOps: suppress ops whose output is free (MakeFree'd by DeadCode) -- expression still rendered inline at RETURN site.
+  - renderReturnValue(): free varnode -> findDefiningOpForFreeVarnode (scan AllOps for non-dead op at same register location, skipping COPY/phi) -> findLiveReturnVarnode fallback.
+  - inferReturnType(): same free-varnode recovery for return type (multiply now shows 'unsigned int' not 'void').
+  - anchorReturnReg(): fix best-selection when best.Def==nil (was not replaced by later Def!=nil candidate).
+  - multiply: 'return param_0 * param_1' (was 'return local_21')
+  - add3: 'return param_0 + param_1 + param_2' (correct)
+  - classify_sign: correct else-if chain, correct return (was already working)
+  - AArch64: 'return;' void (stale LR reference removed)
+  - Known mismatch: callee-save STORE artifacts (*(local_N + -4) = local_M) require ActionPrototypeTypes for proper suppression
 
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
