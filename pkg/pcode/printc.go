@@ -28,8 +28,10 @@ const (
 )
 
 type PrintC struct {
-	indentStep    string
-	registerNames map[string]string // "spaceIdx:offset:size" -> reg name; nil = disabled
+	indentStep      string
+	registerNames   map[string]string // "spaceIdx:offset:size" -> reg name; nil = disabled
+	entryAnnotation string            // prepended before function name (e.g. "processEntry")
+	ghostParamCount int               // number of undefined4 ghost params prepended in signature
 }
 
 func NewPrintC() *PrintC {
@@ -41,6 +43,18 @@ func NewPrintC() *PrintC {
 // When set, known register locations are named by their SLA symbol name instead of local_N.
 func (p *PrintC) SetRegisterNames(names map[string]string) *PrintC {
 	p.registerNames = names
+	return p
+}
+
+// SetProcessEntry configures entry-point rendering:
+//   - annotation: string prepended before function name (e.g. "processEntry")
+//   - ghostCount: number of undefined4 ghost params prepended before real params
+//
+// C++ parity: Ghidra's processEntry calling convention adds ghost argc/argv params
+// to the signature. Real params are renumbered to follow after the ghost params.
+func (p *PrintC) SetProcessEntry(annotation string, ghostCount int) *PrintC {
+	p.entryAnnotation = annotation
+	p.ghostParamCount = ghostCount
 	return p
 }
 
@@ -85,6 +99,12 @@ type printCState struct {
 	// are rendered with undefined%d type rather than their committed type, matching
 	// Ghidra's ActionReturnSplit behaviour (return-value carrier -> TYPE_UNKNOWN).
 	returnOnlyLocs map[locationKey]bool
+
+	// entryAnnotation and ghostParamCount come from PrintC.SetProcessEntry.
+	// When non-empty, the signature is rendered as "annotation name(ghost..., real...)"
+	// and real param names are offset by ghostParamCount.
+	entryAnnotation string
+	ghostParamCount int
 }
 
 func newPrintCState(printer *PrintC, fd *Funcdata) *printCState {
@@ -103,6 +123,8 @@ func newPrintCState(printer *PrintC, fd *Funcdata) *printCState {
 		prologueOps:      make(map[*PcodeOp]bool),
 		prologueVarnodes: make(map[*Varnode]bool),
 		returnOnlyLocs:   make(map[locationKey]bool),
+		entryAnnotation:  printer.entryAnnotation,
+		ghostParamCount:  printer.ghostParamCount,
 	}
 }
 
@@ -279,10 +301,11 @@ func (s *printCState) collectSymbols() {
 		s.params = dedupVarnodes(params)
 		s.locals = dedupVarnodes(locals)
 		// Assign names for any params/locals not yet named.
+		// 1-indexed to match Ghidra output (param_1, param_2, ...).
 		paramIndex := 0
 		for _, vn := range s.params {
 			if _, ok := s.names[vn]; !ok {
-				s.names[vn] = fmt.Sprintf("param_%d", paramIndex)
+				s.names[vn] = fmt.Sprintf("param_%d", paramIndex+1)
 			}
 			paramIndex++
 		}
@@ -372,8 +395,9 @@ func (s *printCState) collectSymbols() {
 	if len(s.params) > 2 {
 		s.params = s.params[:2]
 	}
+	// 1-indexed to match Ghidra output (param_1, param_2, ...).
 	for i, vn := range s.params {
-		s.names[vn] = fmt.Sprintf("param_%d", i)
+		s.names[vn] = fmt.Sprintf("param_%d", i+1)
 	}
 	localIndex := 0
 	tmpIndex := 0
@@ -569,14 +593,42 @@ func (s *printCState) renderFunctionSignature(retType Datatype) string {
 	if s.fd.DisplayName() != "" {
 		name = s.fd.DisplayName()
 	}
-	paramNames := make([]string, len(s.params))
-	paramTypes := make([]Datatype, len(s.params))
+
+	realParamNames := make([]string, len(s.params))
+	realParamTypes := make([]Datatype, len(s.params))
 	for i, param := range s.params {
-		paramNames[i] = s.nameOf(param)
-		paramTypes[i] = s.normalizeTypeForDecl(param.TypeReadFacing(nil))
+		realParamTypes[i] = s.normalizeTypeForDecl(param.TypeReadFacing(nil))
+		existing := s.nameOf(param)
+		if s.ghostParamCount > 0 && strings.HasPrefix(existing, "param_") {
+			// Renumber: real param i becomes param_(ghostParamCount+i+1).
+			// Also update s.names so the body uses the same name.
+			newName := fmt.Sprintf("param_%d", s.ghostParamCount+i+1)
+			s.names[param] = newName
+			realParamNames[i] = newName
+		} else {
+			realParamNames[i] = existing
+		}
 	}
-	codeType := sharedTypeFactory.GetCode("", s.normalizeTypeForDecl(retType), paramTypes, false)
-	return CFuncSignatureString(name, codeType, paramNames)
+
+	// Build ghost param lists (undefined4 param_1, param_2, ...).
+	ghostNames := make([]string, s.ghostParamCount)
+	ghostTypes := make([]Datatype, s.ghostParamCount)
+	for i := 0; i < s.ghostParamCount; i++ {
+		ghostNames[i] = fmt.Sprintf("param_%d", i+1)
+		ghostTypes[i] = sharedTypeFactory.GetBase(4, TYPE_UNKNOWN, "undefined4")
+	}
+
+	allNames := append(ghostNames, realParamNames...)
+	allTypes := append(ghostTypes, realParamTypes...)
+
+	// Prepend annotation to name when set (e.g. "processEntry entry").
+	displayName := name
+	if s.entryAnnotation != "" {
+		displayName = s.entryAnnotation + " " + name
+	}
+
+	codeType := sharedTypeFactory.GetCode("", s.normalizeTypeForDecl(retType), allTypes, false)
+	return CFuncSignatureString(displayName, codeType, allNames)
 }
 
 func (s *printCState) emitLocalDeclarations() {

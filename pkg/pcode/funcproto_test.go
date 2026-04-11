@@ -27,8 +27,8 @@ func makeStackVarnode(sp *address.Space, offset uint64) *Varnode {
 // TestIsParamVarnode verifies FuncProto.IsParamVarnode against the key boundary
 // offsets in an x86 cdecl stack layout:
 //
-//   - offset 4  -> true  (param_0: first slot above return address)
-//   - offset 8  -> true  (param_1)
+//   - offset 4  -> true  (param_1: first slot above return address)
+//   - offset 8  -> true  (param_2)
 //   - offset 0  -> false (return address, below ParamBaseOffset)
 //   - offset 0xfffffffc -> false (negative frame offset, local area)
 //   - non-stack space   -> false (register varnode cannot be a stack param)
@@ -59,9 +59,9 @@ func TestIsParamVarnode(t *testing.T) {
 		vn      *Varnode
 		isParam bool
 	}{
-		{"offset 4 (param_0)", makeStackVarnode(stackSpace, 4), true},
-		{"offset 8 (param_1)", makeStackVarnode(stackSpace, 8), true},
-		{"offset 12 (param_2)", makeStackVarnode(stackSpace, 12), true},
+		{"offset 4 (param_1)", makeStackVarnode(stackSpace, 4), true},
+		{"offset 8 (param_2)", makeStackVarnode(stackSpace, 8), true},
+		{"offset 12 (param_3)", makeStackVarnode(stackSpace, 12), true},
 		{"offset 0 (return addr)", makeStackVarnode(stackSpace, 0), false},
 		{"offset 0xfffffffc (local)", makeStackVarnode(stackSpace, 0xfffffffc), false},
 		{"offset 0x80000000 (local boundary)", makeStackVarnode(stackSpace, 0x80000000), false},
@@ -107,16 +107,17 @@ func TestIsParamVarnode_StackSpaceFallback(t *testing.T) {
 	}
 }
 
-// TestGetParamName verifies the naming scheme: param_0, param_1, ..., param_N.
+// TestGetParamName verifies the naming scheme: param_1, param_2, ..., param_N+1.
+// Ghidra uses 1-indexed parameter names.
 func TestGetParamName(t *testing.T) {
 	cases := []struct {
 		index int
 		want  string
 	}{
-		{0, "param_0"},
-		{1, "param_1"},
-		{5, "param_5"},
-		{99, "param_99"},
+		{0, "param_1"},
+		{1, "param_2"},
+		{5, "param_6"},
+		{99, "param_100"},
 	}
 	for _, tc := range cases {
 		got := GetParamName(tc.index)

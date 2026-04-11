@@ -111,11 +111,11 @@ func (fp *FuncProto) IsParamVarnode(vn *Varnode) bool {
 	return fp.model.IsParamOffset(vn.Offset())
 }
 
-// GetParamName returns a human-readable name like "param_0", "param_1" etc.
-// for the given parameter index.
+// GetParamName returns a human-readable name like "param_1", "param_2" etc.
+// for the given parameter index (1-indexed to match Ghidra output).
 // C++ parity: ParameterBasic::getName / FuncProto::getParamSymbol
 func GetParamName(index int) string {
-	return fmt.Sprintf("param_%d", index)
+	return fmt.Sprintf("param_%d", index+1)
 }
 
 // GetLocalName returns a human-readable name like "local_0", "local_1" etc.
