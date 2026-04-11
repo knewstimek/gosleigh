@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: F-Phase + Ghidra Golden 인프라 + return value rendering (2026-04-11)
+## 현재 단계: F-Phase + Ghidra Golden 인프라 + undefined4/uVar1 parity (2026-04-11)
 
 ### 완료
 - [x] Git repo initialized
@@ -442,6 +442,17 @@
   - `pkg/pcode/printc.go` blank line separator: 보이는 (non-unique, non-prologue) local이 있을 때만 빈 줄 출력.
   - `pkg/loader/loader_test.go` TestAARCH64SimpleFunction: WithRegParams 호출 + golden assertions. AArch64 `unsigned long long aarch64_add_ret(unsigned long long param_0, unsigned long long param_1) { return param_0 + param_1; }` Ghidra 출력과 완전 일치.
   - 알려진 미스매치 (pre-existing): multiply `local_0 = param_0` 잉여 assignment, add3 `local_0`/`local_1` 잉여 declarations, classify_sign `0 < param_0` vs Ghidra `param_3 < 1` CFG 순서 차이. 테스트는 통과.
+
+- [x] printc: undefined4 type rendering + uVar1 return-value naming (2026-04-11)
+  - TYPE_UNKNOWN now rendered as undefined%d (undefined4/undefined8) instead of unsigned int/unsigned long long. Matches Ghidra's undefined-byte convention for untyped varnodes.
+  - renameReturnOnlyLocals(): detects locals whose only non-marker consumers are RETURN ops; renames them using Ghidra's uVar1/iVar1/lVar1 prefix (ActionReturnSplit parity). Declaration type and inferred return type also forced to undefined%d for those locations when the committed type is untyped.
+  - inferReturnType(): TYPE_INT/TYPE_FLOAT preserved as-is; only TYPE_UINT/TYPE_UNKNOWN slots converted to undefined%d for return-only locations.
+  - BuildFromVarnodes: seeds TYPE_UINT on register-space params so AArch64/x86-64 register parameters continue rendering as unsigned int/unsigned long long.
+  - classify_sign golden parity: `undefined4 uVar1;` declaration, `undefined4` return type, `uVar1 = 0/1/0xffffffff` assignments -- matches Ghidra golden exactly except processEntry wrapper (Known Mismatch).
+  - Known mismatches (not yet implemented):
+    - processEntry wrapper: Ghidra wraps x86 entry functions as `processEntry entry(undefined4 param_1, undefined4 param_2, ...)` with 2 ghost argc/argv params. Requires significant calling-convention changes.
+    - x86 return type: multiply/add3 return `undefined4` (Ghidra shows `int` due to processEntry context).
+    - AArch64 return type: `undefined8` (Ghidra shows `long` via TYPE_INT -- would require seeding TYPE_INT on AArch64 register params instead of TYPE_UINT).
 
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
