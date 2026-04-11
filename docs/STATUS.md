@@ -355,7 +355,7 @@
   - All existing tests continue to pass (go test ./...)
 
 ### 다음
-- [ ] **[우선순위 높음]** `DecisionNode::resolve()` 결함 수정: 6502 BRK 외 대부분 opcode (NOP 0xEA, LDA 0xA9 등)에서 발생하는 `"unable to resolve constructor"` 원인을 C++ `slghsymbol.cc` 대조로 찾아 수정. 수정 후 `GOSLEIGH_UPDATE_GOLDEN=1`로 golden fixture 재생성.
+- [x] `DecisionNode::resolve()` 결함 수정 완료: 6502 NOP(0xEA)/LDA(0xA9) 정상 동작 확인. NOP -> 0 ops, LDA -> COPY+flags. 모든 6502 golden 통과.
 - [ ] Continue `Instruction Execution Parity`: remaining full catch coverage outside the current typed path, stricter same-object mutation semantics for every nested failure path, and constructor-print/catch-format parity beyond the current shell
 - [ ] Continue `PcodeCacher And Builder Parity`: direct `allocateInstruction()` / `allocateVarnodes()` integration into `AppendRawBuild` path, infallible sink semantics, and full container/pool parity beyond the current `allocateInstruction` stub
 - [ ] Continue `Decode Pipeline Parity`: build on the authoritative split `LoadFill` / `LoadContext` route, the per-phase bundled fallback compatibility layer, backend-backed context reads/writes, parser-context circular reuse path, lazy `inst_next2` derivation, root-instruction emission propagation, and the raw file-backed loader path, then replace remaining synthetic setup with broader real decode population of cached fields such as handles, calladdr semantics, commit-backed context state, and broader loader/database parity
