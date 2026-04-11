@@ -198,6 +198,15 @@ func propagateOneType(vn *Varnode, tf *TypeFactory) {
 				trySetTempType(def.Input(i), derived)
 			}
 		}
+	case CPUI_INT_MULT:
+		// Reverse: if output is TYPE_INT, propagate to both multiply inputs.
+		// C++ parity: TypeOpIntMult::propagateType passes TYPE_INT bidirectionally.
+		// Required for IMUL type inference: EAX(int) -> both IMUL operands(int).
+		for i := 0; i < def.NumInput(); i++ {
+			if def.Input(i) != nil {
+				trySetTempType(def.Input(i), derived)
+			}
+		}
 	}
 }
 

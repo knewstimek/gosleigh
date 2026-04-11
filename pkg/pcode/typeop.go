@@ -203,6 +203,20 @@ func (t *typeOpSext) PropagateType(op *PcodeOp, slot int, inType Datatype, tf *T
 	return nil
 }
 
+// typeOpIntMult: integer multiply propagates TYPE_INT bidirectionally.
+// If either operand is TYPE_INT, the result is TYPE_INT; and if the output
+// is TYPE_INT, both inputs are inferred as TYPE_INT.
+// C++ parity: TypeOpIntMult::propagateType (typeop.cc) passes alttype through
+// unchanged when alttype is TYPE_INT, enabling bidirectional signed inference.
+type typeOpIntMult struct{ typeOpBase }
+
+func (t *typeOpIntMult) PropagateType(_ *PcodeOp, slot int, inType Datatype, _ *TypeFactory) Datatype {
+	if base, ok := inType.(*Base); ok && base.Metatype() == TYPE_INT {
+		return inType // pass TYPE_INT through in both directions
+	}
+	return nil
+}
+
 // typeOpIntCmp: comparison ops always produce a 1-byte bool output.
 // Forward: return bool. Reverse: no useful inference.
 type typeOpIntCmp struct{ typeOpBase }
@@ -288,7 +302,7 @@ func RegisterTypeOps() []TypeOp {
 	inst[CPUI_INT_LEFT] = &typeOpBase{CPUI_INT_LEFT, PcodeOpBinary, "<<"}
 	inst[CPUI_INT_RIGHT] = &typeOpBase{CPUI_INT_RIGHT, PcodeOpBinary, ">>"}
 	inst[CPUI_INT_SRIGHT] = &typeOpBase{CPUI_INT_SRIGHT, PcodeOpBinary, ">>"}
-	inst[CPUI_INT_MULT] = &typeOpBase{CPUI_INT_MULT, PcodeOpBinary | PcodeOpCommutative, "*"}
+	inst[CPUI_INT_MULT] = &typeOpIntMult{typeOpBase{CPUI_INT_MULT, PcodeOpBinary | PcodeOpCommutative, "*"}}
 	inst[CPUI_INT_DIV] = &typeOpBase{CPUI_INT_DIV, PcodeOpBinary, "/"}
 	inst[CPUI_INT_SDIV] = &typeOpBase{CPUI_INT_SDIV, PcodeOpBinary, "/"}
 	inst[CPUI_INT_REM] = &typeOpBase{CPUI_INT_REM, PcodeOpBinary, "%"}

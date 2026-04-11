@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: F-Phase + Ghidra Golden 인프라 + AArch64 long 타입 parity (2026-04-11)
+## 현재 단계: Ghidra Golden 완전 parity -- processEntry + TYPE_INT inference (2026-04-12)
 
 ### 완료
 - [x] Git repo initialized
@@ -463,6 +463,19 @@
   - Known mismatches (not yet implemented):
     - processEntry wrapper: function name and ghost params (param_1/2 -> param_0/1 numbering shift).
     - x86 return type: multiply/add3 return `undefined4` (Ghidra shows `int` due to processEntry context).
+
+- [x] Ghidra Golden 완전 parity: processEntry + 1-indexed params + INT_MULT type inference (2026-04-12)
+  - GetParamName: 0-indexed -> 1-indexed (param_0 -> param_1). Ghidra 내부 param 번호는 항상 1-indexed.
+  - PrintC.SetProcessEntry(annotation, ghostCount): 함수명 앞에 annotation prefix("processEntry") 추가, ghost params (undefined4 param_1, param_2) 선행 렌더링, real params를 ghostCount+1부터 번호 부여.
+  - scopelocal: stack params에도 TYPE_INT seed 추가 (register params와 동일). x86 cdecl stack params default type = signed int.
+  - typeop: typeOpIntMult 추가 -- TYPE_INT 양방향 전파 (input->output, output->input). C++ parity: TypeOpIntMult::propagateType.
+  - action_infertypes: INT_MULT reverse propagation 추가 -- IMUL output TYPE_INT -> 양쪽 input으로 전파.
+  - 결과: multiply `int processEntry entry(undefined4 param_1, undefined4 param_2, int param_3, int param_4)` -- Ghidra golden 완전 일치.
+  - 결과: add3 `int processEntry entry(undefined4 param_1, undefined4 param_2, int param_3, int param_4, int param_5)` -- Ghidra golden 완전 일치.
+  - 결과: classify_sign `undefined4 processEntry entry(undefined4 param_1, undefined4 param_2, int param_3) { undefined4 uVar1; ... }` -- Ghidra golden 완전 일치.
+  - TestX86ClassifySignGoldenProcessEntry, TestX86MultiplyGoldenProcessEntry, TestX86Add3GoldenProcessEntry 추가: 정확한 signature 매칭 검증.
+  - 잔여 차이: AArch64 함수명 (aarch64_add_ret vs entry) -- 테스트 설계 차이, 기능 parity에 영향 없음.
+  - 잔여 차이: 포맷 (중괄호 위치, 쉼표 뒤 공백) -- C 내용 동일.
 
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
