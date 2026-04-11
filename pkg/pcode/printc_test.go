@@ -97,7 +97,7 @@ func TestPrintCExpressionPrecedence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("renderOpExpr(mul): %v", err)
 		}
-		if gotMul != "param_0 * (param_1 + 3)" {
+		if gotMul != "param_1 * (param_2 + 3)" {
 			t.Fatalf("unexpected multiply expression: %q", gotMul)
 		}
 
@@ -105,7 +105,7 @@ func TestPrintCExpressionPrecedence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("renderOpExpr(not): %v", err)
 		}
-		if gotBool != "!(param_0 == 0 || param_1 != 1)" {
+		if gotBool != "!(param_1 == 0 || param_2 != 1)" {
 			t.Fatalf("unexpected boolean expression: %q", gotBool)
 		}
 	})
@@ -142,7 +142,7 @@ func TestPrintCExpressionPrecedence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("renderOpExpr(cast): %v", err)
 		}
-		if got != "(int)(param_0 + param_1)" {
+		if got != "(int)(param_1 + param_2)" {
 			t.Fatalf("unexpected cast expression: %q", got)
 		}
 	})
@@ -181,7 +181,7 @@ func TestPrintCExpressionPrecedence(t *testing.T) {
 		if err != nil {
 			t.Fatalf("renderOpExpr(call): %v", err)
 		}
-		if got != "(*param_0)(param_1 + 3)" {
+		if got != "(*param_1)(param_2 + 3)" {
 			t.Fatalf("unexpected call expression: %q", got)
 		}
 	})
@@ -277,13 +277,13 @@ func TestPrintCEndToEndRawPcodeToStructuredC(t *testing.T) {
 	if err != nil {
 		t.Fatalf("PrintC.Emit: %v", err)
 	}
-	// C++ parity: ruleBlockIfNoExit fires at i=0 (FalseOut=param_0+1 path),
-	// negates condition (param_0==0 -> param_0!=0), and makes that the if-body.
-	// param_0 lives in register space with no committed type -> TYPE_UNKNOWN -> "undefined4".
+	// C++ parity: ruleBlockIfNoExit fires at i=0 (FalseOut=param_1+1 path),
+	// negates condition (param_1==0 -> param_1!=0), and makes that the if-body.
+	// param_1 lives in register space with no committed type -> TYPE_UNKNOWN -> "undefined4".
 	// Return type: INT_ADD produces a TYPE_UINT unique varnode -> "unsigned int".
 	// C++ parity: Ghidra emits "undefined4" for untyped 4-byte varnodes;
 	// the return type is inferred from the RETURN's input (TYPE_UINT from INT_ADD).
-	want := "unsigned int sample(undefined4 param_0) {\n    if (param_0 != 0) {\n        return param_0 + 1;\n    }\n    return 1;\n}\n"
+	want := "unsigned int sample(undefined4 param_1) {\n    if (param_1 != 0) {\n        return param_1 + 1;\n    }\n    return 1;\n}\n"
 	if got != want {
 		t.Fatalf("unexpected emitted C:\n%s", got)
 	}

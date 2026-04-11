@@ -101,12 +101,12 @@ func TestBuildFromVarnodes_MixedSpaces(t *testing.T) {
 		t.Errorf("NumLocals = %d, want 1 (offset 0xfffffffc)", fp.NumLocals())
 	}
 
-	// Params must be named param_0, param_1 in ascending offset order.
-	if p0 := fp.GetParam(0); p0 == nil || p0.Name() != "param_0" {
-		t.Errorf("param 0 name = %q, want param_0", nameOrNil(p0))
+	// Params must be named param_1, param_2 in ascending offset order (Ghidra 1-indexed).
+	if p0 := fp.GetParam(0); p0 == nil || p0.Name() != "param_1" {
+		t.Errorf("param 0 name = %q, want param_1", nameOrNil(p0))
 	}
-	if p1 := fp.GetParam(1); p1 == nil || p1.Name() != "param_1" {
-		t.Errorf("param 1 name = %q, want param_1", nameOrNil(p1))
+	if p1 := fp.GetParam(1); p1 == nil || p1.Name() != "param_2" {
+		t.Errorf("param 1 name = %q, want param_2", nameOrNil(p1))
 	}
 
 	// Local must be named local_0.
@@ -142,7 +142,7 @@ func TestBuildFromVarnodes_Duplicates(t *testing.T) {
 }
 
 // TestBuildFromVarnodes_ParamOrdering verifies that params are assigned names in
-// ascending offset order (offset 4 -> param_0, offset 8 -> param_1, offset 12 -> param_2)
+// ascending offset order (offset 4 -> param_1, offset 8 -> param_2, offset 12 -> param_3)
 // regardless of the order they appear in the input slice.
 func TestBuildFromVarnodes_ParamOrdering(t *testing.T) {
 	stackSp, _, _ := buildTestSpaces()
@@ -162,14 +162,14 @@ func TestBuildFromVarnodes_ParamOrdering(t *testing.T) {
 		t.Fatalf("NumParams = %d, want 3", fp.NumParams())
 	}
 
-	// param_0 must correspond to the lowest offset varnode (4).
+	// param_1 must correspond to the lowest offset varnode (4).
 	vn0 := fp.GetParam(0).GetInstance(0)
 	if vn0 == nil || vn0.Offset() != 4 {
-		t.Errorf("param_0 instance offset = %d, want 4", vn0.Offset())
+		t.Errorf("param_1 instance offset = %d, want 4", vn0.Offset())
 	}
 	vn2 := fp.GetParam(2).GetInstance(0)
 	if vn2 == nil || vn2.Offset() != 12 {
-		t.Errorf("param_2 instance offset = %d, want 12", vn2.Offset())
+		t.Errorf("param_3 instance offset = %d, want 12", vn2.Offset())
 	}
 }
 
@@ -220,8 +220,8 @@ func TestFindEntry(t *testing.T) {
 	// Known param varnode.
 	if hv := sl.FindEntry(paramVn); hv == nil {
 		t.Error("FindEntry(paramVn) = nil, want non-nil HighVariable")
-	} else if hv.Name() != "param_0" {
-		t.Errorf("FindEntry(paramVn).Name() = %q, want param_0", hv.Name())
+	} else if hv.Name() != "param_1" {
+		t.Errorf("FindEntry(paramVn).Name() = %q, want param_1", hv.Name())
 	}
 
 	// Known local varnode.
