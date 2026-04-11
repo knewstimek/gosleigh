@@ -236,9 +236,14 @@ func anchorReturnReg(fd *Funcdata, model *ProtoModel) {
 		// Use SeqNumLess to compare across instruction addresses and within-instruction
 		// order so that later SSA definitions (e.g. IMUL result) win over earlier ones
 		// (e.g. the MOV EAX that feeds IMUL) when there is no phi merge node.
-		if best == nil || (vn.Def() != nil && best.Def() != nil &&
-			SeqNumLess(best.Def().Seq(), vn.Def().Seq())) {
+		// Also prefer any varnode with a known Def() over one whose Def is nil
+		// (which can happen when VarnodeWritten is set without a corresponding SetDef call).
+		if best == nil {
 			best = vn
+		} else if vn.Def() != nil {
+			if best.Def() == nil || SeqNumLess(best.Def().Seq(), vn.Def().Seq()) {
+				best = vn
+			}
 		}
 	}
 	if best == nil {
