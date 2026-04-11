@@ -477,6 +477,15 @@
   - 잔여 차이: AArch64 함수명 (aarch64_add_ret vs entry) -- 테스트 설계 차이, 기능 parity에 영향 없음.
   - 잔여 차이: 포맷 (중괄호 위치, 쉼표 뒤 공백) -- C 내용 동일.
 
+- [x] CountedLoop 렌더링 수정 + Heritage/prologueOp 억제 (2026-04-12, commit 817fd16)
+  - bridge.go: instructionDefs를 명령어별로 리셋 -- 명령어 간 def 공유로 Heritage가 ECX reads=0 을 보던 버그 수정.
+  - heritage.go: MULTIEQUAL output에 SetActiveHeritage() 호출 -- phi varnode가 non-free로 정확히 마킹됨.
+  - printc.go markReturnOnlyCopies: inline consumer one-level lookahead -- inline op의 직접 consumer가 RETURN이 아닌 CBRANCH일 때 hasReturnOrInline=true 설정 방지. INT_ADD(ECX, -1)이 prologueOp으로 잘못 마킹되는 버그 수정.
+  - printc.go markPhiReturnOnly: 새 pass -- self-loop이거나 모든 non-self consumer가 return-chain transparent인 MULTIEQUAL output을 prologueVarnode로 마킹 (ESP/EIP loop phi가 여분 local 선언으로 나타나는 문제 억제).
+  - printc.go renderOpExprFrag INT_ADD: inline INT_2COMP input을 뺄셈으로 fold -- `local_0 + -1` -> `local_0 - 1`. C++ cleanup-phase Rule2Comp2Sub 동작을 렌더링 시점에 미러링.
+  - TestX86CountedLoop: `do { local_0 = local_0 - 1; } while (local_0 != 0);` 정상 출력.
+  - go test ./... 전체 통과.
+
 ### 미시작
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
 - [ ] Full golden test coverage: decision tree resolution fix required before NOP/LDA/branch fixtures can be promoted from "unimplemented" to "match". See PARITY_AUDIT.md Golden/Bridge section.
