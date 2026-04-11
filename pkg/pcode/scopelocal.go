@@ -89,6 +89,16 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 	seenRegIdx := make(map[int]bool)
 
 	if len(sl.model.RegParamOffsets) > 0 {
+		// Two-pass: first pick isinput=true varnodes (function live-ins),
+		// then fall back to any written varnode if no input was found.
+		// This prevents a written copy of the register (e.g. INT_ADD output
+		// stored back into X0) from displacing the actual parameter input.
+		// C++ parity: ScopeLocal uses Heritage input varnodes (isInput()) for param slots.
+		type candidate struct {
+			vn      *Varnode
+			isInput bool
+		}
+		best := make(map[int]candidate) // paramIdx -> best candidate so far
 		for _, vn := range varnodes {
 			if vn == nil || vn.Space() == nil {
 				continue
@@ -100,11 +110,20 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 			if !ok {
 				continue
 			}
+			cur, exists := best[idx]
+			if !exists {
+				best[idx] = candidate{vn, vn.IsInput()}
+			} else if !cur.isInput && vn.IsInput() {
+				// Upgrade to the input varnode -- it is the true function parameter.
+				best[idx] = candidate{vn, true}
+			}
+		}
+		for idx, c := range best {
 			if seenRegIdx[idx] {
-				continue // deduplicate: one HighVariable per ABI slot
+				continue
 			}
 			seenRegIdx[idx] = true
-			regParamSlots = append(regParamSlots, regParamSlot{vn, idx})
+			regParamSlots = append(regParamSlots, regParamSlot{c.vn, idx})
 		}
 		// Sort by ABI index so param_0 always matches the first argument register.
 		sort.Slice(regParamSlots, func(i, j int) bool {

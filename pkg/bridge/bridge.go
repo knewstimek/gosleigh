@@ -430,7 +430,14 @@ func resolveInput(fd *pcode.Funcdata, input pcode.VarnodeData, defs map[varKey]*
 	}
 
 	vn := fd.NewVarnode(int32(input.Size), input.Address())
-	defs[key] = vn
+	// Do NOT store read varnodes in defs. If this location has not been written
+	// yet (no output defined it), it is a function live-in that Heritage will
+	// rename to an SSA input varnode. Storing the read would cause subsequent
+	// reads of the same register to reuse the same varnode object, which breaks
+	// Heritage's per-use renaming: Heritage marks the varnode active, renames
+	// the first user, then clears active -- leaving other users with the old
+	// pre-Heritage raw varnode.
+	// C++ parity: Ghidra's SLEIGH builder creates a fresh varnode per read.
 	return vn
 }
 

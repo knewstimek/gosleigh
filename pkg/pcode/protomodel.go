@@ -203,3 +203,19 @@ func (pm *ProtoModel) WithReturnReg(spaceIdx int, offset uint64, size int32) *Pr
 	pm.ReturnRegSize = size
 	return pm
 }
+
+// WithRegParams adds register parameter slots directly without requiring a
+// regLookup callback. offsets is a slice of byte offsets within the register
+// address space ordered by ABI parameter index (index 0 = first parameter).
+// This is used for architectures where register param offsets are known at
+// test time without a full cspec parse (e.g. AArch64 X0=16384, X1=16392).
+// Returns pm for chaining.
+func (pm *ProtoModel) WithRegParams(offsets []uint64) *ProtoModel {
+	if pm.RegParamOffsets == nil {
+		pm.RegParamOffsets = make(map[uint64]int, len(offsets))
+	}
+	for i, off := range offsets {
+		pm.RegParamOffsets[off] = i
+	}
+	return pm
+}

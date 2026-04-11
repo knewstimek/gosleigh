@@ -2239,7 +2239,46 @@ func TestAARCH64SimpleFunction(t *testing.T) {
 	}
 
 	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+
+	// ActionStackPtrFlow: convert LOAD(ram, INT_ADD(FP, offset)) patterns into
+	// COPY(stack_input_vn) so ScopeLocal can classify stack parameters.
+	// AArch64 uses a frame pointer convention similar to x86; run this before
+	// ApplyCallingConvention so stack params are recognized.
+	spfAArch64 := pcode.NewActionStackPtrFlow("analysis")
+	spfAArch64.Apply(result.Funcdata)
+
+	// Apply AArch64 calling convention: X0 is the integer return register.
+	// X0 is at offset 16384 (0x4000) in the register space, size 8 bytes.
+	// Find the register space index from the varnode bank.
+	var regSpaceIdxAArch64 int = -1
+	stackSpaceAArch64 := spfAArch64.StackSpace()
+	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.Space() == nil {
+			continue
+		}
+		sp := vn.Space()
+		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxAArch64 < 0 {
+			regSpaceIdxAArch64 = int(sp.Index)
+		}
+	}
+	// Build AArch64 ProtoModel: X0 (offset 16384) is return reg and param_0;
+	// X1 (offset 16392) is param_1. Both are 8-byte GP registers.
+	aarch64Model := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceAArch64, nil)
+	if regSpaceIdxAArch64 >= 0 {
+		// X0: register space offset 16384, size 8 bytes (return value).
+		aarch64Model.WithReturnReg(regSpaceIdxAArch64, 16384, 8)
+	}
+	// X0=param_0 (16384), X1=param_1 (16392) per AArch64 AAPCS64 ABI.
+	aarch64Model.WithRegParams([]uint64{16384, 16392})
+	pcode.ApplyCallingConvention(result.Funcdata, aarch64Model)
+	pcode.NewMerge(result.Funcdata).MergeMarker()
+	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
+	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
+	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
+	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
+	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -2251,4 +2290,18 @@ func TestAARCH64SimpleFunction(t *testing.T) {
 		t.Fatal("PrintC.Emit returned empty output for AArch64 function")
 	}
 	t.Logf("AArch64 simple function C output:\n%s", output)
+
+	// Ghidra 12 golden: ADD X0, X0, X1; RET decompiles to a simple return.
+	wantBody := "return param_0 + param_1;"
+	if !strings.Contains(output, wantBody) {
+		t.Errorf("G1: expected %q in output, not found:\n%s", wantBody, output)
+	}
+	wantSig := "aarch64_add_ret(unsigned long long param_0, unsigned long long param_1)"
+	if !strings.Contains(output, wantSig) {
+		t.Errorf("G2: expected signature %q in output, not found:\n%s", wantSig, output)
+	}
+	// No spurious local declarations: the body should not declare tmp_N or local_N.
+	if strings.Contains(output, "tmp_") || strings.Contains(output, "local_") {
+		t.Errorf("G3: unexpected local/tmp declaration in output:\n%s", output)
+	}
 }
