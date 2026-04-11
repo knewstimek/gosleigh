@@ -1596,8 +1596,21 @@ func (s *printCState) inferSignedConstType(vn *Varnode) Datatype {
 		if out == nil {
 			continue
 		}
-		if s.locationIsSigned(out) {
+		// Check only the direct committed type of the consumer output, not a
+		// location-wide scan. The location-wide scan (locationIsSigned) is too
+		// broad: it matches other SSA versions of the same register (e.g. EAX_0
+		// used in INT_SLESS with TYPE_INT) and incorrectly forces TYPE_INT onto a
+		// constant whose consumer output (e.g. EAX_1 from COPY) is TYPE_UINT.
+		// C++ parity: Ghidra propagates TYPE_INT into constants directly; this
+		// fallback must only trigger when the immediate consumer output is signed.
+		dt := out.Type()
+		if dt != nil && dt.Metatype() == TYPE_INT {
 			return sharedTypeFactory.GetExactType(vn.Size(), TYPE_INT)
+		}
+		if hv := out.High(); hv != nil {
+			if hvdt := hv.Type(); hvdt != nil && hvdt.Metatype() == TYPE_INT {
+				return sharedTypeFactory.GetExactType(vn.Size(), TYPE_INT)
+			}
 		}
 	}
 	return nil

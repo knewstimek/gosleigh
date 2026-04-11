@@ -1053,13 +1053,15 @@ func TestX86ClassifySignFunction(t *testing.T) {
 	}
 
 	// The if-branch bodies must not be empty: at least one assignment value
-	// (= 1, = -1, or = 0) should appear in the output, confirming that the
-	// return register anchoring kept the EAX write ops alive.
+	// (= 1, = 0xffffffff, or = 0) should appear in the output, confirming that
+	// the return register anchoring kept the EAX write ops alive.
+	// Ghidra golden: uVar1 = 0xffffffff (unsigned output type renders hex).
 	hasReturnValue := strings.Contains(output, "= 1") ||
+		strings.Contains(output, "= 0xffffffff") ||
 		strings.Contains(output, "= -1") ||
 		strings.Contains(output, "= 0")
 	if !hasReturnValue {
-		t.Errorf("expected EAX assignment values (= 1 / = -1 / = 0) in output but found none:\n%s", output)
+		t.Errorf("expected EAX assignment values (= 1 / = 0xffffffff / = 0) in output but found none:\n%s", output)
 	}
 
 	// F4: identity elimination must remove "+ -0" artifacts.
@@ -1067,14 +1069,13 @@ func TestX86ClassifySignFunction(t *testing.T) {
 		t.Errorf("F4: expected '+ -0' to be eliminated by RuleIdentityEl, but found it:\n%s", output)
 	}
 
-	// F7: signed constant must print as -1, not 0xffffffff.
-	if strings.Contains(output, "0xffffffff") {
-		t.Errorf("F7: expected 0xffffffff to be rendered as -1 (signed), but found hex literal:\n%s", output)
-	}
-
-	// F7: the output should contain -1 as a signed constant (from MOV EAX, 0xFFFFFFFF).
-	if !strings.Contains(output, "-1") {
-		t.Errorf("F7: expected -1 in output (signed constant rendering), but not found:\n%s", output)
+	// F7: Ghidra golden renders 0xffffffff as hex (not -1) because the output
+	// variable type is undefined4 (unsigned 4-byte). TYPE_UINT constants with the
+	// high bit set must render as 0xffffffff, not as a signed decimal -1.
+	// Ghidra C++ parity: push_integer(val, sz, false, ...) for TYPE_UINT ->
+	// mostNaturalBase(0xffffffff)==16 -> "0xffffffff".
+	if !strings.Contains(output, "0xffffffff") {
+		t.Errorf("F7: expected 0xffffffff in output (unsigned hex constant rendering), but not found:\n%s", output)
 	}
 
 	// ActionStackPtrFlow must have converted LOAD(ram, EBP+8) into a stack-space
