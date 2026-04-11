@@ -344,6 +344,7 @@ func (s *printCState) collectSymbols() {
 		// After s.inline is populated, identify COPY ops that are only consumed
 		// by the return chain. This must run after shouldInline has been applied.
 		s.markReturnOnlyCopies()
+		s.markPhiReturnOnly()
 		// Rename return-only locals to Ghidra's uVar1/iVar1/lVar1 convention.
 		// C++ parity: ActionReturnSplit names the return-value variable with a
 		// prefix derived from its type (u=undefined/unsigned, i=signed, l=long).
@@ -434,6 +435,7 @@ func (s *printCState) collectSymbols() {
 	// After s.inline is populated, identify COPY ops that are only consumed
 	// by the return chain. This must run after shouldInline has been applied.
 	s.markReturnOnlyCopies()
+	s.markPhiReturnOnly()
 	// NOTE: renameReturnOnlyLocals is intentionally NOT called on the nil-FuncProto
 	// path. Without ABI information (calling convention, return register) the
 	// return-only detection is unreliable and non-deterministic because AllVarnodes()
@@ -1876,6 +1878,23 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	case CPUI_INT_SEXT:
 		return s.renderCast(op)
 	case CPUI_INT_ADD:
+		// C++ parity: cleanup-phase Rule2Comp2Sub converts INT_ADD(x, INT_2COMP(y))
+		// to INT_SUB(x, y) before rendering. Mirror this at render time: when the
+		// right-hand input is an inline INT_2COMP, fold into subtraction so we emit
+		// "x - y" instead of "x + -y".
+		if rhs := op.Input(1); rhs != nil {
+			if def := rhs.Def(); def != nil && s.inline[def] && def.Code() == CPUI_INT_2COMP {
+				left, err := s.renderVarnodeExpr(op.Input(0))
+				if err != nil {
+					return ExprFragment{}, err
+				}
+				inner, err := s.renderVarnodeExpr(def.Input(0))
+				if err != nil {
+					return ExprFragment{}, err
+				}
+				return s.lang.BinaryExpr(left, "-", inner, cPrecAdd, ExprAssocLeft), nil
+			}
+		}
 		return s.renderBinary(op, "+", cPrecAdd, ExprAssocLeft)
 	case CPUI_INT_SUB:
 		return s.renderBinary(op, "-", cPrecAdd, ExprAssocLeft)
@@ -2530,7 +2549,19 @@ func (s *printCState) markReturnOnlyCopies() {
 					if s.prologueOps[consumer] {
 						// Already suppressed; transparent.
 					} else if s.inline[consumer] {
-						hasReturnOrInline = true
+						// Inline consumer is transparent, but hasReturnOrInline only fires
+						// if the inline op reaches RETURN (not CBRANCH). Without this check,
+						// a loop-condition inline op (INT_NOTEQUAL -> CBRANCH) falsely
+						// suppresses the loop counter update (local_0 = local_0 - 1).
+						// One-level lookahead: any direct consumer of the inline op is RETURN.
+						if consumer.Output() != nil {
+							for _, c2 := range consumer.Output().DescendIter() {
+								if c2 != nil && c2.Code() == CPUI_RETURN {
+									hasReturnOrInline = true
+									break
+								}
+							}
+						}
 					} else if consumer.Output() != nil && consumer.Output().NumDescend() == 0 {
 						// Dead-store consumer: suppressible (handled in dead-store pass or
 						// will be suppressed when we process it below).
@@ -2550,6 +2581,70 @@ func (s *printCState) markReturnOnlyCopies() {
 		}
 		if !changed {
 			break
+		}
+	}
+}
+
+// markPhiReturnOnly marks MULTIEQUAL output varnodes as prologueVarnodes when
+// their only consumers are return-chain ops or self-referential back-edges.
+// This prevents architectural live-throughs (ESP_phi, EIP_phi in a loop) from
+// appearing as local variable declarations.
+//
+// Must run after markReturnOnlyCopies so prologueOps and s.inline are fully set.
+func (s *printCState) markPhiReturnOnly() {
+	for _, op := range s.fd.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() || op.Code() != CPUI_MULTIEQUAL {
+			continue
+		}
+		out := op.Output()
+		if out == nil || s.prologueVarnodes[out] {
+			continue
+		}
+		allTransparent := true
+		hasReturnOrInline := false
+		hasNonSelfConsumer := false
+		for _, consumer := range out.DescendIter() {
+			if consumer == nil {
+				continue
+			}
+			// Skip self-referential back-edge: the MULTIEQUAL reads its own output
+			// as one of its inputs (loop phi self-loop). Not a real consumer.
+			if consumer == op {
+				continue
+			}
+			hasNonSelfConsumer = true
+			switch consumer.Code() {
+			case CPUI_RETURN:
+				hasReturnOrInline = true
+			case CPUI_MULTIEQUAL, CPUI_INDIRECT:
+				// Marker ops.
+			default:
+				if s.prologueOps[consumer] {
+					// Already suppressed.
+				} else if s.inline[consumer] {
+					// One-level lookahead: does the inline op reach RETURN?
+					if consumer.Output() != nil {
+						for _, c2 := range consumer.Output().DescendIter() {
+							if c2 != nil && c2.Code() == CPUI_RETURN {
+								hasReturnOrInline = true
+								break
+							}
+						}
+					}
+				} else if consumer.Output() != nil && consumer.Output().NumDescend() == 0 {
+					// Dead-store consumer.
+				} else {
+					allTransparent = false
+				}
+			}
+			if !allTransparent {
+				break
+			}
+		}
+		// Mark if: no real consumers (pure self-loop phi) OR all real consumers are
+		// return-chain transparent. Either way the phi output carries no C-level info.
+		if !hasNonSelfConsumer || (allTransparent && hasReturnOrInline) {
+			s.prologueVarnodes[out] = true
 		}
 	}
 }

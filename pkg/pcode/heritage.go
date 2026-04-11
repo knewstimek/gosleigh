@@ -355,8 +355,13 @@ func (h *Heritage) placeMultiequals(graph *BlockGraph, addr address.Address, siz
 		op := h.fd.NewOp(numPreds, addr)
 		h.fd.OpSetOpcode(op, CPUI_MULTIEQUAL)
 
-		// Create output varnode
-		h.fd.NewVarnodeOut(size, addr, op)
+		// Create output varnode and mark it for heritage tracking.
+		// The output must be ActiveHeritage so that renameRecurse pushes it
+		// onto varStack when visiting this MULTIEQUAL, allowing subsequent
+		// ops in the same block to receive the phi output as their renamed input.
+		// C++ parity: Heritage::placeMultiequals sets activeHeritage on the new vn.
+		out := h.fd.NewVarnodeOut(size, addr, op)
+		out.SetActiveHeritage()
 
 		// Insert at beginning of block
 		h.fd.OpInsertBegin(op, bb)

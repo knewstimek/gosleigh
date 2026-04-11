@@ -96,7 +96,14 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	blockByAddr := make(map[address.Address]*pcode.BlockBasic, len(starts))
 	instToBlock := make(map[address.Address]*pcode.BlockBasic, len(records))
 	lastInBlock := make(map[*pcode.BlockBasic]instructionRecord, len(starts))
-	currentDefs := make(map[varKey]*pcode.Varnode)
+	// instructionDefs is reset per instruction so that cross-instruction reads
+	// always produce fresh free varnodes that Heritage can rename.
+	// Within one instruction, writes are cached so later ops in the same
+	// instruction can reference the written varnode (e.g. ZF = ECX_new == 0
+	// after DEC ECX writes ECX_new).
+	// C++ parity: Ghidra's SLEIGH builder creates fresh varnodes per read;
+	// within-instruction writes are tracked but not propagated across instructions.
+	var instructionDefs map[varKey]*pcode.Varnode
 
 	var current *pcode.BlockBasic
 	for idx, record := range records {
@@ -114,7 +121,10 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		instToBlock[addr] = current
 		lastInBlock[current] = record
 
-		if err := addInstructionOps(fd, current, record.translation, currentDefs); err != nil {
+		// Fresh defs map per instruction: reads in one instruction must not
+		// resolve to writes from a different instruction.
+		instructionDefs = make(map[varKey]*pcode.Varnode)
+		if err := addInstructionOps(fd, current, record.translation, instructionDefs); err != nil {
 			return nil, err
 		}
 	}
