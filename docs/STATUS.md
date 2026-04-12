@@ -570,6 +570,14 @@
 ### 미시작 (우선순위 순)
 
 - [x] H1: Ghidra format matching + auto golden assertions (2026-04-13, commit 0f6d8c4)
+- [x] H1-fix: CountedLoop regression + anchorReturnReg per-RETURN selection (2026-04-13)
+  - 현상: Heritage task split (gcd RuleSignForm 지원)이 phi_eax_4b_out(Block 2 loop-header)을 anchorReturnReg에 의해 RETURN input으로 wired → DeadCode가 phi 제거 불가 → EAX_vn2.NumDescend=2 → shouldInline 실패 → `local_0 = local_8 + 1; local_8 = local_0` (got) vs `local_8 = local_8 + 1` (want).
+  - 수정: `anchorReturnReg` 전략을 global-best → per-RETURN 선택으로 교체. Pass 1: RETURN op와 같은 블록의 varnode 중 최신 SeqNum 선택. Pass 2: 전체 candidates 중 최신 SeqNum fallback.
+  - 같은 블록 우선 이유: Block 4(exit)의 `EAX_ret=LOAD[EBP-8]`이 RETURN과 같은 블록 → 정확히 live. Loop-header phi는 다른 블록이므로 제외됨.
+  - 부수 수정: Pass 1 내 "break at first same-block"을 "latest SeqNum in same block"으로 교체 -- multiply 함수에서 EAX_1(MOV)과 EAX_2(IMUL)이 모두 Block 0에 있을 때 EAX_2가 선택되어야 하기 때문.
+  - 수정 파일: `pkg/pcode/funcproto.go:anchorReturnReg`
+  - debug 아티팩트 제거: `cmd/gcd_debug/`, `pkg/pcode/gcd_rule_test.go`, `pkg/loader/heritage_debug_test.go`
+  - 성공 기준: TestMSVC_CountedLoop, TestMSVC_SumList, TestMSVC_AbsVal, TestMSVC_Classify2, TestMSVC_Gcd_Diag, TestX86MultiplyGoldenProcessEntry 전부 PASS; go test ./... 전체 통과.
   - 현상: Gosleigh PrintC output format != Ghidra golden (4-space indent vs flat, BSD brace vs K&R+blank, ", " vs ",", `} else if` vs `}\nelse if`). TestMSVC_* tests have no assertions -- golden diff not auto-detected.
   - C++ ref: printc.cc PrintC::docFunction() (K&R function brace), printc.cc emitBlockBraces (no indent), parameterList comma format
   - 수정 대상: pkg/pcode/printc.go, pkg/pcode/printc_decl.go, pkg/pcode/emitter.go, pkg/pcode/printlanguage.go, pkg/loader/msvc_diag_test.go

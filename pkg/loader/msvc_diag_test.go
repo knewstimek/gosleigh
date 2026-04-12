@@ -294,6 +294,18 @@ func TestMSVC_Classify2(t *testing.T) {
 // phi (MULTIEQUAL) assignments. Not yet implemented in Gosleigh's emitWhileBlock.
 // C++ parity: PrintC::emitBlockWhile sets setMod(comma_separate) for condBlock
 // emission (printc.cc ~3186).
+// TestMSVC_Gcd_Diag logs what Gosleigh currently produces for gcd (no assertion).
+// Used to diagnose block structure and output before implementing while-comma.
+func TestMSVC_Gcd_Diag(t *testing.T) {
+	prog := []byte{0x8b, 0x4c, 0x24, 0x08, 0x8b, 0x44, 0x24, 0x04, 0x85, 0xc9, 0x74, 0x0b, 0x99, 0xf7, 0xf9, 0x8b, 0xc1, 0x8b, 0xca, 0x85, 0xd2, 0x75, 0xf5, 0xc3}
+	out := runPipeline(t, prog, "gcd")
+	t.Logf("GOSLEIGH output:\n%s", out)
+	ghidra := runPipelineGhidra(t, prog, "gcd")
+	t.Logf("GOSLEIGH (Ghidra format):\n%s", ghidra)
+	want := loadGhidraGolden(t, "gcd_x86_32")
+	t.Logf("GHIDRA golden:\n%s", strings.TrimSpace(want))
+}
+
 func TestMSVC_Gcd(t *testing.T) {
 	t.Skip("known mismatch: while-condition comma_separate rendering not yet implemented (emitWhileBlock)")
 	// MSVC /O1 x86-32 gcd: frameless, ESP-relative params, CDQ+IDIV for modulo
