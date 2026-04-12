@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "gorchera": {
+      "command": "D:\\News\\Business\\Gosleigh\\gorchera.exe",
+      "args": ["mcp"],
+      "cwd": "D:\\News\\Business\\Gosleigh"
+    }
+  }
+}

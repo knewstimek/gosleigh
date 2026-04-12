@@ -237,13 +237,40 @@ func (b *FlowBlock) negateCondition(top bool) bool {
 	return false
 }
 
+// BlockWhileDo is a while-do structured loop block.
+// When iterateOp is non-nil the block prints as a for-loop.
+// C++ parity: block.hh BlockWhileDo -- iterateOp / initializeOp fields
 type BlockWhileDo struct {
 	FlowBlock
+	// iterateOp is the increment op extracted from the loop tail.
+	// When non-nil the block renders as "for(init; cond; iter)".
+	// C++ parity: BlockWhileDo::iterateOp
+	iterateOp *PcodeOp
+	// initializeOp is the initializer op extracted from the block preceding the loop.
+	// May be nil (produces "for(; cond; iter)").
+	// C++ parity: BlockWhileDo::initializeOp
+	initializeOp *PcodeOp
 }
 
+// SetOverflowSyntax marks this while-do as requiring overflow (while(true)) syntax.
 func (b *BlockWhileDo) SetOverflowSyntax() {
 	b.FlowBlock.SetFlag(BlockFlagWhileDoOverflow)
 	b.FlowBlock.setOverflowSyntax(true)
+}
+
+// IterateOp returns the for-loop increment op, or nil for a plain while loop.
+// C++ parity: BlockWhileDo::getIterateOp
+func (b *BlockWhileDo) IterateOp() *PcodeOp { return b.iterateOp }
+
+// InitializeOp returns the for-loop initializer op, or nil if absent.
+// C++ parity: BlockWhileDo::getInitializeOp
+func (b *BlockWhileDo) InitializeOp() *PcodeOp { return b.initializeOp }
+
+// SetForLoop sets the iterate and initialize ops, converting this block to a for-loop.
+// C++ parity: BlockWhileDo::finalTransform sets iterateOp / initializeOp
+func (b *BlockWhileDo) SetForLoop(iterateOp, initializeOp *PcodeOp) {
+	b.iterateOp = iterateOp
+	b.initializeOp = initializeOp
 }
 
 type edgeRecord struct {
