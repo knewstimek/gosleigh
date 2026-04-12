@@ -100,6 +100,17 @@ type printCState struct {
 	// Ghidra's ActionReturnSplit behaviour (return-value carrier -> TYPE_UNKNOWN).
 	returnOnlyLocs map[locationKey]bool
 
+	// identityOps is the set of COPY ops that are identity assignments of a param
+	// to the return carrier (e.g., "eax = param_3" when param_3 is the return value).
+	// These ops are suppressed in emitOps since they are no-ops when the carrier is
+	// renamed to the param's name.
+	// C++ parity: ActionReturnSplit eliminates identity branches from the return path.
+	identityOps map[*PcodeOp]bool
+	// returnCarrierParams maps a return-carrier location key to the param varnode that
+	// serves as the direct return carrier (G5: identity-copy phi input detection).
+	// Names are resolved post-ghost-rename by finalizeReturnCarrierRenames.
+	returnCarrierParams map[locationKey]*Varnode
+
 	// entryAnnotation and ghostParamCount come from PrintC.SetProcessEntry.
 	// When non-empty, the signature is rendered as "annotation name(ghost..., real...)"
 	// and real param names are offset by ghostParamCount.
@@ -123,6 +134,8 @@ func newPrintCState(printer *PrintC, fd *Funcdata) *printCState {
 		prologueOps:      make(map[*PcodeOp]bool),
 		prologueVarnodes: make(map[*Varnode]bool),
 		returnOnlyLocs:   make(map[locationKey]bool),
+		identityOps:         make(map[*PcodeOp]bool),
+		returnCarrierParams: make(map[locationKey]*Varnode),
 		entryAnnotation:  printer.entryAnnotation,
 		ghostParamCount:  printer.ghostParamCount,
 	}
@@ -161,6 +174,10 @@ func (s *printCState) emit() (string, error) {
 	s.lang.OpenBlockAfter(func() {
 		s.lang.Token(s.renderFunctionSignature(retType))
 	})
+	// Apply post-ghost-rename param names to return-carrier varnodes detected in G5.
+	// renderFunctionSignature has now updated param names (param_1 -> param_3 etc.),
+	// so we can resolve the correct final name for the return carrier.
+	s.finalizeReturnCarrierRenames()
 	s.emitLocalDeclarations()
 	// Emit blank line between declarations and body only when at least one
 	// non-suppressed local was actually declared. Unique-space temps and
@@ -172,6 +189,10 @@ func (s *printCState) emit() (string, error) {
 			continue
 		}
 		if vn.Space() != nil && vn.Space().IsUnique() {
+			continue
+		}
+		// Skip locals that were remapped to a param name (G5: no separate declaration).
+		if s.isParamName(s.nameOf(vn)) {
 			continue
 		}
 		hasVisibleLocal = true
@@ -830,6 +851,13 @@ func (s *printCState) emitLocalDeclarations() {
 		if _, seen := declared[name]; seen {
 			continue
 		}
+		// Skip locals whose name was remapped to a parameter name (G5: identity
+		// return-carrier). The parameter is already declared in the function
+		// signature; re-declaring it as a local would produce duplicate declarations.
+		// C++ parity: ActionReturnSplit reuses the param as the return carrier.
+		if s.isParamName(name) {
+			continue
+		}
 		declared[name] = struct{}{}
 		// Return-only locals are rendered with undefined%d regardless of their
 		// committed type. Ghidra's ActionReturnSplit assigns TYPE_UNKNOWN to the
@@ -1069,6 +1097,47 @@ func (s *printCState) emitIfBlock(bl *FlowBlock) error {
 	return s.emitIfBlockChain(bl, false)
 }
 
+// isBlockEmpty reports whether a block would produce no visible C output.
+// A block is empty when all its ops are dead, inlined, prologue, identity, or
+// unique-space temporaries with no named consumers.
+//
+// Used to suppress empty else branches (e.g., after G5 identity-copy elimination).
+// C++ parity: Ghidra's ActionReturnSplit removes the identity branch entirely
+// from the block graph; we approximate by skipping empty else at render time.
+func (s *printCState) isBlockEmpty(bl *FlowBlock) bool {
+	bb, ok := bl.Concrete().(*BlockBasic)
+	if !ok {
+		return false
+	}
+	for _, op := range bb.Ops() {
+		if op == nil || op.IsDead() || s.inline[op] {
+			continue
+		}
+		if op.HasFlag(PcodeOpNonPrinting) {
+			continue
+		}
+		if s.prologueOps[op] {
+			continue
+		}
+		if s.identityOps[op] {
+			continue
+		}
+		if out := op.Output(); out != nil {
+			if out.Space() != nil && out.Space().IsUnique() && out.NumDescend() == 0 {
+				continue
+			}
+			if out.IsFree() {
+				continue
+			}
+		}
+		if isControlOpcode(op.Code()) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // emitIfBlockChain emits a BlockIf as either a leading "if" or a chained
 // "else if", allowing deeply nested else-if ladders to be flattened.
 // When isElseIf is true the "if" header is preceded by "else " inline with
@@ -1114,6 +1183,15 @@ func (s *printCState) emitIfBlockChain(bl *FlowBlock, isElseIf bool) error {
 	// If so, emit it as an else-if chain to avoid extra brace nesting.
 	// C++ parity: PrintC::emitBlockIfElse -- else-if ladders use single brace level.
 	elseChild := children[2]
+	// Skip empty else branches (e.g., after G5 identity-copy suppression).
+	// An else block containing only an identity "param = param" COPY is invisible;
+	// suppressing it matches Ghidra's ActionReturnSplit output where the trivial
+	// branch is removed entirely.
+	// C++ parity: ActionReturnSplit eliminates the identity branch from the graph.
+	if s.isBlockEmpty(elseChild) {
+		s.lang.CloseBlock()
+		return nil
+	}
 	if elseChild.Type() == BlockIfType {
 		return s.emitIfBlockChain(elseChild, true)
 	}
@@ -1226,6 +1304,7 @@ func (s *printCState) renderForPartOp(op *PcodeOp) (string, error) {
 		}
 		return lhs + " = " + rhs, nil
 	default:
+		castStr := s.assignCastStr(op)
 		rhs, err := s.renderOpExpr(op, cPrecAssign)
 		if err != nil {
 			return "", err
@@ -1234,6 +1313,9 @@ func (s *printCState) renderForPartOp(op *PcodeOp) (string, error) {
 			return rhs, nil
 		}
 		lhs := s.nameOf(op.Output())
+		if castStr != "" {
+			return lhs + " = " + castStr + rhs, nil
+		}
 		return lhs + " = " + rhs, nil
 	}
 }
@@ -1418,6 +1500,13 @@ func (s *printCState) emitOps(bb *BlockBasic, suppressControl bool) error {
 		if s.prologueOps[op] {
 			continue
 		}
+		// Skip identity COPY ops that are "param = param" assignments produced when
+		// the return carrier is renamed to a parameter name. These are no-ops that
+		// Ghidra eliminates via ActionReturnSplit.
+		// C++ parity: ActionReturnSplit removes the identity branch of the phi.
+		if s.identityOps[op] {
+			continue
+		}
 		if out := op.Output(); out != nil {
 			if out.NumDescend() == 0 {
 				switch op.Code() {
@@ -1566,6 +1655,8 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 		})
 		return nil
 	default:
+		castStr := s.assignCastStr(op)
+
 		expr, err := s.renderOpExpr(op, cPrecAssign)
 		if err != nil {
 			return err
@@ -1582,9 +1673,104 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 			s.lang.Space()
 			s.lang.Token("=")
 			s.lang.Space()
+			if castStr != "" {
+				s.lang.Token(castStr)
+			}
 			s.lang.Token(expr)
 		})
 		return nil
+	}
+}
+
+// effectiveLoadResultType traces vn's definition to find if it comes from a LOAD
+// whose address has a pointer type. If so, returns the pointee type (the "natural"
+// result type of the LOAD dereference), not the potentially overridden committed type.
+// Returns nil if vn is not traceable to a LOAD with known pointer address.
+func (s *printCState) effectiveLoadResultType(vn *Varnode) Datatype {
+	if vn == nil {
+		return nil
+	}
+	def := vn.Def()
+	if def == nil {
+		return nil
+	}
+	switch def.Code() {
+	case CPUI_LOAD:
+		addr := def.Input(def.NumInput() - 1)
+		if addr == nil {
+			return nil
+		}
+		if ptrType, ok := addr.TypeReadFacing(nil).(*Pointer); ok {
+			return ptrType.Pointee()
+		}
+	case CPUI_COPY:
+		if def.NumInput() > 0 {
+			return s.effectiveLoadResultType(def.Input(0))
+		}
+	}
+	return nil
+}
+
+// assignCastStr returns the cast string needed when an op's output has a pointer
+// type but the rendered expression is semantically non-pointer (e.g. LOAD or COPY
+// of a LOAD result). Returns "" if no cast is needed.
+//
+// Covers:
+//   - COPY where input comes from a LOAD through a pointer address.
+//   - LOAD directly used as an assignment op (e.g. when LOAD is the for-iterate op
+//     and its output carries a pointer type via HighVariable propagation).
+//
+// C++ parity: PrintC emits explicit casts when the RHS metatype is less specific
+// than the LHS pointer type (typeop.cc / printc.cc cast emission).
+func (s *printCState) assignCastStr(op *PcodeOp) string {
+	if op == nil {
+		return ""
+	}
+	out := op.Output()
+	if out == nil {
+		return ""
+	}
+	outPtr, ok := out.TypeReadFacing(nil).(*Pointer)
+	if !ok {
+		return "" // output is not a pointer -- no cast needed
+	}
+
+	switch op.Code() {
+	case CPUI_COPY:
+		if op.NumInput() == 0 {
+			return ""
+		}
+		srcType := s.effectiveLoadResultType(op.Input(0))
+		if srcType == nil {
+			return ""
+		}
+		if _, isPtr := srcType.(*Pointer); isPtr {
+			return ""
+		}
+		return "(" + CTypeString(outPtr) + ")"
+
+	case CPUI_LOAD:
+		// LOAD's natural result is the pointee (non-pointer when addr is int*).
+		// If the output varnode carries a pointer type (via HighVariable propagation
+		// from the MULTIEQUAL phi), an explicit cast is needed.
+		// Verify that the LOAD address is indeed a pointer to confirm we're in the
+		// linked-list traversal pattern (LOAD[ptr_addr] -> next_ptr).
+		if op.NumInput() >= 2 {
+			addr := op.Input(op.NumInput() - 1)
+			if addr != nil {
+				if addrPtr, addrIsPtr := addr.TypeReadFacing(nil).(*Pointer); addrIsPtr {
+					// Natural result is addrPtr.Pointee(); if that is not itself a pointer
+					// but the output is, a cast is required.
+					if _, pointeeIsPtr := addrPtr.Pointee().(*Pointer); !pointeeIsPtr {
+						return "(" + CTypeString(outPtr) + ")"
+					}
+				}
+			}
+		}
+		return ""
+
+	default:
+		return ""
 	}
 }
 
@@ -1884,6 +2070,27 @@ func (s *printCState) renderBranchCondition(op *PcodeOp) (string, error) {
 			}
 			if err != nil {
 				return "", err
+			}
+			// Null pointer comparison: apply null cast even in the BooleanFlip path.
+			// C++ parity: PrintC pointer comparison rendering with explicit null cast.
+			if negTok == "==" || negTok == "!=" {
+				if castStr, constIdx := s.nullPtrCastStr(defOp); castStr != "" {
+					nullFrag := s.lang.Atom(castStr)
+					if reorder {
+						// Inputs were swapped: constIdx in original -> opposite in swapped.
+						if constIdx == 0 {
+							right = nullFrag
+						} else {
+							left = nullFrag
+						}
+					} else {
+						if constIdx == 0 {
+							left = nullFrag
+						} else {
+							right = nullFrag
+						}
+					}
+				}
 			}
 			return s.lang.BinaryExpr(left, negTok, right, prec, ExprAssocLeft).Text, nil
 		}
@@ -2301,6 +2508,32 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	}
 }
 
+// nullPtrCastStr returns the cast string for a null pointer in a comparison,
+// or "" if this is not a null pointer comparison.
+// Also returns which input index is the constant (to replace it).
+func (s *printCState) nullPtrCastStr(op *PcodeOp) (castStr string, constIdx int) {
+	if op.NumInput() < 2 {
+		return "", -1
+	}
+	for ptrIdx := 0; ptrIdx <= 1; ptrIdx++ {
+		cstIdx := 1 - ptrIdx
+		ptrVn := op.Input(ptrIdx)
+		cstVn := op.Input(cstIdx)
+		if ptrVn == nil || cstVn == nil {
+			continue
+		}
+		if !cstVn.IsConstant() || cstVn.Offset() != 0 {
+			continue
+		}
+		ptrDt := ptrVn.TypeReadFacing(nil)
+		if _, isPtr := ptrDt.(*Pointer); !isPtr {
+			continue
+		}
+		return "(" + CTypeString(ptrDt) + ")0x0", cstIdx
+	}
+	return "", -1
+}
+
 func (s *printCState) renderBinary(op *PcodeOp, token string, prec ExprPrecedence, assoc ExprAssociativity) (ExprFragment, error) {
 	left, err := s.renderVarnodeExpr(op.Input(0))
 	if err != nil {
@@ -2309,6 +2542,18 @@ func (s *printCState) renderBinary(op *PcodeOp, token string, prec ExprPrecedenc
 	right, err := s.renderVarnodeExpr(op.Input(1))
 	if err != nil {
 		return ExprFragment{}, err
+	}
+	// Null pointer comparison: render 0 as (ptr_type)0x0 when comparing a pointer with NULL.
+	// C++ parity: PrintC renders pointer comparisons with explicit null pointer casts.
+	if token == "==" || token == "!=" {
+		if castStr, constIdx := s.nullPtrCastStr(op); castStr != "" {
+			nullFrag := s.lang.Atom(castStr)
+			if constIdx == 0 {
+				left = nullFrag
+			} else {
+				right = nullFrag
+			}
+		}
 	}
 	return s.lang.BinaryExpr(left, token, right, prec, assoc), nil
 }
@@ -2334,11 +2579,62 @@ func (s *printCState) renderCast(op *PcodeOp) (ExprFragment, error) {
 }
 
 func (s *printCState) renderLoad(op *PcodeOp) (ExprFragment, error) {
-	ptr, err := s.renderVarnodeExpr(op.Input(op.NumInput() - 1))
+	addrVn := op.Input(op.NumInput() - 1)
+
+	// Subscript pattern: LOAD[INT_ADD(ptr, const_offset)] where ptr is a pointer.
+	// Render as ptr[index] when const_offset is a multiple of the pointee size.
+	// This handles the case where BatchA's RulePtrArith did not fire (pointer type
+	// was unknown at BatchA time) but we now know ptr is a pointer.
+	// C++ parity: PrintC renders PTRADD as subscript; we detect the INT_ADD pattern directly.
+	if frag, ok, err := s.tryRenderSubscript(addrVn); ok || err != nil {
+		return frag, err
+	}
+
+	ptr, err := s.renderVarnodeExpr(addrVn)
 	if err != nil {
 		return ExprFragment{}, err
 	}
 	return s.lang.UnaryExpr("*", cPrecUnary, ptr), nil
+}
+
+// tryRenderSubscript detects LOAD[INT_ADD(ptr, const_bytes)] where ptr has a
+// pointer type, and renders the subscript as ptr[index].
+// Returns (frag, true, nil) when the pattern matches, (zero, false, nil) otherwise.
+func (s *printCState) tryRenderSubscript(addrVn *Varnode) (ExprFragment, bool, error) {
+	if addrVn == nil {
+		return ExprFragment{}, false, nil
+	}
+	def := addrVn.Def()
+	if def == nil || def.Code() != CPUI_INT_ADD || def.NumInput() < 2 {
+		return ExprFragment{}, false, nil
+	}
+	// Find base (pointer) and constant offset in the INT_ADD inputs.
+	baseVn, offsetVn := def.Input(0), def.Input(1)
+	if !offsetVn.IsConstant() {
+		baseVn, offsetVn = def.Input(1), def.Input(0)
+		if !offsetVn.IsConstant() {
+			return ExprFragment{}, false, nil
+		}
+	}
+	ptrType, ok := baseVn.TypeReadFacing(nil).(*Pointer)
+	if !ok {
+		return ExprFragment{}, false, nil
+	}
+	pointeeSize := int64(ptrType.Pointee().Size())
+	if pointeeSize <= 0 {
+		return ExprFragment{}, false, nil
+	}
+	offsetBytes := int64(offsetVn.Offset())
+	if offsetBytes <= 0 || offsetBytes%pointeeSize != 0 {
+		return ExprFragment{}, false, nil
+	}
+	index := offsetBytes / pointeeSize
+	baseExpr, err := s.renderVarnodeExpr(baseVn)
+	if err != nil {
+		return ExprFragment{}, false, err
+	}
+	frag := s.lang.PostfixExpr(baseExpr, fmt.Sprintf("[%d]", index))
+	return frag, true, nil
 }
 
 func (s *printCState) renderCall(op *PcodeOp, indirect bool) (ExprFragment, error) {
@@ -3103,6 +3399,137 @@ func (s *printCState) renameReturnOnlyLocals() {
 			s.returnOnlyLocs[key] = true
 		}
 	}
+	// Also rename MULTIEQUAL outputs at return-only locations.
+	// These are excluded from s.locals (marked as prologueVarnodes) but the
+	// RETURN op still references them by name during C rendering.
+	// C++ parity: ActionReturnSplit names the phi output directly when it is
+	// the sole carrier of the return value through the phi network.
+	for _, op := range s.fd.GetPcodeOpBank().AllOps() {
+		if op == nil || op.Code() != CPUI_MULTIEQUAL {
+			continue
+		}
+		out := op.Output()
+		if out == nil || out.Space() == nil || out.Space().IsUnique() {
+			continue
+		}
+		key := varnodeLocKey(out)
+		if newName, ok := keyName[key]; ok {
+			s.names[out] = newName
+			s.returnOnlyLocs[key] = true
+		}
+	}
+
+	// G5: Detect return-carrying MULTIEQUAL phi nodes with an identity-copy input
+	// from a named parameter. When found, store the param varnode reference for
+	// post-ghost-rename resolution in finalizeReturnCarrierRenames, and suppress
+	// the identity assignment statement immediately.
+	//
+	// We store the param VARNODE (not the name string) because renderFunctionSignature
+	// has not yet run -- param names will be ghost-offset later. finalizeReturnCarrierRenames
+	// is called after renderFunctionSignature to apply the correct final param names.
+	//
+	// C++ parity: ActionReturnSplit in coreaction.cc detects when a phi input is
+	// the identity of a parameter, making the parameter the direct return carrier.
+	paramVnSet := make(map[*Varnode]bool)
+	for _, pvn := range s.params {
+		paramVnSet[pvn] = true
+	}
+	for _, op := range s.fd.GetPcodeOpBank().AllOps() {
+		if op == nil || op.Code() != CPUI_MULTIEQUAL {
+			continue
+		}
+		out := op.Output()
+		if out == nil || out.Space() == nil || out.Space().IsUnique() {
+			continue
+		}
+		key := varnodeLocKey(out)
+		if _, isReturnCarrier := keyName[key]; !isReturnCarrier {
+			continue
+		}
+		// Look for a phi input that is an identity copy of a param varnode.
+		for i := 0; i < op.NumInput(); i++ {
+			in := op.Input(i)
+			if in == nil {
+				continue
+			}
+			paramVn := s.findParamCopyVarnode(in, paramVnSet)
+			if paramVn == nil {
+				continue
+			}
+			// Store for post-ghost-rename: finalizeReturnCarrierRenames will apply the name.
+			s.returnCarrierParams[key] = paramVn
+			// Suppress the identity COPY op: it becomes "param = param" (no-op).
+			if defOp := in.Def(); defOp != nil && defOp.Code() == CPUI_COPY {
+				s.identityOps[defOp] = true
+			}
+			break
+		}
+	}
+}
+
+// findParamCopyVarnode returns the param varnode if vn is a direct param varnode
+// or a COPY of one. paramVns is the set of known parameter varnodes.
+// Returns nil if vn is not an identity copy of a parameter.
+//
+// C++ parity: ActionReturnSplit detects phi inputs that are identity copies of params.
+func (s *printCState) findParamCopyVarnode(vn *Varnode, paramVns map[*Varnode]bool) *Varnode {
+	if vn == nil {
+		return nil
+	}
+	// Check if vn itself is a param varnode.
+	if paramVns[vn] {
+		return vn
+	}
+	// Check if vn's defining op is a COPY of a param varnode.
+	def := vn.Def()
+	if def == nil || def.Code() != CPUI_COPY {
+		return nil
+	}
+	src := def.Input(0)
+	if src != nil && paramVns[src] {
+		return src
+	}
+	return nil
+}
+
+// finalizeReturnCarrierRenames updates return-carrier varnodes to use the
+// post-ghost-rename param name. This must run AFTER renderFunctionSignature
+// has applied the ghost param offset (param_1 -> param_3 etc.).
+//
+// C++ parity: ActionReturnSplit renames the return carrier; ghost param offset
+// is applied during signature rendering in Ghidra's PrintC.
+func (s *printCState) finalizeReturnCarrierRenames() {
+	for key, paramVn := range s.returnCarrierParams {
+		newName := s.nameOf(paramVn)
+		// Update locals at this location key.
+		for _, vn := range s.locals {
+			if vn.Space() != nil && !vn.Space().IsUnique() {
+				if varnodeLocKey(vn) == key {
+					s.names[vn] = newName
+				}
+			}
+		}
+		// Update MULTIEQUAL outputs at this location (prologueVarnodes, not in s.locals).
+		for _, op := range s.fd.GetPcodeOpBank().AllOps() {
+			if op == nil || op.Code() != CPUI_MULTIEQUAL || op.Output() == nil {
+				continue
+			}
+			if varnodeLocKey(op.Output()) == key {
+				s.names[op.Output()] = newName
+			}
+		}
+	}
+}
+
+// isParamName reports whether name is the declared name of a function parameter
+// in this function. Used to skip re-declaring params that serve as return carriers.
+func (s *printCState) isParamName(name string) bool {
+	for _, vn := range s.params {
+		if s.nameOf(vn) == name {
+			return true
+		}
+	}
+	return false
 }
 
 // ghidraVarPrefix returns the Ghidra variable name prefix for a local based on
@@ -3149,7 +3576,29 @@ func (s *printCState) isReturnOnlyVarnode(vn *Varnode) bool {
 		case CPUI_RETURN:
 			hasReturn = true
 		case CPUI_MULTIEQUAL, CPUI_INDIRECT:
-			// Marker ops; transparent.
+			// Marker op: check if the marker's output exclusively reaches RETURN.
+			// If the phi output has any non-RETURN consumer, this vn is not return-only.
+			// C++ parity: ActionReturnSplit traces through phi nodes when determining
+			// whether a varnode is a pure return-value carrier.
+			if out := consumer.Output(); out != nil {
+				phiAllReturn := true
+				phiHasReturn := false
+				for _, c2 := range out.DescendIter() {
+					if c2 == nil || c2 == consumer {
+						continue // skip self-referential back-edges
+					}
+					if c2.Code() == CPUI_RETURN {
+						phiHasReturn = true
+					} else {
+						phiAllReturn = false
+						break
+					}
+				}
+				if !phiHasReturn || !phiAllReturn {
+					return false
+				}
+				hasReturn = true
+			}
 		default:
 			if s.prologueOps[consumer] {
 				// Suppressed; transparent.

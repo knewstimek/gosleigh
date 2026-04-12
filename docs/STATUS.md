@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: MSVC golden diff 대폭 축소 -- G1-G3, G7, 타입 추론 수정 완료 (2026-04-13)
+## 현재 단계: MSVC golden diff 완전 해소 -- G1-G7 모두 완료, Ghidra golden 100% 일치 (2026-04-13)
 
 ### 완료
 - [x] Git repo initialized
@@ -545,41 +545,26 @@
   - printc.go inferReturnType: 4바이트 TYPE_UNKNOWN return을 arithmetic ancestor check 후 int로 기본값 설정.
   - hasArithmeticAncestor(): def chain을 4레벨 탐색해 연산 결과면 int, 상수 선택이면 undefined4.
   - 결과: Classify2 `if (param_3 < 1)` v, CountedLoop/SumList `int` return v
+- [x] G5: AbsVal param 직접 수정 패턴 (2026-04-12)
+  - isReturnOnlyVarnode: MULTIEQUAL 투과 탐지 (phi output이 RETURN만 소비하면 true).
+  - renameReturnOnlyLocals: phi 입력이 param의 identity COPY면 carrier를 param으로 rename.
+  - finalizeReturnCarrierRenames: renderFunctionSignature 이후 ghost offset 반영.
+  - isBlockEmpty + empty else skip: identity COPY 제거 후 빈 else 분기 렌더링 억제.
+  - identityOps: param-to-carrier COPY를 suppress. emitLocalDeclarations: param name 중복 선언 skip.
+  - 결과: AbsVal `if (param_3 < 0) { param_3 = -param_3; } return param_3;` v (else/local 없음)
+- [x] G6: uVar1 rename (Classify2/nested_if) (2026-04-12)
+  - isReturnOnlyVarnode: MULTIEQUAL 투과 탐지 (phi 입력이 RETURN-feeding phi 거치면 return-only로 인식).
+  - renameReturnOnlyLocals 확장: MULTIEQUAL output도 keyName 위치에 rename.
+  - 결과: Classify2 `undefined4 uVar1; if (...) { uVar1 = 0; } ... return uVar1;` v
+
+- [x] G4: pointer type inference (`int *param_3`) (2026-04-13)
+  - seedLoadPointers(): ActionInferTypes.Apply 시작 전 pre-pass. LOAD op의 address input(1)에 `int *` 타입 직접 설정. C++ parity: TypeOpLoad::getInputLocal.
+  - 타입 전파 cascade: param3_phi(int*) -> LOAD output(int) -> INT_ADD(int) -> local_8(int).
+  - tryRenderSubscript(): renderLoad에서 LOAD[INT_ADD(ptr, const)] 패턴 감지, ptr이 pointer type이면 `ptr[index]` subscript 표기.
+  - nullPtrCastStr(): renderBinary에서 pointer vs constant-0 비교 시 `(int *)0x0` cast 삽입.
+  - effectiveLoadResultType() + assignCastStr(): COPY output이 pointer이고 source가 LOAD(int)이면 `(int *)` cast 삽입.
+  - 결과: SumList golden 완전 일치. go test ./... all PASS.
 
 ### 미시작 (우선순위 순)
-
-#### 실측 Ghidra golden 기준 잔여 diff
-golden 원본: `testdata/ghidra_golden/ghidra_golden.json`
-현재 테스트: `pkg/loader/msvc_diag_test.go` (TestMSVC_CountedLoop/SumList/AbsVal/Classify2)
-
----
-
-#### G4: pointer type inference (`int *param_3`)
-**현상**: SumList에서 `int param_3` 대신 `int *param_3` 필요.
-**현재 출력**: `int processEntry entry(undefined4 param_1, undefined4 param_2, int param_3)` -- param_3에 pointer type 없음.
-**Ghidra golden**: `int *param_3`, `local_8 = local_8 + *param_3`, `param_3 = (int *)param_3[1]`
-**C++ 참조**: `ghidra-ref/.../typeop.cc`: TypeOpLoad::propagateType -- LOAD 결과가 다시 LOAD의 주소로 쓰이면 pointer 추론.
-**수정 위치**: `pkg/pcode/action_infertypes.go` 또는 `pkg/pcode/typeop.go`
-
----
-
-#### G5: AbsVal -- local_0 제거 (param 직접 수정 패턴)
-**현상**: `local_0 = -param_3; return local_0` 대신 `param_3 = -param_3; return param_3` 필요.
-**Ghidra golden**: local 없음, else 분기 없음.
-**원인**: EAX가 param_3을 load해서 NEG 후 return -- Ghidra는 이를 param_3 직접 수정으로 인식.
-**C++ 참조**: ActionReturnSplit + copy propagation 조합.
-**수정 위치**: `pkg/pcode/printc.go` resolveForReturn 또는 `pkg/pcode/action_copy_markerop.go`
-
----
-
-#### G6: `uVar1` rename (Classify2/nested_if)
-**현상**: `undefined4 local_0` 대신 `undefined4 uVar1` 필요.
-**현재 출력**: `undefined4 local_0;` (타입은 undefined4로 맞음, 이름만 다름)
-**Ghidra golden**: `undefined4 uVar1; if (param_3 < 1) { uVar1 = 0; } ...`
-**원인**: renameReturnOnlyLocals가 Classify2 케이스에서 미발동. EAX-range varnode가 return-only로 인식되지 않음.
-**수정 위치**: `pkg/pcode/printc.go` renameReturnOnlyLocals / markReturnOnlyCopies
-
----
-
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
 - [ ] Full golden test coverage: decision tree resolution fix required before NOP/LDA/branch fixtures can be promoted from "unimplemented" to "match". See PARITY_AUDIT.md Golden/Bridge section.

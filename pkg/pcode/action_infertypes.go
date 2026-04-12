@@ -41,10 +41,47 @@ func (a *ActionInferTypes) Clone(groups ActionGroupList) Action {
 	return NewActionInferTypes(a.GetGroup())
 }
 
+// seedLoadPointers seeds a pointer type on the address input of each LOAD op.
+// When a varnode is used as the LOAD address, it must hold a pointer;
+// the pointee type is inferred from the LOAD output size.
+// Running this before the main inference loop lets type propagation (TypeOpLoad,
+// TypeOpIntAdd, TypeOpMultiequal) cascade int* -> int (LOAD result) -> int (local_8).
+// C++ parity: TypeOpLoad::getInputLocal (typeop.cc) -- address varnode seeding.
+func seedLoadPointers(data *Funcdata, tf *TypeFactory) {
+	for _, op := range data.allOpsOrdered() {
+		if op.IsDead() || op.Code() != CPUI_LOAD {
+			continue
+		}
+		if op.Output() == nil || op.NumInput() < 2 || op.Input(1) == nil {
+			continue
+		}
+		addr := op.Input(1)
+		cur := addr.Type()
+		if cur != nil && cur.Metatype() <= TYPE_PTR {
+			continue // already a pointer type or more specific -- don't override
+		}
+		outSize := op.Output().Size()
+		pointee := tf.GetBase(outSize, TYPE_INT, "int")
+		ptrType := tf.GetPointerTo(pointee, addr.Size())
+		SetVarnodeType(addr, ptrType)
+		if hv := addr.High(); hv != nil {
+			if hvt := hv.Type(); hvt == nil || hvt.Metatype() > TYPE_PTR {
+				hv.SetType(ptrType)
+			}
+		}
+	}
+}
+
 // Apply runs the iterative type-inference loop (max 7 iterations).
 // Returns 1 if any type was committed, 0 otherwise.
 func (a *ActionInferTypes) Apply(data *Funcdata) int {
 	tf := sharedTypeFactory
+
+	// Pre-pass: seed LOAD address inputs as pointer types before type propagation.
+	// This is needed because BatchA (which converts INT_ADD->PTRADD via RulePtrArith)
+	// already ran before ActionInferTypes. Without this pre-seed, param3 stays int
+	// and the LOAD address has no pointer type to propagate from.
+	seedLoadPointers(data, tf)
 
 	const maxIter = 7
 	totalCommitted := 0
