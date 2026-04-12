@@ -241,6 +241,13 @@ func (r *RuleSubCommute) apply(op *PcodeOp, data *Funcdata) int {
 	// Determine whether SUBPIECE commutes through this opcode.
 	// INT_MULT and INT_ADD only commute when truncating the low part (offset==0).
 	// Bitwise ops commute regardless of offset.
+	// INT_SDIV/INT_SREM/INT_DIV/INT_REM also commute at offset==0: used to
+	// cancel the CDQ+IDIV pattern where SUBPIECE(INT_SREM(INT_SEXT(x), ...), 0, n)
+	// is pushed through to INT_SREM(SUBPIECE(INT_SEXT(x), 0, n), ...) and then
+	// RuleSubExtComm collapses SUBPIECE(INT_SEXT(x), 0, n) -> x.
+	// C++ parity: RuleSubCommute::applyOp handles INT_SDIV/INT_SREM at lines
+	// 4590-4621 in ruleaction.cc (Ghidra), pushing SUBPIECE through the op and
+	// canceling the SEXT of each input when sizes match.
 	switch longform.Code() {
 	case CPUI_INT_MULT, CPUI_INT_ADD:
 		if offset != 0 {
@@ -252,6 +259,10 @@ func (r *RuleSubCommute) apply(op *PcodeOp, data *Funcdata) int {
 		}
 	case CPUI_INT_NEGATE, CPUI_INT_XOR, CPUI_INT_AND, CPUI_INT_OR:
 		// commutes for any offset
+	case CPUI_INT_SDIV, CPUI_INT_SREM, CPUI_INT_DIV, CPUI_INT_REM:
+		if offset != 0 {
+			return 0
+		}
 	default:
 		return 0
 	}
