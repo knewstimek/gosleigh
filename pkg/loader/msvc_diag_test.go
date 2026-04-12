@@ -59,6 +59,11 @@ func runPipeline(t *testing.T, prog []byte, name string) string {
 	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
+	// C++ parity: ActionDeadCode is in actmainloop alongside actprop (BatchA).
+	// BatchA rules (RuleIdentityEl, RulePropagateCopy) can leave dead ops
+	// (e.g., INT_XOR simplified to COPY then propagated) that need cleanup
+	// before shouldInline's NumDescend check for inlining decisions.
+	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
 	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)

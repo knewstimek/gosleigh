@@ -186,6 +186,34 @@ func (bg *BlockGraph) FindSpanningTree() {
 			bl.SetOutEdgeFlag(edgeIdx, EdgeFlagCross)
 		}
 	}
+
+	// Re-order bg.blocks to match RPO indices, mirroring C++ findSpanningTree's
+	// "list = rpostorder" assignment. This ensures GetBlock(i) returns the block
+	// with RPO index i, which Heritage and CalcForwardDominator rely on.
+	// Unreachable blocks (index == -1) are placed at the end.
+	// C++ parity: block.cc BlockGraph::findSpanningTree (list = rpostorder, line 1135)
+	rpostorder := make([]*FlowBlock, n)
+	for _, bl := range bg.blocks {
+		if bl.index >= 0 && int(bl.index) < n {
+			rpostorder[bl.index] = bl
+		}
+	}
+	// Compact: put nil slots (unreachable) after reachable blocks.
+	j := 0
+	for _, bl := range rpostorder {
+		if bl != nil {
+			rpostorder[j] = bl
+			j++
+		}
+	}
+	// Append unreachable blocks at the end.
+	for _, bl := range bg.blocks {
+		if bl.index < 0 {
+			rpostorder[j] = bl
+			j++
+		}
+	}
+	bg.blocks = rpostorder
 }
 
 // CalcForwardDominator computes immediate dominators using the

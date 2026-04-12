@@ -353,25 +353,78 @@ type RuleLessEqual struct{ batchRule }
 
 func NewRuleLessEqual(group string) *RuleLessEqual {
 	r := &RuleLessEqual{}
-	r.batchRule = newBatchRule(group, "lessequal", []OpCode{CPUI_INT_LESSEQUAL, CPUI_INT_SLESSEQUAL}, r.apply, func(g string) Rule { return NewRuleLessEqual(g) })
+	// C++ parity: RuleLessEqual fires on CPUI_BOOL_OR (ruleaction.cc:2256).
+	// Pattern: BOOL_OR(INT_SLESS(a,b), INT_EQUAL(a,b)) -> INT_SLESSEQUAL(a,b)
+	//          BOOL_OR(INT_LESS(a,b),  INT_EQUAL(a,b)) -> INT_LESSEQUAL(a,b)
+	r.batchRule = newBatchRule(group, "lessequal", []OpCode{CPUI_BOOL_OR}, r.apply, func(g string) Rule { return NewRuleLessEqual(g) })
 	return r
 }
 
 func (r *RuleLessEqual) apply(op *PcodeOp, data *Funcdata) int {
-	val, ok := constantValue(op.Input(1))
-	if !ok {
+	vnout1 := op.Input(0)
+	vnout2 := op.Input(1)
+	if vnout1 == nil || vnout2 == nil {
 		return 0
 	}
-	if op.Code() == CPUI_INT_LESSEQUAL {
-		if val == 0 {
-			rewriteOp(data, op, CPUI_INT_EQUAL, op.Input(0), data.NewConstant(op.Input(0).Size(), 0))
-			return 1
-		}
-		if val == maskForSize(op.Input(0).Size()) {
-			return rewriteToConst(data, op, 1)
-		}
+	opLess := vnout1.Def()
+	if opLess == nil {
+		return 0
 	}
-	return 0
+	opc := opLess.Code()
+	var opEqual *PcodeOp
+	if opc != CPUI_INT_LESS && opc != CPUI_INT_SLESS {
+		// Try swapping: maybe vnout2 is the less op.
+		opEqual = opLess
+		opLess = vnout2.Def()
+		if opLess == nil {
+			return 0
+		}
+		opc = opLess.Code()
+		if opc != CPUI_INT_LESS && opc != CPUI_INT_SLESS {
+			return 0
+		}
+	} else {
+		opEqual = vnout2.Def()
+	}
+	if opEqual == nil {
+		return 0
+	}
+	equalOpc := opEqual.Code()
+	if equalOpc != CPUI_INT_EQUAL && equalOpc != CPUI_INT_NOTEQUAL {
+		return 0
+	}
+	compvn1 := opLess.Input(0)
+	compvn2 := opLess.Input(1)
+	if compvn1 == nil || compvn2 == nil {
+		return 0
+	}
+	eq0 := opEqual.Input(0)
+	eq1 := opEqual.Input(1)
+	if eq0 == nil || eq1 == nil {
+		return 0
+	}
+	// Verify the equal op uses the same two operands (in either order).
+	// C++ parity: ruleaction.cc:2291-2294
+	match := (sameValue(compvn1, eq0) && sameValue(compvn2, eq1)) ||
+		(sameValue(compvn1, eq1) && sameValue(compvn2, eq0))
+	if !match {
+		return 0
+	}
+	if equalOpc == CPUI_INT_NOTEQUAL {
+		// BOOL_OR(less, notequal): notequal alone subsumes less.
+		// Rewrite to COPY(notequal_out). C++ parity: ruleaction.cc:2296-2299.
+		rewriteToCopy(data, op, opEqual.Output())
+	} else {
+		// Convert BOOL_OR -> INT_SLESSEQUAL or INT_LESSEQUAL.
+		var newOpc OpCode
+		if opc == CPUI_INT_SLESS {
+			newOpc = CPUI_INT_SLESSEQUAL
+		} else {
+			newOpc = CPUI_INT_LESSEQUAL
+		}
+		rewriteOp(data, op, newOpc, compvn1, compvn2)
+	}
+	return 1
 }
 
 type RuleLessNotEqual struct{ batchRule }

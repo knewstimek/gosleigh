@@ -50,3 +50,23 @@ func TestRulesBool_RewriteAndNonRewrite(t *testing.T) {
 		t.Fatalf("logic2bool non-rewrite=%d, want 0", got)
 	}
 }
+
+func TestRuleEqual2Zero_IntSub(t *testing.T) {
+	data := newRulesFuncdata()
+	x := newRuleInput(data, 4, 0x10)
+	y := newRuleInput(data, 4, 0x20)
+	sub := newRuleOp(data, CPUI_INT_SUB, 4, x, y)
+	eq0 := newRuleOp(data, CPUI_INT_EQUAL, 1, sub.Output(), data.NewConstant(4, 0))
+	if got := NewRuleEqual2Zero("bool").ApplyOp(eq0, data); got != 1 {
+		t.Fatalf("equal2zero INT_SUB ApplyOp=%d, want 1", got)
+	}
+	if eq0.Code() != CPUI_INT_EQUAL {
+		t.Fatalf("expected INT_EQUAL, got %v", eq0.Code())
+	}
+	if eq0.Input(0) != x {
+		t.Fatalf("expected x as lhs, got %v", eq0.Input(0))
+	}
+	if eq0.Input(1) != y {
+		t.Fatalf("expected y as rhs, got %v", eq0.Input(1))
+	}
+}
