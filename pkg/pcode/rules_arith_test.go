@@ -152,13 +152,15 @@ func TestRuleIdentityEl_IntXorZero(t *testing.T) {
 }
 
 // TestActionSeedSignedOps_SetsTypeInt verifies that ActionSeedSignedOps seeds
-// TYPE_INT on all inputs of a signed comparison opcode (INT_SLESS).
-// C++ parity: TypeOpIntSless::propagateType input->input edge (typeop.cc ~1036).
+// TYPE_INT on inputs of signed arithmetic opcodes (INT_2COMP / INT_SRIGHT / etc.).
+// SLESS/SLESSEQUAL are intentionally excluded: TypeOpIntSless::propagateType
+// returns nullptr in C++, so comparisons do not establish operand signedness.
 func TestActionSeedSignedOps_SetsTypeInt(t *testing.T) {
 	data := newRulesFuncdata()
 	a := newRuleInput(data, 4, 0x10)
-	b := newRuleInput(data, 4, 0x20)
-	newRuleOp(data, CPUI_INT_SLESS, 1, a, b)
+	// INT_2COMP (two's complement negation) has exactly one input that should
+	// be seeded as TYPE_INT because negation is a signed-specific operation.
+	newRuleOp(data, CPUI_INT_2COMP, 1, a)
 
 	action := NewActionSeedSignedOps("analysis")
 	ret := action.Apply(data)
@@ -171,36 +173,48 @@ func TestActionSeedSignedOps_SetsTypeInt(t *testing.T) {
 	if a.Type().Metatype() != TYPE_INT {
 		t.Fatalf("expected vn_a metatype TYPE_INT (%d), got %d", TYPE_INT, a.Type().Metatype())
 	}
-	if b.Type() == nil {
-		t.Fatal("expected vn_b to have TYPE_INT set, got nil")
+}
+
+// TestActionSeedSignedOps_SLessDoesNotSeed verifies that INT_SLESS comparisons
+// do NOT seed TYPE_INT on their inputs.
+// C++ parity: TypeOpIntSless::propagateType returns nullptr (typeop.cc).
+func TestActionSeedSignedOps_SLessDoesNotSeed(t *testing.T) {
+	data := newRulesFuncdata()
+	a := newRuleInput(data, 4, 0x10)
+	b := newRuleInput(data, 4, 0x20)
+	newRuleOp(data, CPUI_INT_SLESS, 1, a, b)
+
+	action := NewActionSeedSignedOps("analysis")
+	ret := action.Apply(data)
+	if ret != 0 {
+		t.Fatalf("ActionSeedSignedOps.Apply=%d on SLESS, want 0 (no seeding)", ret)
 	}
-	if b.Type().Metatype() != TYPE_INT {
-		t.Fatalf("expected vn_b metatype TYPE_INT (%d), got %d", TYPE_INT, b.Type().Metatype())
+	if a.Type() != nil {
+		t.Fatalf("SLESS input vn_a should not be seeded, got type %v", a.Type())
+	}
+	if b.Type() != nil {
+		t.Fatalf("SLESS input vn_b should not be seeded, got type %v", b.Type())
 	}
 }
 
 // TestActionSeedSignedOps_DoesNotOverrideUint verifies that ActionSeedSignedOps
 // does not override a varnode whose type is already TYPE_UINT (more specific
 // than TYPE_INT in Ghidra's metatype ordering).
+// Uses INT_2COMP (a signed-seeding op) since SLESS no longer seeds at all.
 func TestActionSeedSignedOps_DoesNotOverrideUint(t *testing.T) {
 	data := newRulesFuncdata()
 	a := newRuleInput(data, 4, 0x10)
-	b := newRuleInput(data, 4, 0x20)
 	// Pre-set vn_a to TYPE_UINT -- more specific than TYPE_INT (13 < 14).
 	tf := sharedTypeFactory
 	utype := tf.GetExactType(4, TYPE_UINT)
 	if utype != nil {
 		SetVarnodeType(a, utype)
 	}
-	newRuleOp(data, CPUI_INT_SLESS, 1, a, b)
+	newRuleOp(data, CPUI_INT_2COMP, 1, a)
 	action := NewActionSeedSignedOps("analysis")
 	action.Apply(data)
 	// vn_a must still have TYPE_UINT, not overridden to TYPE_INT.
 	if a.Type() != nil && a.Type().Metatype() == TYPE_INT {
 		t.Fatalf("ActionSeedSignedOps overrode TYPE_UINT with TYPE_INT on vn_a")
-	}
-	// vn_b had no type so it should have been seeded with TYPE_INT.
-	if b.Type() == nil || b.Type().Metatype() != TYPE_INT {
-		t.Fatalf("expected vn_b metatype TYPE_INT, got %v", b.Type())
 	}
 }

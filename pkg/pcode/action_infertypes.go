@@ -122,6 +122,16 @@ func propagateOneType(vn *Varnode, tf *TypeFactory) {
 		return
 	}
 
+	// Don't propagate TYPE_UINT forward from constant varnodes. Constants carry
+	// a TYPE_UINT assignment as their intrinsic type, but that should not seed
+	// the type of variables that merely hold their value. Variable types come
+	// from semantic ops (SLESS -> INT, ZEXT -> UINT, pointer deref -> PTR).
+	// Skipping the forward direction for constants mirrors the Ghidra behavior
+	// where simple loop counters / accumulators remain undefined4 rather than
+	// being promoted to "unsigned int" by the constant initialiser.
+	// C++ parity: TypeRecovery::propagateOneType -- constants are not pushed
+	// as type sources in the forward direction (typeop.cc / coreaction.cc).
+	if !vn.IsConstant() {
 	// Forward: vn is an input of some ops; propagate to their outputs.
 	for _, op := range vn.DescendIter() {
 		if op == nil || op.IsDead() {
@@ -154,6 +164,7 @@ func propagateOneType(vn *Varnode, tf *TypeFactory) {
 			trySetTempType(out, derived)
 		}
 	}
+	} // end !vn.IsConstant() guard
 
 	// Reverse: vn is the output of its defining op; propagate to sibling inputs.
 	def := vn.Def()
