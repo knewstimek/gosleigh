@@ -52,6 +52,11 @@ Ghidra decompiler/Sleigh runtime을 Go로 다시 구현하는 프로젝트. stan
 - 중간 슬라이스를 MVP나 최종 목표처럼 표현하지 않는다.
 - 마일스톤을 끝내면 `docs/STATUS.md`를 갱신한다.
 - runtime 실행 경로가 바뀌면 같은 라운드에 `docs/RUNTIME_FLOW.md`와 `docs/PARITY_AUDIT.md`도 갱신한다.
+- `docs/STATUS.md`의 `### 미시작` 항목은 다음 세션이 바로 실행 가능한 수준으로 유지한다. 각 항목에 반드시 포함:
+  - 현상: 현재 출력 vs Ghidra golden (`testdata/ghidra_golden/ghidra_golden.json`) 차이
+  - C++ 참조: `ghidra-ref/` 파일명과 함수/라인 수준
+  - 수정 대상 Go 파일
+  - 성공 기준: golden JSON 키 또는 `go test` 테스트 함수명
 - 여러 파일에 걸친 실행 순서와 authority path는 문서에, 세부 C++ 대응 관계는 코드 주석에 남긴다.
 
 ## ghidra-ref
