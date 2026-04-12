@@ -15,10 +15,29 @@
 package pcode
 
 import (
+	"fmt"
 	"sort"
 
 	"gosleigh/pkg/address"
 )
+
+// localHexName returns the Ghidra-style local variable name for a stack slot.
+// Ghidra names stack locals using the absolute value of the signed frame offset
+// in hex: offset 0xfffffff4 (-12) -> "local_c", 0xfffffff8 (-8) -> "local_8".
+// Positive offsets (parameters) use this function only when the caller knows
+// they are locals; callers must guard against parameter offsets beforehand.
+// C++ parity: ScopeLocal uses frame-offset-based naming via Symbol::buildName.
+func localHexName(offset uint64) string {
+	// Interpret the offset as a signed 32-bit value to get the frame offset.
+	// Stack addresses in x86-32 are 4 bytes; use int32 sign extension.
+	signed := int32(uint32(offset))
+	if signed < 0 {
+		return fmt.Sprintf("local_%x", uint32(-signed))
+	}
+	// Positive offset: use as-is with "local_" prefix.
+	// This should not normally occur since positive stack offsets are params.
+	return fmt.Sprintf("local_%x", offset)
+}
 
 // stackSpaceKind returns the SpaceKind used for stack address spaces.
 func stackSpaceKind() address.SpaceKind { return address.SpaceKindStack }
@@ -160,8 +179,17 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 	}
 
 	// --- Stack parameters and locals ---
-	var paramEntries []stackEntry
-	var localEntries []stackEntry
+	// Group all stack varnodes by offset. Each unique offset gets one HighVariable;
+	// all SSA versions at that offset (input, MULTIEQUAL output, COPY output) become
+	// instances of the same HighVariable so they share the same C name.
+	// C++ parity: ScopeLocal::restructureHigh -- Ghidra merges all SSA versions at the
+	// same address into a single HighVariable with multiple instances.
+	type offsetGroup struct {
+		offset  uint64
+		varnodes []*Varnode
+	}
+	paramGroups := make(map[uint64]*offsetGroup) // offset -> group
+	localGroups := make(map[uint64]*offsetGroup)
 
 	for _, vn := range varnodes {
 		if vn == nil || vn.Space() == nil {
@@ -171,61 +199,86 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 		if !isStackSpace(vn, sl.model) {
 			continue
 		}
-		if sl.model.IsParamOffset(vn.Offset()) {
-			// Input varnodes in the param range are parameters.
-			// Also accept written varnodes in the param range -- after Heritage,
-			// stack params often appear as both input and written.
-			paramEntries = append(paramEntries, stackEntry{vn, vn.Offset()})
-		} else if sl.model.IsLocalOffset(vn.Offset()) {
-			localEntries = append(localEntries, stackEntry{vn, vn.Offset()})
+		off := vn.Offset()
+		if sl.model.IsParamOffset(off) {
+			if g, ok := paramGroups[off]; ok {
+				g.varnodes = append(g.varnodes, vn)
+			} else {
+				paramGroups[off] = &offsetGroup{offset: off, varnodes: []*Varnode{vn}}
+			}
+		} else if sl.model.IsLocalOffset(off) {
+			if g, ok := localGroups[off]; ok {
+				g.varnodes = append(g.varnodes, vn)
+			} else {
+				localGroups[off] = &offsetGroup{offset: off, varnodes: []*Varnode{vn}}
+			}
 		}
 	}
 
-	// Deduplicate by offset: keep only the first varnode seen per offset
-	// (stack varnodes at the same offset are aliases; one name is enough).
-	paramEntries = deduplicateByOffset(paramEntries)
-	localEntries = deduplicateByOffset(localEntries)
-
+	// Collect and sort groups.
+	paramList := make([]*offsetGroup, 0, len(paramGroups))
+	for _, g := range paramGroups {
+		paramList = append(paramList, g)
+	}
 	// Sort params ascending by offset: offset 8 < 16 < 24 -> param_N, param_N+1, ...
-	sort.Slice(paramEntries, func(i, j int) bool {
-		return paramEntries[i].offset < paramEntries[j].offset
+	sort.Slice(paramList, func(i, j int) bool {
+		return paramList[i].offset < paramList[j].offset
 	})
 
+	localList := make([]*offsetGroup, 0, len(localGroups))
+	for _, g := range localGroups {
+		localList = append(localList, g)
+	}
 	// Sort locals descending by offset: 0xfffffffc > 0xfffffff8 -> local_0, local_1, ...
 	// This matches Ghidra's frame layout where the first local below the frame pointer is local_0.
-	sort.Slice(localEntries, func(i, j int) bool {
-		return localEntries[i].offset > localEntries[j].offset
+	sort.Slice(localList, func(i, j int) bool {
+		return localList[i].offset > localList[j].offset
 	})
 
 	// Create HighVariables for stack params.
 	// Stack param numbering starts AFTER register params so the combined
 	// param_1..param_N sequence is contiguous and ABI-ordered.
-	for i, e := range paramEntries {
+	// All SSA versions at the same offset share one HighVariable.
+	for i, g := range paramList {
 		name := GetParamName(regParamCount + i)
 		hv := NewHighVariable(name)
-		hv.AddInstance(e.vn)
-		sl.paramByVn[e.vn] = hv
+		// Add all SSA versions at this offset as instances of the same HighVariable.
+		// C++ parity: ScopeLocal::restructureHigh merges all versions into one HighVariable.
+		for _, vn := range g.varnodes {
+			hv.AddInstance(vn)
+			sl.paramByVn[vn] = hv
+		}
 		if fp != nil {
 			fp.AddParam(hv)
 		}
 		// Seed TYPE_INT for untyped stack params, matching register param treatment.
 		// C++ parity: Ghidra assigns signed integer as default type for ABI stack slots;
 		// ActionInferTypes then propagates this through INT_ADD/INT_MULT chains.
-		if e.vn.Type() == nil {
-			sz := e.vn.Size()
-			if sz <= 0 {
-				sz = 4
+		for _, vn := range g.varnodes {
+			if vn.Type() == nil {
+				sz := vn.Size()
+				if sz <= 0 {
+					sz = 4
+				}
+				SetVarnodeType(vn, sharedTypeFactory.GetBase(int32(sz), TYPE_INT, ""))
 			}
-			SetVarnodeType(e.vn, sharedTypeFactory.GetBase(int32(sz), TYPE_INT, ""))
 		}
 	}
 
 	// Create HighVariables for locals.
-	for i, e := range localEntries {
-		name := GetLocalName(i)
+	// All SSA versions at the same offset share one HighVariable.
+	// Name: Ghidra hex-offset style "local_<hex>".
+	// For negative frame offsets (locals below EBP/FP), the hex suffix is the
+	// absolute value of the signed offset, e.g. 0xfffffff4 (-12) -> "local_c".
+	// C++ parity: ScopeLocal uses SymbolEntry addresses; Ghidra names are set by
+	// ScopeLocal::buildFromVarnodes via Symbol::buildName using the frame offset.
+	for _, g := range localList {
+		name := localHexName(g.offset)
 		hv := NewHighVariable(name)
-		hv.AddInstance(e.vn)
-		sl.localByVn[e.vn] = hv
+		for _, vn := range g.varnodes {
+			hv.AddInstance(vn)
+			sl.localByVn[vn] = hv
+		}
 		if fp != nil {
 			fp.AddLocal(hv)
 		}

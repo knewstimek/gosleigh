@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: Ghidra Golden 완전 parity -- processEntry + TYPE_INT inference (2026-04-12)
+## 현재 단계: Stack Heritage 완료 -- local_c/local_8 named locals + loop body (2026-04-13)
 
 ### 완료
 - [x] Git repo initialized
@@ -505,6 +505,22 @@
   - TestMSVC_Classify2: `if (param_3 <= 0) { ... } else if (param_3 < param_4) { ... }` -- 논리적으로 정확. 구조적 미스매치: 조건 inversion (Ghidra는 param_4 <= param_3 선호 가능).
   - TestMSVC_CountedLoop/SumList: stack local 렌더링 미해결 -- `*(local_0 - 8) = 0` 형태. Stack Heritage 부재로 STORE-to-local이 변수 할당으로 변환되지 않음. 기능적으로 올바르나 Ghidra golden과 다름.
 
+- [x] G1: Stack Heritage -- STORE to named local (2026-04-13)
+  - **ActionStackPtrFlow** (action_stack_ptr_flow.go): STORE(ram, INT_ADD(FP,const), val) 패턴 감지 후 stack-space varnode COPY로 변환. LOAD(FP+offset)도 stack input varnode로 변환.
+  - **Heritage** (heritage.go): HeritageRange()로 슬롯별 SSA Heritage 실행. MULTIEQUAL phi node 생성.
+  - **MergeMarker 2회**: BatchA RulePropagateCopy가 MULTIEQUAL inputs를 unique varnode로 교체 후 2차 MergeMarker로 HighVariable 재연결.
+  - **PrintC** (printc.go):
+    - unique MULTIEQUAL-input op을 suppress하지 않고 MULTIEQUAL output 이름으로 emit (local_c = ...).
+    - collectSymbols: unique varnode가 MULTIEQUAL sole input이면 MULTIEQUAL output(stack-space)을 locals 대표로 등록.
+    - isReturnOnlyVarnode: inline consumer가 COPY->MULTIEQUAL 체인으로 이어지면 return-only 아님.
+    - markPhiReturnOnly: inline consumer의 1-level lookahead에서 COPY 등 non-RETURN을 만나면 allTransparent=false.
+  - **ScopeLocal** (scopelocal.go): Ghidra hex-offset 스타일 이름 (`local_c`, `local_8` 등). `localHexName()` 함수 추가.
+  - **MergeMarker** (merge.go): mergeTestRequired() nil guard 추가.
+  - 결과:
+    - CountedLoop: `local_c = 0; while (local_8 < 5) { local_c = local_c + local_8; local_8 = local_8 + 1; } return local_c;`
+    - SumList: `local_8 = 0; while (param_3 != 0) { ... }` 형태 (stack local 올바름).
+  - go test ./... 전체 통과.
+
 ### 미시작 (우선순위 순)
 
 #### 실측 Ghidra golden 기준 잔여 diff
@@ -513,34 +529,11 @@ golden 원본: `testdata/ghidra_golden/ghidra_golden.json`
 
 ---
 
-#### G1: Stack Heritage -- STORE to named local (최우선)
-**현상**: CountedLoop/SumList에서 `*(local_0 - 8) = 0` 형태로 raw 포인터 산술 노출.
-**Ghidra golden** (counted_loop_x86_32):
-```
-local_c = 0;
-for (local_8 = 0; local_8 < 5; local_8 = local_8 + 1) {
-    local_c = local_c + local_8;
-}
-return local_c;
-```
-**C++ 참조**:
-- `ghidra-ref/.../heritage.cc`: Heritage::buildADT(), Heritage::analyzeHeap() -- stack space를 일반 SSA 공간처럼 처리
-- `ghidra-ref/.../coreaction.cc`: ActionStackPtrFlow::checkClog(), repair() -- L433-L499
-**수정 위치**: `pkg/pcode/action_stack_ptr_flow.go`
-**핵심 작업**:
-1. STORE(ram, INT_ADD(FP, const), val) 패턴 감지 후 stack-space output varnode로 변환 (COPY op 삽입 + STORE 제거)
-2. 루프에서 같은 stack slot이 여러 번 쓰일 때 Heritage의 MULTIEQUAL 삽입과 연계
-3. 프레임 셋업 ops (PUSH/SUB ESP) -- STORE 변환 후 consumer 없어지면 ActionDeadCode가 자동 제거
-**네이밍 규칙**: `local_N` where N = hex(abs(EBP_offset) + sizeof(saved_EBP)). EBP-4 = local_8 (EBP-4+saved_EBP_4 = 8), EBP-8 = local_c (EBP-8+saved_EBP_4 = 0xC).
-
----
-
 #### G2: `for` 루프 구조화
 **현상**: counted_loop/sum_list에서 `while` 대신 `for` 필요.
 **Ghidra golden**: `for (local_8 = 0; local_8 < 5; local_8 = local_8 + 1)`
 **C++ 참조**: `ghidra-ref/.../coreaction.cc`: ActionForLoops -- loop-tail increment 패턴 감지 후 for 헤더로 올림.
 **수정 위치**: `pkg/pcode/printc.go` 또는 새 ActionForLoops
-**의존**: G1 완료 후 진행.
 
 ---
 

@@ -126,6 +126,9 @@ func mergeTestRequired(h1, h2 *HighVariable) bool {
 	if h1 == h2 {
 		return true // already the same variable
 	}
+	if h1 == nil || h2 == nil {
+		return true // nil HighVariable cannot conflict
+	}
 	// If both have locked types they must agree.
 	if h1.datatype != nil && h2.datatype != nil {
 		if h1.datatype != h2.datatype {
@@ -340,7 +343,17 @@ func (m *Merge) MergeOp(op *PcodeOp) {
 		// Re-read highOut: a previous merge iteration may have updated it.
 		highOut = outVn.High()
 		highIn := inVn.High()
-		if highIn == nil || highIn == highOut {
+		if highIn == nil {
+			// Varnode has no HighVariable -- this happens when a COPY-propagation
+			// rule (e.g. RulePropagateCopy in BatchA) replaces a stack-space phi
+			// input with a unique-space intermediate that was never assigned a High.
+			// C++ parity: Ghidra Heritage always assigns a HighVariable to every
+			// live varnode before mergeMarker runs; we bootstrap the unique here.
+			highIn = NewHighVariable("")
+			highIn.AddInstance(inVn)
+			inVn.SetHigh(highIn)
+		}
+		if highIn == highOut {
 			continue
 		}
 		if !mergeTestRequired(highOut, highIn) {
