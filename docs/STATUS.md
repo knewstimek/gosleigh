@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: MSVC golden diff 완전 해소 -- G1-G7 모두 완료, Ghidra golden 100% 일치 (2026-04-13)
+## 현재 단계: H1 완료 -- GhidraFormat + 자동 golden assertions (2026-04-13)
 
 ### 완료
 - [x] Git repo initialized
@@ -569,7 +569,7 @@
 
 ### 미시작 (우선순위 순)
 
-- [ ] H1: Ghidra format matching + auto golden assertions
+- [x] H1: Ghidra format matching + auto golden assertions (2026-04-13, commit 0f6d8c4)
   - 현상: Gosleigh PrintC output format != Ghidra golden (4-space indent vs flat, BSD brace vs K&R+blank, ", " vs ",", `} else if` vs `}\nelse if`). TestMSVC_* tests have no assertions -- golden diff not auto-detected.
   - C++ ref: printc.cc PrintC::docFunction() (K&R function brace), printc.cc emitBlockBraces (no indent), parameterList comma format
   - 수정 대상: pkg/pcode/printc.go, pkg/pcode/printc_decl.go, pkg/pcode/emitter.go, pkg/pcode/printlanguage.go, pkg/loader/msvc_diag_test.go
