@@ -109,9 +109,9 @@ func TestBuildFromVarnodes_MixedSpaces(t *testing.T) {
 		t.Errorf("param 1 name = %q, want param_2", nameOrNil(p1))
 	}
 
-	// Local must be named local_0.
-	if l0 := fp.GetLocal(0); l0 == nil || l0.Name() != "local_0" {
-		t.Errorf("local 0 name = %q, want local_0", nameOrNil(l0))
+	// Local must be named local_4 (offset 0xfffffffc -> -4 -> hex 4).
+	if l0 := fp.GetLocal(0); l0 == nil || l0.Name() != "local_4" {
+		t.Errorf("local 0 name = %q, want local_4", nameOrNil(l0))
 	}
 }
 
@@ -173,8 +173,11 @@ func TestBuildFromVarnodes_ParamOrdering(t *testing.T) {
 	}
 }
 
-// TestBuildFromVarnodes_LocalOrdering verifies that locals are assigned names in
-// descending offset order: 0xfffffffc -> local_0, 0xfffffff8 -> local_1 (Ghidra frame layout).
+// TestBuildFromVarnodes_LocalOrdering verifies that locals are assigned names using
+// Ghidra hex-offset style in descending offset order:
+//   0xfffffffc (-4)  -> local_4  (first, closest to EBP)
+//   0xfffffff8 (-8)  -> local_8
+//   0xfffffff4 (-12) -> local_c  (third, farthest from EBP)
 func TestBuildFromVarnodes_LocalOrdering(t *testing.T) {
 	stackSp, _, _ := buildTestSpaces()
 	model := buildTestModel(stackSp)
@@ -192,14 +195,14 @@ func TestBuildFromVarnodes_LocalOrdering(t *testing.T) {
 		t.Fatalf("NumLocals = %d, want 3", fp.NumLocals())
 	}
 
-	// local_0 must be the highest offset (0xfffffffc, closest to frame pointer).
+	// local_4 must be the highest offset (0xfffffffc, closest to frame pointer).
 	l0 := fp.GetLocal(0).GetInstance(0)
 	if l0 == nil || l0.Offset() != 0xfffffffc {
-		t.Errorf("local_0 offset = %#x, want 0xfffffffc", l0.Offset())
+		t.Errorf("local_4 offset = %#x, want 0xfffffffc", l0.Offset())
 	}
 	l2 := fp.GetLocal(2).GetInstance(0)
 	if l2 == nil || l2.Offset() != 0xfffffff4 {
-		t.Errorf("local_2 offset = %#x, want 0xfffffff4", l2.Offset())
+		t.Errorf("local_c offset = %#x, want 0xfffffff4", l2.Offset())
 	}
 }
 
@@ -224,11 +227,11 @@ func TestFindEntry(t *testing.T) {
 		t.Errorf("FindEntry(paramVn).Name() = %q, want param_1", hv.Name())
 	}
 
-	// Known local varnode.
+	// Known local varnode (offset 0xfffffffc -> -4 -> local_4).
 	if hv := sl.FindEntry(localVn); hv == nil {
 		t.Error("FindEntry(localVn) = nil, want non-nil HighVariable")
-	} else if hv.Name() != "local_0" {
-		t.Errorf("FindEntry(localVn).Name() = %q, want local_0", hv.Name())
+	} else if hv.Name() != "local_4" {
+		t.Errorf("FindEntry(localVn).Name() = %q, want local_4", hv.Name())
 	}
 
 	// Unknown varnode.

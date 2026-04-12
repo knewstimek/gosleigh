@@ -34,6 +34,21 @@ func runPipeline(t *testing.T, prog []byte, name string) string {
 	spf := pcode.NewActionStackPtrFlow("analysis")
 	spf.Apply(result.Funcdata)
 
+	// Run Heritage for each individual stack slot produced by ActionStackPtrFlow.
+	// Each slot is processed independently to avoid the TaskList adjacency-merging
+	// that would combine distinct locals into one wide range (causing wrong phi sizes).
+	// C++ parity: Ghidra runs ActionStackPtrFlow before Heritage, so Heritage handles
+	// stack SSA natively in one pass; we approximate by running HeritageRange per slot.
+	if ss := spf.StackSpace(); ss != nil {
+		stackHeritage := pcode.NewHeritage(result.Funcdata, []*address.Space{ss})
+		stackHeritage.BuildADT(result.Graph)
+		slots := spf.StackSlots()
+		sizes := spf.StackSlotSizes()
+		for i, addr := range slots {
+			stackHeritage.HeritageRange(result.Graph, addr, sizes[i])
+		}
+	}
+
 	var regSpaceIdx int = -1
 	stackSpace := spf.StackSpace()
 	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
@@ -64,6 +79,15 @@ func runPipeline(t *testing.T, prog []byte, name string) string {
 	// (e.g., INT_XOR simplified to COPY then propagated) that need cleanup
 	// before shouldInline's NumDescend check for inlining decisions.
 	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
+	// Re-run MergeMarker after BatchA: RulePropagateCopy may have replaced
+	// stack-space COPY inputs to MULTIEQUAL with unique-space varnodes that
+	// have no HighVariable assigned. A second MergeMarker pass propagates the
+	// MULTIEQUAL output's HighVariable (e.g. local_0) to those unique inputs
+	// so they are rendered as the correct local variable in assignments.
+	// C++ parity: Ghidra runs mergeMarker once before actprop, but actprop
+	// does not perform COPY propagation into phi inputs; Gosleigh approximates
+	// by re-running MergeMarker after BatchA propagation completes.
+	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
 	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)

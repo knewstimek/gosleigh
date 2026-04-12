@@ -407,13 +407,38 @@ func (h *Heritage) renameRecurse(bl *BlockBasic, graph *BlockGraph,
 	// Phase 1: Process ops in this block
 	for _, op := range bl.Ops() {
 		if op.Code() != CPUI_MULTIEQUAL {
-			// For non-MULTIEQUAL ops: replace active heritage inputs
+			// For non-MULTIEQUAL ops: replace inputs in our address range with the
+			// current reaching definition from varStack.
 			for slot := 0; slot < op.NumInput(); slot++ {
 				inp := op.Input(slot)
-				if inp == nil || !inp.IsActiveHeritage() {
+				if inp == nil {
 					continue
 				}
-				inp.ClearActiveHeritage()
+				// Only process inputs in our address range.
+				// Multiple HeritageRange passes run sequentially over different slots;
+				// this range check keeps each pass scoped to its own slot.
+				// C++ parity: Ghidra runs a single rename over all disjoint ranges at once;
+				// we approximate by scoping each HeritageRange pass to its own address range.
+				if inp.Space() != addr.Space ||
+					inp.Offset() < addr.Offset || inp.Offset() >= endOff {
+					continue
+				}
+				// Skip varnodes that are already SSA-renamed definitions (IsWritten).
+				// A written varnode is the output of a COPY/MULTIEQUAL in this pass --
+				// it is already on varStack and does not need renaming as a use.
+				// C++ parity: isHeritageKnown() filters out insert/constant/annotation varnodes
+				// from the free set before Heritage processes them.
+				if inp.IsWritten() {
+					continue
+				}
+				// Clear ActiveHeritage flag to avoid double-processing if this varnode
+				// is shared across multiple ops (e.g. multiple LOADs with same fresh input vn).
+				// We do NOT require IsActiveHeritage() here -- for shared input varnodes only
+				// the first use has the flag set; subsequent uses have it cleared but still
+				// need renaming. The address range check above ensures we only touch our slot.
+				if inp.IsActiveHeritage() {
+					inp.ClearActiveHeritage()
+				}
 
 				key := makeAddressKey(inp.Addr())
 				stk := varStack[key]
@@ -570,6 +595,30 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 	h.disjoint.Clear()
 	h.pass++
 	h.AnnotateFloatTypes()
+}
+
+// HeritageRange performs SSA construction for a single explicit address range
+// [addr, addr+size). This is used by callers (e.g. ActionStackPtrFlow) that need
+// to run Heritage on individual stack slots without merging adjacent ranges.
+//
+// Unlike Heritage(), this method:
+//   - Builds the ADT if not already built (requires the graph to have RPO + idoms set).
+//   - Processes exactly one range, bypassing the TaskList merging logic.
+//   - Does NOT increment the pass counter or run AnnotateFloatTypes.
+//
+// The caller is responsible for calling this once per distinct stack slot.
+// C++ parity: approximates Heritage::heritage() restricted to one slot; Ghidra
+// avoids this problem by running ActionStackPtrFlow before the first Heritage pass.
+func (h *Heritage) HeritageRange(graph *BlockGraph, addr address.Address, size int32) {
+	if h.maxDepth == -1 {
+		h.BuildADT(graph)
+	}
+	reads, writes, inputs := h.Collect(addr, size)
+	if len(reads) == 0 && len(writes) == 0 && len(inputs) == 0 {
+		return
+	}
+	h.placeMultiequals(graph, addr, size, reads, writes, inputs)
+	h.Rename(graph, addr, size)
 }
 
 // AnnotateFloatTypes marks output varnodes of FLOAT_* ops with float type.
