@@ -505,7 +505,85 @@
   - TestMSVC_Classify2: `if (param_3 <= 0) { ... } else if (param_3 < param_4) { ... }` -- 논리적으로 정확. 구조적 미스매치: 조건 inversion (Ghidra는 param_4 <= param_3 선호 가능).
   - TestMSVC_CountedLoop/SumList: stack local 렌더링 미해결 -- `*(local_0 - 8) = 0` 형태. Stack Heritage 부재로 STORE-to-local이 변수 할당으로 변환되지 않음. 기능적으로 올바르나 Ghidra golden과 다름.
 
-### 미시작
-- [ ] Stack Heritage: STORE(ram, INT_ADD(FP, const), val) -> stack local 변수 할당 변환. CountedLoop/SumList stack local 렌더링 개선에 필요. C++ Heritage pass가 stack space를 SSA 처리.
+### 미시작 (우선순위 순)
+
+#### 실측 Ghidra golden 기준 잔여 diff
+golden 원본: `testdata/ghidra_golden/ghidra_golden.json`
+현재 테스트: `pkg/loader/msvc_diag_test.go` (TestMSVC_CountedLoop/SumList/AbsVal/Classify2)
+
+---
+
+#### G1: Stack Heritage -- STORE to named local (최우선)
+**현상**: CountedLoop/SumList에서 `*(local_0 - 8) = 0` 형태로 raw 포인터 산술 노출.
+**Ghidra golden** (counted_loop_x86_32):
+```
+local_c = 0;
+for (local_8 = 0; local_8 < 5; local_8 = local_8 + 1) {
+    local_c = local_c + local_8;
+}
+return local_c;
+```
+**C++ 참조**:
+- `ghidra-ref/.../heritage.cc`: Heritage::buildADT(), Heritage::analyzeHeap() -- stack space를 일반 SSA 공간처럼 처리
+- `ghidra-ref/.../coreaction.cc`: ActionStackPtrFlow::checkClog(), repair() -- L433-L499
+**수정 위치**: `pkg/pcode/action_stack_ptr_flow.go`
+**핵심 작업**:
+1. STORE(ram, INT_ADD(FP, const), val) 패턴 감지 후 stack-space output varnode로 변환 (COPY op 삽입 + STORE 제거)
+2. 루프에서 같은 stack slot이 여러 번 쓰일 때 Heritage의 MULTIEQUAL 삽입과 연계
+3. 프레임 셋업 ops (PUSH/SUB ESP) -- STORE 변환 후 consumer 없어지면 ActionDeadCode가 자동 제거
+**네이밍 규칙**: `local_N` where N = hex(abs(EBP_offset) + sizeof(saved_EBP)). EBP-4 = local_8 (EBP-4+saved_EBP_4 = 8), EBP-8 = local_c (EBP-8+saved_EBP_4 = 0xC).
+
+---
+
+#### G2: `for` 루프 구조화
+**현상**: counted_loop/sum_list에서 `while` 대신 `for` 필요.
+**Ghidra golden**: `for (local_8 = 0; local_8 < 5; local_8 = local_8 + 1)`
+**C++ 참조**: `ghidra-ref/.../coreaction.cc`: ActionForLoops -- loop-tail increment 패턴 감지 후 for 헤더로 올림.
+**수정 위치**: `pkg/pcode/printc.go` 또는 새 ActionForLoops
+**의존**: G1 완료 후 진행.
+
+---
+
+#### G3: ghost params 억제 (void 함수)
+**현상**: CountedLoop가 `entry(void)`여야 하는데 `entry(param_1, param_2)` 출력.
+**Ghidra golden**: `int processEntry entry(void)`
+**원인**: stack param이 없는 함수에서도 ghost params 2개를 무조건 추가하는 중.
+**수정 위치**: `pkg/pcode/printc.go` SetProcessEntry or `pkg/pcode/scopelocal.go` BuildFromVarnodes -- stack-relative params가 없으면 ghost 생략.
+
+---
+
+#### G4: pointer type inference (`int *param_3`)
+**현상**: SumList에서 `int param_3` 대신 `int *param_3` 필요.
+**Ghidra golden**: `int *param_3`, `local_8 = local_8 + *param_3`, `param_3 = (int *)param_3[1]`
+**C++ 참조**: `ghidra-ref/.../typeop.cc`: TypeOpLoad::propagateType -- LOAD 결과가 다시 LOAD의 주소로 쓰이면 pointer 추론.
+**수정 위치**: `pkg/pcode/action_infertypes.go` 또는 `pkg/pcode/typeop.go`
+
+---
+
+#### G5: AbsVal -- local_0 제거 (param 직접 수정 패턴)
+**현상**: `local_0 = -param_3; return local_0` 대신 `param_3 = -param_3; return param_3` 필요.
+**Ghidra golden**: local 없음, else 분기 없음.
+**원인**: EAX가 param_3을 load해서 NEG 후 return -- Ghidra는 이를 param_3 직접 수정으로 인식.
+**C++ 참조**: ActionReturnSplit + copy propagation 조합.
+**수정 위치**: `pkg/pcode/printc.go` resolveForReturn 또는 `pkg/pcode/action_copy_markerop.go`
+
+---
+
+#### G6: `uVar1` rename (Classify2/nested_if)
+**현상**: `unsigned int local_0` 대신 `undefined4 uVar1` 필요.
+**Ghidra golden**: `undefined4 uVar1; if (param_3 < 1) { uVar1 = 0; } ...`
+**원인**: renameReturnOnlyLocals가 Classify2 케이스에서 미발동. EAX-range varnode가 return-only로 인식되지 않음.
+**수정 위치**: `pkg/pcode/printc.go` renameReturnOnlyLocals / markReturnOnlyCopies
+
+---
+
+#### G7: `param_3 < 1` 정규화 (Classify2)
+**현상**: `param_3 <= 0` 대신 `param_3 < 1`.
+**Ghidra golden**: `if (param_3 < 1)`
+**C++ 참조**: `ghidra-ref/.../ruleaction.cc` RuleLessEqual 또는 flag-fold 시점에 INT_SLESSEQUAL(x,0) -> INT_SLESS(x,1) 변환.
+**수정 위치**: `pkg/pcode/rules_misc.go` 또는 `pkg/pcode/action_fold_flag_conditions.go`
+
+---
+
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
 - [ ] Full golden test coverage: decision tree resolution fix required before NOP/LDA/branch fixtures can be promoted from "unimplemented" to "match". See PARITY_AUDIT.md Golden/Bridge section.
