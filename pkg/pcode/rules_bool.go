@@ -295,6 +295,58 @@ func (r *RuleEqual2Zero) apply(op *PcodeOp, data *Funcdata) int {
 	if !ok || val != 0 {
 		return 0
 	}
+	// All descendants of lhs must produce bool output; non-bool consumers
+	// mean the expression value is used outside a comparison context.
+	// C++ parity: RuleEqual2Zero::applyOp ruleaction.cc:5884-5887
+	for _, desc := range lhs.DescendIter() {
+		if !desc.IsBoolOutput() {
+			return 0
+		}
+	}
+	// Pattern: INT_ADD(a, INT_MULT(b, -1)) == 0  =>  a == b
+	// This is the normal form produced by RuleSub2Add from INT_SUB(a,b).
+	// Also: INT_ADD(a, c) == 0  =>  a == -c  (constant rhs).
+	// C++ parity: RuleEqual2Zero::applyOp ruleaction.cc:5890-5923
+	add := definedBy(lhs, CPUI_INT_ADD)
+	if add != nil && add.Input(0) != nil && add.Input(1) != nil {
+		a, b := add.Input(0), add.Input(1)
+		if bval, bok := constantValue(b); bok {
+			// INT_ADD(a, c) == 0  =>  a == -c
+			sz := b.Size()
+			negC := truncateToSize(^bval+1, sz)
+			data.OpSetInput(op, a, 0)
+			data.OpSetInput(op, data.NewConstant(sz, negC), 1)
+			return 1
+		}
+		// Try: one operand is INT_MULT(x, -1) -- identifies the negated operand.
+		for slot := 0; slot < 2; slot++ {
+			negvn := add.Input(slot)
+			posvn := add.Input(1 - slot)
+			mult := definedBy(negvn, CPUI_INT_MULT)
+			if mult == nil || mult.Input(0) == nil || mult.Input(1) == nil {
+				continue
+			}
+			mval, mok := constantValue(mult.Input(1))
+			if !mok {
+				continue
+			}
+			allOnes := truncateToSize(^uint64(0), negvn.Size())
+			if mval != allOnes {
+				continue
+			}
+			unnegvn := mult.Input(0)
+			data.OpSetInput(op, posvn, 0)
+			data.OpSetInput(op, unnegvn, 1)
+			return 1
+		}
+	}
+	// Pattern: INT_SUB(a, b) == 0  =>  a == b (pre-Sub2Add form)
+	sub := definedBy(lhs, CPUI_INT_SUB)
+	if sub != nil && sub.Input(0) != nil && sub.Input(1) != nil {
+		rewriteOp(data, op, op.Code(), sub.Input(0), sub.Input(1))
+		return 1
+	}
+	// Pattern: INT_XOR(a, c) == 0  =>  a == c
 	xor := definedBy(lhs, CPUI_INT_XOR)
 	if xor == nil {
 		return 0

@@ -483,6 +483,14 @@ func (s *printCState) shouldInline(op *PcodeOp) bool {
 	if op.Output().NumDescend() != 1 {
 		return false
 	}
+	// C++ parity: ActionMarkExplicit::baseExplicit returns -1 (explicit) when any descendant is a marker op (MULTIEQUAL/INDIRECT). coreaction.cc:3083
+	// A varnode whose sole consumer is a marker op must be emitted as an explicit statement, not inlined.
+	if consumer := op.Output().LoneDescend(); consumer != nil {
+		switch consumer.Code() {
+		case CPUI_MULTIEQUAL, CPUI_INDIRECT:
+			return false
+		}
+	}
 	switch op.Code() {
 	case CPUI_BRANCH, CPUI_CBRANCH, CPUI_BRANCHIND, CPUI_STORE, CPUI_RETURN, CPUI_MULTIEQUAL, CPUI_INDIRECT:
 		return false
@@ -1473,6 +1481,11 @@ func (s *printCState) resolveForReturn(vn *Varnode, maxDepth int) (resolved *Var
 		// If the MULTIEQUAL has exactly one live, non-trivial input, follow it.
 		// This collapses MergeMarker phi-nodes in straight-line code where the
 		// phi has only one real producer.
+		// Function parameter inputs (IsInput=true) count as real phi contributors
+		// even though they have no defining op (Def()==nil).
+		// Matches ActionMarkExplicit::baseExplicit returning -1 when a descendant
+		// is a marker op -- the MULTIEQUAL output is always explicit when it has
+		// multiple real inputs.
 		var candidate *Varnode
 		count := 0
 		for i := 0; i < op.NumInput(); i++ {
@@ -1480,7 +1493,7 @@ func (s *printCState) resolveForReturn(vn *Varnode, maxDepth int) (resolved *Var
 			if inp == nil || inp.IsAnnotation() {
 				continue
 			}
-			if inp.Def() != nil && !inp.Def().IsDead() {
+			if (inp.Def() != nil && !inp.Def().IsDead()) || inp.IsInput() {
 				candidate = inp
 				count++
 			}

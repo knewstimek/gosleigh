@@ -220,6 +220,19 @@ func resolveFrame(ctx *ParserContext, change *ParserWalkerChange, resolve func(R
 		if err := resolveFrame(ctx, change, resolve, ctxOps, depth+1); err != nil {
 			return normalizeResolveUnimpl(err)
 		}
+		// Propagate child subtree length back to the child state before popping.
+		// C++ parity: walker.calcCurrentLength(ct->getMinimumLength(), numoper) in
+		// Sleigh::resolve() (sleigh.cc:649). Without this, sibling.Length stays at
+		// MinimumLength and subsequent sibling offsets computed via
+		// sibling.Offset + sibling.Length are wrong (e.g., imm8 offset off by 1
+		// for "cmp [ebp+8], 0" = 83 7D 08 00, producing len=3 instead of 4).
+		if child := change.Walker.Point; child != nil {
+			if end := currentStateEnd(child); end > child.Offset {
+				if length := int(end - child.Offset); length > child.Length {
+					child.Length = length
+				}
+			}
+		}
 		change.Walker.PopOperand()
 	}
 	return nil

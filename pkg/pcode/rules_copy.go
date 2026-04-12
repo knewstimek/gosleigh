@@ -1,5 +1,18 @@
 package pcode
 
+import "gosleigh/pkg/address"
+
+func isEffectivelyAddrTied(vn *Varnode) bool {
+	if vn == nil || vn.Space() == nil {
+		return false
+	}
+	sp := vn.Space()
+	// Register space and stack space hold concrete CPU state -- treat as addr-tied.
+	// C++ parity: Varnode::addrtied is set for these by syncVarnodesWithSymbols.
+	return (sp.Kind == address.SpaceKindProcessor && sp.Name == "register") ||
+		sp.Kind == address.SpaceKindStack
+}
+
 type RulePropagateCopy struct{ batchRule }
 
 func NewRulePropagateCopy(group string) *RulePropagateCopy {
@@ -17,6 +30,22 @@ func (r *RulePropagateCopy) apply(op *PcodeOp, data *Funcdata) int {
 		}
 		if copyop.Input(0) == op.Input(i) {
 			continue
+		}
+		// Don't propagate into marker ops (MULTIEQUAL/INDIRECT) when:
+		//  (a) source is a constant, or
+		//  (b) source and output are addr-tied to different locations.
+		// C++ parity: RulePropagateCopy::applyOp ruleaction.cc:3966-3971
+		if op.IsMarker() {
+			invn := copyop.Input(0)
+			if invn.IsConstant() {
+				continue
+			}
+			out := op.Output()
+			if out != nil && isEffectivelyAddrTied(invn) && isEffectivelyAddrTied(out) {
+				if invn.Space() != out.Space() || invn.Offset() != out.Offset() || invn.Size() != out.Size() {
+					continue
+				}
+			}
 		}
 		data.OpUnsetInput(op, i)
 		data.OpSetInput(op, copyop.Input(0), i)
@@ -214,6 +243,7 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRulePtrsubAddConst(group) },
 	func(group string) Rule { return NewRulePtrsubCollapse(group) },
 	func(group string) Rule { return NewRulePtrFlowCopy(group) },
+	func(group string) Rule { return NewRuleLessEqual(group) },
 	func(group string) Rule { return NewRuleIdentityEl(group) },
 }
 

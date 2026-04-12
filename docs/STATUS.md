@@ -486,6 +486,26 @@
   - TestX86CountedLoop: `do { local_0 = local_0 - 1; } while (local_0 != 0);` 정상 출력.
   - go test ./... 전체 통과.
 
+- [x] F12: MSVC rule parity fixes -- RulePropagateCopy + RuleEqual2Zero + RuleLessEqual (2026-04-12)
+  - **RulePropagateCopy** (rules_copy.go): C++ parity 두 가지 추가.
+    - 상수 guard: MULTIEQUAL/INDIRECT 입력으로 상수를 전파하지 않음 (C++ ruleaction.cc:3966).
+    - addr-tied guard: register/stack space varnode를 다른 위치의 MULTIEQUAL output으로 전파하지 않음 (C++ parity: Varnode::addrtied check). `isEffectivelyAddrTied()` 헬퍼 추가.
+    - 효과: Classify2 empty-if-body 버그 수정 (constants was being propagated into MULTIEQUAL); AbsVal empty-else 수정.
+  - **RuleEqual2Zero** (rules_bool.go): INT_ADD(a, INT_MULT(b, -1)) == 0 -> a == b 패턴 추가.
+    - RuleSub2Add가 INT_SUB(a,b)를 INT_ADD(a, INT_MULT(b, 0xFFFFFFFF))로 변환한 후 RuleEqual2Zero가 이를 a == b로 정규화해야 함. Go 버전은 XOR 패턴만 처리했었음.
+    - C++ parity: ruleaction.cc:5868 RuleEqual2Zero::applyOp 전체 구현.
+    - INT_ADD(a, const_c) == 0 -> a == -c 패턴도 추가.
+    - 효과: Classify2 `param_4 == param_3` 비교가 올바르게 렌더링됨.
+  - **RuleLessEqual** (rules_misc.go): BOOL_OR 기반으로 완전 재구현.
+    - 기존 구현: INT_LESSEQUAL/INT_SLESSEQUAL 기반, 상수 극단값 처리만 하던 잘못된 버전.
+    - 새 구현: CPUI_BOOL_OR에서 발화, BOOL_OR(INT_SLESS(a,b), INT_EQUAL(a,b)) -> INT_SLESSEQUAL(a,b) 변환. C++ parity: ruleaction.cc:2256 RuleLessEqual::applyOp.
+    - batchARuleFactories에 추가 (기존에는 batchCMiscRuleFactories에만 있었고 파이프라인에서 실행되지 않음).
+    - 효과: Classify2 `param_3 <= 0` 정상 출력 (기존: `param_3 == 0 || param_3 < 0`).
+  - TestMSVC_AbsVal: `if (param_3 < 0) { local_0 = -param_3; } else { local_0 = param_3; }` -- 정상.
+  - TestMSVC_Classify2: `if (param_3 <= 0) { ... } else if (param_3 < param_4) { ... }` -- 논리적으로 정확. 구조적 미스매치: 조건 inversion (Ghidra는 param_4 <= param_3 선호 가능).
+  - TestMSVC_CountedLoop/SumList: stack local 렌더링 미해결 -- `*(local_0 - 8) = 0` 형태. Stack Heritage 부재로 STORE-to-local이 변수 할당으로 변환되지 않음. 기능적으로 올바르나 Ghidra golden과 다름.
+
 ### 미시작
+- [ ] Stack Heritage: STORE(ram, INT_ADD(FP, const), val) -> stack local 변수 할당 변환. CountedLoop/SumList stack local 렌더링 개선에 필요. C++ Heritage pass가 stack space를 SSA 처리.
 - [ ] Full p-code engine parity (Heritage guard infrastructure)
 - [ ] Full golden test coverage: decision tree resolution fix required before NOP/LDA/branch fixtures can be promoted from "unimplemented" to "match". See PARITY_AUDIT.md Golden/Bridge section.
