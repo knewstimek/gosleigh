@@ -243,7 +243,8 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRulePtrsubAddConst(group) },
 	func(group string) Rule { return NewRulePtrsubCollapse(group) },
 	func(group string) Rule { return NewRulePtrFlowCopy(group) },
-	func(group string) Rule { return NewRuleLessEqual(group) },
+		func(group string) Rule { return NewRuleSLessEqual2Constant(group) },
+		func(group string) Rule { return NewRuleLessEqual(group) },
 	func(group string) Rule { return NewRuleIdentityEl(group) },
 }
 
