@@ -278,3 +278,29 @@ func TestMSVC_Classify2(t *testing.T) {
 	t.Logf("GOSLEIGH (Ghidra format):\n%s", ghidra)
 	assertGoldenMatch(t, "nested_if_x86_32", ghidra)
 }
+
+// TestMSVC_Gcd tests a frameless x86-32 gcd function compiled with MSVC /O1.
+// The function uses ESP-relative parameter access (no EBP frame) and CDQ+IDIV
+// for modulo (INT_SREM). Bytes extracted from .text$mn section of gcd.obj.
+// Ghidra golden generated via ELF32 wrapper + analyzeHeadless (PyGhidra mode).
+//
+// Frameless detection: ActionStackPtrFlow.findFramelessStackPointer now handles
+// [esp+N] parameter access (2026-04-13). CDQ+IDIV -> INT_SREM simplification
+// is now handled by RuleSubCommute (INT_SDIV/INT_SREM case, 2026-04-13).
+//
+// Remaining mismatch: Ghidra renders the loop condition as a comma expression:
+//   while (iVar1 = param_4, iVar1 != 0) { ... }
+// This requires PrintC comma_separate mode for while-condition blocks containing
+// phi (MULTIEQUAL) assignments. Not yet implemented in Gosleigh's emitWhileBlock.
+// C++ parity: PrintC::emitBlockWhile sets setMod(comma_separate) for condBlock
+// emission (printc.cc ~3186).
+func TestMSVC_Gcd(t *testing.T) {
+	t.Skip("known mismatch: while-condition comma_separate rendering not yet implemented (emitWhileBlock)")
+	// MSVC /O1 x86-32 gcd: frameless, ESP-relative params, CDQ+IDIV for modulo
+	prog := []byte{0x8b, 0x4c, 0x24, 0x08, 0x8b, 0x44, 0x24, 0x04, 0x85, 0xc9, 0x74, 0x0b, 0x99, 0xf7, 0xf9, 0x8b, 0xc1, 0x8b, 0xca, 0x85, 0xd2, 0x75, 0xf5, 0xc3}
+	out := runPipeline(t, prog, "gcd")
+	t.Logf("GOSLEIGH:\n%s", out)
+	ghidra := runPipelineGhidra(t, prog, "gcd")
+	t.Logf("GOSLEIGH (Ghidra format):\n%s", ghidra)
+	assertGoldenMatch(t, "gcd_x86_32", ghidra)
+}

@@ -117,9 +117,15 @@ func (a *ActionStackPtrFlow) Reset(data *Funcdata) {
 // Gosleigh replicates this by requiring callers to run Heritage after Apply.
 func (a *ActionStackPtrFlow) Apply(data *Funcdata) int {
 	// Step 1: locate the frame pointer and its prologue push delta.
+	// Fall back to frameless detection when no EBP-style frame is found.
+	// Frameless functions (e.g. MSVC /O1 leaf functions) access params via
+	// [ESP+4], [ESP+8], ... without a PUSH EBP; MOV EBP,ESP prologue.
 	fpVn, pushDelta, ok := findFramePointerDef(data)
 	if !ok {
-		return 0
+		fpVn, pushDelta, ok = findFramelessStackPointer(data)
+		if !ok {
+			return 0
+		}
 	}
 
 	// Step 2: ensure a stack address space exists.
@@ -355,6 +361,69 @@ func (a *ActionStackPtrFlow) resolveStackSpace(data *Funcdata) *address.Space {
 		AddrSize: 4,
 		WordSize: 1,
 	}
+}
+
+// findFramelessStackPointer detects a frameless function where the entry stack
+// pointer register is used directly as a base for LOAD/STORE address computations.
+// A frameless function (e.g. MSVC /O1 leaf function with no saved EBP) accesses
+// parameters via [ESP+4], [ESP+8], etc. without a PUSH EBP; MOV EBP,ESP prologue.
+//
+// The heuristic scans all LOAD/STORE ops for INT_ADD(reg_input, positive_const)
+// patterns. If exactly one register-space input varnode is found as such a base,
+// it is returned as the "frame pointer" with pushDelta=0. With delta=0, the
+// stackOffsetFor mapping in Apply gives: [ESP+4] -> offset 4, [ESP+8] -> offset 8,
+// which the calling convention classifies as first/second parameter respectively.
+//
+// C++ parity: ActionStackPtrFlow full implementation uses TrackedSet to propagate
+// the stack pointer through arbitrary transforms; here we use a single-base scan
+// that covers the common frameless leaf-function pattern.
+func findFramelessStackPointer(data *Funcdata) (*Varnode, int64, bool) {
+	var candidate *Varnode
+
+	for _, op := range data.GetPcodeOpBank().AllOps() {
+		if op.IsDead() {
+			continue
+		}
+		code := op.Code()
+		if code != CPUI_LOAD && code != CPUI_STORE {
+			continue
+		}
+		// Both LOAD and STORE have the address in input(1).
+		if op.NumInput() < 2 || op.Input(1) == nil {
+			continue
+		}
+		addrVn := op.Input(1)
+		addOp := definedBy(addrVn, CPUI_INT_ADD)
+		if addOp == nil || addOp.NumInput() < 2 {
+			continue
+		}
+		// Look for INT_ADD(reg_input, positive_const) -- direct or slot-swapped.
+		in0, in1 := addOp.Input(0), addOp.Input(1)
+		var regBase *Varnode
+		if in0 != nil && in0.IsInput() && in0.Space() != nil &&
+			in0.Space().Kind == address.SpaceKindProcessor &&
+			in1 != nil && in1.IsConstant() && int64(in1.Offset()) > 0 {
+			regBase = in0
+		} else if in1 != nil && in1.IsInput() && in1.Space() != nil &&
+			in1.Space().Kind == address.SpaceKindProcessor &&
+			in0 != nil && in0.IsConstant() && int64(in0.Offset()) > 0 {
+			regBase = in1
+		}
+		if regBase == nil {
+			continue
+		}
+		if candidate == nil {
+			candidate = regBase
+		} else if candidate != regBase {
+			// Multiple distinct register bases -- not a simple frameless fn.
+			return nil, 0, false
+		}
+	}
+
+	if candidate == nil {
+		return nil, 0, false
+	}
+	return candidate, 0, true
 }
 
 // findFramePointerDef locates the frame pointer varnode by scanning for the pattern:
