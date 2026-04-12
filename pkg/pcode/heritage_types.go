@@ -210,8 +210,13 @@ type TaskList struct {
 	tasks []MemRange
 }
 
-// Add appends a range to the task list. If the last entry overlaps or is
-// adjacent in the same space, extends it and ORs the flags.
+// Add appends a range to the task list. If the last entry overlaps with or is
+// adjacent to the new range in the same space, it is extended and flags are ORed.
+// C++ parity: heritage.cc TaskList::add (lines 108-123) uses
+// addr.overlap(0, entry.addr, entry.size) >= 0 which is true for overlap AND
+// for the adjacent case (addr == entry.addr + entry.size, overlap=0).
+// Note: the MULTIEQUAL output size is determined by the actual varnode size at
+// the task's start address (via placeMultiequals), NOT the merged task size.
 func (tl *TaskList) Add(addr address.Address, size int32, flags uint32) {
 	if len(tl.tasks) > 0 {
 		last := &tl.tasks[len(tl.tasks)-1]

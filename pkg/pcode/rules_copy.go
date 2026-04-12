@@ -229,6 +229,8 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRuleSubNormal(group) },
 	func(group string) Rule { return NewRuleSborrow(group) },
 	func(group string) Rule { return NewRuleLessNotEqualBoolAnd(group) },
+	func(group string) Rule { return NewRuleSignForm(group) },    // CDQ: SUBPIECE(INT_SEXT(x),c) -> INT_SRIGHT
+	func(group string) Rule { return NewRuleOrSextForm(group) },  // IDIV dividend: INT_OR(..SRIGHT..) -> INT_SEXT
 	// pointer rules -- C++ ActionPool::registerRule equivalents; inserted before identityel
 	func(group string) Rule { return NewRulePtrArith(group) },
 	func(group string) Rule { return NewRulePtraddUndo(group) },

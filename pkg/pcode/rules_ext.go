@@ -312,9 +312,99 @@ func (r *RuleSubCommute) apply(op *PcodeOp, data *Funcdata) int {
 	// Redirect longform's output to reuse outvn (which is the SUBPIECE output).
 	data.OpUnsetOutput(longform)
 	data.OpSetOutput(longform, outvn)
+	// Decouple op from outvn before destruction. OpDestroy calls OpUnsetOutput(op),
+	// which would call MakeFree(outvn) and clear outvn.def -- even though outvn was
+	// just assigned to longform above. Clearing op.output here prevents that.
+	// C++ parity: after opSetOutput(longform, outvn), op->output is no longer the
+	// canonical owner of outvn; destroying op must not touch outvn's bank entry.
+	op.SetOutput(nil)
 	// Destroy the now-redundant SUBPIECE.
 	data.OpDestroy(op)
 	return 1
+}
+
+// RuleOrSextForm collapses the OR-based sign-extension form back to INT_SEXT.
+// This pattern appears in x86 CDQ+IDIV pcode where Gosleigh's packed .sla
+// encodes the EDX:EAX 64-bit dividend as:
+//
+//	INT_OR(INT_LEFT(INT_ZEXT(INT_SRIGHT(x, n-1)), n), INT_ZEXT(x))
+//
+// which is semantically equivalent to INT_SEXT(x). After RuleSignForm converts
+// CDQ's SUBPIECE(INT_SEXT(EAX), 4, 4) → INT_SRIGHT(EAX, 31), this rule
+// collapses the full dividend expression, allowing RuleSubCommute to then push
+// SUBPIECE through INT_SREM/INT_SDIV and cancel the SEXTs.
+//
+// C++ parity: Ghidra's x86 Sleigh emits PIECE(EDX, EAX) for IDIV which
+// RulePiece2Sext handles. Gosleigh's packed .sla emits the INT_OR form;
+// this rule provides an equivalent simplification path.
+type RuleOrSextForm struct{ batchRule }
+
+func NewRuleOrSextForm(group string) *RuleOrSextForm {
+	r := &RuleOrSextForm{}
+	r.batchRule = newBatchRule(group, "orsextform", []OpCode{CPUI_INT_OR}, r.apply,
+		func(g string) Rule { return NewRuleOrSextForm(g) })
+	return r
+}
+
+func (r *RuleOrSextForm) apply(op *PcodeOp, data *Funcdata) int {
+	if op.NumInput() != 2 {
+		return 0
+	}
+	// Try both slot orders for INT_OR(shifted_sign, base) and INT_OR(base, shifted_sign).
+	for slot := 0; slot < 2; slot++ {
+		shifted := op.Input(slot)
+		baseZext := op.Input(1 - slot)
+		// The base side must be INT_ZEXT(x).
+		zextBase := definedBy(baseZext, CPUI_INT_ZEXT)
+		if zextBase == nil {
+			continue
+		}
+		x := zextBase.Input(0)
+		if x == nil || x.IsFree() {
+			continue
+		}
+		n := uint64(x.Size()) * 8 // bit width of x
+		// The shifted side must be INT_LEFT(..., n) or INT_MULT(..., 2^n).
+		// RuleShift2Mult in BatchA may convert INT_LEFT to INT_MULT before this
+		// rule sees the INT_OR op (ops are visited in instruction-address order),
+		// so we must accept both forms.
+		var signInput *Varnode
+		if leftOp := definedBy(shifted, CPUI_INT_LEFT); leftOp != nil && leftOp.NumInput() >= 2 {
+			shiftAmt, shiftOK := constantValue(leftOp.Input(1))
+			if !shiftOK || shiftAmt != n {
+				continue
+			}
+			signInput = leftOp.Input(0)
+		} else if multOp := definedBy(shifted, CPUI_INT_MULT); multOp != nil && multOp.NumInput() >= 2 {
+			multConst, multOK := constantValue(multOp.Input(1))
+			if !multOK || multConst != uint64(1)<<n {
+				continue
+			}
+			signInput = multOp.Input(0)
+		} else {
+			continue
+		}
+		// signInput must be INT_ZEXT(INT_SRIGHT(x, n-1)).
+		zextSign := definedBy(signInput, CPUI_INT_ZEXT)
+		if zextSign == nil {
+			continue
+		}
+		sright := definedBy(zextSign.Input(0), CPUI_INT_SRIGHT)
+		if sright == nil || sright.NumInput() < 2 {
+			continue
+		}
+		if sright.Input(0) != x {
+			continue
+		}
+		signShift, ok := constantValue(sright.Input(1))
+		if !ok || signShift != n-1 {
+			continue
+		}
+		// Pattern matched: collapse to INT_SEXT(x).
+		rewriteOp(data, op, CPUI_INT_SEXT, x)
+		return 1
+	}
+	return 0
 }
 
 type RuleBoolZext struct{ batchRule }

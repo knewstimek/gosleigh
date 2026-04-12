@@ -98,6 +98,11 @@ func TestTaskList_AddDisjoint(t *testing.T) {
 	}
 }
 
+// TestTaskList_AddAdjacent verifies that adjacent ranges ARE merged.
+// C++ parity: TaskList::add uses addr.overlap(0,entry.addr,entry.size) >= 0,
+// which is true (returns 0) when addr == entry.addr+entry.size (adjacent).
+// The MULTIEQUAL output size is corrected by placeMultiequals using the actual
+// varnode size at the task's start address, not the merged task size.
 func TestTaskList_AddAdjacent(t *testing.T) {
 	var tl TaskList
 	spc := &address.Space{Name: "ram", Index: 1, AddrSize: 4, WordSize: 1}
@@ -105,6 +110,7 @@ func TestTaskList_AddAdjacent(t *testing.T) {
 	tl.Add(address.Address{Space: spc, Offset: 0x100}, 4, MemRangeNewAddresses)
 	tl.Add(address.Address{Space: spc, Offset: 0x104}, 4, MemRangeOldAddresses)
 
+	// Adjacent ranges are merged -- C++ overlap(0, entry.addr, entry.size) == 0 >= 0.
 	if tl.Len() != 1 {
 		t.Fatalf("Adjacent add: want 1 (merged), got %d", tl.Len())
 	}

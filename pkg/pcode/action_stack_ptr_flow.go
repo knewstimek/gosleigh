@@ -165,24 +165,54 @@ func (a *ActionStackPtrFlow) Apply(data *Funcdata) int {
 		return nil
 	}
 
+	// tracesFP returns true if vn is fpVn directly, or is a MULTIEQUAL phi
+	// whose non-self inputs all resolve to fpVn (self-referential phis arise when
+	// Heritage runs before ActionStackPtrFlow and EBP is not written in the loop
+	// body, producing phi_ebp = MULTIEQUAL(EBP_1, phi_ebp_self)).
+	// This is needed because Heritage's task-split refinement may create a phi
+	// for EBP at the loop header, renaming EBP reads to phi_ebp instead of fpVn.
+	tracesFP := func(vn *Varnode) bool {
+		if vn == fpVn {
+			return true
+		}
+		phi := definedBy(vn, CPUI_MULTIEQUAL)
+		if phi == nil {
+			return false
+		}
+		for i := 0; i < phi.NumInput(); i++ {
+			inp := phi.Input(i)
+			if inp == nil {
+				return false
+			}
+			if inp == vn {
+				continue // self-reference is OK
+			}
+			if inp != fpVn {
+				return false
+			}
+		}
+		return true
+	}
+
 	// isFPAdd returns true when addrVn is defined by INT_ADD(FP, const) or
 	// INT_ADD(const, FP), where the constant may be direct or via COPY(const).
 	// Sleigh x86 typically emits frame-relative addresses as:
 	//   unique_tmp = COPY(const_offset)   ; separate COPY for the displacement
 	//   addr_tmp   = INT_ADD(EBP, unique_tmp)
 	// so we follow one COPY indirection when the direct operand is not a constant.
+	// tracesFP handles the case where Heritage renamed EBP reads to a phi node.
 	isFPAdd := func(addrVn *Varnode) (*Varnode, bool) {
 		addOp := definedBy(addrVn, CPUI_INT_ADD)
 		if addOp == nil || addOp.NumInput() < 2 {
 			return nil, false
 		}
 		in0, in1 := addOp.Input(0), addOp.Input(1)
-		if in0 == fpVn {
+		if tracesFP(in0) {
 			if c := resolveConst(in1); c != nil {
 				return c, true
 			}
 		}
-		if in1 == fpVn {
+		if tracesFP(in1) {
 			if c := resolveConst(in0); c != nil {
 				return c, true
 			}
