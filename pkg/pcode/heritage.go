@@ -26,6 +26,18 @@ type Heritage struct {
 	infoList       []HeritageInfo
 	loadGuards     []LoadGuard
 	storeGuards    []LoadGuard
+	// proto is the optional calling-convention model for CALL-site INDIRECT guard
+	// insertion.  nil means no guardCalls pass (leaf-function safe default).
+	// C++ parity: Heritage uses fd->getFuncProto()->getModel() for guardCalls.
+	proto   *ProtoModel
+	guarded map[callGuardKey]bool // deduplicate (callOp, addr) guard insertions
+}
+
+// callGuardKey uniquely identifies a guarded (callOp, register-offset, size) triple.
+type callGuardKey struct {
+	callOp *PcodeOp
+	offset uint64
+	size   int32
 }
 
 const (
@@ -42,6 +54,66 @@ func NewHeritage(fd *Funcdata, spaces []*address.Space) *Heritage {
 		fd:       fd,
 		spaces:   spaces,
 		maxDepth: -1,
+	}
+}
+
+// WithProtoModel attaches a calling-convention model so that Heritage inserts
+// INDIRECT ops at CALL sites during SSA construction (guardCalls pass).
+// Returns h for chaining.  Passing nil is safe and disables guardCalls.
+// C++ parity: Heritage stores fd->getFuncProto()->getModel() internally;
+// we accept it explicitly to avoid coupling Heritage to FuncProto.
+func (h *Heritage) WithProtoModel(pm *ProtoModel) *Heritage {
+	h.proto = pm
+	return h
+}
+
+// guardCalls inserts INDIRECT (or INDIRECT_CREATION) ops immediately before
+// each CALL/CALLIND op to model the call-site side-effect on the register
+// range (sp, offset, size).  Only register-space ranges are guarded; stack
+// and other spaces are ignored (stack side effects are handled separately).
+//
+// Effect classification uses h.proto.EffectOnRegister:
+//   - EffectKilledByCall  -> newIndirectCreation  (caller-saved: EAX/ECX/EDX)
+//   - EffectUnaffected    -> no INDIRECT           (callee-saved: EBX/ESI/EDI/EBP)
+//   - EffectUnknown       -> newIndirectOp         (unknown: model conservatively)
+//
+// h.guarded deduplicates (callOp, offset, size) across multiple Heritage()
+// calls so the same INDIRECT is not inserted twice.
+//
+// C++ parity: heritage.cc Heritage::guardCalls (register-space subset of lines 1443-1527)
+func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
+	if h.proto == nil {
+		return
+	}
+	// Only register space is guarded here; stack side-effects handled elsewhere.
+	if sp.Kind != address.SpaceKindProcessor || sp.Name != "register" {
+		return
+	}
+	if h.guarded == nil {
+		h.guarded = make(map[callGuardKey]bool)
+	}
+	for _, op := range h.fd.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() {
+			continue
+		}
+		if op.Code() != CPUI_CALL && op.Code() != CPUI_CALLIND {
+			continue
+		}
+		key := callGuardKey{callOp: op, offset: offset, size: size}
+		if h.guarded[key] {
+			continue
+		}
+		h.guarded[key] = true
+		switch h.proto.EffectOnRegister(offset) {
+		case EffectUnaffected:
+			// Callee-saved register: no INDIRECT needed; pre-call value flows through.
+		case EffectKilledByCall:
+			// Caller-saved register (e.g. EAX, ECX, EDX): call overwrites it.
+			h.fd.NewIndirectCreation(op, sp, offset, size)
+		default: // EffectUnknown
+			// Conservative: call may or may not modify; model as read-modify.
+			h.fd.NewIndirectOp(op, sp, offset, size)
+		}
 	}
 }
 
@@ -621,6 +693,10 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 		// physical splits; x86 register varnodes don't straddle sub-task boundaries).
 		for i := 0; i < h.disjoint.Len(); i++ {
 			task := h.disjoint.Get(i)
+			// Insert INDIRECT guards for call-site side-effects on this range BEFORE
+			// Collect so the INDIRECT output varnodes appear as written SSA definitions.
+			// C++ parity: heritage.cc Heritage::heritage -> guard -> guardCalls
+			h.guardCalls(info.Space, task.Addr.Offset, task.Size)
 			reads, writes, inputs := h.Collect(task.Addr, task.Size)
 			if len(reads) == 0 && len(writes) == 0 && len(inputs) == 0 {
 				continue
@@ -669,6 +745,9 @@ func (h *Heritage) HeritageRange(graph *BlockGraph, addr address.Address, size i
 	if h.maxDepth == -1 {
 		h.BuildADT(graph)
 	}
+	// Guard call sites for this range before Collect picks up SSA definitions.
+	// C++ parity: heritage.cc Heritage::heritage -> guard -> guardCalls
+	h.guardCalls(addr.Space, addr.Offset, size)
 	reads, writes, inputs := h.Collect(addr, size)
 	if len(reads) == 0 && len(writes) == 0 && len(inputs) == 0 {
 		return

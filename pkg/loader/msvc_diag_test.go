@@ -73,7 +73,20 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 		t.Fatalf("bridge.Build: %v", err)
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	// Build ProtoModel before Heritage so guardCalls can insert INDIRECT ops at
+	// CALL sites to model caller-saved/callee-saved register effects.
+	// StackSpace is nil here; updated after ActionStackPtrFlow resolves it.
+	// C++ parity: ActionPrototypeTypes runs before Heritage in Ghidra's pipeline.
+	cdecl := pcode.NewProtoModelFromCspec(result.CspecData, nil, nil)
+	xr := engine.XRefs()
+	cdecl.WithEffectOffsets(func(name string) (uint64, int32, bool) {
+		_, off, sz, ok := xr.RegisterByName(name)
+		return off, int32(sz), ok
+	})
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).
+		WithProtoModel(cdecl).
+		Heritage(result.Graph)
 	spf := pcode.NewActionStackPtrFlow("analysis")
 	spf.Apply(result.Funcdata)
 
@@ -87,21 +100,21 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 		}
 	}
 
+	// Resolve stack space and return register now that Heritage and StackPtrFlow are done.
 	var regSpaceIdx int = -1
-	stackSpace := spf.StackSpace()
+	cdecl.StackSpace = spf.StackSpace()
 	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
 		if vn == nil || vn.Space() == nil {
 			continue
 		}
 		sp := vn.Space()
-		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpace == nil {
-			stackSpace = sp
+		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && cdecl.StackSpace == nil {
+			cdecl.StackSpace = sp
 		}
 		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdx < 0 {
 			regSpaceIdx = int(sp.Index)
 		}
 	}
-	cdecl := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace, nil)
 	if regSpaceIdx >= 0 {
 		cdecl.WithReturnReg(regSpaceIdx, 0, 4)
 	}
@@ -165,7 +178,20 @@ func runPipeline(t *testing.T, prog []byte, name string) string {
 		t.Fatalf("bridge.Build: %v", err)
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
+	// Build ProtoModel before Heritage so guardCalls can insert INDIRECT ops at
+	// CALL sites to model caller-saved/callee-saved register effects.
+	// StackSpace is nil here; updated after ActionStackPtrFlow resolves it.
+	// C++ parity: ActionPrototypeTypes runs before Heritage in Ghidra's pipeline.
+	cdecl := pcode.NewProtoModelFromCspec(result.CspecData, nil, nil)
+	xr2 := engine.XRefs()
+	cdecl.WithEffectOffsets(func(name string) (uint64, int32, bool) {
+		_, off, sz, ok := xr2.RegisterByName(name)
+		return off, int32(sz), ok
+	})
+
+	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).
+		WithProtoModel(cdecl).
+		Heritage(result.Graph)
 	spf := pcode.NewActionStackPtrFlow("analysis")
 	spf.Apply(result.Funcdata)
 
@@ -184,21 +210,21 @@ func runPipeline(t *testing.T, prog []byte, name string) string {
 		}
 	}
 
+	// Resolve stack space and return register now that Heritage and StackPtrFlow are done.
 	var regSpaceIdx int = -1
-	stackSpace := spf.StackSpace()
+	cdecl.StackSpace = spf.StackSpace()
 	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
 		if vn == nil || vn.Space() == nil {
 			continue
 		}
 		sp := vn.Space()
-		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpace == nil {
-			stackSpace = sp
+		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && cdecl.StackSpace == nil {
+			cdecl.StackSpace = sp
 		}
 		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdx < 0 {
 			regSpaceIdx = int(sp.Index)
 		}
 	}
-	cdecl := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace, nil)
 	if regSpaceIdx >= 0 {
 		cdecl.WithReturnReg(regSpaceIdx, 0, 4)
 	}
