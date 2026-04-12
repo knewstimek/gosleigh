@@ -18,6 +18,25 @@ import (
 	"gosleigh/pkg/address"
 )
 
+// EffectKind describes how a CALL instruction affects a register or memory location.
+// Used by Heritage.guardCalls to decide which INDIRECT op to insert.
+// C++ parity: compiler.hh EffectRecord::EffectType constants
+type EffectKind uint8
+
+const (
+	// EffectUnknown: effect is not known; insert a conservative INDIRECT guard
+	// (value may or may not be modified).
+	EffectUnknown EffectKind = iota
+	// EffectKilledByCall: caller-saved register -- callee may freely overwrite it.
+	// Heritage inserts INDIRECT_CREATION (new undefined SSA version).
+	// C++ parity: EffectRecord::killedbycall
+	EffectKilledByCall
+	// EffectUnaffected: callee-saved register -- callee must preserve the value.
+	// Heritage inserts nothing; the pre-call SSA version flows through.
+	// C++ parity: EffectRecord::unaffected
+	EffectUnaffected
+)
+
 // ProtoModel is a lightweight representation of a calling convention prototype
 // sufficient for ABI-aware variable naming. It does not replicate the full
 // Ghidra PrototypeModel -- only the subset needed for param/local classification.
@@ -64,6 +83,16 @@ type ProtoModel struct {
 	// ReturnRegSpaceIndex is the address-space index of the return register.
 	// -1 means unset; ApplyCallingConvention skips return anchoring when -1.
 	ReturnRegSpaceIndex int
+
+	// KilledByCallOffsets maps register-space byte offset -> true for caller-saved
+	// registers.  Populated by WithEffectOffsets.
+	// C++ parity: EffectRecord set for PrototypeModel::killedByCall regions.
+	KilledByCallOffsets map[uint64]bool
+
+	// UnaffectedOffsets maps register-space byte offset -> true for callee-saved
+	// registers.  Populated by WithEffectOffsets.
+	// C++ parity: EffectRecord set for PrototypeModel::unaffected regions.
+	UnaffectedOffsets map[uint64]bool
 }
 
 // RegLookupFunc is an optional callback for looking up a register's byte offset
@@ -189,6 +218,52 @@ func (pm *ProtoModel) IsKilledByCall(regName string) bool {
 		return false
 	}
 	return pm.KilledByCallRegs[regName]
+}
+
+// WithEffectOffsets resolves killedbycall and unaffected register names to
+// register-space byte offsets and populates KilledByCallOffsets / UnaffectedOffsets.
+// The lookup function maps a register name to its (offset, size) in the register
+// address space.  Call this before passing the ProtoModel to Heritage.WithProtoModel
+// so that guardCalls can classify each heritaged register range.
+//
+// Registers not found via lookup are silently skipped (they will be treated as
+// EffectUnknown, triggering a conservative INDIRECT guard).
+//
+// C++ parity: PrototypeModel effect-record construction (compiler.hh/cc)
+func (pm *ProtoModel) WithEffectOffsets(lookup func(name string) (offset uint64, size int32, ok bool)) *ProtoModel {
+	if pm == nil || lookup == nil {
+		return pm
+	}
+	pm.KilledByCallOffsets = make(map[uint64]bool)
+	pm.UnaffectedOffsets = make(map[uint64]bool)
+	for name := range pm.KilledByCallRegs {
+		if off, _, ok := lookup(name); ok {
+			pm.KilledByCallOffsets[off] = true
+		}
+	}
+	for name := range pm.UnaffectedRegs {
+		if off, _, ok := lookup(name); ok {
+			pm.UnaffectedOffsets[off] = true
+		}
+	}
+	return pm
+}
+
+// EffectOnRegister returns the effect type for the register at the given
+// register-space byte offset.  Used by Heritage.guardCalls.
+// Returns EffectUnknown when the offset is not classified (offset maps not built).
+// C++ parity: FuncCallSpecs::hasEffect / EffectRecord::contains
+func (pm *ProtoModel) EffectOnRegister(offset uint64) EffectKind {
+	if pm == nil {
+		return EffectUnknown
+	}
+	if pm.KilledByCallOffsets != nil && pm.KilledByCallOffsets[offset] {
+		return EffectKilledByCall
+	}
+	if pm.UnaffectedOffsets != nil && pm.UnaffectedOffsets[offset] {
+		return EffectUnaffected
+	}
+	return EffectUnknown
 }
 
 // WithReturnReg sets the integer return register location on the ProtoModel.

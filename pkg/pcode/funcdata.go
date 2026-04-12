@@ -328,6 +328,51 @@ func (fd *Funcdata) OpInsertAfter(op *PcodeOp, prev *PcodeOp) {
 	bb.InsertOpAfter(op, prev)
 }
 
+// NewIndirectOp creates an INDIRECT op inserted immediately before callOp that
+// models an unknown side-effect on the address range (sp, off, size).
+// The INDIRECT output is a new SSA version of the location that MAY have been
+// modified by the call; input[0] is a fresh free varnode (renamed during Heritage
+// to the pre-call SSA value); input[1] is a zero constant (cause reference --
+// simplified: C++ uses an IOP-space varnode encoding the CALL op pointer).
+// Both input[0] and output are marked ActiveHeritage for renaming.
+//
+// C++ parity: Funcdata::newIndirectOp (funcdata_op.cc:683)
+func (fd *Funcdata) NewIndirectOp(callOp *PcodeOp, sp *address.Space, off uint64, size int32) *PcodeOp {
+	addr := address.Address{Space: sp, Offset: off}
+	in0 := fd.NewVarnode(size, addr)
+	in0.SetActiveHeritage()
+	op := fd.NewOp(2, callOp.Addr())
+	out := fd.NewVarnodeOut(size, addr, op)
+	out.SetActiveHeritage()
+	fd.OpSetOpcode(op, CPUI_INDIRECT)
+	fd.OpSetInput(op, in0, 0)
+	fd.OpSetInput(op, fd.NewConstant(4, 0), 1) // cause ref (IOP stub)
+	fd.OpInsertBefore(op, callOp)
+	return op
+}
+
+// NewIndirectCreation creates an INDIRECT op inserted immediately before callOp
+// that models a caller-saved register being overwritten by the call.
+// Unlike NewIndirectOp, the output has no data-flow from the pre-call value:
+// input[0] is a zero constant, signalling that the call produces a new value
+// at this location (e.g., EAX holding the return value of the callee).
+// The op and output are flagged with PcodeOpIndirectCreation / VarnodeIndirectCreation.
+//
+// C++ parity: Funcdata::newIndirectCreation (funcdata_op.cc:710)
+func (fd *Funcdata) NewIndirectCreation(callOp *PcodeOp, sp *address.Space, off uint64, size int32) *PcodeOp {
+	addr := address.Address{Space: sp, Offset: off}
+	op := fd.NewOp(2, callOp.Addr())
+	op.SetFlag(PcodeOpIndirectCreation)
+	out := fd.NewVarnodeOut(size, addr, op)
+	out.SetFlags(VarnodeIndirectCreation)
+	out.SetActiveHeritage()
+	fd.OpSetOpcode(op, CPUI_INDIRECT)
+	fd.OpSetInput(op, fd.NewConstant(4, 0), 0) // no pre-call value flows through
+	fd.OpSetInput(op, fd.NewConstant(4, 0), 1) // cause ref (IOP stub)
+	fd.OpInsertBefore(op, callOp)
+	return op
+}
+
 // VarnodesBySpace returns all varnodes in the given address space.
 func (fd *Funcdata) VarnodesBySpace(spc *address.Space) []*Varnode {
 	return fd.vbank.BySpace(spc)
