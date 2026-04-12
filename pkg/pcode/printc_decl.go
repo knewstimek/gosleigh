@@ -7,7 +7,11 @@ import (
 )
 
 // CDeclRenderer renders C type spellings and declarators directly from existing p-code datatypes.
-type CDeclRenderer struct{}
+type CDeclRenderer struct {
+	// noCommaSpace omits the space after commas in parameter lists when true.
+	// Ghidra format uses "param_1,param_2" rather than "param_1, param_2".
+	noCommaSpace bool
+}
 
 func NewCDeclRenderer() *CDeclRenderer {
 	return &CDeclRenderer{}
@@ -337,7 +341,11 @@ func (r *CDeclRenderer) parameterList(fn *Code, paramNames []string) string {
 	if len(parts) == 0 {
 		return "void"
 	}
-	return strings.Join(parts, ", ")
+	sep := ", "
+	if r.noCommaSpace {
+		sep = ","
+	}
+	return strings.Join(parts, sep)
 }
 
 func nameWithParams(name string, params string) string {

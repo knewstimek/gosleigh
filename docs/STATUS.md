@@ -565,6 +565,26 @@
   - effectiveLoadResultType() + assignCastStr(): COPY output이 pointer이고 source가 LOAD(int)이면 `(int *)` cast 삽입.
   - 결과: SumList golden 완전 일치. go test ./... all PASS.
 
+- [x] Full golden test coverage: 6502 NOP(0xEA)/LDA(0xA9)/BRK TestGolden6502 pass (2026-04-13)
+
 ### 미시작 (우선순위 순)
-- [ ] Full p-code engine parity (Heritage guard infrastructure)
-- [ ] Full golden test coverage: decision tree resolution fix required before NOP/LDA/branch fixtures can be promoted from "unimplemented" to "match". See PARITY_AUDIT.md Golden/Bridge section.
+
+- [ ] H1: Ghidra format matching + auto golden assertions
+  - 현상: Gosleigh PrintC output format != Ghidra golden (4-space indent vs flat, BSD brace vs K&R+blank, ", " vs ",", `} else if` vs `}\nelse if`). TestMSVC_* tests have no assertions -- golden diff not auto-detected.
+  - C++ ref: printc.cc PrintC::docFunction() (K&R function brace), printc.cc emitBlockBraces (no indent), parameterList comma format
+  - 수정 대상: pkg/pcode/printc.go, pkg/pcode/printc_decl.go, pkg/pcode/emitter.go, pkg/pcode/printlanguage.go, pkg/loader/msvc_diag_test.go
+  - 구현 방향: PrintC.SetGhidraFormat() -- zero indent, K&R+blank function brace, no-comma-space, `}\nelse if` style. Load testdata/ghidra_golden/ghidra_golden.json in TestMSVC_* and assert content match (whitespace-normalized). Update TestX86*GoldenProcessEntry accordingly.
+  - 성공 기준: TestMSVC_CountedLoop/SumList/AbsVal/Classify2 each assert content-match against ghidra_golden.json entry
+
+- [ ] H2: Heritage guard infrastructure (INDIRECT at CALL sites)
+  - 현상: Heritage analysis does not insert INDIRECT guard ops at CALL instruction sites for live-in stack vars. Non-leaf function callee-modified stack vars get incorrect SSA.
+  - C++ ref: heritage.cc Heritage::buildInfoList() -> guardCalls() -> guard() -- inserts INDIRECT per live-in stack var at each CALL site. coreaction.cc ActionHeritage::apply() ordering.
+  - 수정 대상: pkg/pcode/heritage.go, pkg/pcode/action_stack_ptr_flow.go
+  - 성공 기준: E2E test with caller->callee->param-modification shows correct phi nodes for caller stack vars after CALL site
+
+- [ ] H3: More complex Ghidra golden test cases (struct, CALL chain, switch, global var)
+  - 현상: ghidra_golden.json has 4 MSVC + 6 non-MSVC functions. No golden coverage for struct pointer, CALL chain, switch, global var patterns.
+  - 방향: Compile 3-4 more complex MSVC functions, run Ghidra headless to generate golden, add to ghidra_golden.json, fix decompiler gaps.
+  - C++ ref: ghidra_decompile.py (existing Ghidra headless script)
+  - 수정 대상: testdata/ghidra_golden/ghidra_golden.json, pkg/loader/msvc_diag_test.go
+  - 성공 기준: New golden entries have passing TestMSVC_* assertions

@@ -32,10 +32,23 @@ type PrintC struct {
 	registerNames   map[string]string // "spaceIdx:offset:size" -> reg name; nil = disabled
 	entryAnnotation string            // prepended before function name (e.g. "processEntry")
 	ghostParamCount int               // number of undefined4 ghost params prepended in signature
+	ghidraFormat    bool              // emit Ghidra-compatible formatting (no indent, brace on own line, else on new line, no comma-space)
 }
 
 func NewPrintC() *PrintC {
 	return &PrintC{indentStep: "    "}
+}
+
+// SetGhidraFormat enables Ghidra-compatible output formatting:
+//   - zero indentation
+//   - function opening brace on its own line with blank line between signature and brace
+//   - else/else-if on a new line after closing brace
+//   - no space after commas in parameter lists
+//
+// C++ parity: Ghidra PrintC default formatting.
+func (p *PrintC) SetGhidraFormat() *PrintC {
+	p.ghidraFormat = true
+	return p
 }
 
 // SetRegisterNames installs a location-to-name map for register identification.
@@ -116,16 +129,28 @@ type printCState struct {
 	// and real param names are offset by ghostParamCount.
 	entryAnnotation string
 	ghostParamCount int
+
+	// ghidraFormat mirrors PrintC.ghidraFormat for use during emit.
+	// Controls function brace placement, else newline style, and comma spacing.
+	ghidraFormat bool
 }
 
 func newPrintCState(printer *PrintC, fd *Funcdata) *printCState {
-	emitter := NewTextEmitterWithIndent(printer.indentStep)
+	indentStep := printer.indentStep
+	if printer.ghidraFormat {
+		indentStep = "" // no indentation in Ghidra format
+	}
+	emitter := NewTextEmitterWithIndent(indentStep)
+	decls := NewCDeclRenderer()
+	if printer.ghidraFormat {
+		decls.noCommaSpace = true
+	}
 	return &printCState{
 		printer:          printer,
 		fd:               fd,
 		emitter:          emitter,
 		lang:             NewPrintLanguage(emitter),
-		decls:            NewCDeclRenderer(),
+		decls:            decls,
 		names:            make(map[*Varnode]string),
 		inline:           make(map[*PcodeOp]bool),
 		emittedTypes:     make(map[uint64]bool),
@@ -138,6 +163,7 @@ func newPrintCState(printer *PrintC, fd *Funcdata) *printCState {
 		returnCarrierParams: make(map[locationKey]*Varnode),
 		entryAnnotation:  printer.entryAnnotation,
 		ghostParamCount:  printer.ghostParamCount,
+		ghidraFormat:     printer.ghidraFormat,
 	}
 }
 
@@ -171,9 +197,22 @@ func (s *printCState) emit() (string, error) {
 		s.lang.Newline()
 	}
 
-	s.lang.OpenBlockAfter(func() {
+	if s.ghidraFormat {
+		// Ghidra format: \n + signature + \n\n + { + \n
+		// The leading blank line before the signature is part of Ghidra's output convention.
+		// C++ parity: PrintC::emitBlockGraph writes a blank line before the function header.
+		s.lang.Newline()
 		s.lang.Token(s.renderFunctionSignature(retType))
-	})
+		s.lang.Newline()
+		s.lang.Newline()
+		s.lang.Token("{")
+		s.lang.Newline()
+		s.lang.Indent()
+	} else {
+		s.lang.OpenBlockAfter(func() {
+			s.lang.Token(s.renderFunctionSignature(retType))
+		})
+	}
 	// Apply post-ghost-rename param names to return-carrier varnodes detected in G5.
 	// renderFunctionSignature has now updated param names (param_1 -> param_3 etc.),
 	// so we can resolve the correct final name for the return carrier.
@@ -823,7 +862,9 @@ func (s *printCState) renderFunctionSignature(retType Datatype) string {
 	}
 
 	codeType := sharedTypeFactory.GetCode("", s.normalizeTypeForDecl(retType), allTypes, false)
-	return CFuncSignatureString(displayName, codeType, allNames)
+	// Use s.decls (which has noCommaSpace set in ghidraFormat mode) instead of the
+	// global CFuncSignatureString helper, which always uses a default CDeclRenderer.
+	return s.decls.FunctionSignature(displayName, codeType, allNames)
 }
 
 func (s *printCState) emitLocalDeclarations() {
@@ -1150,8 +1191,10 @@ func (s *printCState) emitIfBlockChain(bl *FlowBlock, isElseIf bool) error {
 	}
 	cond := s.mustRenderCondition(children[0])
 	if isElseIf {
-		// Append "else if (cond) {" to the previous closing brace line.
-		s.lang.CloseBlockWithSuffix(func() {
+		if s.ghidraFormat {
+			// Ghidra format: close brace on own line, then "else if (cond) {" on next line.
+			// C++ parity: Ghidra PrintC emits "}\nelse if (cond) {\n" for else-if chains.
+			s.lang.CloseBlock()
 			s.lang.Token("else")
 			s.lang.Space()
 			s.lang.Token("if")
@@ -1161,8 +1204,23 @@ func (s *printCState) emitIfBlockChain(bl *FlowBlock, isElseIf bool) error {
 			s.lang.Token(")")
 			s.lang.Space()
 			s.lang.Token("{")
+			s.lang.Newline()
 			s.lang.Indent()
-		})
+		} else {
+			// Standard format: "} else if (cond) {" on same line as closing brace.
+			s.lang.CloseBlockWithSuffix(func() {
+				s.lang.Token("else")
+				s.lang.Space()
+				s.lang.Token("if")
+				s.lang.Space()
+				s.lang.Token("(")
+				s.lang.Token(cond)
+				s.lang.Token(")")
+				s.lang.Space()
+				s.lang.Token("{")
+				s.lang.Indent()
+			})
+		}
 	} else {
 		s.lang.OpenBlockAfter(func() {
 			s.lang.Token("if")
@@ -1195,12 +1253,23 @@ func (s *printCState) emitIfBlockChain(bl *FlowBlock, isElseIf bool) error {
 	if elseChild.Type() == BlockIfType {
 		return s.emitIfBlockChain(elseChild, true)
 	}
-	s.lang.CloseBlockWithSuffix(func() {
+	if s.ghidraFormat {
+		// Ghidra format: "}\nelse {\n"
+		// C++ parity: Ghidra PrintC emits "}\nelse {\n" for terminal else.
+		s.lang.CloseBlock()
 		s.lang.Token("else")
 		s.lang.Space()
 		s.lang.Token("{")
+		s.lang.Newline()
 		s.lang.Indent()
-	})
+	} else {
+		s.lang.CloseBlockWithSuffix(func() {
+			s.lang.Token("else")
+			s.lang.Space()
+			s.lang.Token("{")
+			s.lang.Indent()
+		})
+	}
 	if err := s.emitBlock(elseChild); err != nil {
 		return err
 	}
