@@ -28,9 +28,6 @@ func NewTextEmitter() *TextEmitter {
 }
 
 func NewTextEmitterWithIndent(indent string) *TextEmitter {
-	if indent == "" {
-		indent = "    "
-	}
 	return &TextEmitter{
 		indentUnit: indent,
 		lineStart:  true,
