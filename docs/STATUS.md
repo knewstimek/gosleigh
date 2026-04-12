@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: H1 완료 -- GhidraFormat + 자동 golden assertions (2026-04-13)
+## 현재 단계: H2 완료 -- Heritage CALL guard infrastructure / INDIRECT at CALL sites (2026-04-13)
 
 ### 완료
 - [x] Git repo initialized
@@ -10,7 +10,7 @@
 - [x] Launcher scripts (Gosleigh.bat, Gosleigh-codex.bat)
 - [x] C++ reference codegraph index created for `ghidra-ref/.../decompile/cpp`
 - [x] Indexing workflow documented in `docs/INDEX.md`
-- [x] Detailed implementation plan documented in `docs/PLAN.md`
+- [x] Detailed implementation plan documented (archived)
 - [x] Parity audit document added for current runtime mismatches: `docs/PARITY_AUDIT.md`
 - [x] Go module initialized
 - [x] Initial Go package layout created
@@ -584,11 +584,13 @@
   - 구현 방향: PrintC.SetGhidraFormat() -- zero indent, K&R+blank function brace, no-comma-space, `}\nelse if` style. Load testdata/ghidra_golden/ghidra_golden.json in TestMSVC_* and assert content match (whitespace-normalized). Update TestX86*GoldenProcessEntry accordingly.
   - 성공 기준: TestMSVC_CountedLoop/SumList/AbsVal/Classify2 each assert content-match against ghidra_golden.json entry
 
-- [ ] H2: Heritage guard infrastructure (INDIRECT at CALL sites)
-  - 현상: Heritage analysis does not insert INDIRECT guard ops at CALL instruction sites for live-in stack vars. Non-leaf function callee-modified stack vars get incorrect SSA.
-  - C++ ref: heritage.cc Heritage::buildInfoList() -> guardCalls() -> guard() -- inserts INDIRECT per live-in stack var at each CALL site. coreaction.cc ActionHeritage::apply() ordering.
-  - 수정 대상: pkg/pcode/heritage.go, pkg/pcode/action_stack_ptr_flow.go
-  - 성공 기준: E2E test with caller->callee->param-modification shows correct phi nodes for caller stack vars after CALL site
+- [x] H2: Heritage CALL guard infrastructure (INDIRECT at CALL sites) (2026-04-13, commit 744b17f)
+  - EffectKind/KilledByCallOffsets/UnaffectedOffsets + WithEffectOffsets (protomodel.go)
+  - NewIndirectOp / NewIndirectCreation (funcdata.go)
+  - WithProtoModel / guardCalls -- CALL op마다 register range별 INDIRECT 삽입 (heritage.go)
+  - 파이프라인 wiring: Heritage 전에 WithEffectOffsets + WithProtoModel (msvc_diag_test.go)
+  - C++ parity: heritage.cc:1443-1527 guardCalls, funcdata_op.cc:683-728 newIndirectOp/newIndirectCreation
+  - 주의: guardCalls는 register space만 처리 (stack side-effect는 별도). non-leaf function golden 미추가 (H3 대상)
 
 - [ ] H3: More complex Ghidra golden test cases (struct, CALL chain, switch, global var)
   - 현상: ghidra_golden.json has 4 MSVC + 6 non-MSVC functions. No golden coverage for struct pointer, CALL chain, switch, global var patterns.
