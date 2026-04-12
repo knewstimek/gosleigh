@@ -592,9 +592,82 @@
   - C++ parity: heritage.cc:1443-1527 guardCalls, funcdata_op.cc:683-728 newIndirectOp/newIndirectCreation
   - 주의: guardCalls는 register space만 처리 (stack side-effect는 별도). non-leaf function golden 미추가 (H3 대상)
 
-- [ ] H3: More complex Ghidra golden test cases (struct, CALL chain, switch, global var)
-  - 현상: ghidra_golden.json has 4 MSVC + 6 non-MSVC functions. No golden coverage for struct pointer, CALL chain, switch, global var patterns.
-  - 방향: Compile 3-4 more complex MSVC functions, run Ghidra headless to generate golden, add to ghidra_golden.json, fix decompiler gaps.
-  - C++ ref: ghidra_decompile.py (existing Ghidra headless script)
-  - 수정 대상: testdata/ghidra_golden/ghidra_golden.json, pkg/loader/msvc_diag_test.go
-  - 성공 기준: New golden entries have passing TestMSVC_* assertions
+## 작업 방향 (2026-04-13 확정)
+
+golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 각 패스를 알고리즘 레벨에서 충실히 구현**. golden test는 검증 수단이지 목표가 아님. 각 패스 구현 시 C++ 코드 먼저 읽고 이해 후 Go로 포팅.
+
+현재 구현율: Rules 78% (125/161), Actions ~12% (7/59). 미구현 Actions 중 foundational 6개가 핵심 gap.
+
+---
+
+### 미시작 -- actmainloop 순서 기반 foundational 패스
+
+**NOTE**: 아래 항목들은 golden match가 아니라 C++ 알고리즘 충실 구현이 성공 기준. 각 항목 완료 후 `go test ./...` 기존 테스트 통과 여부로 regression 확인.
+
+---
+
+- [ ] H3: ActionAssignHigh -- SSA varnode를 HighVariable에 할당
+  - 역할: SSA의 각 varnode 집합을 "고수준 변수" 하나로 그루핑. ActionNameVars의 선행 조건.
+    Ghidra에서 MergeMarker(현재 근사 구현)가 하려는 일의 정식 버전.
+  - C++ 참조: `ghidra-ref/.../coreaction.cc` ActionAssignHigh::apply(),
+    `ghidra-ref/.../merge.cc` Merge::mergeByDatatype(), mergeAdjacentCopies()
+  - 수정 대상: `pkg/pcode/merge.go` (현재 MergeMarker 근사 구현 교체 또는 보강)
+  - 성공 기준: 각 HighVariable이 올바른 SSA varnode 집합을 포함. 기존 테스트 유지.
+
+- [ ] H4: ActionNameVars -- HighVariable에 사람이 읽을 수 있는 이름 결정
+  - 역할: HighVariable 종류에 따라 이름 결정.
+    스택 로컬 → `local_N` (offset), 레지스터 임시(int) → `iVar1/iVar2...`,
+    레지스터 임시(uint) → `uVar1...`, 함수 입력 → `param_N` 유지.
+    현재 MergeMarker가 local_N을 임시로 할당하지만 iVar/uVar 패턴 미구현.
+  - C++ 참조: `ghidra-ref/.../coreaction.cc` ActionNameVars::apply(),
+    `ghidra-ref/.../varmap.cc` ScopeLocal::assignHigh(), mapGlobals(),
+    `ghidra-ref/.../database.cc` Symbol::getNameType()
+  - 수정 대상: `pkg/pcode/` 신규 `action_name_vars.go`, `pkg/pcode/scopelocal.go` 보강
+  - 성공 기준: gcd 출력에서 `local_0/local_1` → `iVar1/param_3` 패턴으로 변환.
+    기존 local_N 기반 golden (counted_loop, sum_list 등) 깨지지 않아야 함.
+
+- [ ] H5: ActionMergeCopy + ActionMergeRequired -- SSA copy/phi 기반 변수 병합
+  - 역할: COPY로 연결된 SSA 노드들을 같은 HighVariable로 병합.
+    phi(MULTIEQUAL)로 합쳐지는 노드들 병합. 중복 로컬 변수 제거.
+    현재 없어서 gcd에서 `local_0 = local_1; local_1 = local_2` 식의 잉여 대입이 남음.
+  - C++ 참조: `ghidra-ref/.../coreaction.cc` ActionMergeCopy::apply(), ActionMergeRequired::apply(),
+    `ghidra-ref/.../merge.cc` Merge::mergeOpcode(), mergeRequired()
+  - 수정 대상: `pkg/pcode/merge.go` 신규 메서드 추가
+  - 성공 기준: gcd에서 `local_0/local_1/local_2` 3개가 `param_3/param_4/iVar1` 2-3개로 병합.
+
+- [ ] H6: ActionMarkExplicit + ActionMarkImplied -- 임시변수 인라인 여부 결정
+  - 역할: HighVariable이 C 코드에 별도 선언이 필요한지(explicit) 아니면
+    사용처에 인라인될 수 있는지(implied) 결정. shouldInline() 판단의 정식 버전.
+    현재 shouldInline() 휴리스틱이 이를 근사하지만 C++ 기준과 다름.
+  - C++ 참조: `ghidra-ref/.../coreaction.cc` ActionMarkExplicit::apply(), ActionMarkImplied::apply(),
+    `ghidra-ref/.../varmap.cc` HighVariable::markImplied()
+  - 수정 대상: `pkg/pcode/printc.go` shouldInline() 교체 또는 보강,
+    `pkg/pcode/merge.go`
+  - 성공 기준: 기존 shouldInline 통과 케이스(multiply, add3) 유지 + 근사 제거.
+
+- [ ] H7: ActionPrototypeTypes 정식 구현 -- 함수 반환형/인자형 결정
+  - 역할: 함수 프로토타입(반환형, 인자 타입)을 Heritage 전에 확정.
+    현재 ApplyCallingConvention이 Heritage 후에 실행 -- C++ 순서와 반대.
+    gcd 반환형이 `int`로 잘못 추론되는 원인 (Ghidra는 `void`).
+  - C++ 참조: `ghidra-ref/.../coreaction.cc` ActionPrototypeTypes::apply() (~line 4620),
+    `ghidra-ref/.../funcdata.cc` Funcdata::startProcessing()
+  - 수정 대상: `pkg/loader/msvc_diag_test.go` 파이프라인 순서 교정,
+    `pkg/pcode/funcproto.go` ApplyCallingConvention 이동
+  - 성공 기준: gcd 반환형 `void`로 정확히 결정. anchorReturnReg 휴리스틱 제거 가능해짐.
+
+- [ ] H8: while-condition comma_separate 렌더링 (gcd 완성)
+  - 역할: while 조건 블록에 MULTIEQUAL 할당이 있을 때
+    `while (iVar1 = param_4, iVar1 != 0)` 형식으로 렌더링.
+    현재 emitWhileBlock이 이 패턴 미지원.
+  - C++ 참조: `ghidra-ref/.../printc.cc` PrintC::emitBlockWhile() (setMod(comma_separate)),
+    `ghidra-ref/.../blockbasic.cc` BlockWhileDo::emit()
+  - 수정 대상: `pkg/pcode/printc.go` emitWhileBlock()
+  - 성공 기준: TestMSVC_Gcd PASS (t.Skip 제거), gcd_x86_32 golden 일치.
+
+- [ ] H9: ActionSetCasts -- 타입 캐스트 삽입
+  - 역할: 타입 불일치 지점에 명시적 캐스트 삽입.
+    현재 수동 캐스트 로직(assignCastStr 등)이 근사로 처리.
+  - C++ 참조: `ghidra-ref/.../coreaction.cc` ActionSetCasts::apply(),
+    `ghidra-ref/.../printc.cc` EmitXml::tagOp() 캐스트 처리
+  - 수정 대상: `pkg/pcode/printc.go`, `pkg/pcode/action_infertypes.go`
+  - 성공 기준: 기존 캐스트 golden (sum_list의 `(int *)`, complex_max의 `(int)`) 유지.
