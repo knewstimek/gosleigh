@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: Stack Heritage 완료 -- local_c/local_8 named locals + loop body (2026-04-13)
+## 현재 단계: MSVC golden diff 대폭 축소 -- G1-G3, G7, 타입 추론 수정 완료 (2026-04-13)
 
 ### 완료
 - [x] Git repo initialized
@@ -521,6 +521,31 @@
     - SumList: `local_8 = 0; while (param_3 != 0) { ... }` 형태 (stack local 올바름).
   - go test ./... 전체 통과.
 
+- [x] G2: ActionForLoops -- while-with-increment to for loop (2026-04-13)
+  - collapse.go에 BlockForDo 타입 추가, ActionForLoops 액션 구현.
+  - while body 마지막 op이 condition varnode에 쓰는 단순 할당이면 for increment로 올림.
+  - printc.go에 BlockForDoType case + emitForBlock 렌더링 추가.
+  - 결과: CountedLoop `for (local_8 = 0; local_8 < 5; local_8 = local_8 + 1)` v
+  - 결과: SumList `for (; param_3 != 0; param_3 = *(param_3 + 4))` v
+
+- [x] G3: ghost params 억제 (2026-04-13)
+  - scopelocal.go BuildFromVarnodes: 실제 args가 없으면 (stack param 없으면) param list를 비워 `(void)` 출력.
+  - 결과: CountedLoop `entry(void)` v
+
+- [x] Type inference 수정 -- undefined4 vs unsigned int (2026-04-13)
+  - action_infertypes.go propagateOneType: 상수 varnode는 forward 전파 생략.
+    상수의 TYPE_UINT가 accumulator/counter 변수를 오염시키던 문제 해결.
+  - action_seed_signed.go: INT_SLESS/SLESSEQUAL 제거. C++ parity: TypeOpIntSless::propagateType은 nullptr 반환.
+    stack params는 BuildFromVarnodes에서 TYPE_INT로 초기화됨으로 충분.
+  - 결과: CountedLoop `undefined4 local_c; undefined4 local_8;` v
+  - 결과: Classify2 `int param_3, int param_4` v (BuildFromVarnodes에서 타입 부여)
+
+- [x] G7: SLESSEQUAL 정규화 + CDECL int return 기본값 (2026-04-13)
+  - RuleSLessEqual2Constant: INT_SLESSEQUAL(x, C) -> INT_SLESS(x, C+1) 규칙 추가 (rules_misc.go, batchARuleFactories에 등록).
+  - printc.go inferReturnType: 4바이트 TYPE_UNKNOWN return을 arithmetic ancestor check 후 int로 기본값 설정.
+  - hasArithmeticAncestor(): def chain을 4레벨 탐색해 연산 결과면 int, 상수 선택이면 undefined4.
+  - 결과: Classify2 `if (param_3 < 1)` v, CountedLoop/SumList `int` return v
+
 ### 미시작 (우선순위 순)
 
 #### 실측 Ghidra golden 기준 잔여 diff
@@ -529,24 +554,9 @@ golden 원본: `testdata/ghidra_golden/ghidra_golden.json`
 
 ---
 
-#### G2: `for` 루프 구조화
-**현상**: counted_loop/sum_list에서 `while` 대신 `for` 필요.
-**Ghidra golden**: `for (local_8 = 0; local_8 < 5; local_8 = local_8 + 1)`
-**C++ 참조**: `ghidra-ref/.../coreaction.cc`: ActionForLoops -- loop-tail increment 패턴 감지 후 for 헤더로 올림.
-**수정 위치**: `pkg/pcode/printc.go` 또는 새 ActionForLoops
-
----
-
-#### G3: ghost params 억제 (void 함수)
-**현상**: CountedLoop가 `entry(void)`여야 하는데 `entry(param_1, param_2)` 출력.
-**Ghidra golden**: `int processEntry entry(void)`
-**원인**: stack param이 없는 함수에서도 ghost params 2개를 무조건 추가하는 중.
-**수정 위치**: `pkg/pcode/printc.go` SetProcessEntry or `pkg/pcode/scopelocal.go` BuildFromVarnodes -- stack-relative params가 없으면 ghost 생략.
-
----
-
 #### G4: pointer type inference (`int *param_3`)
 **현상**: SumList에서 `int param_3` 대신 `int *param_3` 필요.
+**현재 출력**: `int processEntry entry(undefined4 param_1, undefined4 param_2, int param_3)` -- param_3에 pointer type 없음.
 **Ghidra golden**: `int *param_3`, `local_8 = local_8 + *param_3`, `param_3 = (int *)param_3[1]`
 **C++ 참조**: `ghidra-ref/.../typeop.cc`: TypeOpLoad::propagateType -- LOAD 결과가 다시 LOAD의 주소로 쓰이면 pointer 추론.
 **수정 위치**: `pkg/pcode/action_infertypes.go` 또는 `pkg/pcode/typeop.go`
@@ -563,18 +573,11 @@ golden 원본: `testdata/ghidra_golden/ghidra_golden.json`
 ---
 
 #### G6: `uVar1` rename (Classify2/nested_if)
-**현상**: `unsigned int local_0` 대신 `undefined4 uVar1` 필요.
+**현상**: `undefined4 local_0` 대신 `undefined4 uVar1` 필요.
+**현재 출력**: `undefined4 local_0;` (타입은 undefined4로 맞음, 이름만 다름)
 **Ghidra golden**: `undefined4 uVar1; if (param_3 < 1) { uVar1 = 0; } ...`
 **원인**: renameReturnOnlyLocals가 Classify2 케이스에서 미발동. EAX-range varnode가 return-only로 인식되지 않음.
 **수정 위치**: `pkg/pcode/printc.go` renameReturnOnlyLocals / markReturnOnlyCopies
-
----
-
-#### G7: `param_3 < 1` 정규화 (Classify2)
-**현상**: `param_3 <= 0` 대신 `param_3 < 1`.
-**Ghidra golden**: `if (param_3 < 1)`
-**C++ 참조**: `ghidra-ref/.../ruleaction.cc` RuleLessEqual 또는 flag-fold 시점에 INT_SLESSEQUAL(x,0) -> INT_SLESS(x,1) 변환.
-**수정 위치**: `pkg/pcode/rules_misc.go` 또는 `pkg/pcode/action_fold_flag_conditions.go`
 
 ---
 
