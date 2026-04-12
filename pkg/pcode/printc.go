@@ -721,11 +721,19 @@ func (s *printCState) renderFunctionSignature(retType Datatype) string {
 	}
 
 	// Build ghost param lists (undefined4 param_1, param_2, ...).
-	ghostNames := make([]string, s.ghostParamCount)
-	ghostTypes := make([]Datatype, s.ghostParamCount)
-	for i := 0; i < s.ghostParamCount; i++ {
-		ghostNames[i] = fmt.Sprintf("param_%d", i+1)
-		ghostTypes[i] = sharedTypeFactory.GetBase(4, TYPE_UNKNOWN, "undefined4")
+	// When the function has no real parameters (s.params is empty) and only ghost
+	// params exist, Ghidra renders (void) rather than the ghost params.
+	// C++ parity: processEntry CC with no real args -> ProtoModel marks no real
+	// parameters -> PrintC emits "void" for the parameter list.
+	var ghostNames []string
+	var ghostTypes []Datatype
+	if len(s.params) > 0 {
+		ghostNames = make([]string, s.ghostParamCount)
+		ghostTypes = make([]Datatype, s.ghostParamCount)
+		for i := 0; i < s.ghostParamCount; i++ {
+			ghostNames[i] = fmt.Sprintf("param_%d", i+1)
+			ghostTypes[i] = sharedTypeFactory.GetBase(4, TYPE_UNKNOWN, "undefined4")
+		}
 	}
 
 	allNames := append(ghostNames, realParamNames...)
@@ -1071,6 +1079,11 @@ func (s *printCState) emitWhileBlock(bl *FlowBlock) error {
 	if len(children) < 2 {
 		return s.emitListBlock(bl)
 	}
+	// Delegate to for-loop rendering when ActionForLoops identified an iterate op.
+	// C++ parity: PrintC::emitBlockWhileDo -> emitForLoop when iterateOp != nil
+	if wdo, ok := bl.Concrete().(*BlockWhileDo); ok && wdo.IterateOp() != nil {
+		return s.emitForBlock(wdo, children)
+	}
 	s.lang.OpenBlockAfter(func() {
 		s.lang.Token("while")
 		s.lang.Space()
@@ -1083,6 +1096,90 @@ func (s *printCState) emitWhileBlock(bl *FlowBlock) error {
 	}
 	s.lang.CloseBlock()
 	return nil
+}
+
+// emitForBlock renders a BlockWhileDo as a C for-loop:
+//
+//	for (<init>; <cond>; <iter>) { <body> }
+//
+// The init part is omitted when initializeOp is nil (produces "for (;...").
+// The iterate op and initialize op have PcodeOpNonPrinting set so that
+// emitOps skips them in their original positions inside body/predecessor.
+//
+// C++ parity: PrintC::emitForLoop (printc.cc ~3089)
+func (s *printCState) emitForBlock(wdo *BlockWhileDo, children []*FlowBlock) error {
+	iterOp := wdo.IterateOp()
+	initOp := wdo.InitializeOp()
+
+	initStr, err := s.renderForPartOp(initOp)
+	if err != nil {
+		return err
+	}
+	iterStr, err := s.renderForPartOp(iterOp)
+	if err != nil {
+		return err
+	}
+	condStr := s.mustRenderCondition(children[0])
+
+	s.lang.OpenBlockAfter(func() {
+		s.lang.Token("for")
+		s.lang.Space()
+		s.lang.Token("(")
+		if initStr != "" {
+			s.lang.Token(initStr)
+		}
+		s.lang.Token(";")
+		s.lang.Space()
+		s.lang.Token(condStr)
+		s.lang.Token(";")
+		s.lang.Space()
+		s.lang.Token(iterStr)
+		s.lang.Token(")")
+	})
+	if err := s.emitBlock(children[1]); err != nil {
+		return err
+	}
+	s.lang.CloseBlock()
+	return nil
+}
+
+// renderForPartOp renders a single op (iterate or initialize) as a C expression
+// string suitable for use inside a for-loop header clause.
+//
+// Assignment ops render as "lhs = rhs".
+// STORE ops render as "*ptr = rhs".
+// Returns "" for nil ops.
+//
+// C++ parity: PrintC::emitForLoop calls emitExpression(op) for each part.
+func (s *printCState) renderForPartOp(op *PcodeOp) (string, error) {
+	if op == nil {
+		return "", nil
+	}
+	if op.IsMarker() {
+		return "", nil
+	}
+	switch op.Code() {
+	case CPUI_STORE:
+		lhs, err := s.renderStoreLHS(storePointer(op), cPrecAssign)
+		if err != nil {
+			return "", err
+		}
+		rhs, err := s.renderVarnode(storeValue(op), cPrecAssign)
+		if err != nil {
+			return "", err
+		}
+		return lhs + " = " + rhs, nil
+	default:
+		rhs, err := s.renderOpExpr(op, cPrecAssign)
+		if err != nil {
+			return "", err
+		}
+		if op.Output() == nil {
+			return rhs, nil
+		}
+		lhs := s.nameOf(op.Output())
+		return lhs + " = " + rhs, nil
+	}
 }
 
 func (s *printCState) emitDoWhileBlock(bl *FlowBlock) error {
@@ -1248,6 +1345,13 @@ func (s *printCState) emitBasicBlock(bl *FlowBlock) error {
 func (s *printCState) emitOps(bb *BlockBasic, suppressControl bool) error {
 	for _, op := range bb.Ops() {
 		if op == nil || op.IsDead() || s.inline[op] {
+			continue
+		}
+		// Skip ops marked as NonPrinting by ActionForLoops (iterate/initialize ops
+		// are emitted inside the for-loop header, not as body statements).
+		// C++ parity: PrintC skips ops where PcodeOp::notPrinted() is true
+		// (set by Funcdata::opMarkNonPrinting in BlockWhileDo::finalizePrinting).
+		if op.HasFlag(PcodeOpNonPrinting) {
 			continue
 		}
 		// Skip prologue/epilogue register-save ops (PUSH EBP, PUSH EBX, etc.)

@@ -93,6 +93,10 @@ func runPipeline(t *testing.T, prog []byte, name string) string {
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionPreferComplement("analysis").Apply(result.Funcdata)
+	// ActionForLoops: convert while-with-increment to for-loops.
+	// C++ parity: BlockWhileDo::finalTransform runs during ActionFinalStructure
+	// in C++; here we run it as a separate post-structure pass.
+	pcode.NewActionForLoops("analysis").Apply(result.Funcdata)
 
 	out, err := pcode.NewPrintC().
 		SetRegisterNames(engine.RegisterNamesByLocation()).
