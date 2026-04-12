@@ -37,8 +37,8 @@ func (a *ActionSeedSignedOps) Apply(data *Funcdata) int {
 			continue
 		}
 		switch op.Code() {
-		case CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL,
-			CPUI_INT_SRIGHT, CPUI_INT_SDIV, CPUI_INT_SREM,
+		case CPUI_INT_SRIGHT, // SLESS/SLESSEQUAL excluded: comparisons do not establish operand signedness (C++ parity: TypeOpIntSless::propagateType returns nullptr)
+			CPUI_INT_SDIV, CPUI_INT_SREM,
 			CPUI_INT_SBORROW, CPUI_INT_SCARRY, CPUI_INT_2COMP:
 			for i := 0; i < op.NumInput(); i++ {
 				vn := op.Input(i)
