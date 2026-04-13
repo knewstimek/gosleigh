@@ -341,19 +341,54 @@ func markImpliedCheckCover(data *Funcdata, vn *Varnode) bool {
 		return false
 	}
 	op := vn.Def()
-	if op.IsCall() || op.Code() == CPUI_LOAD {
-		// known mismatch: LOAD and CALL cover crossing checks require store/call
-		// containment queries that the current Go cover model does not expose.
+	high := vn.High()
+	if high == nil {
 		return false
 	}
-	merge := NewMerge(data)
+	cov := high.getCover()
+	if cov == nil {
+		return false
+	}
+	if op.Code() == CPUI_LOAD {
+		for _, storeOp := range data.GetPcodeOpBank().AllOps() {
+			if storeOp == nil || storeOp.IsDead() || storeOp.Code() != CPUI_STORE {
+				continue
+			}
+			storeBlock := storeOp.Parent()
+			if storeBlock == nil || !cov.GetCoverBlock(storeBlock.Index()).Contain(storeOp) {
+				continue
+			}
+			if storeOp.NumInput() < 3 || op.NumInput() < 2 {
+				continue
+			}
+			if storeOp.Input(0) == nil || op.Input(0) == nil {
+				continue
+			}
+			if storeOp.Input(0).Offset() == op.Input(0).Offset() {
+				if !markImpliedPossibleAlias(storeOp.Input(1), op.Input(1), 2) {
+					return false
+				}
+			}
+		}
+	}
 	for i := 0; i < op.NumInput(); i++ {
 		defvn := op.Input(i)
 		if defvn == nil || defvn.IsConstant() {
 			continue
 		}
-		if merge.inflateTest(defvn, vn.High()) {
+		if NewMerge(data).inflateTest(defvn, high) {
 			return false
+		}
+	}
+	if op.Code() == CPUI_CALL || op.Code() == CPUI_LOAD {
+		for _, callOp := range data.GetPcodeOpBank().AllOps() {
+			if callOp == nil || callOp.IsDead() || !callOp.IsCall() {
+				continue
+			}
+			callBlock := callOp.Parent()
+			if callBlock != nil && cov.GetCoverBlock(callBlock.Index()).Contain(callOp) {
+				return false
+			}
 		}
 	}
 	return true

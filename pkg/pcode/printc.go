@@ -27,8 +27,6 @@ const (
 	cPrecPrimary    = ExprPrecPrimary
 )
 
-
-
 type PrintC struct {
 	indentStep      string
 	registerNames   map[string]string // "spaceIdx:offset:size" -> reg name; nil = disabled
@@ -1380,21 +1378,7 @@ func (s *printCState) emitWhileBlock(bl *FlowBlock) error {
 	// ops before the CBRANCH (e.g. iVar1 = param_4 produced by NodeJoin).
 	// C++ parity: PrintC::emitBlockWhileDo sets setMod(comma_separate) for condBlock
 	// emission (printc.cc ~3186).
-	fmt.Printf("DEBUG emitWhileBlock children[0]=%p type=%T children[1]=%p type=%T\n", children[0], children[0].Concrete(), children[1], children[1].Concrete())
 	condStr := s.renderCondBlockComma(children[0])
-	// DEBUG: dump body block ops
-	fmt.Printf("DEBUG emitWhileBlock body block children[1]=%p type=%T\n", children[1], children[1].Concrete())
-	if bodyBasic, ok2 := children[1].Concrete().(*BlockBasic); ok2 {
-		for _, op := range bodyBasic.Ops() {
-			if op == nil { continue }
-			out := op.Output()
-			fmt.Printf("  bodyop=%v dead=%v marker=%v nonprint=%v inline=%v prologue=%v identity=%v", op.Code(), op.IsDead(), op.IsMarker(), op.HasFlag(PcodeOpNonPrinting), s.inline[op], s.prologueOps[op], s.identityOps[op])
-			if out != nil {
-				fmt.Printf(" out=%v implied=%v explicit=%v free=%v name=%q", out, out.IsImplied(), out.IsExplicit(), out.IsFree(), s.nameOf(out))
-			}
-			fmt.Printf("\n")
-		}
-	}
 	s.lang.OpenBlockAfter(func() {
 		s.lang.Token("while")
 		s.lang.Space()
@@ -1419,28 +1403,6 @@ func (s *printCState) renderCondBlockComma(bl *FlowBlock) string {
 	basic, ok := bl.Concrete().(*BlockBasic)
 	if !ok {
 		return s.mustRenderCondition(bl)
-	}
-
-	// DEBUG: dump all ops in the condition block
-	fmt.Printf("DEBUG renderCondBlockComma: block=%p ops:\n", basic)
-	for _, op := range basic.Ops() {
-		if op == nil {
-			continue
-		}
-		out := op.Output()
-		fmt.Printf("  op=%v dead=%v marker=%v nonprint=%v inline=%v prologue=%v identity=%v", op.Code(), op.IsDead(), op.IsMarker(), op.HasFlag(PcodeOpNonPrinting), s.inline[op], s.prologueOps[op], s.identityOps[op])
-		if out != nil {
-			fmt.Printf(" out=%v implied=%v explicit=%v free=%v name=%q", out, out.IsImplied(), out.IsExplicit(), out.IsFree(), s.nameOf(out))
-		}
-		if op.IsMarker() && op.Code() == CPUI_MULTIEQUAL {
-			for i := 0; i < op.NumInput(); i++ {
-				inp := op.Input(i)
-				if inp != nil {
-					fmt.Printf("\n    Input(%d)=%v name=%q", i, inp, s.nameOf(inp))
-				}
-			}
-		}
-		fmt.Printf("\n")
 	}
 
 	var parts []string
