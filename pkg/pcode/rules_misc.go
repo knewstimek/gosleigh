@@ -1596,3 +1596,45 @@ func (r *RuleSplitStore) apply(op *PcodeOp, data *Funcdata) int {
 	}
 	return 0
 }
+
+// RuleSubfloatConvert::applyOp -- subflow.cc.
+type RuleSubfloatConvert struct{ batchRule }
+
+// NewRuleSubfloatConvert is the Go port of RuleSubfloatConvert::RuleSubfloatConvert in subflow.cc.
+func NewRuleSubfloatConvert(group string) *RuleSubfloatConvert {
+	r := &RuleSubfloatConvert{}
+	r.batchRule = newBatchRule(group, "subfloat_convert", []OpCode{CPUI_FLOAT_FLOAT2FLOAT}, r.apply, func(g string) Rule {
+		return NewRuleSubfloatConvert(g)
+	})
+	return r
+}
+
+// RuleSubfloatConvert::getOpList -- subflow.cc.
+func (r *RuleSubfloatConvert) getOpList() []OpCode {
+	return []OpCode{CPUI_FLOAT_FLOAT2FLOAT}
+}
+
+// RuleSubfloatConvert::applyOp -- subflow.cc.
+func (r *RuleSubfloatConvert) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.NumInput() != 1 || op.Output() == nil || op.Input(0) == nil {
+		return 0
+	}
+	invn := op.Input(0)
+	outvn := op.Output()
+	insize := invn.Size()
+	outsize := outvn.Size()
+	if outsize > insize {
+		subflow := NewSubfloatFlow(data, outvn, insize)
+		if !subflow.DoTrace() {
+			return 0
+		}
+		subflow.Apply()
+		return 1
+	}
+	subflow := NewSubfloatFlow(data, invn, outsize)
+	if !subflow.DoTrace() {
+		return 0
+	}
+	subflow.Apply()
+	return 1
+}
