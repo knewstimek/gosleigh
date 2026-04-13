@@ -44,7 +44,7 @@ func TestRulesCopy_RewriteAndRegistration(t *testing.T) {
 	if len(pool.allRules) != count {
 		t.Fatalf("pool registered %d rules, want %d", len(pool.allRules), count)
 	}
-	if pool.allRules[0].GetName() != "piece2zext" || pool.allRules[len(pool.allRules)-1].GetName() != "subfloat_convert" {
+	if pool.allRules[0].GetName() != "piece2zext" || pool.allRules[len(pool.allRules)-1].GetName() != "insert_absorb" {
 		t.Fatalf("unexpected registration order: first=%s last=%s", pool.allRules[0].GetName(), pool.allRules[len(pool.allRules)-1].GetName())
 	}
 	if pool.GetSubRule("trivialarith") == nil || pool.GetSubRule("propagatecopy") == nil {
