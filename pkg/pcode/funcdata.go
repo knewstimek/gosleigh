@@ -196,10 +196,48 @@ func (fd *Funcdata) CalcNZMask() {
 	_ = fd
 }
 
-// MapGlobals discovers global symbols for the function.
+// MapGlobals walks every persistent Varnode in the function and makes sure
+// each has an attached global SymbolEntry, creating one when none exists.
+//
+// We only implement the flat single-scope subset of Ghidra's mapGlobals:
+// there is no Scope tree to discoverScope() against, so every created entry
+// is dropped into the Funcdata's own ScopeLocal. This is correct for the
+// present Go callers, which exercise mapGlobals as a placeholder for future
+// globals tracking rather than full namespace resolution.
+// TODO: route newly discovered globals into a real global Scope once the
+// Scope tree / symbol table port lands (database.cc discoverScope path).
 // C++ parity: funcdata.hh Funcdata::mapGlobals
 func (fd *Funcdata) MapGlobals() {
-	_ = fd
+	if fd == nil || fd.scopeLocal == nil {
+		return
+	}
+	scope := fd.scopeLocal
+	seen := make(map[address.Address]bool)
+	for _, vn := range fd.vbank.AllVarnodes() {
+		if vn == nil || vn.IsFree() {
+			continue
+		}
+		if !vn.IsPersist() {
+			continue
+		}
+		if scope.EntryForVarnode(vn) != nil {
+			continue
+		}
+		addr := vn.Addr()
+		if seen[addr] {
+			continue
+		}
+		seen[addr] = true
+		// Prefer an existing overlapping entry if one exists; otherwise
+		// manufacture a fresh default-named symbol at the Varnode address.
+		entry := scope.QueryContainer(addr, vn.Size(), address.Address{})
+		if entry == nil {
+			name := localHexName(addr.Offset)
+			dt := sharedTypeFactory.GetBase(vn.Size(), TYPE_UNKNOWN, "")
+			entry = scope.AddSymbol(name, dt, addr, vn.Size())
+		}
+		scope.AttachEntryToVarnode(vn, entry)
+	}
 }
 
 // MarkIndirectOnly marks illegal inputs used only in INDIRECT ops.
@@ -220,10 +258,103 @@ func (fd *Funcdata) ApplyForceGoto() {
 	_ = fd
 }
 
-// SyncVarnodesWithSymbols attempts to reconcile symbols with varnodes.
-// C++ parity: funcdata.hh Funcdata::syncVarnodesWithSymbols
-func (fd *Funcdata) SyncVarnodesWithSymbols(*ScopeLocal, bool, bool) bool {
-	return false
+// SyncVarnodesWithSymbols pushes symbol data from the scope down onto the
+// Varnodes that occupy the scope's address space. For each Varnode the scope
+// either (a) returns a SymbolEntry that contains it -- in which case the
+// entry's flags/data-type are pulled onto the Varnode, or (b) produces no
+// match, in which case either the "in scope" flag set is applied or, when
+// unmappedAliasCheck is requested, the Varnode is checked against the
+// unmapped-unaliased heuristic.
+//
+// Returns true if any Varnode was observably modified.
+// C++ parity: funcdata_varnode.cc Funcdata::syncVarnodesWithSymbols
+func (fd *Funcdata) SyncVarnodesWithSymbols(lm *ScopeLocal, updateDatatypes bool, unmappedAliasCheck bool) bool {
+	if fd == nil || lm == nil {
+		return false
+	}
+	space := lm.SpaceID()
+	if space == nil {
+		return false
+	}
+	updateOccurred := false
+	for _, vn := range fd.vbank.AllVarnodes() {
+		if vn == nil || vn.IsFree() {
+			continue
+		}
+		if vn.Space() != space {
+			continue
+		}
+		addr := vn.Addr()
+		entry := lm.FindOverlap(addr, vn.Size())
+		var ct Datatype
+		var fl uint32
+		if entry != nil {
+			fl = entry.AllFlags()
+			if entry.Size() >= vn.Size() {
+				if updateDatatypes {
+					ct = entry.GetSizedType(addr, vn.Size())
+					if ct != nil {
+						if base, ok := ct.(*Base); ok && base.Metatype() == TYPE_UNKNOWN {
+							ct = nil
+						}
+					}
+				}
+			} else {
+				// Overlapping but not containing: drop typelock/namelock to
+				// avoid forcing a wrong type onto a wider register.
+				fl &^= (VarnodeTypeLock | VarnodeNameLock)
+			}
+			lm.AttachEntryToVarnode(vn, entry)
+		} else {
+			if lm.InScope(addr, vn.Size(), vn.Addr()) {
+				fl = VarnodeMapped | VarnodeAddrTied
+			} else if unmappedAliasCheck {
+				if lm.IsUnmappedUnaliased(vn) {
+					fl = VarnodeNoLocalAlias
+				} else {
+					fl = 0
+				}
+			} else {
+				fl = 0
+			}
+		}
+		if fd.syncVarnodeFlags(vn, fl, ct) {
+			updateOccurred = true
+		}
+	}
+	return updateOccurred
+}
+
+// syncVarnodeFlags applies the subset of flag transitions that
+// syncVarnodesWithSymbol makes: mapped/addrtied/addrforce/nolocalalias and a
+// replacement data-type. The transitions mirror the mask computation in the
+// C++ source so "addrtied can be cleared but not set" and "nolocalalias can
+// be set but not cleared" hold.
+// C++ parity: funcdata_varnode.cc Funcdata::syncVarnodesWithSymbol
+func (fd *Funcdata) syncVarnodeFlags(vn *Varnode, fl uint32, ct Datatype) bool {
+	if vn == nil {
+		return false
+	}
+	mask := VarnodeMapped
+	if fl&VarnodeAddrTied == 0 {
+		mask |= VarnodeAddrTied | VarnodeAddrForce
+	}
+	if fl&VarnodeNoLocalAlias != 0 {
+		mask |= VarnodeNoLocalAlias | VarnodeAddrForce
+	}
+	fl &= mask
+	updated := false
+	cur := vn.Flags() & mask
+	if cur != fl {
+		updated = true
+		vn.SetFlags(fl)
+		vn.ClearFlags((^fl) & mask)
+	}
+	if ct != nil && vn.Type() == nil {
+		SetVarnodeType(vn, ct)
+		updated = true
+	}
+	return updated
 }
 
 // RemoveUnreachableBlocks removes unreachable blocks.
