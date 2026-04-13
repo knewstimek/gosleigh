@@ -722,6 +722,311 @@ func (a *ActionNormalizeSetup) Apply(data *Funcdata) int {
 	return 0
 }
 
+// ActionPrototypeTypes applies prototype types to recovered parameters and returns.
+// C++ parity: coreaction.hh ActionPrototypeTypes
+type ActionPrototypeTypes struct{ ActionBase }
+
+var _ Action = (*ActionPrototypeTypes)(nil)
+
+// NewActionPrototypeTypes constructs ActionPrototypeTypes.
+// C++ parity: coreaction.hh ActionPrototypeTypes::ActionPrototypeTypes
+func NewActionPrototypeTypes(group string) *ActionPrototypeTypes {
+	act := &ActionPrototypeTypes{}
+	act.ActionBase = NewActionBase(act, ActionRuleOncePerFunc, "prototypetypes", group)
+	return act
+}
+
+// Clone clones ActionPrototypeTypes for the provided group list.
+// C++ parity: coreaction.hh ActionPrototypeTypes::clone
+func (a *ActionPrototypeTypes) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionPrototypeTypes(a.GetGroup())
+}
+
+// extendInput inserts a widening op when the input varnode is smaller than the prototype.
+// TODO known mismatch: Ghidra's FuncProto::assumedInputExtension chooses the exact
+// extension opcode from the calling convention model. Gosleigh uses a size/type heuristic.
+// C++ parity: ActionPrototypeTypes::extendInput
+func (a *ActionPrototypeTypes) extendInput(data *Funcdata, invn *Varnode, param *HighVariable, topbl *BlockBasic) {
+	if data == nil || invn == nil || param == nil || topbl == nil || param.Type() == nil {
+		return
+	}
+	if invn.Size() >= param.Type().Size() {
+		return
+	}
+	opcode := CPUI_INT_ZEXT
+	if param.Type().Metatype() == TYPE_INT {
+		opcode = CPUI_INT_SEXT
+	}
+	start := topbl.FirstOp()
+	if start == nil {
+		return
+	}
+	extop := data.NewOp(1, start.Addr())
+	data.NewVarnodeOut(param.Type().Size(), invn.Addr(), extop)
+	data.OpSetOpcode(extop, opcode)
+	data.OpSetInput(extop, invn, 0)
+	data.OpInsertBegin(extop, topbl)
+}
+
+// Apply applies the prototype model to locked inputs and outputs.
+// C++ parity: coreaction.cc ActionPrototypeTypes::apply
+func (a *ActionPrototypeTypes) Apply(data *Funcdata) int {
+	fp := data.GetFuncProto()
+	if fp == nil {
+		return 0
+	}
+
+	if fp.HasThisPointer() {
+		fp.PrepareThisPointer()
+	}
+
+	for _, op := range data.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN {
+			continue
+		}
+		if op.NumInput() == 0 {
+			continue
+		}
+		in0 := op.Input(0)
+		if in0 != nil && !in0.IsConstant() {
+			zeroConst := data.NewConstant(in0.Size(), 0)
+			data.OpSetInput(op, zeroConst, 0)
+		}
+	}
+
+	if fp.IsOutputLocked() {
+		out := fp.GetOutput()
+		if out != nil && out.Type() != nil && out.Type().Metatype() != TYPE_VOID {
+			for _, op := range data.GetPcodeOpBank().AllOps() {
+				if op == nil || op.IsDead() || op.Code() != CPUI_RETURN || op.HaltType() != 0 {
+					continue
+				}
+				if out.NumInstances() == 0 {
+					continue
+				}
+				ref := out.GetInstance(0)
+				if ref == nil {
+					continue
+				}
+				vn := data.NewVarnode(out.Type().Size(), ref.Addr())
+				data.OpSetInput(op, vn, op.NumInput())
+				SetVarnodeType(vn, out.Type())
+			}
+		}
+	}
+
+	if fp.IsInputLocked() {
+		var topbl *BlockBasic
+		if bg := data.GetBasicBlocks(); bg != nil && bg.GetSize() > 0 {
+			if concrete, ok := bg.GetBlock(0).Concrete().(*BlockBasic); ok {
+				topbl = concrete
+			}
+		}
+		if topbl != nil {
+			for i := 0; i < fp.NumParams(); i++ {
+				param := fp.GetParam(i)
+				if param == nil || param.NumInstances() == 0 {
+					continue
+				}
+				for _, invn := range param.Instances() {
+					if invn == nil {
+						continue
+					}
+					invn.SetAddlFlags(VarnodeLockedInput)
+					if param.Type() != nil {
+						a.extendInput(data, invn, param, topbl)
+					}
+					if param.Type() != nil && param.Type().Metatype() == TYPE_PTR && param.Type().Size() == invn.Size() {
+						invn.SetPtrFlow()
+					}
+				}
+			}
+		}
+	}
+
+	return 0
+}
+
+// ActionDefaultParams applies the default calling convention to calls without a prototype.
+// C++ parity: coreaction.hh ActionDefaultParams
+type ActionDefaultParams struct{ ActionBase }
+
+var _ Action = (*ActionDefaultParams)(nil)
+
+// NewActionDefaultParams constructs ActionDefaultParams.
+// C++ parity: coreaction.hh ActionDefaultParams::ActionDefaultParams
+func NewActionDefaultParams(group string) *ActionDefaultParams {
+	act := &ActionDefaultParams{}
+	act.ActionBase = NewActionBase(act, ActionRuleOncePerFunc, "defaultparams", group)
+	return act
+}
+
+// Clone clones ActionDefaultParams for the provided group list.
+// C++ parity: coreaction.hh ActionDefaultParams::clone
+func (a *ActionDefaultParams) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionDefaultParams(a.GetGroup())
+}
+
+// Apply applies the default model to any call op without an explicit prototype.
+// TODO known mismatch: Gosleigh does not yet track callee Funcdata linkage or
+// upon-return p-code injection, so the callee copy branch is reduced to the local model.
+// C++ parity: coreaction.cc ActionDefaultParams::apply
+func (a *ActionDefaultParams) Apply(data *Funcdata) int {
+	if data == nil {
+		return 0
+	}
+	evalfp := data.GetFuncProto()
+	var defaultModel *ProtoModel
+	if evalfp != nil {
+		defaultModel = evalfp.Model()
+	}
+	if defaultModel == nil && evalfp != nil {
+		defaultModel = evalfp.Model()
+	}
+
+	for i := 0; i < data.NumCalls(); i++ {
+		fc := data.GetCallSpecs(i)
+		if fc == nil {
+			continue
+		}
+		if !fc.HasModel() {
+			if otherfunc := fc.GetFuncdata(); otherfunc != nil {
+				if otherProto := otherfunc.GetFuncProto(); otherProto != nil {
+					fc.Copy(otherProto)
+					if !fc.IsModelLocked() && !fc.HasMatchingModel(defaultModel) {
+						fc.SetModel(defaultModel)
+					}
+				}
+			} else {
+				fc.SetInternal(defaultModel, sharedTypeFactory.GetVoid())
+			}
+		}
+		fc.InsertPcode(data)
+	}
+	return 0
+}
+
+// ActionInputPrototype finalizes recovered input parameters.
+// C++ parity: coreaction.hh ActionInputPrototype
+type ActionInputPrototype struct{ ActionBase }
+
+var _ Action = (*ActionInputPrototype)(nil)
+
+// NewActionInputPrototype constructs ActionInputPrototype.
+// C++ parity: coreaction.hh ActionInputPrototype::ActionInputPrototype
+func NewActionInputPrototype(group string) *ActionInputPrototype {
+	act := &ActionInputPrototype{}
+	act.ActionBase = NewActionBase(act, ActionRuleOncePerFunc, "inputprototype", group)
+	return act
+}
+
+// Clone clones ActionInputPrototype for the provided group list.
+// C++ parity: coreaction.hh ActionInputPrototype::clone
+func (a *ActionInputPrototype) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionInputPrototype(a.GetGroup())
+}
+
+// Apply finalizes the recovered input prototype.
+// C++ parity: coreaction.cc ActionInputPrototype::apply
+func (a *ActionInputPrototype) Apply(data *Funcdata) int {
+	fp := data.GetFuncProto()
+	if fp == nil {
+		return 0
+	}
+	fp.ClearUnlockedInput()
+	if !fp.IsInputLocked() {
+		model := fp.Model()
+		if model != nil {
+			scope := data.GetScopeLocal()
+			if scope != nil {
+				scope.ResetLocalWindow()
+			}
+			// Build a fresh high-level view from the existing varnodes.
+			if scope == nil {
+				scope = NewScopeLocal(model)
+				data.SetScopeLocal(scope)
+			}
+			scope.BuildFromVarnodes(data.GetVarnodeBank().AllVarnodes(), fp)
+			fp.SetInputLocked(true)
+		}
+	}
+	return 0
+}
+
+// ActionOutputPrototype finalizes the recovered return value.
+// C++ parity: coreaction.hh ActionOutputPrototype
+type ActionOutputPrototype struct{ ActionBase }
+
+var _ Action = (*ActionOutputPrototype)(nil)
+
+// NewActionOutputPrototype constructs ActionOutputPrototype.
+// C++ parity: coreaction.hh ActionOutputPrototype::ActionOutputPrototype
+func NewActionOutputPrototype(group string) *ActionOutputPrototype {
+	act := &ActionOutputPrototype{}
+	act.ActionBase = NewActionBase(act, ActionRuleOncePerFunc, "outputprototype", group)
+	return act
+}
+
+// Clone clones ActionOutputPrototype for the provided group list.
+// C++ parity: coreaction.hh ActionOutputPrototype::clone
+func (a *ActionOutputPrototype) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionOutputPrototype(a.GetGroup())
+}
+
+// Apply finalizes the recovered return value.
+// C++ parity: coreaction.cc ActionOutputPrototype::apply
+func (a *ActionOutputPrototype) Apply(data *Funcdata) int {
+	fp := data.GetFuncProto()
+	if fp == nil {
+		return 0
+	}
+	out := fp.GetOutput()
+	if out != nil && out.Type() != nil && out.Type().Metatype() != TYPE_VOID && fp.IsOutputLocked() {
+		return 0
+	}
+	var firstRet *Varnode
+	for _, op := range data.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN {
+			continue
+		}
+		for i := 1; i < op.NumInput(); i++ {
+			if vn := op.Input(i); vn != nil {
+				firstRet = vn
+				break
+			}
+		}
+		if firstRet != nil {
+			break
+		}
+	}
+	if firstRet == nil {
+		fp.ClearUnlockedOutput()
+		return 0
+	}
+	hv := fp.GetOutput()
+	if hv == nil {
+		hv = NewHighVariable("return")
+		fp.SetOutput(hv)
+	}
+	hv.AddInstance(firstRet)
+	if firstRet.Type() != nil {
+		hv.SetType(firstRet.Type())
+	}
+	return 0
+}
+
 // ActionExtraPopSetup defines formal links between stack-pointer values across calls.
 // C++ parity: coreaction.hh ActionExtraPopSetup
 type ActionExtraPopSetup struct{ ActionBase }
