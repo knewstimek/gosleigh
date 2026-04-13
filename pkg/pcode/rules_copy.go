@@ -280,6 +280,7 @@ var batchARuleFactories = []batchARuleFactory{
 	// C++ groups under floatprecision pool; tentatively in BatchA pending dedicated pool
 	func(group string) Rule { return NewRuleInt2FloatCollapse(group) },
 	func(group string) Rule { return NewRuleOrPredicate(group) },
+	func(group string) Rule { return NewRuleDumptyHumpLate(group) },
 }
 
 func BatchARules(group string) []Rule {

@@ -1034,6 +1034,86 @@ func (r *RulePushMultiME) apply(op *PcodeOp, data *Funcdata) int {
 	return 1
 }
 
+// RuleDumptyHumpLate::applyOp -- subflow.cc.
+type RuleDumptyHumpLate struct{ batchRule }
+
+// NewRuleDumptyHumpLate is the Go port of RuleDumptyHumpLate::RuleDumptyHumpLate in subflow.cc.
+func NewRuleDumptyHumpLate(group string) *RuleDumptyHumpLate {
+	r := &RuleDumptyHumpLate{}
+	r.batchRule = newBatchRule(group, "dumptyhumplate", []OpCode{CPUI_SUBPIECE}, r.apply, func(g string) Rule { return NewRuleDumptyHumpLate(g) })
+	return r
+}
+
+// RuleDumptyHumpLate::applyOp -- subflow.cc.
+func (r *RuleDumptyHumpLate) apply(op *PcodeOp, data *Funcdata) int {
+	vn := op.Input(0)
+	if vn == nil || !vn.IsWritten() {
+		return 0
+	}
+	pieceOp := vn.Def()
+	if pieceOp == nil || pieceOp.Code() != CPUI_PIECE {
+		return 0
+	}
+	out := op.Output()
+	if out == nil {
+		return 0
+	}
+	outSize := out.Size()
+	trunc, ok := constantValue(op.Input(1))
+	if !ok {
+		return 0
+	}
+	for {
+		trialVn := pieceOp.Input(1)
+		trialTrunc := trunc
+		if trunc >= uint64(trialVn.Size()) {
+			trialTrunc -= uint64(trialVn.Size())
+			trialVn = pieceOp.Input(0)
+		}
+		if uint64(outSize)+trialTrunc > uint64(trialVn.Size()) {
+			return 0
+		}
+		vn = trialVn
+		trunc = trialTrunc
+		if vn.Size() == outSize {
+			break
+		}
+		if !vn.IsWritten() {
+			break
+		}
+		pieceOp = vn.Def()
+		if pieceOp == nil || pieceOp.Code() != CPUI_PIECE {
+			break
+		}
+	}
+	if vn == op.Input(0) {
+		return 0
+	}
+	if vn.IsWritten() && vn.Def() != nil && vn.Def().Code() == CPUI_COPY {
+		vn = vn.Def().Input(0)
+	}
+	var removeOp *PcodeOp
+	if outSize != vn.Size() {
+		removeOp = op.Input(0).Def()
+		if op.Input(1).Offset() != trunc {
+			data.OpSetInput(op, data.NewConstant(4, trunc), 1)
+		}
+		data.OpSetInput(op, vn, 0)
+	} else if out.IsAutoLive() {
+		removeOp = op.Input(0).Def()
+		data.OpRemoveInput(op, 1)
+		data.OpSetOpcode(op, CPUI_COPY)
+		data.OpSetInput(op, vn, 0)
+	} else {
+		removeOp = op
+		data.TotalReplace(out, vn)
+	}
+	if removeOp != nil && removeOp.Output() != nil && removeOp.Output().HasNoDescend() && !removeOp.Output().IsAutoLive() {
+		data.OpDestroyRecursive(removeOp)
+	}
+	return 1
+}
+
 type batchCMiscRuleFactory func(string) Rule
 
 var batchCMiscRuleFactories = []batchCMiscRuleFactory{
