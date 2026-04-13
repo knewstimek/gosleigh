@@ -1148,6 +1148,12 @@ var batchCMiscRuleFactories = []batchCMiscRuleFactory{
 	func(group string) Rule { return NewRuleShiftPiece(group) },
 	func(group string) Rule { return NewRuleConcatLeftShift(group) },
 	func(group string) Rule { return NewRuleShiftSub(group) },
+	func(group string) Rule { return NewRuleBitFieldStore(group) },
+	func(group string) Rule { return NewRuleBitFieldOut(group) },
+	func(group string) Rule { return NewRuleBitFieldLoad(group) },
+	func(group string) Rule { return NewRuleBitFieldIn(group) },
+	func(group string) Rule { return NewRulePullAbsorb(group) },
+	func(group string) Rule { return NewRuleInsertAbsorb(group) },
 }
 
 func BatchCMiscRules(group string) []Rule {
@@ -1637,4 +1643,647 @@ func (r *RuleSubfloatConvert) apply(op *PcodeOp, data *Funcdata) int {
 	}
 	subflow.Apply()
 	return 1
+}
+
+// RuleBitFieldStore is the Go port of RuleBitFieldStore::RuleBitFieldStore in bitfield.cc.
+type RuleBitFieldStore struct{ batchRule }
+
+// NewRuleBitFieldStore is the Go port of RuleBitFieldStore::RuleBitFieldStore in bitfield.cc.
+func NewRuleBitFieldStore(group string) *RuleBitFieldStore {
+	r := &RuleBitFieldStore{}
+	r.batchRule = newBatchRule(group, "bitfield_store", []OpCode{CPUI_STORE}, r.apply, func(g string) Rule {
+		return NewRuleBitFieldStore(g)
+	})
+	return r
+}
+
+// RuleBitFieldStore::getOpList -- bitfield.cc.
+func (r *RuleBitFieldStore) getOpList() []OpCode {
+	return []OpCode{CPUI_STORE}
+}
+
+// RuleBitFieldStore::applyOp -- bitfield.cc.
+func (r *RuleBitFieldStore) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.NumInput() < 3 || op.Input(1) == nil || op.Input(2) == nil {
+		return 0
+	}
+	ptr := op.Input(1).TypeReadFacing(op)
+	if ptr == nil {
+		return 0
+	}
+	dt, off := bitfieldPtrInto(ptr, 0)
+	if dt == nil || !bitfieldHasBitfields(dt) {
+		return 0
+	}
+	_ = off
+	vn := op.Input(2)
+	if vn.IsWritten() && vn.Def() != nil && vn.Def().Code() == CPUI_INSERT {
+		return 0
+	}
+	// Gosleigh keeps the transform scaffold conservative until the bitfield
+	// datatype metadata is wired in.
+	_ = data
+	return 0
+}
+
+// RuleBitFieldOut is the Go port of RuleBitFieldOut::RuleBitFieldOut in bitfield.cc.
+type RuleBitFieldOut struct{ batchRule }
+
+// NewRuleBitFieldOut is the Go port of RuleBitFieldOut::RuleBitFieldOut in bitfield.cc.
+func NewRuleBitFieldOut(group string) *RuleBitFieldOut {
+	r := &RuleBitFieldOut{}
+	r.batchRule = newBatchRule(group, "bitfield_out", []OpCode{
+		CPUI_COPY, CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL, CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL,
+		CPUI_INT_LESS, CPUI_INT_LESSEQUAL, CPUI_INT_ZEXT, CPUI_INT_SEXT, CPUI_INT_ADD,
+		CPUI_INT_CARRY, CPUI_INT_SCARRY, CPUI_INT_XOR, CPUI_INT_AND, CPUI_INT_OR,
+		CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT, CPUI_INT_MULT, CPUI_BOOL_NEGATE,
+		CPUI_BOOL_XOR, CPUI_BOOL_AND, CPUI_BOOL_OR, CPUI_FLOAT_EQUAL, CPUI_FLOAT_NOTEQUAL,
+		CPUI_FLOAT_LESS, CPUI_FLOAT_LESSEQUAL, CPUI_FLOAT_NAN, CPUI_INDIRECT, CPUI_SUBPIECE,
+	}, r.apply, func(g string) Rule { return NewRuleBitFieldOut(g) })
+	return r
+}
+
+// RuleBitFieldOut::getOpList -- bitfield.cc.
+func (r *RuleBitFieldOut) getOpList() []OpCode {
+	return []OpCode{
+		CPUI_COPY, CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL, CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL,
+		CPUI_INT_LESS, CPUI_INT_LESSEQUAL, CPUI_INT_ZEXT, CPUI_INT_SEXT, CPUI_INT_ADD,
+		CPUI_INT_CARRY, CPUI_INT_SCARRY, CPUI_INT_XOR, CPUI_INT_AND, CPUI_INT_OR,
+		CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT, CPUI_INT_MULT, CPUI_BOOL_NEGATE,
+		CPUI_BOOL_XOR, CPUI_BOOL_AND, CPUI_BOOL_OR, CPUI_FLOAT_EQUAL, CPUI_FLOAT_NOTEQUAL,
+		CPUI_FLOAT_LESS, CPUI_FLOAT_LESSEQUAL, CPUI_FLOAT_NAN, CPUI_INDIRECT, CPUI_SUBPIECE,
+	}
+}
+
+// RuleBitFieldOut::applyOp -- bitfield.cc.
+func (r *RuleBitFieldOut) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.Output() == nil {
+		return 0
+	}
+	dt := op.Output().TypeDefFacing()
+	if !bitfieldHasBitfields(dt) {
+		return 0
+	}
+	_ = data
+	return 0
+}
+
+// RuleBitFieldLoad is the Go port of RuleBitFieldLoad::RuleBitFieldLoad in bitfield.cc.
+type RuleBitFieldLoad struct{ batchRule }
+
+// NewRuleBitFieldLoad is the Go port of RuleBitFieldLoad::RuleBitFieldLoad in bitfield.cc.
+func NewRuleBitFieldLoad(group string) *RuleBitFieldLoad {
+	r := &RuleBitFieldLoad{}
+	r.batchRule = newBatchRule(group, "bitfield_load", []OpCode{CPUI_LOAD}, r.apply, func(g string) Rule {
+		return NewRuleBitFieldLoad(g)
+	})
+	return r
+}
+
+// RuleBitFieldLoad::getOpList -- bitfield.cc.
+func (r *RuleBitFieldLoad) getOpList() []OpCode {
+	return []OpCode{CPUI_LOAD}
+}
+
+// RuleBitFieldLoad::applyOp -- bitfield.cc.
+func (r *RuleBitFieldLoad) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.NumInput() < 2 || op.Input(1) == nil {
+		return 0
+	}
+	ptr := op.Input(1).TypeReadFacing(op)
+	if ptr == nil {
+		return 0
+	}
+	dt, off := bitfieldPtrInto(ptr, 0)
+	if dt == nil || !bitfieldHasBitfields(dt) {
+		return 0
+	}
+	_ = off
+	_ = data
+	return 0
+}
+
+// RuleBitFieldIn is the Go port of RuleBitFieldIn::RuleBitFieldIn in bitfield.cc.
+type RuleBitFieldIn struct{ batchRule }
+
+// NewRuleBitFieldIn is the Go port of RuleBitFieldIn::RuleBitFieldIn in bitfield.cc.
+func NewRuleBitFieldIn(group string) *RuleBitFieldIn {
+	r := &RuleBitFieldIn{}
+	r.batchRule = newBatchRule(group, "bitfield_in", []OpCode{CPUI_COPY, CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL,
+		CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL, CPUI_INT_LESS, CPUI_INT_LESSEQUAL, CPUI_INT_ZEXT,
+		CPUI_INT_SEXT, CPUI_INT_ADD, CPUI_INT_NEGATE, CPUI_INT_AND, CPUI_INT_LEFT, CPUI_INT_RIGHT,
+		CPUI_INT_SRIGHT, CPUI_INT_MULT, CPUI_SUBPIECE}, r.apply, func(g string) Rule { return NewRuleBitFieldIn(g) })
+	return r
+}
+
+// RuleBitFieldIn::getOpList -- bitfield.cc.
+func (r *RuleBitFieldIn) getOpList() []OpCode {
+	return []OpCode{
+		CPUI_COPY, CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL, CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL,
+		CPUI_INT_LESS, CPUI_INT_LESSEQUAL, CPUI_INT_ZEXT, CPUI_INT_SEXT, CPUI_INT_ADD,
+		CPUI_INT_NEGATE, CPUI_INT_AND, CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT,
+		CPUI_INT_MULT, CPUI_SUBPIECE,
+	}
+}
+
+// RuleBitFieldIn::applyOp -- bitfield.cc.
+func (r *RuleBitFieldIn) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.NumInput() == 0 || op.Input(0) == nil {
+		return 0
+	}
+	dt := op.Input(0).TypeReadFacing(op)
+	if !bitfieldHasBitfields(dt) {
+		return 0
+	}
+	_ = data
+	return 0
+}
+
+// RulePullAbsorb is the Go port of RulePullAbsorb::RulePullAbsorb in bitfield.cc.
+type RulePullAbsorb struct{ batchRule }
+
+// NewRulePullAbsorb is the Go port of RulePullAbsorb::RulePullAbsorb in bitfield.cc.
+func NewRulePullAbsorb(group string) *RulePullAbsorb {
+	r := &RulePullAbsorb{}
+	r.batchRule = newBatchRule(group, "pull_absorb", []OpCode{CPUI_ZPULL, CPUI_SPULL}, r.apply, func(g string) Rule {
+		return NewRulePullAbsorb(g)
+	})
+	return r
+}
+
+// RulePullAbsorb::getOpList -- bitfield.cc.
+func (r *RulePullAbsorb) getOpList() []OpCode {
+	return []OpCode{CPUI_ZPULL, CPUI_SPULL}
+}
+
+// RulePullAbsorb::applyOp -- bitfield.cc.
+func (r *RulePullAbsorb) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.Output() == nil {
+		return 0
+	}
+	outvn := op.Output()
+	destroyIfDead := func(dead *PcodeOp) {
+		if dead == nil || dead.Output() == nil || !dead.Output().HasNoDescend() {
+			return
+		}
+		data.OpDestroyRecursive(dead)
+	}
+	absorbExt := func(extOp *PcodeOp, pullOp *PcodeOp) int {
+		if extOp == nil || pullOp == nil || extOp.NumInput() != 1 || extOp.Input(0) == nil {
+			return 0
+		}
+		pullSigned := pullOp.Code() == CPUI_SPULL
+		extSigned := extOp.Code() == CPUI_INT_SEXT
+		if extSigned != pullSigned {
+			return 0
+		}
+		vn := extOp.Input(0)
+		if vn.LoneDescend() != extOp {
+			return 0
+		}
+		extOp.SetNumInputs(3)
+		data.OpSetOpcode(extOp, pullOp.Code())
+		data.OpSetInput(extOp, pullOp.Input(0), 0)
+		data.OpSetInput(extOp, pullOp.Input(1), 1)
+		data.OpSetInput(extOp, pullOp.Input(2), 2)
+		destroyIfDead(vn.Def())
+		return 1
+	}
+	absorbSubpiece := func(subOp *PcodeOp, pullOp *PcodeOp) int {
+		if subOp == nil || pullOp == nil || subOp.NumInput() < 2 || subOp.Input(1) == nil {
+			return 0
+		}
+		if subOp.Input(1).Offset() != 0 {
+			return 0
+		}
+		bitsize := int32(pullOp.Input(2).Offset())
+		if bitsize > 8*subOp.Output().Size() {
+			return 0
+		}
+		vn := subOp.Input(0)
+		if vn.LoneDescend() != subOp {
+			return 0
+		}
+		subOp.SetNumInputs(3)
+		data.OpSetOpcode(subOp, pullOp.Code())
+		data.OpSetInput(subOp, pullOp.Input(0), 0)
+		data.OpSetInput(subOp, pullOp.Input(1), 1)
+		data.OpSetInput(subOp, pullOp.Input(2), 2)
+		destroyIfDead(vn.Def())
+		return 1
+	}
+	absorbCompare := func(compOp *PcodeOp, leftOp *PcodeOp, pullOp *PcodeOp) int {
+		if compOp == nil || pullOp == nil || compOp.NumInput() != 2 || compOp.Input(0) == nil || compOp.Input(1) == nil {
+			return 0
+		}
+		sa := int32(0)
+		if leftOp != nil {
+			if leftOp.NumInput() < 2 || leftOp.Input(1) == nil || !leftOp.Input(1).IsConstant() {
+				return 0
+			}
+			sa = int32(leftOp.Input(1).Offset())
+		}
+		numbits := int32(pullOp.Input(2).Offset())
+		invn := pullOp.Input(0)
+		if numbits+sa != invn.Size()*8 {
+			return 0
+		}
+		inVn := pullOp.Output()
+		if leftOp != nil {
+			inVn = leftOp.Output()
+		}
+		lessVn0 := compOp.Input(0)
+		lessVn1 := compOp.Input(1)
+		if compOp.Code() == CPUI_INT_SLESS {
+			if numbits == 1 && lessVn0 == inVn && lessVn1.IsConstant() && lessVn1.Offset() == 0 {
+				rewriteToCopy(data, compOp, pullOp.Output())
+				destroyIfDead(leftOp)
+				return 1
+			}
+			if numbits == 1 && lessVn1 == inVn && lessVn0.IsConstant() && lessVn0.Offset() == maskForSize(inVn.Size()) {
+				rewriteOp(data, compOp, CPUI_BOOL_NEGATE, pullOp.Output())
+				destroyIfDead(leftOp)
+				return 1
+			}
+		}
+		mask := uint64(1)
+		mask = (mask << uint(sa)) - 1
+		if sa > 0 && sa < 64 && inVn == lessVn0 && lessVn1.IsConstant() {
+			origVal := lessVn1.Offset()
+			lowBits := mask & origVal
+			if lowBits == 0 || lowBits == 1 {
+				var newVal uint64
+				if lowBits == 1 {
+					newVal = (origVal - 1) >> uint(sa)
+					newVal = (newVal + 1) & maskForSize(inVn.Size())
+				} else {
+					newVal = origVal >> uint(sa)
+				}
+				data.OpSetInput(compOp, pullOp.Output(), 0)
+				data.OpSetInput(compOp, data.NewConstant(inVn.Size(), newVal), 1)
+				destroyIfDead(leftOp)
+				return 1
+			}
+		}
+		if sa > 0 && sa < 64 && inVn == lessVn1 && lessVn0.IsConstant() {
+			origVal := lessVn0.Offset()
+			lowBits := mask & origVal
+			if lowBits == 0 || lowBits == mask {
+				var newVal uint64
+				if lowBits == mask {
+					newVal = (origVal + 1) >> uint(sa)
+					newVal = (newVal - 1) & maskForSize(inVn.Size())
+				} else {
+					newVal = origVal >> uint(sa)
+				}
+				data.OpSetInput(compOp, pullOp.Output(), 1)
+				data.OpSetInput(compOp, data.NewConstant(inVn.Size(), newVal), 0)
+				destroyIfDead(leftOp)
+				return 1
+			}
+		}
+		return 0
+	}
+	absorbAnd := func(andOp *PcodeOp, pullOp *PcodeOp) int {
+		if andOp == nil || pullOp == nil || andOp.NumInput() < 2 || andOp.Input(1) == nil || !andOp.Input(1).IsConstant() {
+			return 0
+		}
+		if pullOp.Code() != CPUI_SPULL {
+			return 0
+		}
+		bitsize := int32(pullOp.Input(2).Offset())
+		if bitsize <= 0 {
+			return 0
+		}
+		matchVal := uint64(1) << uint(bitsize-1)
+		if matchVal != andOp.Input(1).Offset() {
+			return 0
+		}
+		outvn := andOp.Output()
+		if outvn == nil {
+			return 0
+		}
+		for _, readOp := range outvn.DescendIter() {
+			if readOp == nil || readOp.NumInput() < 2 || readOp.Input(1) == nil || !readOp.Input(1).IsConstant() {
+				continue
+			}
+			switch readOp.Code() {
+			case CPUI_INT_EQUAL:
+				rewriteOp(data, readOp, CPUI_INT_LESSEQUAL, pullOp.Output(), data.NewConstant(pullOp.Output().Size(), 0))
+				destroyIfDead(andOp)
+				return 1
+			case CPUI_INT_NOTEQUAL:
+				rewriteOp(data, readOp, CPUI_INT_SLESS, pullOp.Output(), data.NewConstant(pullOp.Output().Size(), 0))
+				destroyIfDead(andOp)
+				return 1
+			}
+		}
+		return 0
+	}
+	absorbRightAndCompZero := func(rightOp *PcodeOp, andOp *PcodeOp, pullOp *PcodeOp) int {
+		if pullOp.Code() != CPUI_SPULL || rightOp == nil || andOp == nil {
+			return 0
+		}
+		if rightOp.NumInput() < 2 || !rightOp.Input(1).IsConstant() || andOp.NumInput() < 2 || !andOp.Input(1).IsConstant() {
+			return 0
+		}
+		if int32(pullOp.Input(2).Offset())-1 != int32(rightOp.Input(1).Offset()) {
+			return 0
+		}
+		if andOp.Input(1).Offset() != 1 {
+			return 0
+		}
+		outvn := andOp.Output()
+		if outvn == nil {
+			return 0
+		}
+		for _, readOp := range outvn.DescendIter() {
+			if readOp == nil || readOp.NumInput() < 2 || readOp.Input(1) == nil || !readOp.Input(1).IsConstant() || readOp.Input(1).Offset() != 0 {
+				continue
+			}
+			switch readOp.Code() {
+			case CPUI_INT_EQUAL:
+				rewriteOp(data, readOp, CPUI_INT_LESSEQUAL, pullOp.Output(), readOp.Input(1))
+				destroyIfDead(andOp)
+				return 1
+			case CPUI_INT_NOTEQUAL:
+				rewriteOp(data, readOp, CPUI_INT_SLESS, pullOp.Output(), readOp.Input(1))
+				destroyIfDead(andOp)
+				return 1
+			}
+		}
+		return 0
+	}
+	absorbExtOrSubpiece := func(readOp *PcodeOp) int {
+		switch readOp.Code() {
+		case CPUI_INT_ZEXT, CPUI_INT_SEXT:
+			return absorbExt(readOp, op)
+		case CPUI_SUBPIECE:
+			return absorbSubpiece(readOp, op)
+		case CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL:
+			if readOp.NumInput() >= 2 && readOp.Input(1) != nil && readOp.Input(1).IsConstant() && readOp.Input(1).Offset() == 0 {
+				if readOp.Code() == CPUI_INT_EQUAL {
+					rewriteOp(data, readOp, CPUI_BOOL_NEGATE, op.Output())
+				} else {
+					rewriteToCopy(data, readOp, op.Output())
+				}
+				return 1
+			}
+		}
+		return 0
+	}
+	for _, readOp := range outvn.DescendIter() {
+		if readOp == nil {
+			continue
+		}
+		switch readOp.Code() {
+		case CPUI_INT_RIGHT, CPUI_INT_SRIGHT:
+			if readOp.Output() == nil || readOp.Output().LoneDescend() == nil {
+				continue
+			}
+			if res := absorbRightAndCompZero(readOp, readOp.Output().LoneDescend(), op); res != 0 {
+				return res
+			}
+		case CPUI_INT_LEFT:
+			if readOp.Output() == nil {
+				continue
+			}
+			for _, nextOp := range readOp.Output().DescendIter() {
+				if nextOp == nil {
+					continue
+				}
+				switch nextOp.Code() {
+				case CPUI_INT_SLESS, CPUI_INT_LESS:
+					if res := absorbCompare(nextOp, readOp, op); res != 0 {
+						return res
+					}
+				case CPUI_INT_RIGHT:
+					if res := absorbCompare(nextOp, readOp, op); res != 0 {
+						return res
+					}
+				case CPUI_INT_AND:
+					if res := absorbCompare(nextOp, readOp, op); res != 0 {
+						return res
+					}
+				}
+			}
+		case CPUI_INT_AND:
+			if res := absorbAnd(readOp, op); res != 0 {
+				return res
+			}
+		case CPUI_INT_ZEXT, CPUI_INT_SEXT, CPUI_SUBPIECE, CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL:
+			if res := absorbExtOrSubpiece(readOp); res != 0 {
+				return res
+			}
+		case CPUI_INT_SLESS, CPUI_INT_LESS:
+			if res := absorbCompare(readOp, nil, op); res != 0 {
+				return res
+			}
+		}
+	}
+	return 0
+}
+
+// RuleInsertAbsorb is the Go port of RuleInsertAbsorb::RuleInsertAbsorb in bitfield.cc.
+type RuleInsertAbsorb struct{ batchRule }
+
+// NewRuleInsertAbsorb is the Go port of RuleInsertAbsorb::RuleInsertAbsorb in bitfield.cc.
+func NewRuleInsertAbsorb(group string) *RuleInsertAbsorb {
+	r := &RuleInsertAbsorb{}
+	r.batchRule = newBatchRule(group, "insert_absorb", []OpCode{CPUI_INSERT}, r.apply, func(g string) Rule {
+		return NewRuleInsertAbsorb(g)
+	})
+	return r
+}
+
+// RuleInsertAbsorb::getOpList -- bitfield.cc.
+func (r *RuleInsertAbsorb) getOpList() []OpCode {
+	return []OpCode{CPUI_INSERT}
+}
+
+// RuleInsertAbsorb::applyOp -- bitfield.cc.
+func (r *RuleInsertAbsorb) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.NumInput() < 2 || op.Input(1) == nil {
+		return 0
+	}
+	leftShiftVarnode := func(vn *Varnode, sa int32) *Varnode {
+		if vn == nil || !vn.IsWritten() || vn.Def() == nil || vn.Def().NumInput() < 2 || vn.Def().Input(1) == nil || !vn.Def().Input(1).IsConstant() {
+			return nil
+		}
+		multOp := vn.Def()
+		multVal := multOp.Input(1)
+		var matchVal uint64
+		switch multOp.Code() {
+		case CPUI_INT_MULT:
+			matchVal = uint64(1) << uint(sa)
+		case CPUI_INT_LEFT:
+			matchVal = uint64(sa)
+		default:
+			return nil
+		}
+		if multVal.Offset() != matchVal {
+			return nil
+		}
+		return multOp.Input(0)
+	}
+	absorbAnd := func(andOp *PcodeOp, insertOp *PcodeOp) int {
+		if andOp == nil || insertOp == nil || andOp.NumInput() < 2 || andOp.Input(1) == nil || !andOp.Input(1).IsConstant() || insertOp.NumInput() < 4 || insertOp.Input(3) == nil {
+			return 0
+		}
+		mask := lowMask(insertOp.Input(3).Offset())
+		if (mask & andOp.Input(1).Offset()) != mask {
+			return 0
+		}
+		data.OpSetInput(insertOp, andOp.Input(0), 1)
+		if andOp.Output() != nil && andOp.Output().HasNoDescend() {
+			data.OpDestroyRecursive(andOp)
+		}
+		return 1
+	}
+	absorbRightLeft := func(nextOp *PcodeOp, rightOp *PcodeOp, insertOp *PcodeOp) int {
+		if nextOp == nil || rightOp == nil || insertOp == nil || rightOp.NumInput() < 2 || rightOp.Input(1) == nil || !rightOp.Input(1).IsConstant() {
+			return 0
+		}
+		var leftOp *PcodeOp
+		switch nextOp.Code() {
+		case CPUI_INT_LEFT:
+			leftOp = nextOp
+		case CPUI_SUBPIECE:
+			if nextOp.NumInput() < 2 || nextOp.Input(1) == nil || nextOp.Input(1).Offset() != 0 {
+				return 0
+			}
+			subin := nextOp.Input(0)
+			if subin == nil || !subin.IsWritten() || subin.Def() == nil || subin.Def().Code() != CPUI_INT_LEFT {
+				return 0
+			}
+			leftOp = subin.Def()
+		default:
+			return 0
+		}
+		if leftOp.NumInput() < 2 || leftOp.Input(1) == nil || !leftOp.Input(1).IsConstant() {
+			return 0
+		}
+		lsa := int32(leftOp.Input(1).Offset())
+		rsa := int32(rightOp.Input(1).Offset())
+		if lsa != rsa {
+			return 0
+		}
+		if insertOp.NumInput() < 4 || insertOp.Input(3) == nil {
+			return 0
+		}
+		bitsize := int32(insertOp.Input(3).Offset())
+		if bitsize > leftOp.Input(0).Size()*8-lsa {
+			return 0
+		}
+		data.OpSetInput(insertOp, leftOp.Input(0), 1)
+		if rightOp.Output() != nil && rightOp.Output().HasNoDescend() {
+			data.OpDestroyRecursive(rightOp)
+		}
+		return 1
+	}
+	absorbShiftAdd := func(rightOp *PcodeOp, addOp *PcodeOp, insertOp *PcodeOp) int {
+		if rightOp == nil || addOp == nil || insertOp == nil || rightOp.NumInput() < 2 || rightOp.Input(1) == nil || !rightOp.Input(1).IsConstant() {
+			return 0
+		}
+		sa := int32(rightOp.Input(1).Offset())
+		if sa <= 0 || sa >= 64 {
+			return 0
+		}
+		vn0 := leftShiftVarnode(addOp.Input(0), sa)
+		if vn0 == nil {
+			return 0
+		}
+		var vn1 *Varnode
+		addVn1 := addOp.Input(1)
+		if addVn1 != nil && addVn1.IsConstant() {
+			addVal := addVn1.Offset()
+			addVal >>= uint(sa)
+			if (addVal << uint(sa)) != addVn1.Offset() {
+				return 0
+			}
+			vn1 = data.NewConstant(vn0.Size(), addVal)
+			SetVarnodeType(vn1, addVn1.TypeReadFacing(addOp))
+		} else {
+			vn1 = leftShiftVarnode(addVn1, sa)
+			if vn1 == nil {
+				return 0
+			}
+		}
+		if insertOp.NumInput() < 4 || insertOp.Input(3) == nil {
+			return 0
+		}
+		bitsize := int32(insertOp.Input(3).Offset())
+		if bitsize > vn0.Size()*8-sa {
+			return 0
+		}
+		data.OpSetOpcode(rightOp, CPUI_INT_ADD)
+		data.OpSetInput(rightOp, vn0, 0)
+		data.OpSetInput(rightOp, vn1, 1)
+		if addOp.Output() != nil && addOp.Output().HasNoDescend() {
+			data.OpDestroyRecursive(addOp)
+		}
+		return 1
+	}
+	absorbNestedAnd := func(baseOp *PcodeOp, insertOp *PcodeOp) int {
+		if baseOp == nil || insertOp == nil || baseOp.Output() == nil || baseOp.Output().LoneDescend() != insertOp || insertOp.NumInput() < 4 || insertOp.Input(3) == nil {
+			return 0
+		}
+		for slot := 0; slot < 2; slot++ {
+			vn := baseOp.Input(slot)
+			if vn == nil || !vn.IsWritten() || vn.Def() == nil || vn.Def().Code() != CPUI_INT_AND || vn.Def().NumInput() < 2 || vn.Def().Input(1) == nil || !vn.Def().Input(1).IsConstant() {
+				continue
+			}
+			mask := vn.Def().Input(1).Offset()
+			cover := lowMask(uint64(bits.Len64(mask)))
+			if cover != mask || (cover&1) == 0 {
+				continue
+			}
+			count := bits.OnesCount64(mask)
+			if uint64(count) < insertOp.Input(3).Offset() {
+				continue
+			}
+			data.OpSetInput(baseOp, vn.Def().Input(0), slot)
+			if vn.Def().Output() != nil && vn.Def().Output().HasNoDescend() {
+				data.OpDestroyRecursive(vn.Def())
+			}
+			return 1
+		}
+		return 0
+	}
+	inVn := op.Input(1)
+	if !inVn.IsWritten() || inVn.Def() == nil {
+		return 0
+	}
+	inOp := inVn.Def()
+	switch inOp.Code() {
+	case CPUI_SUBPIECE:
+		if inOp.NumInput() < 2 || inOp.Input(1) == nil || inOp.Input(1).Offset() != 0 {
+			return 0
+		}
+		data.OpSetInput(op, inOp.Input(0), 1)
+		if inOp.Output() != nil && inOp.Output().HasNoDescend() {
+			data.OpDestroyRecursive(inOp)
+		}
+		return 1
+	case CPUI_INT_RIGHT, CPUI_INT_SRIGHT:
+		if inOp.NumInput() < 2 || inOp.Input(1) == nil || !inOp.Input(1).IsConstant() {
+			return 0
+		}
+		vn := inOp.Input(0)
+		if vn == nil || !vn.IsWritten() || vn.Def() == nil {
+			return 0
+		}
+		nextOp := vn.Def()
+		switch nextOp.Code() {
+		case CPUI_INT_ADD:
+			return absorbShiftAdd(inOp, nextOp, op)
+		case CPUI_INT_LEFT, CPUI_SUBPIECE:
+			return absorbRightLeft(nextOp, inOp, op)
+		}
+	case CPUI_INT_AND:
+		return absorbAnd(inOp, op)
+	case CPUI_INT_ADD, CPUI_INT_OR, CPUI_INT_XOR, CPUI_INT_MULT:
+		return absorbNestedAnd(inOp, op)
+	}
+	return 0
 }
