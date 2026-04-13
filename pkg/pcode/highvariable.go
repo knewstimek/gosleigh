@@ -139,3 +139,25 @@ func (hv *HighVariable) MarkCoverDirty() {
 		hv.cover = nil
 	}
 }
+
+func (hv *HighVariable) SetExplicit() {
+	if hv == nil {
+		return
+	}
+	for _, vn := range hv.instances {
+		if vn != nil {
+			vn.SetExplicit()
+		}
+	}
+}
+
+func (hv *HighVariable) ClearImplied() {
+	if hv == nil {
+		return
+	}
+	for _, vn := range hv.instances {
+		if vn != nil {
+			vn.ClearImplied()
+		}
+	}
+}
