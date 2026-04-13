@@ -1092,3 +1092,347 @@ func (data *Funcdata) allOpsOrdered() []*PcodeOp {
 	})
 	return ops
 }
+
+// ---------------------------------------------------------------------------
+// Universal action build -- ports ActionDatabase::buildDefaultGroups and
+// ActionDatabase::universalAction from coreaction.cc (lines 5430-5756).
+//
+// The universal action is the canonical analysis pipeline used by Ghidra's
+// decompiler; derived roots like "decompile", "normalize", and "paramid" are
+// produced by filtering the universal action against a named group list.
+//
+// C++ parity: coreaction.cc ActionDatabase::universalAction
+// ---------------------------------------------------------------------------
+
+// BuildDefaultGroups installs the canonical group lists (decompile, jumptable,
+// normalize, paramid, register, firstpass).  Mirrors the const char *[] arrays
+// in coreaction.cc ActionDatabase::buildDefaultGroups.
+//
+// C++ parity: coreaction.cc ActionDatabase::buildDefaultGroups
+func (db *ActionDatabase) BuildDefaultGroups() {
+	db.SetGroup("decompile",
+		"base", "protorecovery", "protorecovery_a", "deindirect", "localrecovery",
+		"deadcode", "typerecovery", "stackptrflow",
+		"blockrecovery", "stackvars", "deadcontrolflow", "switchnorm",
+		"cleanup", "splitcopy", "splitpointer", "merge", "dynamic", "casts", "analysis",
+		"fixateglobals", "fixateproto", "constsequence", "bitfields",
+		"segment", "returnsplit", "nodejoin", "doubleload", "doubleprecis",
+		"unreachable", "subvar", "floatprecision",
+		"conditionalexe")
+
+	db.SetGroup("jumptable",
+		"base", "noproto", "localrecovery", "deadcode", "stackptrflow",
+		"stackvars", "analysis", "segment", "subvar", "normalizebranches", "conditionalexe")
+
+	db.SetGroup("normalize",
+		"base", "protorecovery", "protorecovery_b", "deindirect", "localrecovery",
+		"deadcode", "stackptrflow", "normalanalysis",
+		"stackvars", "deadcontrolflow", "analysis", "fixateproto", "nodejoin",
+		"unreachable", "subvar", "floatprecision", "normalizebranches",
+		"conditionalexe")
+
+	db.SetGroup("paramid",
+		"base", "protorecovery", "protorecovery_b", "deindirect", "localrecovery",
+		"deadcode", "typerecovery", "stackptrflow", "siganalysis",
+		"stackvars", "deadcontrolflow", "analysis", "fixateproto",
+		"unreachable", "subvar", "floatprecision",
+		"conditionalexe")
+
+	db.SetGroup("register", "base", "analysis", "subvar")
+	db.SetGroup("firstpass", "base")
+}
+
+// BuildUniversalAction constructs the full universal Action and registers it
+// with the database under the name "universal".  The returned Action is the
+// raw tree before any group-list filtering; SetCurrent("decompile") will then
+// derive a filtered copy.
+//
+// The action layout follows coreaction.cc ActionDatabase::universalAction
+// EXACTLY -- the order of addAction / addRule calls determines analysis order
+// and is parity-critical.  Do not reorder, add, or remove entries without
+// updating the corresponding C++ reference.
+//
+// extraPoolRules is the per-architecture rule set normally drained from
+// Architecture::extra_pool_rules; pass nil for a generic build.
+//
+// C++ parity: coreaction.cc ActionDatabase::universalAction (lines 5471-5756)
+func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
+	act := NewActionRestartGroup(ActionRuleOncePerFunc, "universal", 1)
+
+	act.AddAction(NewActionStart("base"))
+	act.AddAction(NewActionConstbase("base"))
+	act.AddAction(NewActionNormalizeSetup("normalanalysis"))
+	act.AddAction(NewActionDefaultParams("base"))
+	// ActionParamShiftStart: not yet ported (Ghidra-specific paramshift group).
+	act.AddAction(NewActionExtraPopSetup("base"))
+	act.AddAction(NewActionPrototypeTypes("protorecovery"))
+	act.AddAction(NewActionFuncLink("protorecovery"))
+	act.AddAction(NewActionFuncLinkOutOnly("noproto"))
+
+	// ----- fullloop -----
+	actfullloop := NewActionGroup(ActionRuleRepeatApply, "fullloop")
+
+	// ----- mainloop -----
+	actmainloop := NewActionGroup(ActionRuleRepeatApply, "mainloop")
+	actmainloop.AddAction(NewActionUnreachable("base"))
+	actmainloop.AddAction(NewActionVarnodeProps("base"))
+	actmainloop.AddAction(NewActionHeritage("base"))
+	actmainloop.AddAction(NewActionParamDouble("protorecovery"))
+	actmainloop.AddAction(NewActionSegmentize("base"))
+	actmainloop.AddAction(NewActionInternalStorage("base"))
+	actmainloop.AddAction(NewActionForceGoto("blockrecovery"))
+	actmainloop.AddAction(NewActionDirectWrite("protorecovery_a", true))
+	actmainloop.AddAction(NewActionDirectWrite("protorecovery_b", false))
+	actmainloop.AddAction(NewActionActiveParam("protorecovery"))
+	actmainloop.AddAction(NewActionReturnRecovery("protorecovery"))
+	// ActionParamShiftStop: not yet ported (paramshift).
+	actmainloop.AddAction(NewActionRestrictLocal("localrecovery")) // before dead code removed
+	actmainloop.AddAction(NewActionDeadCode("deadcode"))
+	actmainloop.AddAction(NewActionDynamicMapping("dynamic")) // before restructure / infertypes
+	actmainloop.AddAction(NewActionRestructureVarnode("localrecovery"))
+	actmainloop.AddAction(NewActionSpacebase("base")) // before infertypes / nonzeromask
+	actmainloop.AddAction(NewActionNonzeroMask("analysis"))
+	actmainloop.AddAction(NewActionInferTypes("typerecovery"))
+
+	// ----- stackstall (inner repeat group) -----
+	actstackstall := NewActionGroup(ActionRuleRepeatApply, "stackstall")
+
+	// ----- oppool1 (large rule pool) -----
+	actprop := NewActionPool(ActionRuleRepeatApply, "oppool1")
+	actprop.AddRule(NewRuleEarlyRemoval("deadcode"))
+	actprop.AddRule(NewRuleTermOrder("analysis"))
+	actprop.AddRule(NewRuleSelectCse("analysis"))
+	actprop.AddRule(NewRuleCollectTerms("analysis"))
+	actprop.AddRule(NewRulePullsubMulti("analysis"))
+	actprop.AddRule(NewRulePullsubIndirect("analysis"))
+	actprop.AddRule(NewRulePushMulti("nodejoin"))
+	actprop.AddRule(NewRuleSborrow("analysis"))
+	actprop.AddRule(NewRuleScarry("analysis"))
+	actprop.AddRule(NewRuleIntLessEqual("analysis"))
+	actprop.AddRule(NewRuleTrivialArith("analysis"))
+	actprop.AddRule(NewRuleTrivialBool("analysis"))
+	actprop.AddRule(NewRuleTrivialShift("analysis"))
+	actprop.AddRule(NewRuleSignShift("analysis"))
+	actprop.AddRule(NewRuleTestSign("analysis"))
+	actprop.AddRule(NewRuleIdentityEl("analysis"))
+	actprop.AddRule(NewRuleOrMask("analysis"))
+	actprop.AddRule(NewRuleAndMask("analysis"))
+	actprop.AddRule(NewRuleOrConsume("analysis"))
+	actprop.AddRule(NewRuleOrCollapse("analysis"))
+	actprop.AddRule(NewRuleAndOrLump("analysis"))
+	actprop.AddRule(NewRuleShiftBitops("analysis"))
+	actprop.AddRule(NewRuleRightShiftAnd("analysis"))
+	actprop.AddRule(NewRuleNotDistribute("analysis"))
+	actprop.AddRule(NewRuleHighOrderAnd("analysis"))
+	actprop.AddRule(NewRuleAndDistribute("analysis"))
+	actprop.AddRule(NewRuleAndCommute("analysis"))
+	actprop.AddRule(NewRuleAndPiece("analysis"))
+	actprop.AddRule(NewRuleAndZext("analysis"))
+	actprop.AddRule(NewRuleAndCompare("analysis"))
+	actprop.AddRule(NewRuleDoubleSub("analysis"))
+	actprop.AddRule(NewRuleDoubleShift("analysis"))
+	actprop.AddRule(NewRuleDoubleArithShift("analysis"))
+	actprop.AddRule(NewRuleConcatShift("analysis"))
+	actprop.AddRule(NewRuleLeftRight("analysis"))
+	actprop.AddRule(NewRuleShiftCompare("analysis"))
+	actprop.AddRule(NewRuleShift2Mult("analysis"))
+	actprop.AddRule(NewRuleShiftPiece("analysis"))
+	actprop.AddRule(NewRuleMultiCollapse("analysis"))
+	actprop.AddRule(NewRuleIndirectCollapse("analysis"))
+	actprop.AddRule(NewRule2Comp2Mult("analysis"))
+	actprop.AddRule(NewRuleSub2Add("analysis"))
+	actprop.AddRule(NewRuleCarryElim("analysis"))
+	actprop.AddRule(NewRuleBxor2NotEqual("analysis"))
+	actprop.AddRule(NewRuleLess2Zero("analysis"))
+	actprop.AddRule(NewRuleLessEqual2Zero("analysis"))
+	actprop.AddRule(NewRuleSLess2Zero("analysis"))
+	actprop.AddRule(NewRuleEqual2Zero("analysis"))
+	actprop.AddRule(NewRuleEqual2Constant("analysis"))
+	actprop.AddRule(NewRuleThreeWayCompare("analysis"))
+	actprop.AddRule(NewRuleXorCollapse("analysis"))
+	actprop.AddRule(NewRuleAddMultCollapse("analysis"))
+	actprop.AddRule(NewRuleCollapseConstants("analysis"))
+	actprop.AddRule(NewRuleTransformCPool("analysis"))
+	actprop.AddRule(NewRulePropagateCopy("analysis"))
+	actprop.AddRule(NewRuleZextEliminate("analysis"))
+	actprop.AddRule(NewRuleSlessToLess("analysis"))
+	actprop.AddRule(NewRuleZextSless("analysis"))
+	actprop.AddRule(NewRuleBitUndistribute("analysis"))
+	actprop.AddRule(NewRuleBooleanUndistribute("analysis"))
+	actprop.AddRule(NewRuleBooleanDedup("analysis"))
+	actprop.AddRule(NewRuleBoolZext("analysis"))
+	actprop.AddRule(NewRuleBooleanNegate("analysis"))
+	actprop.AddRule(NewRuleLogic2Bool("analysis"))
+	actprop.AddRule(NewRuleSubExtComm("analysis"))
+	actprop.AddRule(NewRuleSubCommute("analysis"))
+	actprop.AddRule(NewRuleConcatCommute("analysis"))
+	actprop.AddRule(NewRuleConcatZext("analysis"))
+	actprop.AddRule(NewRuleZextCommute("analysis"))
+	actprop.AddRule(NewRuleZextShiftZext("analysis"))
+	actprop.AddRule(NewRuleShiftAnd("analysis"))
+	actprop.AddRule(NewRuleConcatZero("analysis"))
+	actprop.AddRule(NewRuleConcatLeftShift("analysis"))
+	actprop.AddRule(NewRuleSubZext("analysis"))
+	actprop.AddRule(NewRuleSubCancel("analysis"))
+	actprop.AddRule(NewRuleShiftSub("analysis"))
+	actprop.AddRule(NewRuleHumptyDumpty("analysis"))
+	actprop.AddRule(NewRuleDumptyHump("analysis"))
+	actprop.AddRule(NewRuleHumptyOr("analysis"))
+	actprop.AddRule(NewRuleNegateIdentity("analysis"))
+	actprop.AddRule(NewRuleSubNormal("analysis"))
+	actprop.AddRule(NewRulePositiveDiv("analysis"))
+	actprop.AddRule(NewRuleDivTermAdd("analysis"))
+	actprop.AddRule(NewRuleDivTermAdd2("analysis"))
+	actprop.AddRule(NewRuleDivOpt("analysis"))
+	actprop.AddRule(NewRuleSignForm("analysis"))
+	actprop.AddRule(NewRuleSignForm2("analysis"))
+	actprop.AddRule(NewRuleSignDiv2("analysis"))
+	actprop.AddRule(NewRuleDivChain("analysis"))
+	actprop.AddRule(NewRuleSignNearMult("analysis"))
+	actprop.AddRule(NewRuleModOpt("analysis"))
+	actprop.AddRule(NewRuleSignMod2nOpt("analysis"))
+	actprop.AddRule(NewRuleSignMod2nOpt2("analysis"))
+	actprop.AddRule(NewRuleSignMod2Opt("analysis"))
+	actprop.AddRule(NewRuleSwitchSingle("analysis"))
+	actprop.AddRule(NewRuleCondNegate("analysis"))
+	actprop.AddRule(NewRuleBoolNegate("analysis"))
+	actprop.AddRule(NewRuleLessEqual("analysis"))
+	actprop.AddRule(NewRuleLessNotEqual("analysis"))
+	actprop.AddRule(NewRuleLessOne("analysis"))
+	actprop.AddRule(NewRuleRangeMeld("analysis"))
+	actprop.AddRule(NewRuleFloatRange("analysis"))
+	actprop.AddRule(NewRulePiece2Zext("analysis"))
+	actprop.AddRule(NewRulePiece2Sext("analysis"))
+	actprop.AddRule(NewRulePopcountBoolXor("analysis"))
+	actprop.AddRule(NewRuleXorSwap("analysis"))
+	actprop.AddRule(NewRuleLzcountShiftBool("analysis"))
+	actprop.AddRule(NewRuleFloatSign("analysis"))
+	actprop.AddRule(NewRuleOrCompare("analysis"))
+	actprop.AddRule(NewRuleSubvarAnd("subvar"))
+	actprop.AddRule(NewRuleSubvarSubpiece("subvar"))
+	actprop.AddRule(NewRuleSplitFlow("subvar"))
+	actprop.AddRule(NewRulePtrFlow("subvar")) // C++ takes (group, conf); Go signature has no conf
+	actprop.AddRule(NewRuleSubvarCompZero("subvar"))
+	actprop.AddRule(NewRuleSubvarShift("subvar"))
+	actprop.AddRule(NewRuleSubvarZext("subvar"))
+	actprop.AddRule(NewRuleSubvarSext("subvar"))
+	actprop.AddRule(NewRuleNegateNegate("analysis"))
+	actprop.AddRule(NewRuleConditionalMove("conditionalexe"))
+	actprop.AddRule(NewRuleOrPredicate("conditionalexe"))
+	actprop.AddRule(NewRuleFuncPtrEncoding("analysis"))
+	actprop.AddRule(NewRuleSubfloatConvert("floatprecision"))
+	actprop.AddRule(NewRuleFloatCast("floatprecision"))
+	actprop.AddRule(NewRuleIgnoreNan("floatprecision"))
+	actprop.AddRule(NewRuleUnsigned2Float("analysis"))
+	actprop.AddRule(NewRuleInt2FloatCollapse("analysis"))
+	actprop.AddRule(NewRulePtraddUndo("typerecovery"))
+	actprop.AddRule(NewRulePtrsubUndo("typerecovery"))
+	actprop.AddRule(NewRuleSegment("segment"))
+	actprop.AddRule(NewRulePiecePathology("protorecovery"))
+	actprop.AddRule(NewRuleDoubleLoad("doubleload"))
+	actprop.AddRule(NewRuleDoubleStore("doubleprecis"))
+	actprop.AddRule(NewRuleDoubleIn("doubleprecis"))
+	actprop.AddRule(NewRuleDoubleOut("doubleprecis"))
+	for _, r := range extraPoolRules {
+		actprop.AddRule(r)
+	}
+
+	actstackstall.AddAction(actprop)
+	actstackstall.AddAction(NewActionLaneDivide("base"))
+	actstackstall.AddAction(NewActionMultiCse("analysis"))
+	actstackstall.AddAction(NewActionShadowVar("analysis"))
+	actstackstall.AddAction(NewActionDeindirect("deindirect"))
+	actstackstall.AddAction(NewActionStackPtrFlow("stackptrflow"))
+	actmainloop.AddAction(actstackstall)
+
+	actmainloop.AddAction(NewActionRedundBranch("deadcontrolflow"))
+	actmainloop.AddAction(NewActionBlockStructure("blockrecovery"))
+	actmainloop.AddAction(NewActionConstantPtr("typerecovery"))
+
+	// ----- oppool2 (smaller pool) -----
+	actprop2 := NewActionPool(ActionRuleRepeatApply, "oppool2")
+	actprop2.AddRule(NewRulePushPtr("typerecovery"))
+	actprop2.AddRule(NewRuleStructOffset0("typerecovery"))
+	actprop2.AddRule(NewRulePtrArith("typerecovery"))
+	// RuleIndirectConcat: commented out in C++ source.
+	actprop2.AddRule(NewRuleLoadVarnode("stackvars"))
+	actprop2.AddRule(NewRuleStoreVarnode("stackvars"))
+	actmainloop.AddAction(actprop2)
+
+	actmainloop.AddAction(NewActionDeterminedBranch("unreachable"))
+	actmainloop.AddAction(NewActionUnreachable("unreachable"))
+	actmainloop.AddAction(NewActionNodeJoin("nodejoin"))
+	actmainloop.AddAction(NewActionConditionalExe("conditionalexe"))
+	actmainloop.AddAction(NewActionConditionalConst("analysis"))
+
+	actfullloop.AddAction(actmainloop)
+	actfullloop.AddAction(NewActionLikelyTrash("protorecovery"))
+	actfullloop.AddAction(NewActionDirectWrite("protorecovery_a", true))
+	actfullloop.AddAction(NewActionDirectWrite("protorecovery_b", false))
+	actfullloop.AddAction(NewActionDeadCode("deadcode"))
+	actfullloop.AddAction(NewActionDoNothing("deadcontrolflow"))
+	actfullloop.AddAction(NewActionSwitchNorm("switchnorm"))
+	actfullloop.AddAction(NewActionReturnSplit("returnsplit"))
+	actfullloop.AddAction(NewActionUnjustifiedParams("protorecovery"))
+	actfullloop.AddAction(NewActionStartTypes("typerecovery"))
+	actfullloop.AddAction(NewActionActiveReturn("protorecovery"))
+
+	act.AddAction(actfullloop)
+
+	act.AddAction(NewActionMappedLocalSync("localrecovery"))
+	act.AddAction(NewActionStartCleanUp("cleanup"))
+
+	// ----- cleanup pool -----
+	actcleanup := NewActionPool(ActionRuleRepeatApply, "cleanup")
+	actcleanup.AddRule(NewRuleMultNegOne("cleanup"))
+	actcleanup.AddRule(NewRuleAddUnsigned("cleanup"))
+	actcleanup.AddRule(NewRule2Comp2Sub("cleanup"))
+	actcleanup.AddRule(NewRuleDumptyHumpLate("cleanup"))
+	actcleanup.AddRule(NewRuleSubRight("cleanup"))
+	actcleanup.AddRule(NewRuleFloatSignCleanup("cleanup"))
+	actcleanup.AddRule(NewRuleExpandLoad("cleanup"))
+	actcleanup.AddRule(NewRulePtrsubCharConstant("cleanup"))
+	actcleanup.AddRule(NewRuleExtensionPush("cleanup"))
+	actcleanup.AddRule(NewRulePieceStructure("cleanup"))
+	actcleanup.AddRule(NewRuleSplitCopy("splitcopy"))
+	actcleanup.AddRule(NewRuleSplitLoad("splitpointer"))
+	actcleanup.AddRule(NewRuleSplitStore("splitpointer"))
+	actcleanup.AddRule(NewRuleStringCopy("constsequence"))
+	actcleanup.AddRule(NewRuleStringStore("constsequence"))
+	actcleanup.AddRule(NewRuleBitFieldStore("bitfields"))
+	actcleanup.AddRule(NewRuleBitFieldOut("bitfields"))
+	actcleanup.AddRule(NewRuleBitFieldLoad("bitfields"))
+	actcleanup.AddRule(NewRuleBitFieldIn("bitfields"))
+	actcleanup.AddRule(NewRulePullAbsorb("bitfields"))
+	actcleanup.AddRule(NewRuleInsertAbsorb("bitfields"))
+	act.AddAction(actcleanup)
+
+	act.AddAction(NewActionPreferComplement("blockrecovery"))
+	act.AddAction(NewActionStructureTransform("blockrecovery"))
+	act.AddAction(NewActionNormalizeBranches("normalizebranches"))
+	act.AddAction(NewActionAssignHigh("merge"))
+	act.AddAction(NewActionMergeRequired("merge"))
+	act.AddAction(NewActionMarkExplicit("merge"))
+	act.AddAction(NewActionMarkImplied("merge")) // BEFORE general merging
+	act.AddAction(NewActionMergeMultiEntry("merge"))
+	act.AddAction(NewActionMergeCopy("merge"))
+	act.AddAction(NewActionDominantCopy("merge"))
+	act.AddAction(NewActionDynamicSymbols("dynamic"))
+	act.AddAction(NewActionMarkIndirectOnly("merge")) // after required, before speculative
+	act.AddAction(NewActionMergeAdjacent("merge"))
+	act.AddAction(NewActionMergeType("merge"))
+	act.AddAction(NewActionHideShadow("merge"))
+	act.AddAction(NewActionCopyMarker("merge"))
+	act.AddAction(NewActionOutputPrototype("localrecovery"))
+	act.AddAction(NewActionInputPrototype("fixateproto"))
+	act.AddAction(NewActionMapGlobals("fixateglobals"))
+	act.AddAction(NewActionDynamicSymbols("dynamic"))
+	act.AddAction(NewActionNameVars("merge"))
+	act.AddAction(NewActionSetCasts("casts"))
+	act.AddAction(NewActionFinalStructure("blockrecovery"))
+	act.AddAction(NewActionPrototypeWarnings("protorecovery"))
+	act.AddAction(NewActionStop("base"))
+
+	db.RegisterUniversal(act)
+	return act
+}
