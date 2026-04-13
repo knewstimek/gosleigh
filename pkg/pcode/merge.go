@@ -14,6 +14,8 @@
 
 package pcode
 
+import "sort"
+
 // merge.go -- HighVariable coalescing after Heritage (SSA phi-node merging).
 // C++ parity: merge.hh / merge.cc Merge
 
@@ -136,6 +138,19 @@ func mergeTestRequired(h1, h2 *HighVariable) bool {
 		}
 	}
 	return true
+}
+
+func mergeTestBasic(vn *Varnode) bool {
+	if vn == nil {
+		return false
+	}
+	if vn.IsImplied() || vn.IsProtoPartial() || vn.IsSpaceBase() {
+		return false
+	}
+	if vn.IsConstant() || vn.IsAnnotation() {
+		return false
+	}
+	return vn.High() != nil
 }
 
 // ---------------------------------------------------------------------------
@@ -377,6 +392,172 @@ func (m *Merge) MergeMarker() {
 }
 
 // MergeAdjacent attempts speculative merges of op input/output pairs.
-// Stub: not required for phi resolution; left for future implementation.
 // C++ parity: Merge::mergeAdjacent
-func (m *Merge) MergeAdjacent() {}
+func (m *Merge) MergeAdjacent() {
+	m.mergeAdjacentCopies()
+}
+
+func (m *Merge) mergeOpcode(opc OpCode) {
+	for _, op := range m.fd.GetPcodeOpBank().AliveOps() {
+		if op == nil || op.Code() != opc {
+			continue
+		}
+		outvn := op.Output()
+		if !mergeTestBasic(outvn) {
+			continue
+		}
+		highOut := outvn.High()
+		for i := 0; i < op.NumInput(); i++ {
+			invn := op.Input(i)
+			if !mergeTestBasic(invn) {
+				continue
+			}
+			highIn := invn.High()
+			if !mergeTestRequired(highOut, highIn) {
+				continue
+			}
+			mergeHighVariables(highOut, highIn, m.testCache)
+		}
+	}
+}
+
+func (m *Merge) mergeRequired() {
+	m.MergeMarker()
+}
+
+func (m *Merge) mergeByDatatype() {
+	highByType := make(map[Datatype][]*HighVariable)
+	seen := make(map[*HighVariable]struct{})
+	for _, vn := range m.fd.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.IsFree() {
+			continue
+		}
+		if !mergeTestBasic(vn) {
+			continue
+		}
+		high := vn.High()
+		if high == nil {
+			continue
+		}
+		if _, ok := seen[high]; ok {
+			continue
+		}
+		seen[high] = struct{}{}
+		highByType[high.Type()] = append(highByType[high.Type()], high)
+	}
+	for _, group := range highByType {
+		if len(group) <= 1 {
+			continue
+		}
+		sort.Slice(group, func(i, j int) bool {
+			return highKey(group[i]) < highKey(group[j])
+		})
+		var merged []*HighVariable
+		for _, high := range group {
+			placed := false
+			for _, dst := range merged {
+				if !mergeTestRequired(dst, high) {
+					continue
+				}
+				if m.testCache.Intersection(dst, high) {
+					continue
+				}
+				mergeHighVariables(dst, high, m.testCache)
+				placed = true
+				break
+			}
+			if !placed {
+				merged = append(merged, high)
+			}
+		}
+	}
+}
+
+func (m *Merge) mergeAdjacentCopies() {
+	for _, op := range m.fd.GetPcodeOpBank().AliveOps() {
+		if op == nil || op.IsCall() {
+			continue
+		}
+		outvn := op.Output()
+		if !mergeTestBasic(outvn) {
+			continue
+		}
+		highOut := outvn.High()
+		outType := outvn.Type()
+		for i := 0; i < op.NumInput(); i++ {
+			invn := op.Input(i)
+			if !mergeTestBasic(invn) {
+				continue
+			}
+			if outvn.Size() != invn.Size() {
+				continue
+			}
+			if invn.Def() == nil && !invn.IsInput() {
+				continue
+			}
+			if outType != invn.Type() {
+				continue
+			}
+			highIn := invn.High()
+			if !mergeTestRequired(highOut, highIn) {
+				continue
+			}
+			if m.testCache.Intersection(highIn, highOut) {
+				continue
+			}
+			mergeHighVariables(highOut, highIn, m.testCache)
+		}
+	}
+}
+
+func (m *Merge) markImplied(vn *Varnode) {
+	if vn == nil {
+		return
+	}
+	vn.SetImplied()
+	op := vn.Def()
+	if op == nil {
+		return
+	}
+	for i := 0; i < op.NumInput(); i++ {
+		defvn := op.Input(i)
+		if defvn == nil {
+			continue
+		}
+		defvn.SetFlags(VarnodeCoverDirty)
+		if high := defvn.High(); high != nil {
+			high.MarkCoverDirty()
+		}
+	}
+	if high := vn.High(); high != nil {
+		high.MarkCoverDirty()
+	}
+}
+
+func (m *Merge) inflateTest(a *Varnode, high *HighVariable) bool {
+	if a == nil || high == nil {
+		return false
+	}
+	ahigh := a.High()
+	if ahigh == nil {
+		return false
+	}
+	m.testCache.UpdateHigh(high)
+	highCover := high.getCover()
+	if highCover == nil {
+		return false
+	}
+	for _, b := range ahigh.Instances() {
+		if b == nil || b == a {
+			continue
+		}
+		bCover := b.High()
+		if bCover == nil || bCover.getCover() == nil {
+			continue
+		}
+		if bCover.getCover().Intersect(highCover) == 2 {
+			return true
+		}
+	}
+	return false
+}

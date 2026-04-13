@@ -186,7 +186,9 @@ func (vn *Varnode) IsExplicit() bool      { return vn.flags&VarnodeExplicit != 0
 func (vn *Varnode) IsMark() bool          { return vn.flags&VarnodeMark != 0 }
 func (vn *Varnode) SetMark()              { vn.flags |= VarnodeMark }
 func (vn *Varnode) ClearMark()            { vn.flags &^= VarnodeMark }
-func (vn *Varnode) IsAddrTied() bool      { return vn.flags&VarnodeAddrTied != 0 }
+func (vn *Varnode) IsAddrTied() bool {
+	return vn.flags&(VarnodeAddrTied|VarnodeInsert) == (VarnodeAddrTied | VarnodeInsert)
+}
 func (vn *Varnode) IsAddrForce() bool     { return vn.flags&VarnodeAddrForce != 0 }
 func (vn *Varnode) IsPersist() bool       { return vn.flags&VarnodePersist != 0 }
 func (vn *Varnode) IsReadOnly() bool      { return vn.flags&VarnodeReadOnly != 0 }
@@ -202,7 +204,13 @@ func (vn *Varnode) IsIndirectOnly() bool  { return vn.flags&VarnodeIndirectOnly 
 func (vn *Varnode) IsUnaffected() bool    { return vn.flags&VarnodeUnaffected != 0 }
 func (vn *Varnode) IsAutoLive() bool      { return vn.flags&VarnodeAutoLiveHold != 0 }
 func (vn *Varnode) IsMapped() bool        { return vn.flags&VarnodeMapped != 0 }
+func (vn *Varnode) IsProtoPartial() bool  { return vn.flags&VarnodeProtoPartial != 0 }
 func (vn *Varnode) HasNoDescend() bool    { return len(vn.descend) == 0 }
+
+func (vn *Varnode) SetImplied()      { vn.SetFlags(VarnodeImplied) }
+func (vn *Varnode) ClearImplied()    { vn.ClearFlags(VarnodeImplied) }
+func (vn *Varnode) SetExplicit()     { vn.SetFlags(VarnodeExplicit) }
+func (vn *Varnode) ClearExplicit()   { vn.ClearFlags(VarnodeExplicit) }
 
 // ---------------------------------------------------------------------------
 // Descendant management
