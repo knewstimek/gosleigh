@@ -287,6 +287,10 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRuleSubvarShift(group) },
 	func(group string) Rule { return NewRuleSubvarZext(group) },
 	func(group string) Rule { return NewRuleSubvarSext(group) },
+	func(group string) Rule { return NewRuleSplitFlow(group) },
+	func(group string) Rule { return NewRuleSplitCopy(group) },
+	func(group string) Rule { return NewRuleSplitLoad(group) },
+	func(group string) Rule { return NewRuleSplitStore(group) },
 }
 
 func BatchARules(group string) []Rule {
