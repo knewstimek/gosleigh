@@ -1437,3 +1437,162 @@ func (r *RuleSubvarSext) Reset(data *Funcdata) {
 	_ = data
 	r.isaggressive = false
 }
+
+// RuleSplitFlow::applyOp -- subflow.cc.
+type RuleSplitFlow struct{ batchRule }
+
+// NewRuleSplitFlow is the Go port of RuleSplitFlow::RuleSplitFlow in subflow.cc.
+func NewRuleSplitFlow(group string) *RuleSplitFlow {
+	r := &RuleSplitFlow{}
+	r.batchRule = newBatchRule(group, "splitflow", []OpCode{CPUI_SUBPIECE}, r.apply, func(g string) Rule { return NewRuleSplitFlow(g) })
+	return r
+}
+
+// RuleSplitFlow::applyOp -- subflow.cc.
+func (r *RuleSplitFlow) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.Output() == nil || op.Input(1) == nil || !op.Input(1).IsConstant() {
+		return 0
+	}
+	loSize := int32(op.Input(1).Offset())
+	if loSize == 0 {
+		return 0
+	}
+	vn := op.Input(0)
+	if vn == nil || !vn.IsWritten() || vn.IsPrecisLo() || vn.IsPrecisHi() {
+		return 0
+	}
+	if op.Output().Size()+loSize != vn.Size() {
+		return 0
+	}
+	multiOp := vn.Def()
+	if multiOp == nil {
+		return 0
+	}
+	for multiOp.Code() == CPUI_INDIRECT {
+		tmpvn := multiOp.Input(0)
+		if tmpvn == nil || !tmpvn.IsWritten() {
+			return 0
+		}
+		multiOp = tmpvn.Def()
+		if multiOp == nil {
+			return 0
+		}
+	}
+	var concatOp *PcodeOp
+	switch multiOp.Code() {
+	case CPUI_PIECE:
+		if vn.Def() != multiOp {
+			concatOp = multiOp
+		}
+	case CPUI_MULTIEQUAL:
+		for i := 0; i < multiOp.NumInput(); i++ {
+			invn := multiOp.Input(i)
+			if invn == nil || !invn.IsWritten() {
+				continue
+			}
+			tmpOp := invn.Def()
+			if tmpOp != nil && tmpOp.Code() == CPUI_PIECE {
+				concatOp = tmpOp
+				break
+			}
+		}
+	}
+	if concatOp == nil || concatOp.Input(1) == nil || concatOp.Input(1).Size() != loSize {
+		return 0
+	}
+	splitFlow := NewSplitFlow(data, vn, loSize)
+	if !splitFlow.DoTrace() {
+		return 0
+	}
+	splitFlow.Apply()
+	return 1
+}
+
+// RuleSplitCopy::applyOp -- subflow.cc.
+type RuleSplitCopy struct{ batchRule }
+
+// NewRuleSplitCopy is the Go port of RuleSplitCopy::RuleSplitCopy in subflow.cc.
+func NewRuleSplitCopy(group string) *RuleSplitCopy {
+	r := &RuleSplitCopy{}
+	r.batchRule = newBatchRule(group, "splitcopy", []OpCode{CPUI_COPY}, r.apply, func(g string) Rule { return NewRuleSplitCopy(g) })
+	return r
+}
+
+// RuleSplitCopy::applyOp -- subflow.cc.
+func (r *RuleSplitCopy) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.Output() == nil || op.NumInput() == 0 {
+		return 0
+	}
+	inType := op.Input(0).TypeReadFacing(op)
+	outType := op.Output().TypeDefFacing()
+	if inType == nil || outType == nil {
+		return 0
+	}
+	if inType.Metatype() != TYPE_STRUCT && inType.Metatype() != TYPE_ARRAY && inType.Metatype() != TYPE_PARTIALSTRUCT &&
+		outType.Metatype() != TYPE_STRUCT && outType.Metatype() != TYPE_ARRAY && outType.Metatype() != TYPE_PARTIALSTRUCT {
+		return 0
+	}
+	splitter := NewSplitDatatype(data)
+	if splitter.splitCopy(op, inType, outType) {
+		return 1
+	}
+	return 0
+}
+
+// RuleSplitLoad::applyOp -- subflow.cc.
+type RuleSplitLoad struct{ batchRule }
+
+// NewRuleSplitLoad is the Go port of RuleSplitLoad::RuleSplitLoad in subflow.cc.
+func NewRuleSplitLoad(group string) *RuleSplitLoad {
+	r := &RuleSplitLoad{}
+	r.batchRule = newBatchRule(group, "splitload", []OpCode{CPUI_LOAD}, r.apply, func(g string) Rule { return NewRuleSplitLoad(g) })
+	return r
+}
+
+// RuleSplitLoad::applyOp -- subflow.cc.
+func (r *RuleSplitLoad) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.Output() == nil {
+		return 0
+	}
+	splitter := NewSplitDatatype(data)
+	inType := splitter.getValueDatatype(op, op.Output().Size(), splitter.types)
+	if inType == nil {
+		return 0
+	}
+	if inType.Metatype() != TYPE_STRUCT && inType.Metatype() != TYPE_ARRAY && inType.Metatype() != TYPE_PARTIALSTRUCT {
+		return 0
+	}
+	if splitter.splitLoad(op, inType) {
+		return 1
+	}
+	return 0
+}
+
+// RuleSplitStore::applyOp -- subflow.cc.
+type RuleSplitStore struct{ batchRule }
+
+// NewRuleSplitStore is the Go port of RuleSplitStore::RuleSplitStore in subflow.cc.
+func NewRuleSplitStore(group string) *RuleSplitStore {
+	r := &RuleSplitStore{}
+	r.batchRule = newBatchRule(group, "splitstore", []OpCode{CPUI_STORE}, r.apply, func(g string) Rule { return NewRuleSplitStore(g) })
+	return r
+}
+
+// RuleSplitStore::applyOp -- subflow.cc.
+func (r *RuleSplitStore) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.NumInput() < 3 {
+		return 0
+	}
+	splitter := NewSplitDatatype(data)
+	outType := splitter.getValueDatatype(op, op.Input(2).Size(), splitter.types)
+	if outType == nil {
+		return 0
+	}
+	if outType.Metatype() != TYPE_STRUCT && outType.Metatype() != TYPE_ARRAY && outType.Metatype() != TYPE_PARTIALSTRUCT {
+		return 0
+	}
+	if splitter.splitStore(op, outType) {
+		return 1
+	}
+	return 0
+}
