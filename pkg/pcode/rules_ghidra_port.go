@@ -310,10 +310,264 @@ type RuleBooleanUndistribute struct{ batchRule }
 
 func NewRuleBooleanUndistribute(group string) *RuleBooleanUndistribute {
 	r := &RuleBooleanUndistribute{}
-	// RuleBooleanUndistribute::applyOp -- ruleaction.cc.
-	// known mismatch: BooleanMatch/opBoolNegate are not ported.
 	r.batchRule = newKnownMismatchBatchRule(group, "booleanundistribute", []OpCode{CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL}, func(g string) Rule { return NewRuleBooleanUndistribute(g) })
 	return r
+}
+
+// C++ parity: condexe.cc RuleOrPredicate::MultiPredicate.
+type orPredicateMulti struct {
+	op             *PcodeOp
+	zeroSlot       int
+	zeroBlock      *FlowBlock
+	condBlock      *FlowBlock
+	cbranch        *PcodeOp
+	otherVn        *Varnode
+	zeroPathIsTrue bool
+}
+
+// C++ parity: condexe.cc RuleOrPredicate::MultiPredicate::discoverZeroSlot.
+func (m *orPredicateMulti) discoverZeroSlot(vn *Varnode) bool {
+	if vn == nil || !vn.IsWritten() {
+		return false
+	}
+	m.op = vn.Def()
+	if m.op.Code() != CPUI_MULTIEQUAL || m.op.NumInput() != 2 {
+		return false
+	}
+	for m.zeroSlot = 0; m.zeroSlot < 2; m.zeroSlot++ {
+		tmpvn := m.op.Input(m.zeroSlot)
+		if tmpvn == nil || !tmpvn.IsWritten() {
+			continue
+		}
+		copyop := tmpvn.Def()
+		if copyop.Code() != CPUI_COPY {
+			continue
+		}
+		zerovn := copyop.Input(0)
+		if zerovn == nil || !zerovn.IsConstant() || zerovn.Offset() != 0 {
+			continue
+		}
+		m.otherVn = m.op.Input(1 - m.zeroSlot)
+		if m.otherVn.IsFree() {
+			return false
+		}
+		return true
+	}
+	return false
+}
+
+// C++ parity: condexe.cc RuleOrPredicate::MultiPredicate::discoverCbranch.
+func (m *orPredicateMulti) discoverCbranch() bool {
+	baseBlock := m.op.Parent()
+	if baseBlock == nil {
+		return false
+	}
+	if m.zeroSlot < 0 || m.zeroSlot >= baseBlock.SizeIn() {
+		return false
+	}
+	m.zeroBlock = baseBlock.InEdge(m.zeroSlot).Point
+	otherBlock := baseBlock.InEdge(1 - m.zeroSlot).Point
+	if m.zeroBlock.SizeOut() == 1 {
+		if m.zeroBlock.SizeIn() != 1 {
+			return false
+		}
+		m.condBlock = m.zeroBlock.InEdge(0).Point
+	} else if m.zeroBlock.SizeOut() == 2 {
+		m.condBlock = m.zeroBlock
+	} else {
+		return false
+	}
+	if m.condBlock.SizeOut() != 2 {
+		return false
+	}
+	if otherBlock.SizeOut() == 1 {
+		if otherBlock.SizeIn() != 1 {
+			return false
+		}
+		if m.condBlock != otherBlock.InEdge(0).Point {
+			return false
+		}
+	} else if otherBlock.SizeOut() == 2 {
+		if m.condBlock != otherBlock {
+			return false
+		}
+	} else {
+		return false
+	}
+	condBasic, ok := m.condBlock.Concrete().(*BlockBasic)
+	if !ok {
+		return false
+	}
+	m.cbranch = condBasic.LastOp()
+	if m.cbranch == nil || m.cbranch.Code() != CPUI_CBRANCH {
+		return false
+	}
+	return true
+}
+
+// C++ parity: condexe.cc RuleOrPredicate::MultiPredicate::discoverPathIsTrue.
+func (m *orPredicateMulti) discoverPathIsTrue() {
+	if m.condBlock.TrueOut() == m.zeroBlock {
+		m.zeroPathIsTrue = true
+	} else if m.condBlock.FalseOut() == m.zeroBlock {
+		m.zeroPathIsTrue = false
+	} else {
+		m.zeroPathIsTrue = m.condBlock.TrueOut() == &m.op.Parent().FlowBlock
+	}
+}
+
+// C++ parity: condexe.cc RuleOrPredicate::MultiPredicate::discoverConditionalZero.
+func (m *orPredicateMulti) discoverConditionalZero(vn *Varnode) bool {
+	boolvn := m.cbranch.Input(1)
+	if boolvn == nil || !boolvn.IsWritten() {
+		return false
+	}
+	compareop := boolvn.Def()
+	opc := compareop.Code()
+	if opc == CPUI_INT_NOTEQUAL {
+		m.zeroPathIsTrue = !m.zeroPathIsTrue
+	} else if opc != CPUI_INT_EQUAL {
+		return false
+	}
+	a1 := compareop.Input(0)
+	a2 := compareop.Input(1)
+	var zerovn *Varnode
+	if a1 == vn {
+		zerovn = a2
+	} else if a2 == vn {
+		zerovn = a1
+	} else {
+		return false
+	}
+	if zerovn == nil || !zerovn.IsConstant() || zerovn.Offset() != 0 {
+		return false
+	}
+	if m.cbranch.HasFlag(PcodeOpBooleanFlip) {
+		m.zeroPathIsTrue = !m.zeroPathIsTrue
+	}
+	return true
+}
+
+// C++ parity: condexe.cc RuleOrPredicate.
+type RuleOrPredicate struct{ batchRule }
+
+// C++ parity: condexe.cc RuleOrPredicate.
+func NewRuleOrPredicate(group string) *RuleOrPredicate {
+	r := &RuleOrPredicate{}
+	r.batchRule = newBatchRule(group, "orpredicate", []OpCode{CPUI_INT_OR, CPUI_INT_XOR}, r.apply, func(g string) Rule { return NewRuleOrPredicate(g) })
+	return r
+}
+
+// C++ parity: condexe.cc RuleOrPredicate::getOpList.
+func (r *RuleOrPredicate) getOpList() []OpCode {
+	return []OpCode{CPUI_INT_OR, CPUI_INT_XOR}
+}
+
+// C++ parity: condexe.cc RuleOrPredicate::checkSingle.
+func (r *RuleOrPredicate) checkSingle(vn *Varnode, branch orPredicateMulti, op *PcodeOp, data *Funcdata) int {
+	if vn == nil || vn.IsFree() {
+		return 0
+	}
+	if !branch.discoverCbranch() {
+		return 0
+	}
+	if branch.op.Output() == nil || branch.op.Output().LoneDescend() != op {
+		return 0
+	}
+	branch.discoverPathIsTrue()
+	if !branch.discoverConditionalZero(vn) {
+		return 0
+	}
+	if branch.zeroPathIsTrue {
+		return 0
+	}
+	data.OpSetInput(branch.op, vn, branch.zeroSlot)
+	data.OpRemoveInput(op, 1)
+	data.OpSetOpcode(op, CPUI_COPY)
+	data.OpSetInput(op, branch.op.Output(), 0)
+	return 1
+}
+
+// C++ parity: condexe.cc RuleOrPredicate::applyOp.
+func (r *RuleOrPredicate) apply(op *PcodeOp, data *Funcdata) int {
+	branch0 := orPredicateMulti{}
+	branch1 := orPredicateMulti{}
+	test0 := branch0.discoverZeroSlot(op.Input(0))
+	test1 := branch1.discoverZeroSlot(op.Input(1))
+	if !test0 && !test1 {
+		return 0
+	}
+	if !test0 {
+		return r.checkSingle(op.Input(0), branch1, op, data)
+	}
+	if !test1 {
+		return r.checkSingle(op.Input(1), branch0, op, data)
+	}
+	if !branch0.discoverCbranch() {
+		return 0
+	}
+	if !branch1.discoverCbranch() {
+		return 0
+	}
+	if branch0.condBlock == branch1.condBlock {
+		if branch0.zeroBlock == branch1.zeroBlock {
+			return 0
+		}
+	} else {
+		var condmarker BooleanExpressionMatch
+		if !condmarker.VerifyCondition(branch0.cbranch, branch1.cbranch) {
+			return 0
+		}
+		if condmarker.MultiSlot() != -1 {
+			return 0
+		}
+		branch0.discoverPathIsTrue()
+		branch1.discoverPathIsTrue()
+		finalBool := branch0.zeroPathIsTrue == branch1.zeroPathIsTrue
+		if condmarker.Flip() {
+			finalBool = !finalBool
+		}
+		if finalBool {
+			return 0
+		}
+	}
+	order := 0
+	if SeqNumLess(branch0.op.Seq(), branch1.op.Seq()) {
+		order = -1
+	} else if SeqNumLess(branch1.op.Seq(), branch0.op.Seq()) {
+		order = 1
+	}
+	if order == 0 {
+		return 0
+	}
+	var finalBlock *BlockBasic
+	slot0SetsBranch0 := false
+	if order < 0 {
+		finalBlock = branch1.op.Parent()
+		slot0SetsBranch0 = branch1.zeroSlot == 0
+	} else {
+		finalBlock = branch0.op.Parent()
+		slot0SetsBranch0 = branch0.zeroSlot == 1
+	}
+	insertAddr := branch0.op.Addr()
+	if finalBlock.FirstOp() != nil {
+		insertAddr = finalBlock.FirstOp().Addr()
+	}
+	newMulti := data.NewOp(2, insertAddr)
+	data.OpSetOpcode(newMulti, CPUI_MULTIEQUAL)
+	if slot0SetsBranch0 {
+		data.OpSetInput(newMulti, branch0.otherVn, 0)
+		data.OpSetInput(newMulti, branch1.otherVn, 1)
+	} else {
+		data.OpSetInput(newMulti, branch1.otherVn, 0)
+		data.OpSetInput(newMulti, branch0.otherVn, 1)
+	}
+	newvn := data.NewUniqueOut(branch0.otherVn.Size(), newMulti)
+	data.OpInsertBegin(newMulti, finalBlock)
+	data.OpRemoveInput(op, 1)
+	data.OpSetInput(op, newvn, 0)
+	data.OpSetOpcode(op, CPUI_COPY)
+	return 1
 }
 
 type RuleShiftAnd struct{ batchRule }
