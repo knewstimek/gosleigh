@@ -129,10 +129,66 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
 	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	// H8: NormalizeBranches + NodeJoin (ConditionalJoin) + RulePushMultiME + DeadCode
+	// before BlockStructure so the gcd while-loop condition is merged correctly.
+	// C++ parity: coreaction.cc ActionNormalizeBranches + ActionNodeJoin run before
+	// ActionBlockStructure in the main decompile loop.
+	pcode.NewActionNormalizeBranches("analysis").Apply(result.Funcdata)
+	pcode.NewActionNodeJoin("analysis").Apply(result.Funcdata)
+	pcode.NewBatchAActionPool("batch-node-join", "analysis").Perform(result.Funcdata)
+	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
+	// Re-run MergeMarker so new MULTIEQUAL ops from NodeJoin get HighVariable assignments.
+	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionPreferComplement("analysis").Apply(result.Funcdata)
+	// H3/H5/H6: AssignHigh -> MergeRequired -> MarkExplicit -> MarkImplied -> MergeCopy
+	// C++ parity: coreaction.cc ~5734-5739; runs before ActionFinalStructure in C++,
+	// here placed after FinalStructure but before ForLoops so that testTerminal's
+	// IsExplicit check in ActionForLoops has valid explicit/implied state.
+	pcode.NewActionAssignHigh("analysis").Apply(result.Funcdata)
+	pcode.NewActionMergeRequired("analysis").Apply(result.Funcdata)
+	pcode.NewActionMarkExplicit("analysis").Apply(result.Funcdata)
+	pcode.NewActionMarkImplied("analysis").Apply(result.Funcdata)
+	// ActionForLoops runs after MarkExplicit/MarkImplied so that testTerminal's
+	// IsExplicit check correctly rejects for-loop detection when the iterate
+	// varnode is implied (e.g. gcd single-use ECX after NodeJoin).
+	// C++ parity: BlockWhileDo::finalizePrinting (testTerminal) runs after MarkExplicit
+	// in the main decompile loop (coreaction.cc ~5736 MarkExplicit before FinalStructure).
 	pcode.NewActionForLoops("analysis").Apply(result.Funcdata)
+	pcode.NewActionMergeCopy("analysis").Apply(result.Funcdata)
+	// H4: ActionNameVars -- assign iVar1/uVar1 names to unnamed register-space HVs.
+	// C++ parity: coreaction.cc ActionNameVars::apply() + ScopeLocal::assignDefaultNames().
+	pcode.NewActionNameVars("analysis").Apply(result.Funcdata)
+
+	// DEBUG: dump all MULTIEQUAL ops and their HV names
+	{
+		seen := make(map[*pcode.HighVariable]bool)
+		for _, op := range result.Funcdata.GetPcodeOpBank().AllOps() {
+			if op == nil || op.Code() != pcode.CPUI_MULTIEQUAL {
+				continue
+			}
+			out := op.Output()
+			if out == nil {
+				continue
+			}
+			hv := out.High()
+			name := "<nil>"
+			if hv != nil {
+				name = hv.Name()
+				if name == "" {
+					name = "<empty>"
+				}
+			}
+			t.Logf("DEBUG HV: MULTIEQUAL out=%v hvName=%q", out, name)
+			if hv != nil && !seen[hv] {
+				seen[hv] = true
+				for _, inst := range hv.Instances() {
+					t.Logf("  instance: %v IsInput=%v IsUnique=%v", inst, inst.IsInput(), inst.Space() != nil && inst.Space().IsUnique())
+				}
+			}
+		}
+	}
 
 	out, err := pcode.NewPrintC().
 		SetRegisterNames(engine.RegisterNamesByLocation()).
@@ -251,6 +307,16 @@ func runPipeline(t *testing.T, prog []byte, name string) string {
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
 	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	// H8: NormalizeBranches + NodeJoin (ConditionalJoin) + RulePushMultiME + DeadCode
+	// before BlockStructure so the gcd while-loop condition is merged correctly.
+	// C++ parity: coreaction.cc ActionNormalizeBranches + ActionNodeJoin run before
+	// ActionBlockStructure in the main decompile loop.
+	pcode.NewActionNormalizeBranches("analysis").Apply(result.Funcdata)
+	pcode.NewActionNodeJoin("analysis").Apply(result.Funcdata)
+	pcode.NewBatchAActionPool("batch-node-join", "analysis").Perform(result.Funcdata)
+	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
+	// Re-run MergeMarker so new MULTIEQUAL ops from NodeJoin get HighVariable assignments.
+	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionPreferComplement("analysis").Apply(result.Funcdata)
@@ -333,7 +399,6 @@ func TestMSVC_Gcd_Diag(t *testing.T) {
 }
 
 func TestMSVC_Gcd(t *testing.T) {
-	t.Skip("known mismatch: while-condition comma_separate rendering not yet implemented (emitWhileBlock)")
 	// MSVC /O1 x86-32 gcd: frameless, ESP-relative params, CDQ+IDIV for modulo
 	prog := []byte{0x8b, 0x4c, 0x24, 0x08, 0x8b, 0x44, 0x24, 0x04, 0x85, 0xc9, 0x74, 0x0b, 0x99, 0xf7, 0xf9, 0x8b, 0xc1, 0x8b, 0xca, 0x85, 0xd2, 0x75, 0xf5, 0xc3}
 	out := runPipeline(t, prog, "gcd")

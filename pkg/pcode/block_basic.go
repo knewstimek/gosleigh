@@ -100,6 +100,23 @@ func (bb *BlockBasic) Ops() []*PcodeOp {
 	return out
 }
 
+// EarliestUse finds the earliest op in bb that uses (reads) vn.
+// Returns nil if no op in bb reads vn.
+// C++ parity: block.cc BlockBasic::earliestUse
+func (bb *BlockBasic) EarliestUse(vn *Varnode) *PcodeOp {
+	if vn == nil {
+		return nil
+	}
+	for _, op := range bb.ops {
+		for i := 0; i < op.NumInput(); i++ {
+			if op.Input(i) == vn {
+				return op
+			}
+		}
+	}
+	return nil
+}
+
 // NegateCondition flips PcodeOpBooleanFlip and PcodeOpFallthruTrue on the
 // CBRANCH (last) op, then swaps the two outgoing edges if present.
 // C++ parity: block.cc BlockBasic::negateCondition -- always uses op.back()

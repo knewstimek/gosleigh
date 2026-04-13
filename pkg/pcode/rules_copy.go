@@ -276,6 +276,7 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRulePopcountBoolXor(group) },
 	func(group string) Rule { return NewRuleExtensionPush(group) },
 	func(group string) Rule { return NewRulePieceStructure(group) },
+	func(group string) Rule { return NewRulePushMultiME(group) },
 }
 
 func BatchARules(group string) []Rule {

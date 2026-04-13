@@ -1,6 +1,9 @@
 package pcode
 
-import "math/bits"
+import (
+	"fmt"
+	"math/bits"
+)
 
 type RuleSwitchSingle struct{ batchRule }
 
@@ -881,6 +884,154 @@ func detectThreeWayInputs(vn *Varnode) (*Varnode, *Varnode, bool) {
 		return nil, nil, false
 	}
 	return ab.Input(0), ab.Input(1), true
+}
+
+// RulePushMultiME fires on 2-input MULTIEQUAL ops where both inputs are
+// computed by functionally equivalent operations. It merges the computations
+// into the MULTIEQUAL's block and eliminates one of them.
+// COPY special case: uses findSubstituteForME to find an existing MULTIEQUAL
+// that already merges the differing inputs.
+// C++ parity: ruleaction.cc RulePushMulti::applyOp (lines 1074-1137)
+type RulePushMultiME struct{ batchRule }
+
+func NewRulePushMultiME(group string) *RulePushMultiME {
+	r := &RulePushMultiME{}
+	r.batchRule = newBatchRule(group, "push_multi_me", []OpCode{CPUI_MULTIEQUAL}, r.apply, func(g string) Rule { return NewRulePushMultiME(g) })
+	return r
+}
+
+// findSubstituteForME searches for an existing MULTIEQUAL op in bl with inputs
+// in1 and in2 (in order). If not found, tries via functionalEqualityLevel.
+// C++ parity: ruleaction.cc RulePushMulti::findSubstitute (lines 1031-1059)
+func findSubstituteForME(in1, in2 *Varnode, bl *BlockBasic, earliest *PcodeOp, fd *Funcdata) *PcodeOp {
+	// Direct search: MULTIEQUAL in bl with in[0]==in1 and in[1]==in2.
+	for _, op := range in1.DescendIter() {
+		if op.Parent() != bl {
+			continue
+		}
+		if op.Code() != CPUI_MULTIEQUAL {
+			continue
+		}
+		if op.NumInput() < 2 {
+			continue
+		}
+		if op.Input(0) != in1 {
+			continue
+		}
+		if op.Input(1) != in2 {
+			continue
+		}
+		return op
+	}
+	if in1 == in2 {
+		return nil
+	}
+	var buf1, buf2 [2]*Varnode
+	if functionalEqualityLevel(in1, in2, buf1[:], buf2[:]) != 0 {
+		return nil
+	}
+	if !in1.IsWritten() {
+		return nil
+	}
+	op1 := in1.Def()
+	for i := 0; i < op1.NumInput(); i++ {
+		vn := op1.Input(i)
+		if vn.IsConstant() {
+			continue
+		}
+		if in2.IsWritten() && vn == in2.Def().Input(i) {
+			return fd.CseFindInBlock(op1, vn, bl, earliest)
+		}
+	}
+	return nil
+}
+
+func (r *RulePushMultiME) apply(op *PcodeOp, data *Funcdata) int {
+	if op.NumInput() != 2 {
+		return 0
+	}
+	in1 := op.Input(0)
+	in2 := op.Input(1)
+	if !in1.IsWritten() || !in2.IsWritten() {
+		return 0
+	}
+	if in1.IsSpacebasePlaceholder() || in2.IsSpacebasePlaceholder() {
+		return 0
+	}
+
+	var buf1, buf2 [2]*Varnode
+	res := functionalEqualityLevel(in1, in2, buf1[:], buf2[:])
+	if res < 0 || res > 1 {
+		fmt.Printf("PUSHME skip: res=%d in1=%v in2=%v\n", res, in1, in2)
+		return 0
+	}
+	op1 := in1.Def()
+	if op1.Code() == CPUI_SUBPIECE {
+		return 0
+	}
+
+	bl := op.Parent()
+	earliest := bl.EarliestUse(op.Output())
+
+	if op1.Code() == CPUI_COPY {
+		if res == 0 {
+			return 0
+		}
+		substitute := findSubstituteForME(buf1[0], buf2[0], bl, earliest, data)
+		if substitute == nil {
+			fmt.Printf("PUSHME COPY skip: no substitute in1=%v in2=%v buf1=%v buf2=%v\n", in1, in2, buf1[0], buf2[0])
+			return 0
+		}
+		data.TotalReplace(op.Output(), substitute.Output())
+		data.OpDestroy(op)
+		return 1
+	}
+
+	op2 := in2.Def()
+	if in1.LoneDescend() != op {
+		fmt.Printf("PUSHME skip: in1 not lone descend, in1=%v op1=%v numDesc=%d\n", in1, op1.Code(), in1.NumDescend())
+		for _, d := range in1.DescendIter() {
+			fmt.Printf("  in1 desc: %v parent=%v\n", d.Code(), d.Parent())
+		}
+		return 0
+	}
+	if in2.LoneDescend() != op {
+		fmt.Printf("PUSHME skip: in2 not lone descend, in2=%v op2=%v numDesc=%d\n", in2, op2.Code(), in2.NumDescend())
+		for _, d := range in2.DescendIter() {
+			fmt.Printf("  in2 desc: %v parent=%v\n", d.Code(), d.Parent())
+		}
+		return 0
+	}
+	fmt.Printf("PUSHME applying: op=%v in1=%v in2=%v res=%d buf1=%v buf2=%v\n", op.Code(), in1, in2, res, buf1[0], buf2[0])
+
+	outvn := op.Output()
+	data.OpSetOutput(op1, outvn)
+	data.OpUninsert(op1)
+
+	if res == 1 {
+		slot1 := op1.GetSlot(buf1[0])
+		substitute := findSubstituteForME(buf1[0], buf2[0], bl, earliest, data)
+		if substitute == nil {
+			substitute = data.NewOp(2, op.Addr())
+			data.OpSetOpcode(substitute, CPUI_MULTIEQUAL)
+			if buf1[0].Addr() == buf2[0].Addr() && !buf1[0].IsAddrTied() {
+				data.NewVarnodeOut(buf1[0].Size(), buf1[0].Addr(), substitute)
+			} else {
+				data.NewUniqueOut(buf1[0].Size(), substitute)
+			}
+			data.OpSetInput(substitute, buf1[0], 0)
+			data.OpSetInput(substitute, buf2[0], 1)
+			data.OpInsertBegin(substitute, bl)
+		}
+		data.OpSetInput(op1, substitute.Output(), slot1)
+		data.OpInsertAfter(op1, substitute)
+	} else {
+		data.OpInsertBegin(op1, bl)
+	}
+
+	data.OpDestroy(op)
+	data.OpDestroy(op2)
+	return 1
 }
 
 type batchCMiscRuleFactory func(string) Rule

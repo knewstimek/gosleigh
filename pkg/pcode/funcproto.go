@@ -16,6 +16,7 @@ package pcode
 
 import (
 	"fmt"
+	"gosleigh/pkg/address"
 )
 
 // FuncProto holds the calling convention information attached to a single
@@ -280,5 +281,125 @@ func anchorReturnReg(fd *Funcdata, model *ProtoModel) {
 		slot := op.NumInput()
 		op.SetNumInputs(slot + 1)
 		fd.OpSetInput(op, best, slot)
+	}
+}
+
+// applyReturnRecovery un-wires the return-register varnode from each RETURN op
+// when the varnode's value is not exclusively consumed by that RETURN.
+// This is the post-dead-code recovery step: after ActionDeadCode eliminates
+// side-effect-free ops (e.g. overflow-flag computations from IMUL), the
+// remaining consumers of the return-register varnode are the ground truth.
+// If any consumer is not the RETURN op itself (transitively through transparent
+// ops), the function has no meaningful return value and the wired input is removed.
+//
+// Must be called AFTER ActionDeadCode so that non-return consumers introduced
+// by register-clobbering side-effects (e.g. OF flag from IMUL) have been pruned.
+// C++ parity: ActionReturnRecovery::apply + Funcdata::ancestorOpUse
+func applyReturnRecovery(fd *Funcdata) {
+	for _, op := range fd.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN {
+			continue
+		}
+		if op.NumInput() <= 1 {
+			continue
+		}
+		// slot 1 is where anchorReturnReg wires the return-register varnode.
+		const retSlot = 1
+		retVn := op.Input(retSlot)
+		if retVn == nil || retVn.IsConstant() {
+			continue
+		}
+		// Only check register-space varnodes. If copy propagation has substituted
+		// the return-register varnode with a stack/unique varnode, that substitution
+		// represents a legitimate data-flow (e.g. accumulator variable), not an
+		// accidental register clobber. Checking non-register varnodes would
+		// incorrectly mark loop accumulators (CountedLoop, SumList) as void.
+		// C++ parity: Heritage::guardReturns inserts a fresh register varnode at RETURN,
+		// which is immune to cross-space propagation; we approximate by space guard here.
+		if sp := retVn.Space(); sp == nil || sp.Kind != address.SpaceKindProcessor {
+			continue
+		}
+		if !ancestorOpUseReturn(retVn, op, retSlot, 5, make(map[*PcodeOp]bool)) {
+			fd.OpUnsetInput(op, retSlot)
+			op.SetNumInputs(retSlot)
+		}
+	}
+}
+
+// onlyReturnUse reports whether ALL downstream consumers of vn lead exclusively
+// to retOp at retSlot (transitively through MULTIEQUAL/SEXT/ZEXT/CAST).
+// Visited tracks seen varnodes to break phi back-edge cycles; a cycle is treated
+// as non-disqualifying because the back-edge itself is not a new consumer.
+// C++ parity: Funcdata::onlyOpUse in funcdata_varnode.cc
+func onlyReturnUse(vn *Varnode, retOp *PcodeOp, retSlot int, visited map[*Varnode]bool) bool {
+	if vn == nil {
+		return false
+	}
+	if visited[vn] {
+		return true
+	}
+	visited[vn] = true
+	for _, useOp := range vn.DescendIter() {
+		if useOp == nil || useOp.IsDead() {
+			continue
+		}
+		if useOp == retOp {
+			// Acceptable only if this exact varnode occupies the anchored slot.
+			if useOp.NumInput() > retSlot && useOp.Input(retSlot) == vn {
+				continue
+			}
+			return false
+		}
+		switch useOp.Code() {
+		case CPUI_MULTIEQUAL, CPUI_INT_SEXT, CPUI_INT_ZEXT, CPUI_CAST:
+			out := useOp.Output()
+			if out == nil {
+				return false
+			}
+			if !onlyReturnUse(out, retOp, retSlot, visited) {
+				return false
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// ancestorOpUseReturn reports whether any upstream path from vn satisfies
+// onlyReturnUse. For MULTIEQUAL, any single passing input is sufficient.
+// For CALL/CALLIND, always false. For other defining ops, delegates to
+// onlyReturnUse on vn. depth caps phi-chain recursion.
+// C++ parity: Funcdata::ancestorOpUse in funcdata_varnode.cc
+func ancestorOpUseReturn(vn *Varnode, retOp *PcodeOp, retSlot int, depth int, seenME map[*PcodeOp]bool) bool {
+	if depth <= 0 || vn == nil {
+		return false
+	}
+	if !vn.IsWritten() {
+		return false
+	}
+	def := vn.Def()
+	if def == nil || def.IsDead() {
+		return false
+	}
+	switch def.Code() {
+	case CPUI_MULTIEQUAL:
+		if seenME[def] {
+			return false
+		}
+		seenME[def] = true
+		for i := 0; i < def.NumInput(); i++ {
+			inp := def.Input(i)
+			if inp != nil && ancestorOpUseReturn(inp, retOp, retSlot, depth-1, seenME) {
+				delete(seenME, def)
+				return true
+			}
+		}
+		delete(seenME, def)
+		return false
+	case CPUI_CALL, CPUI_CALLIND:
+		return false
+	default:
+		return onlyReturnUse(vn, retOp, retSlot, make(map[*Varnode]bool))
 	}
 }

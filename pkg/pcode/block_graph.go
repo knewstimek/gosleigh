@@ -288,3 +288,13 @@ func (bg *BlockGraph) OrderBlocks() {
 		return bg.blocks[i].index < bg.blocks[j].index
 	})
 }
+
+// MoveOutEdge retargets blold's out-edge at slot to point to blnew instead.
+// The target block (blold.getOut(slot)) has its corresponding in-edge source
+// changed from blold to blnew.
+// C++ parity: block.cc BlockGraph::moveOutEdge
+func (bg *BlockGraph) MoveOutEdge(blold *FlowBlock, slot int, blnew *FlowBlock) {
+	outbl := blold.outEdges[slot].Point
+	i := blold.outEdges[slot].ReverseIndex
+	outbl.ReplaceInEdge(i, blnew)
+}

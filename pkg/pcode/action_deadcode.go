@@ -74,6 +74,11 @@ func (a *ActionDeadCode) Apply(data *Funcdata) int {
 			break
 		}
 	}
+	// Run return recovery after the dead-code pass: prune any return-register
+	// varnodes that still have non-RETURN consumers (the real uses that survived
+	// dead-code elimination indicate the function has no explicit return value).
+	// C++ parity: ActionReturnRecovery runs after ActionDeadCode in actmainloop.
+	applyReturnRecovery(data)
 	if total > 0 {
 		return 1 // signal modification
 	}

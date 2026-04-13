@@ -182,19 +182,41 @@ func (fd *Funcdata) OpSetOpcode(op *PcodeOp, opc OpCode) {
 }
 
 // OpSetOutput wires a Varnode as the output of a PcodeOp.
-// Updates both the op's output pointer and the varnode's def link.
-// C++ parity: Funcdata::opSetOutput
+// If the op already has an output, it is unset first.
+// If vn already has a def (another op claims to produce it), that op's output
+// is unset before reassigning vn's def to op.
+// C++ parity: Funcdata::opSetOutput (funcdata_op.cc:70)
 func (fd *Funcdata) OpSetOutput(op *PcodeOp, vn *Varnode) {
-	vn.SetDef(op)
+	if vn == op.Output() {
+		return // already set
+	}
+	// Unset old output of this op first.
+	if op.Output() != nil {
+		fd.OpUnsetOutput(op)
+	}
+	// If vn is already defined by another op, unset that op's output first.
+	// This may call vbank.MakeFree(vn), setting vn to free state.
+	if vn.Def() != nil {
+		fd.OpUnsetOutput(vn.Def())
+	}
+	// Use vbank.SetDef to properly re-register vn as written in the varnode bank.
+	// C++ parity: vbank.setDef(vn, op) in funcdata_op.cc:83 -- updates written tree.
+	// Simple vn.SetDef(op) would leave vn in free state after MakeFree above.
+	fd.vbank.SetDef(vn, op)
 	op.SetOutput(vn)
 }
 
 // OpSetInput wires a Varnode as an input of a PcodeOp at the given slot.
-// Updates both the op's input slot and the varnode's descend list.
-// C++ parity: Funcdata::opSetInput
+// If the slot already holds a varnode, it is unset first (descend removed).
+// Then the new varnode's descend list is updated to include op.
+// C++ parity: Funcdata::opSetInput (funcdata_op.cc:104)
 func (fd *Funcdata) OpSetInput(op *PcodeOp, vn *Varnode, slot int) {
-	op.SetInput(vn, slot)
+	// Identical to C++: unset the old input before setting the new one.
+	if old := op.Input(slot); old != nil {
+		fd.OpUnsetInput(op, slot)
+	}
 	vn.AddDescend(op)
+	op.SetInput(vn, slot)
 }
 
 // OpUnsetOutput disconnects the output Varnode from a PcodeOp.
@@ -386,4 +408,133 @@ func (fd *Funcdata) VarnodesByRange(addr address.Address, size int32) []*Varnode
 // ConstSpace returns the constant address space.
 func (fd *Funcdata) ConstSpace() *address.Space {
 	return fd.constSpace
+}
+
+// ---------------------------------------------------------------------------
+// Action support helpers
+// C++ parity: funcdata_op.cc, funcdata_varnode.cc, funcdata_block.cc
+// ---------------------------------------------------------------------------
+
+// OpUninsert moves an op from the alive list to the dead list and removes it
+// from its parent basic block. Does NOT unlink varnodes.
+// C++ parity: Funcdata::opUninsert (funcdata_op.cc:164)
+func (fd *Funcdata) OpUninsert(op *PcodeOp) {
+	fd.obank.MarkDead(op)
+	if p := op.Parent(); p != nil {
+		p.RemoveOp(op)
+		op.SetParent(nil)
+	}
+}
+
+// TotalReplace replaces all uses (descendants) of oldvn with newvn.
+// C++ parity: Funcdata::totalReplace (funcdata_varnode.cc)
+func (fd *Funcdata) TotalReplace(oldvn, newvn *Varnode) {
+	// Snapshot the descend list since we mutate it during iteration.
+	uses := oldvn.DescendIter()
+	for _, useOp := range uses {
+		slot := useOp.GetSlot(oldvn)
+		if slot < 0 {
+			continue
+		}
+		fd.OpUnsetInput(useOp, slot)
+		fd.OpSetInput(useOp, newvn, slot)
+	}
+}
+
+// ClearDeadOps destroys all ops on the dead list.
+// C++ parity: Funcdata::clearDeadOps = obank.destroyDead() (funcdata.hh:429)
+func (fd *Funcdata) ClearDeadOps() {
+	dead := fd.obank.DeadOps()
+	for _, op := range dead {
+		fd.obank.Destroy(op)
+	}
+}
+
+// StructureReset recalculates loop structure and dominance on the basic block
+// graph, then clears the structured hierarchy so ActionBlockStructure restarts.
+// C++ parity: Funcdata::structureReset (funcdata_block.cc:704)
+func (fd *Funcdata) StructureReset() {
+	bg := fd.GetBasicBlocks()
+	if bg == nil {
+		return
+	}
+	bg.StructureLoops()
+	// Clear the sblocks (structured hierarchy) so it rebuilds from scratch.
+	fd.SetStructureGraph(NewBlockGraph())
+}
+
+// NodeJoinCreateBlock creates a new basic block (joinblock) that merges two
+// conditional blocks with identical branch targets (exita and exitb).
+// One edge from each of block1/block2 to exita and exitb is removed, and the
+// remaining edges are retargeted to the new joinblock. Then block1->joinblock
+// and block2->joinblock edges are added.
+// C++ parity: Funcdata::nodeJoinCreateBlock (funcdata_block.cc:779)
+func (fd *Funcdata) NodeJoinCreateBlock(
+	block1, block2, exita, exitb *BlockBasic,
+	fora_block1ishigh, forb_block1ishigh bool,
+	addr address.Address,
+) *BlockBasic {
+	bg := fd.GetBasicBlocks()
+	if bg == nil {
+		return nil
+	}
+
+	newblock := bg.NewBlockBasicInGraph()
+	newblock.SetFlag(BlockFlagJoinedBlock)
+
+	var swapa, swapb *FlowBlock
+
+	// Remove one edge to exita and one to exitb depending on which block is "high".
+	if fora_block1ishigh {
+		bg.RemoveEdge(&block1.FlowBlock, &exita.FlowBlock)
+		swapa = &block2.FlowBlock
+	} else {
+		bg.RemoveEdge(&block2.FlowBlock, &exita.FlowBlock)
+		swapa = &block1.FlowBlock
+	}
+	if forb_block1ishigh {
+		bg.RemoveEdge(&block1.FlowBlock, &exitb.FlowBlock)
+		swapb = &block2.FlowBlock
+	} else {
+		bg.RemoveEdge(&block2.FlowBlock, &exitb.FlowBlock)
+		swapb = &block1.FlowBlock
+	}
+
+	// Move remaining edges from swapa->exita and swapb->exitb to newblock.
+	bg.MoveOutEdge(swapa, swapa.GetOutIndex(&exita.FlowBlock), &newblock.FlowBlock)
+	bg.MoveOutEdge(swapb, swapb.GetOutIndex(&exitb.FlowBlock), &newblock.FlowBlock)
+
+	// Add block1->newblock and block2->newblock.
+	bg.AddEdge(&block1.FlowBlock, &newblock.FlowBlock, 0)
+	bg.AddEdge(&block2.FlowBlock, &newblock.FlowBlock, 0)
+
+	fd.StructureReset()
+	return newblock
+}
+
+// CseFindInBlock finds a duplicate of op in basic block bl that reads vn,
+// occurring before earliest.
+// C++ parity: Funcdata::cseFindInBlock (funcdata_op.cc:1326)
+func (fd *Funcdata) CseFindInBlock(op *PcodeOp, vn *Varnode, bl *BlockBasic, earliest *PcodeOp) *PcodeOp {
+	for _, res := range vn.DescendIter() {
+		if res == op {
+			continue
+		}
+		if res.Parent() != bl {
+			continue
+		}
+		if earliest != nil && earliest.Seq().Order <= res.Seq().Order {
+			continue
+		}
+		out1 := op.Output()
+		out2 := res.Output()
+		if out2 == nil {
+			continue
+		}
+		var r1, r2 [2]*Varnode
+		if functionalEqualityLevel(out1, out2, r1[:], r2[:]) == 0 {
+			return res
+		}
+	}
+	return nil
 }
