@@ -39,7 +39,7 @@ import (
 //   - SymbolEntry checks    (isAddrTiedContiguous, RuleDoubleOut::attemptMarking)
 //   - combineInputVarnodes  (RuleDoubleOut contiguous-input collapse)
 //   - newVarnodeIop + op-from-const affector chain (buildLoFromWhole / buildHiFromWhole INDIRECT case)
-//   - Form classes         (SplitVarnode::applyRuleIn) -- returns 0 until ported
+//   - Form classes         (SplitVarnode::applyRuleIn) -- 11/13 ported; LessThreeWay and IndirectForm remain stubs
 //   - RuleDoubleStore::reassignIndirects op-from-const chain
 //   - RuleDoubleIn::reset  -- Funcdata.setDoublePrecisRecovery not yet plumbed
 
@@ -1191,6 +1191,7 @@ func SplitVarnodeApplyRuleIn(in *SplitVarnode, data *Funcdata) int {
 			if workop.IsDead() {
 				continue
 			}
+			// Dispatch matches C++ SplitVarnode::applyRuleIn (double.cc:1090).
 			switch workop.Code() {
 			case CPUI_INT_ADD:
 				var addform AddForm
@@ -1202,6 +1203,10 @@ func SplitVarnodeApplyRuleIn(in *SplitVarnode, data *Funcdata) int {
 					return 1
 				}
 			case CPUI_INT_AND:
+				var equal3form Equal3Form
+				if equal3form.ApplyRule(in, workop, workishi, data) {
+					return 1
+				}
 				var logicalform LogicalForm
 				if logicalform.ApplyRule(in, workop, workishi, data) {
 					return 1
@@ -1211,7 +1216,29 @@ func SplitVarnodeApplyRuleIn(in *SplitVarnode, data *Funcdata) int {
 				if logicalform.ApplyRule(in, workop, workishi, data) {
 					return 1
 				}
-			case CPUI_INT_LESS, CPUI_INT_LESSEQUAL, CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL:
+			case CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL:
+				var lessthreeway LessThreeWay
+				if lessthreeway.ApplyRule(in, workop, workishi, data) {
+					return 1
+				}
+				var equal1form Equal1Form
+				if equal1form.ApplyRule(in, workop, workishi, data) {
+					return 1
+				}
+				var equal2form Equal2Form
+				if equal2form.ApplyRule(in, workop, workishi, data) {
+					return 1
+				}
+			case CPUI_INT_LESS, CPUI_INT_LESSEQUAL:
+				var lessthreeway LessThreeWay
+				if lessthreeway.ApplyRule(in, workop, workishi, data) {
+					return 1
+				}
+				var lessconstform LessConstForm
+				if lessconstform.ApplyRule(in, workop, workishi, data) {
+					return 1
+				}
+			case CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL:
 				var lessconstform LessConstForm
 				if lessconstform.ApplyRule(in, workop, workishi, data) {
 					return 1
@@ -1226,9 +1253,19 @@ func SplitVarnodeApplyRuleIn(in *SplitVarnode, data *Funcdata) int {
 				if shiftform.ApplyRuleRight(in, workop, workishi, data) {
 					return 1
 				}
+			case CPUI_INT_MULT:
+				var multform MultForm
+				if multform.ApplyRule(in, workop, workishi, data) {
+					return 1
+				}
 			case CPUI_MULTIEQUAL:
 				var phiform PhiForm
 				if phiform.ApplyRule(in, workop, workishi, data) {
+					return 1
+				}
+			case CPUI_INDIRECT:
+				var indform IndirectForm
+				if indform.ApplyRule(in, workop, workishi, data) {
 					return 1
 				}
 			case CPUI_COPY:
@@ -1239,8 +1276,7 @@ func SplitVarnodeApplyRuleIn(in *SplitVarnode, data *Funcdata) int {
 					}
 				}
 			default:
-				// Equal1/2/3Form, LessThreeWay, MultForm, IndirectForm are
-				// not yet ported. See double_forms.go for the TODO list.
+				// All other op codes are no-ops for this rule family.
 			}
 		}
 	}
