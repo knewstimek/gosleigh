@@ -1339,13 +1339,16 @@ func (a *ActionConstantPtr) Reset(_ *Funcdata) { a.localcount = 0 }
 // The Go port walks every eligible constant varnode, runs the same opcode
 // filter as C++, marks the varnode as pointer-checked, and asks the local
 // scope whether the constant corresponds to a known symbol via
-// ScopeLocal::queryContainer. When a hit occurs we stamp the varnode with
-// the symbol's data-type so downstream passes treat it as a typed pointer.
+// ScopeLocal::queryContainer. On a hit the varnode is stamped with the
+// symbol's data-type and Funcdata.SpacebaseConstant rewrites the op into a
+// PTRSUB(spacebase, encoded-offset) chain (see funcdata.cc spacebaseConstant
+// L360 for the canonical form).
 //
-// TODO known mismatch: C++ also calls selectInferSpace / isPointer /
-// spacebaseConstant to rewrite the op into a PTRSUB chain. That rewrite
-// depends on the full TypeFactory + PTRSUB synthesis path which is not
-// ported yet, so we record the type hit but do not rewrite the op.
+// TODO known mismatch: selectInferSpace is approximated as "iterate every
+// processor-kind space the bank has seen, narrowest-match wins"; the C++
+// path uses Architecture::inferPtrSpaces ordering. The PTRSUB rewrite uses
+// the simplified equal-size branch only -- size-mismatched COPY rewrites
+// (zext / subpiece) and the typelock push are not ported yet.
 func (a *ActionConstantPtr) Apply(data *Funcdata) int {
 	if data == nil {
 		return 0
@@ -1418,6 +1421,14 @@ func (a *ActionConstantPtr) Apply(data *Funcdata) int {
 			}
 			if dt != nil {
 				SetVarnodeType(vn, dt)
+				// Rewrite the op into the PTRSUB(spacebase, ...) chain
+				// before the canonical slot-swap below. After the rewrite
+				// op.Input(slot) no longer points at vn, so the swap-input
+				// step is a structural pass-through but we keep it for
+				// C++ parity (and so the slot index stays consistent if
+				// future passes re-enter the loop).
+				// C++ parity: coreaction.cc ActionConstantPtr::apply L1211.
+				data.SpacebaseConstant(op, slot, entry.Addr(), probe, vn.Offset(), vn.Size())
 				a.count++
 				hit = true
 			}
@@ -1425,13 +1436,7 @@ func (a *ActionConstantPtr) Apply(data *Funcdata) int {
 		}
 		// C++ parity: coreaction.cc ActionConstantPtr::apply L1212-1213 --
 		// when we stamp a type onto an INT_ADD slot==1 constant, swap so the
-		// canonical form keeps the constant on slot 1. The full C++ path
-		// follows this with Funcdata::spacebaseConstant which rewrites the
-		// op into a PTRSUB chain; that rewrite depends on a TypeFactory-
-		// backed getTypeSpacebase path that is not ported yet, so only the
-		// canonical slot-swap step lands here.
-		// TODO known mismatch: PTRSUB synthesis + extra INT_ADD for offset
-		// deltas still missing.
+		// canonical form keeps the constant on slot 1.
 		if hit && op.Code() == CPUI_INT_ADD && slot == 1 {
 			data.OpSwapInput(op, 0, 1)
 		}
@@ -1829,17 +1834,19 @@ func (a *ActionFuncLink) Apply(data *Funcdata) int {
 // funcLinkInput sets up stub varnodes / active-input recovery for a call.
 // C++ parity: coreaction.cc ActionFuncLink::funcLinkInput
 //
-// The Go port follows the C++ decision tree: unlocked or varargs calls
-// get an empty ParamActive seeded, locked calls walk every declared
-// parameter and either emit an opStackLoad for stack params or an inline
-// newVarnode for register params. The spacebase placeholder is allocated
-// last when required.
+// The Go port follows the C++ decision tree: unlocked or varargs calls get
+// an empty ParamActive seeded, locked calls walk every declared parameter
+// (currently a structural traversal -- see TODO below), and finally the
+// spacebase placeholder LOAD is appended via FuncCallSpecs.CreatePlaceholder
+// when the prototype model declares a stack space. After the A23 upgrade
+// the placeholder path is real: opStackLoad now drives a LOAD op into the
+// CALL op's input list and the resulting Varnode carries the spacebase
+// placeholder flag for RuleLoadPlaceholderClear to drop later.
 //
-// TODO known mismatch: the inner helpers (OpStackLoad, ParamActive::
-// registerTrial / markActive / setFixedPosition, OpInsertInput-at-end,
-// NewVarnode-at-call) are not all ported. The branches below preserve
-// the control flow and delegate to stubs so the surrounding pipeline
-// observes the right shape; enabling real input recovery is a follow-up.
+// TODO known mismatch: per-parameter ParamActive trial registration plus
+// the locked-input opStackLoad / register inlining are not yet ported. The
+// loop below traverses the parameter list so a future helper can plug in
+// without restructuring the caller.
 func funcLinkInput(fc *FuncCallSpecs, data *Funcdata) {
 	if fc == nil || data == nil {
 		return
@@ -1852,17 +1859,13 @@ func funcLinkInput(fc *FuncCallSpecs, data *Funcdata) {
 		fc.InitActiveInput()
 	}
 	if inputLocked {
-		// TODO known mismatch: per-parameter trial registration + stack
-		// param opStackLoad is not yet ported. We still walk the parameter
-		// list so future helpers can slot directly into this loop.
 		numparam := fc.NumParams()
 		for i := 0; i < numparam; i++ {
-			param := fc.GetParam(i)
-			if param == nil {
+			if fc.GetParam(i) == nil {
 				continue
 			}
-			_ = param
-			// TODO known mismatch: register/stack param inlining.
+			// TODO known mismatch: ParamActive::registerTrial +
+			// markActive + setFixedPosition for the locked param.
 		}
 	}
 	if spacebase != nil {
