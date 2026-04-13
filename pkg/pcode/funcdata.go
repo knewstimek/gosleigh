@@ -698,6 +698,74 @@ func (fd *Funcdata) NodeJoinCreateBlock(
 	return newblock
 }
 
+// NodeSplit duplicates a basic block and retargets one incoming edge.
+// C++ parity: Funcdata::nodeSplit (funcdata_block.cc:845)
+func (fd *Funcdata) NodeSplit(b *BlockBasic, inedge int) {
+	if fd == nil || b == nil {
+		return
+	}
+	bg := fd.GetBasicBlocks()
+	if bg == nil {
+		return
+	}
+	if inedge < 0 || inedge >= b.SizeIn() {
+		return
+	}
+	if b.SizeOut() != 0 || b.SizeIn() <= 1 {
+		return
+	}
+
+	for i := 0; i < b.SizeIn(); i++ {
+		inbl := b.InEdge(i).Point
+		if inbl == nil {
+			continue
+		}
+		if inbl.HasFlag(BlockFlagMark) {
+			return
+		}
+		inbl.SetFlag(BlockFlagMark)
+	}
+	for i := 0; i < b.SizeIn(); i++ {
+		inbl := b.InEdge(i).Point
+		if inbl != nil {
+			inbl.ClearFlag(BlockFlagMark)
+		}
+	}
+
+	src := b.InEdge(inedge).Point
+	if src == nil {
+		return
+	}
+	label := b.InEdge(inedge).Label
+
+	bprime := bg.NewBlockBasicInGraph()
+	bprime.SetFlag(BlockFlagDuplicateBlock)
+	bprime.SetType(b.Type())
+	bprime.SetIndex(b.Index())
+	bprime.SetNumDesc(b.NumDesc())
+	bprime.ops = make([]*PcodeOp, 0, len(b.ops))
+	for _, op := range b.ops {
+		if op == nil {
+			continue
+		}
+		dup := *op
+		if len(op.inputs) > 0 {
+			dup.inputs = append([]*Varnode(nil), op.inputs...)
+		}
+		dup.parent = bprime
+		bprime.ops = append(bprime.ops, &dup)
+	}
+
+	bg.RemoveEdge(src, &b.FlowBlock)
+	bg.AddEdge(src, &bprime.FlowBlock, label)
+	for i := 0; i < b.SizeOut(); i++ {
+		outEdge := b.OutEdge(i)
+		bg.AddEdge(&bprime.FlowBlock, outEdge.Point, outEdge.Label)
+	}
+
+	fd.StructureReset()
+}
+
 // CseFindInBlock finds a duplicate of op in basic block bl that reads vn,
 // occurring before earliest.
 // C++ parity: Funcdata::cseFindInBlock (funcdata_op.cc:1326)
