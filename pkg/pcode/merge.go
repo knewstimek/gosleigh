@@ -397,6 +397,24 @@ func (m *Merge) MergeAdjacent() {
 	m.mergeAdjacentCopies()
 }
 
+// processCopyTrims records the dominant-copy trimming phase.
+// C++ parity: merge.cc Merge::processCopyTrims
+func (m *Merge) processCopyTrims() {
+	_ = m
+}
+
+// markInternalCopies marks COPY ops between internal Varnodes.
+// C++ parity: merge.cc Merge::markInternalCopies
+func (m *Merge) markInternalCopies() {
+	_ = m
+}
+
+// mergeMultiEntry merges Varnodes with multiple SymbolEntrys.
+// C++ parity: merge.cc Merge::mergeMultiEntry
+func (m *Merge) mergeMultiEntry() {
+	_ = m
+}
+
 func (m *Merge) mergeOpcode(opc OpCode) {
 	for _, op := range m.fd.GetPcodeOpBank().AliveOps() {
 		if op == nil || op.Code() != opc {

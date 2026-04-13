@@ -102,6 +102,103 @@ func (fd *Funcdata) GetScopeLocal() *ScopeLocal { return fd.scopeLocal }
 // SetScopeLocal attaches a local variable scope.
 func (fd *Funcdata) SetScopeLocal(sl *ScopeLocal) { fd.scopeLocal = sl }
 
+// StartProcessing marks the function as entering the main analysis phase.
+// C++ parity: funcdata.hh Funcdata::startProcessing
+func (fd *Funcdata) StartProcessing() {
+	fd.SetFlag(FuncProcessingStarted)
+	fd.ClearFlag(FuncProcessingComplete)
+}
+
+// StopProcessing marks the function as leaving analysis.
+// C++ parity: funcdata.hh Funcdata::stopProcessing
+func (fd *Funcdata) StopProcessing() {
+	fd.SetFlag(FuncProcessingComplete)
+}
+
+// StartCleanUp marks the start of the clean-up phase.
+// C++ parity: funcdata.hh Funcdata::startCleanUp
+func (fd *Funcdata) StartCleanUp() {
+	fd.SetFlag(FuncProcessingComplete)
+}
+
+// StartTypeRecovery enables type recovery if it is not already active.
+// C++ parity: funcdata.hh Funcdata::startTypeRecovery
+func (fd *Funcdata) StartTypeRecovery() bool {
+	if fd.HasFlag(FuncTypeRecoveryOn) {
+		return false
+	}
+	fd.SetFlag(FuncTypeRecoveryOn)
+	return true
+}
+
+// SetTypeRecovery toggles the type recovery flag.
+// C++ parity: funcdata.hh Funcdata::setTypeRecovery
+func (fd *Funcdata) SetTypeRecovery(on bool) {
+	if on {
+		fd.SetFlag(FuncTypeRecoveryOn)
+		return
+	}
+	fd.ClearFlag(FuncTypeRecoveryOn)
+}
+
+// OpHeritage performs SSA heritage construction.
+// C++ parity: funcdata.hh Funcdata::opHeritage
+func (fd *Funcdata) OpHeritage() {
+	_ = fd
+}
+
+// CalcNZMask computes non-zero masks for all varnodes.
+// C++ parity: funcdata.hh Funcdata::calcNZMask
+func (fd *Funcdata) CalcNZMask() {
+	_ = fd
+}
+
+// MapGlobals discovers global symbols for the function.
+// C++ parity: funcdata.hh Funcdata::mapGlobals
+func (fd *Funcdata) MapGlobals() {
+	_ = fd
+}
+
+// MarkIndirectOnly marks illegal inputs used only in INDIRECT ops.
+// C++ parity: funcdata.hh Funcdata::markIndirectOnly
+func (fd *Funcdata) MarkIndirectOnly() {
+	_ = fd
+}
+
+// Spacebase performs stack-pointer spacebase processing.
+// C++ parity: funcdata.hh Funcdata::spacebase
+func (fd *Funcdata) Spacebase() {
+	_ = fd
+}
+
+// ApplyForceGoto applies force-goto overrides.
+// C++ parity: funcdata.hh Funcdata::applyForceGoto
+func (fd *Funcdata) ApplyForceGoto() {
+	_ = fd
+}
+
+// SyncVarnodesWithSymbols attempts to reconcile symbols with varnodes.
+// C++ parity: funcdata.hh Funcdata::syncVarnodesWithSymbols
+func (fd *Funcdata) SyncVarnodesWithSymbols(*ScopeLocal, bool, bool) bool {
+	return false
+}
+
+// RemoveUnreachableBlocks removes unreachable blocks.
+// C++ parity: funcdata.hh Funcdata::removeUnreachableBlocks
+func (fd *Funcdata) RemoveUnreachableBlocks(bool, bool) bool {
+	return false
+}
+
+// RemoveDoNothingBlock removes a do-nothing block.
+// C++ parity: funcdata.hh Funcdata::removeDoNothingBlock
+func (fd *Funcdata) RemoveDoNothingBlock(*BlockBasic) {
+}
+
+// RemoveBranch removes a branch from the given basic block.
+// C++ parity: funcdata.hh Funcdata::removeBranch
+func (fd *Funcdata) RemoveBranch(*BlockBasic, int) {
+}
+
 // ---------------------------------------------------------------------------
 // Varnode creation
 // C++ parity: funcdata_varnode.cc

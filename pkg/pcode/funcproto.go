@@ -25,7 +25,10 @@ import (
 //
 // C++ parity: funcdata.hh FuncProto (partial)
 type FuncProto struct {
-	model *ProtoModel
+	model        *ProtoModel
+	inputLocked  bool
+	modelLocked  bool
+	outputLocked bool
 
 	// params holds the discovered parameter HighVariables in order.
 	params []*HighVariable
@@ -41,6 +44,52 @@ func NewFuncProto(model *ProtoModel) *FuncProto {
 
 // Model returns the underlying calling convention model.
 func (fp *FuncProto) Model() *ProtoModel { return fp.model }
+
+// ClearInput clears the currently classified input parameters.
+// C++ parity: funcdata.hh FuncProto::clearInput
+func (fp *FuncProto) ClearInput() {
+	if fp == nil {
+		return
+	}
+	fp.params = nil
+	fp.inputLocked = false
+}
+
+// SetModelLock toggles the prototype model lock.
+// C++ parity: funcdata.hh FuncProto::setModelLock
+func (fp *FuncProto) SetModelLock(val bool) {
+	if fp == nil {
+		return
+	}
+	fp.modelLocked = val
+}
+
+// SetOutputLock toggles the output lock.
+// C++ parity: funcdata.hh FuncProto::setOutputLock
+func (fp *FuncProto) SetOutputLock(val bool) {
+	if fp == nil {
+		return
+	}
+	fp.outputLocked = val
+}
+
+// IsInputLocked reports whether the prototype input is locked.
+// C++ parity: funcdata.hh FuncProto::isInputLocked
+func (fp *FuncProto) IsInputLocked() bool {
+	if fp == nil {
+		return false
+	}
+	return fp.inputLocked
+}
+
+// SetInputLocked toggles the prototype input lock.
+// C++ parity: funcdata.hh FuncProto::setInputLock
+func (fp *FuncProto) SetInputLocked(val bool) {
+	if fp == nil {
+		return
+	}
+	fp.inputLocked = val
+}
 
 // AddParam registers a parameter HighVariable (in ABI order).
 func (fp *FuncProto) AddParam(hv *HighVariable) {
