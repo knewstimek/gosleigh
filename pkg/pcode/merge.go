@@ -465,6 +465,12 @@ func (m *Merge) mergeMultiEntry() {
 	_ = m
 }
 
+// mergeOpcode tries to force merges of input to output for all p-code ops of a
+// given type. For COPY in particular, skip the merge whenever the two
+// HighVariable Covers would intersect. C++ parity: merge.cc Merge::mergeOpcode
+// calls Merge::merge(high1,high2,false) which rejects on testCache.intersection;
+// the equivalent check must live here because Go's mergeHighVariables has no
+// return-false path.
 func (m *Merge) mergeOpcode(opc OpCode) {
 	for _, op := range m.fd.GetPcodeOpBank().AliveOps() {
 		if op == nil || op.Code() != opc {
@@ -481,7 +487,13 @@ func (m *Merge) mergeOpcode(opc OpCode) {
 				continue
 			}
 			highIn := invn.High()
+			if highIn == highOut {
+				continue
+			}
 			if !mergeTestRequired(highOut, highIn) {
+				continue
+			}
+			if m.testCache.Intersection(highOut, highIn) {
 				continue
 			}
 			mergeHighVariables(highOut, highIn, m.testCache)
