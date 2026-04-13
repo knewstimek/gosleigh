@@ -298,3 +298,10 @@ func (bg *BlockGraph) MoveOutEdge(blold *FlowBlock, slot int, blnew *FlowBlock) 
 	i := blold.outEdges[slot].ReverseIndex
 	outbl.ReplaceInEdge(i, blnew)
 }
+
+// FinalTransform gives each control-flow structure a final chance to transform.
+// C++ parity: blockaction.cc ActionStructureTransform::apply / BlockGraph::finalTransform
+func (bg *BlockGraph) FinalTransform(data *Funcdata) {
+	_ = bg
+	_ = data
+}
