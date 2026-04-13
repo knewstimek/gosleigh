@@ -686,14 +686,12 @@ func (s *printCState) shouldInline(op *PcodeOp) bool {
 		return false
 	}
 	if op.Output().NumDescend() != 1 {
-		fmt.Printf("DEBUG shouldInline: op=%v out=%v NumDescend=%d (not 1, skip)\n", op.Code(), op.Output(), op.Output().NumDescend())
 		return false
 	}
 	// C++ parity: ActionMarkExplicit::baseExplicit returns -1 (explicit) when any descendant is a marker op (MULTIEQUAL/INDIRECT). coreaction.cc:3083
 	// A varnode whose sole consumer is a marker op must be emitted as an explicit statement, not inlined.
 	consumer := op.Output().LoneDescend()
 	if consumer != nil {
-		fmt.Printf("DEBUG shouldInline: op=%v out=%v consumer=%v consumerParent=%v\n", op.Code(), op.Output(), consumer.Code(), consumer.Parent())
 		switch consumer.Code() {
 		case CPUI_MULTIEQUAL, CPUI_INDIRECT:
 			return false
