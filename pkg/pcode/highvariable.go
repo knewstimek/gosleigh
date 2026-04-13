@@ -87,6 +87,93 @@ func (hv *HighVariable) Instances() []*Varnode {
 	return hv.instances
 }
 
+// IsAddrTied returns true if any instance Varnode has the address-tied flag.
+// An addr-tied HighVariable is bound to a specific storage address (stack
+// slot or global), and must not be merged with a differently-addressed
+// addr-tied HighVariable.
+// C++ parity: HighVariable::isAddrTied (variable.cc)
+func (hv *HighVariable) IsAddrTied() bool {
+	if hv == nil {
+		return false
+	}
+	for _, vn := range hv.instances {
+		if vn != nil && vn.IsAddrTied() {
+			return true
+		}
+	}
+	return false
+}
+
+// TiedVarnode returns the first addr-tied instance (or nil if none).
+// C++ parity: HighVariable::getTiedVarnode().
+func (hv *HighVariable) TiedVarnode() *Varnode {
+	if hv == nil {
+		return nil
+	}
+	for _, vn := range hv.instances {
+		if vn != nil && vn.IsAddrTied() {
+			return vn
+		}
+	}
+	return nil
+}
+
+// IsInput returns true if any instance Varnode is a function input.
+// C++ parity: HighVariable::isInput (variable.cc)
+func (hv *HighVariable) IsInput() bool {
+	if hv == nil {
+		return false
+	}
+	for _, vn := range hv.instances {
+		if vn != nil && vn.IsInput() {
+			return true
+		}
+	}
+	return false
+}
+
+// IsPersist returns true if any instance Varnode has the persist flag.
+// C++ parity: HighVariable::isPersist (variable.cc)
+func (hv *HighVariable) IsPersist() bool {
+	if hv == nil {
+		return false
+	}
+	for _, vn := range hv.instances {
+		if vn != nil && vn.IsPersist() {
+			return true
+		}
+	}
+	return false
+}
+
+// PhysicalRep returns the first non-unique, non-constant instance Varnode
+// (i.e., the representative backed by physical storage: register or stack).
+// Returns nil if the HV only has unique-space intermediates.
+//
+// Two HVs that both have PhysicalRep() at different (Space, Offset) addresses
+// represent distinct physical variables and must not be merged.
+// C++ parity: indirect equivalent of HighVariable::getTiedVarnode() extended
+// to register-space varnodes, which Ghidra handles via Cover intersection.
+func (hv *HighVariable) PhysicalRep() *Varnode {
+	if hv == nil {
+		return nil
+	}
+	for _, vn := range hv.instances {
+		if vn == nil {
+			continue
+		}
+		if vn.IsConstant() {
+			continue
+		}
+		sp := vn.Space()
+		if sp == nil || sp.IsUnique() {
+			continue
+		}
+		return vn
+	}
+	return nil
+}
+
 // Type returns the type annotation for this high variable, or nil if unset.
 func (hv *HighVariable) Type() Datatype {
 	if hv == nil {

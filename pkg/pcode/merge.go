@@ -123,7 +123,7 @@ func (t *HighIntersectTest) Clear() {
 // HighVariables from being merged.  Returns true when merging is allowed.
 // This is a simplified port; properties not tracked in Gosleigh are skipped.
 //
-// C++ parity: merge.cc Merge::mergeTestRequired (lines 102-166, simplified)
+// C++ parity: merge.cc Merge::mergeTestRequired (lines 102-166)
 func mergeTestRequired(h1, h2 *HighVariable) bool {
 	if h1 == h2 {
 		return true // already the same variable
@@ -134,6 +134,56 @@ func mergeTestRequired(h1, h2 *HighVariable) bool {
 	// If both have locked types they must agree.
 	if h1.datatype != nil && h2.datatype != nil {
 		if h1.datatype != h2.datatype {
+			return false
+		}
+	}
+	// Addr-tied guard: two addr-tied HVs at different addresses must not merge,
+	// because each is bound to distinct storage (different stack slots, etc.).
+	// This is the critical invariant that keeps param_N (stack-backed) separate
+	// from register-backed iVar1 in loops that reuse register values.
+	// C++ parity: merge.cc Merge::mergeTestRequired lines 111-116.
+	if h1.IsAddrTied() && h2.IsAddrTied() {
+		v1 := h1.TiedVarnode()
+		v2 := h2.TiedVarnode()
+		if v1 != nil && v2 != nil {
+			if v1.Space() != v2.Space() || v1.Offset() != v2.Offset() {
+				return false
+			}
+		}
+	}
+	// Physical-rep guard: two HVs that each have a physically-stored instance
+	// (register or stack) at different (Space, Offset) addresses must not be
+	// merged. Without this check, MergeCopy/MergeMarker over-merges distinct
+	// registers into one HighVariable through chains of unique-space COPYs,
+	// producing output like `iVar1 = iVar1 % iVar1` for two-register sequences
+	// like `idiv ecx; mov ecx, edx`.
+	// C++ parity: Ghidra relies on accurate Cover intersection plus isAddrTied
+	// (merge.cc mergeTestRequired lines 111-116) to enforce this invariant;
+	// Gosleigh's Cover rebuild can miss multi-block overlap for register
+	// varnodes, so we add an explicit storage-address check here.
+	if p1 := h1.PhysicalRep(); p1 != nil {
+		if p2 := h2.PhysicalRep(); p2 != nil {
+			if p1.Space() != p2.Space() || p1.Offset() != p2.Offset() {
+				return false
+			}
+		}
+	}
+	// Input/addr-tied asymmetry: a function input HV cannot absorb (or be
+	// absorbed by) a non-addrtied HV when the other is addr-tied.
+	// C++ parity: merge.cc Merge::mergeTestRequired lines 118-132.
+	if h1.IsInput() {
+		if h2.IsPersist() {
+			return false
+		}
+		if h2.IsAddrTied() && !h1.IsAddrTied() {
+			return false
+		}
+	}
+	if h2.IsInput() {
+		if h1.IsPersist() {
+			return false
+		}
+		if h1.IsAddrTied() && !h2.IsAddrTied() {
 			return false
 		}
 	}
