@@ -639,41 +639,47 @@ func dedupVarnodes(in []*Varnode) []*Varnode {
 // shouldInline decides whether an op's output should be inlined into its sole
 // consumer (i.e., the op does not emit a standalone statement).
 //
-// H8 DIAGNOSTIC NOTE (2026-04-13):
-// TestMSVC_Gcd still fails because Gosleigh does not reproduce Ghidra's
+// H8 DIAGNOSTIC NOTE (2026-04-13, A16):
+// Previous root-cause hypothesis ("Cover.rebuild misses cross-block liveness")
+// was WRONG. The real root cause of TestMSVC_Gcd was that ActionBlockStructure
+// CLONED the basic-block graph into a separate structure graph and the clones
+// kept a SNAPSHOT of the op list at clone time. Later passes (ActionMergeRequired
+// -> Merge::trimOpInput) inserted COPY ops into the ORIGINAL basic blocks; those
+// COPYs never appeared in the cloned structure graph that PrintC walks.
 //
-//   while (iVar1 = param_4, iVar1 != 0) {
-//     param_4 = param_3 % iVar1;
-//     param_3 = iVar1;
-//   }
+// FIXED in A16 by making BlockBasic clones delegate their op list to the source
+// basic block via a srcDelegate field (block_basic.go). This mirrors C++ Ghidra's
+// BlockCopy wrapper that holds a pointer to the original FlowBlock rather than
+// copying its ops. After this fix, trim COPYs inserted post-structuring do render.
 //
-// Root causes identified so far:
-//   1. HighVariable over-merging: ActionMergeMarker previously merged register:0x4
-//      (ECX/iVar1) and register:0x8 (EDX) into one HV via chains of unique-space
-//      COPYs, and even absorbed stack:0x4 (param_3) and stack:0x8 (param_4)
-//      into the same HV. FIXED by adding addr-tied and physical-rep guards in
-//      mergeTestRequired (merge.go).
-//   2. Missing `iVar1 = param_4` COPY in the join block: Ghidra's output emits
-//      this COPY as part of the while-condition (via setMod(comma_separate)).
-//      In Gosleigh the corresponding MULTIEQUAL phi stays as a phi marker op
-//      and is skipped by emitBlockBasic (notPrinted()). The C++ equivalent COPY
-//      appears because Merge::trimOpInput inserts a real CPUI_COPY at the end
-//      of the predecessor block when Cover conflicts force a trim; that COPY
-//      then survives as a printable statement. Gosleigh's Cover.rebuild misses
-//      the cross-block liveness overlap for register varnodes that feed a
-//      joinblock phi, so trimOpInput never fires and no printable COPY exists.
-//      Remaining work: fix Cover.rebuild to extend the iVar1 (reg:0x4) live
-//      range through the joinblock's MULTIEQUAL read points; once that reports
-//      a level-2 intersection with the param_4 phi the trim COPY will appear
-//      automatically and renderCondBlockComma will pick it up.
-//   3. Body-block register:0x0 (EAX) elimination: the `mov eax, ecx` COPY in
-//      the raw asm is lost during optimization, so INT_SREM inputs both render
-//      as iVar1 instead of `param_3 % iVar1`. This is likely a RuleCopyPropagate
-//      interacting with the over-merge fix; needs follow-up investigation once
-//      (2) lands.
+// Remaining mismatch (follow-up work after A16):
 //
-// The shouldInline tweak below (non-unique output with cross-block consumer
-// forces a statement) fixes a related secondary issue but not the root cause.
+//   Gosleigh output:
+//     while (param_4 != 0) {
+//       param_4 = param_3 % param_4;
+//       param_3 = param_4;
+//     }
+//
+//   Ghidra golden:
+//     while (iVar1 = param_4, iVar1 != 0) {
+//       param_4 = param_3 % iVar1;
+//       param_3 = iVar1;
+//     }
+//
+// The remaining differences are:
+//   (a) iVar1 variable does not appear as a distinct HighVariable. Gosleigh's
+//       MergeMarker over-merges the register:0x4 (ECX) HV INTO the stack:0x8
+//       (param_4) HV via the MULTIEQUAL phi output that gets named "param_4".
+//       Ghidra keeps them as two separate phi nodes (one for ECX -> iVar1, one
+//       for stack -> param_4). Likely root: Gosleigh's joinblock collapse/NodeJoin
+//       produces fewer phis than Ghidra and then merges too aggressively.
+//       Investigate: RulePushMultiME, NodeJoin, ActionNameVars interactions.
+//   (b) No comma expression in the while header. In Ghidra, the entry-slot trim
+//       COPY lands in a block that gets emitted together with the cond block in
+//       setMod(comma_separate) mode. Either Ghidra absorbs the entry block into
+//       cond via BlockList, or it collapses degenerate predecessors. Investigate:
+//       ActionBlockStructure block merging for single-op predecessors.
+//
 // C++ parity: ActionMarkExplicit::baseExplicit in coreaction.cc:3083.
 func (s *printCState) shouldInline(op *PcodeOp) bool {
 	if op == nil || op.Output() == nil || op.IsDead() {
@@ -1820,24 +1826,30 @@ func (s *printCState) emitOps(bb *BlockBasic, suppressControl bool) error {
 			// C++ parity: ActionMarkImplied / PrintC::isImplied skips unique-space writes.
 			if out.Space() != nil && out.Space().IsUnique() {
 				// Exception: when the unique varnode's sole consumer is a MULTIEQUAL
-				// with a non-unique named output (e.g. stack local), emit this op as
-				// an assignment to the MULTIEQUAL output's name.
-				// This is the pattern produced by RulePropagateCopy on phi inputs:
-				//   COPY(reg_result -> unique_tmp) -> MULTIEQUAL(local_0)
-				// Ghidra handles this via implied/explicit marking; we handle it by
-				// detecting the MULTIEQUAL consumer and using its output as the LHS.
-				// C++ parity: ActionMarkImplied marks unique as implied; COPY becomes
-				// an explicit statement whose output is the stack local (local_0 = ...).
+				// with a named output, emit this op as an assignment to the MULTIEQUAL
+				// output's name. This covers two related patterns:
+				//   (1) RulePropagateCopy on phi inputs produces
+				//         COPY(reg_result -> unique_tmp) -> MULTIEQUAL(stack_local)
+				//       where the MULTIEQUAL output is stack-space.
+				//   (2) Merge::trimOpInput inserts
+				//         COPY(phi_input -> unique_trim) -> MULTIEQUAL(unique_named)
+				//       to break a Cover conflict at phi merge; the MULTIEQUAL output
+				//       is unique-space but carries a real HV name (param_N / iVar1).
+				// Both cases must emit the trim/propagation COPY as a user-visible
+				// statement "name = expr;" because the phi itself is a marker op and
+				// is skipped by emitStatement.
+				// C++ parity: Ghidra's ActionMarkImplied marks the unique trim output
+				// as implied, and the COPY becomes an explicit statement whose output
+				// name is the HighVariable's name (param_N, iVar1, etc.).
 				consumer := out.LoneDescend()
 				if consumer == nil || consumer.Code() != CPUI_MULTIEQUAL ||
 					consumer.Output() == nil ||
-					consumer.Output().Space() == nil ||
-					consumer.Output().Space().IsUnique() ||
-					s.nameOf(consumer.Output()) == "" {
+					s.nameOf(consumer.Output()) == "" ||
+					s.isMachineGeneratedName(s.nameOf(consumer.Output())) {
 					continue
 				}
 				// Remap this unique varnode's name to the MULTIEQUAL output's name
-				// so that emitStatement writes: local_0 = expr; (not: unique_tmp = expr;)
+				// so that emitStatement writes: name = expr; (not: unique_tmp = expr;)
 				s.names[out] = s.nameOf(consumer.Output())
 			}
 			// Free varnodes have been released by ActionDeadCode (MakeFree). The op is

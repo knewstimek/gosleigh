@@ -73,7 +73,13 @@ func cloneFlowBlock(src *FlowBlock) *FlowBlock {
 		clone := NewBlockBasic()
 		clone.SetType(src.Type())
 		clone.flags = src.Flags()
-		clone.ops = append(clone.ops, concrete.Ops()...)
+		// Delegate to the source BlockBasic's op list instead of copying ops.
+		// Later passes (ActionMergeRequired -> Merge::trimOpInput) insert COPY
+		// ops directly into the original basic block; the structure-graph clone
+		// must see those new ops at render time. C++ parity: BlockGraph::buildCopy
+		// creates BlockCopy wrappers that hold a pointer to the source FlowBlock,
+		// not independent copies of the op list.
+		clone.srcDelegate = concrete
 		return &clone.FlowBlock
 	default:
 		clone := &FlowBlock{}

@@ -272,11 +272,11 @@ func flipInPlaceTestBlock(b *FlowBlock) (int, []*PcodeOp) {
 		return 2, nil
 	}
 	bb, ok := b.Concrete().(*BlockBasic)
-	if !ok || len(bb.ops) == 0 {
+	if !ok || bb.EmptyOp() {
 		return 2, nil
 	}
-	lastOp := bb.ops[len(bb.ops)-1]
-	if lastOp.Code() != CPUI_CBRANCH {
+	lastOp := bb.LastOp()
+	if lastOp == nil || lastOp.Code() != CPUI_CBRANCH {
 		return 2, nil
 	}
 	var fliplist []*PcodeOp
@@ -293,10 +293,13 @@ func flipInPlaceExecuteBlock(b *FlowBlock) {
 		return
 	}
 	bb, ok := b.Concrete().(*BlockBasic)
-	if !ok || len(bb.ops) == 0 {
+	if !ok || bb.EmptyOp() {
 		return
 	}
-	lastOp := bb.ops[len(bb.ops)-1]
+	lastOp := bb.LastOp()
+	if lastOp == nil {
+		return
+	}
 	lastOp.FlipFlag(PcodeOpFallthruTrue)
 	if b.SizeOut() == 2 {
 		b.SwapEdges()
