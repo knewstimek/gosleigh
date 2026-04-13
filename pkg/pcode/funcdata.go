@@ -290,6 +290,29 @@ func (fd *Funcdata) OpDestroy(op *PcodeOp) {
 	fd.obank.Destroy(op)
 }
 
+// OpDestroyRecursive is the Go port of Funcdata::opDestroyRecursive in funcdata_op.cc.
+func (fd *Funcdata) OpDestroyRecursive(op *PcodeOp) {
+	scratch := []*PcodeOp{op}
+	for pos := 0; pos < len(scratch); pos++ {
+		cur := scratch[pos]
+		for i := 0; i < cur.NumInput(); i++ {
+			vn := cur.Input(i)
+			if vn == nil || !vn.IsWritten() || vn.IsAutoLive() {
+				continue
+			}
+			if vn.LoneDescend() == nil {
+				continue
+			}
+			defOp := vn.Def()
+			if defOp.IsCall() || defOp.IsIndirectSource() {
+				continue
+			}
+			scratch = append(scratch, defOp)
+		}
+		fd.OpDestroy(cur)
+	}
+}
+
 // FindOp looks up a PcodeOp by its SeqNum.
 // C++ parity: Funcdata::findOp
 func (fd *Funcdata) FindOp(seq SeqNum) *PcodeOp {
