@@ -1405,6 +1405,7 @@ func (a *ActionConstantPtr) Apply(data *Funcdata) int {
 		// partial port we search every processor-kind space the varnode's
 		// bank knows about, narrowest-match wins.
 		// C++ parity: Scope::queryContainer via ScopeLocal::getParent.
+		hit := false
 		for _, sp := range candidatePointerSpaces(data) {
 			probe := address.Address{Space: sp, Offset: vn.Offset()}
 			entry := scope.QueryContainer(probe, 1, address.Address{})
@@ -1418,8 +1419,21 @@ func (a *ActionConstantPtr) Apply(data *Funcdata) int {
 			if dt != nil {
 				SetVarnodeType(vn, dt)
 				a.count++
+				hit = true
 			}
 			break
+		}
+		// C++ parity: coreaction.cc ActionConstantPtr::apply L1212-1213 --
+		// when we stamp a type onto an INT_ADD slot==1 constant, swap so the
+		// canonical form keeps the constant on slot 1. The full C++ path
+		// follows this with Funcdata::spacebaseConstant which rewrites the
+		// op into a PTRSUB chain; that rewrite depends on a TypeFactory-
+		// backed getTypeSpacebase path that is not ported yet, so only the
+		// canonical slot-swap step lands here.
+		// TODO known mismatch: PTRSUB synthesis + extra INT_ADD for offset
+		// deltas still missing.
+		if hit && op.Code() == CPUI_INT_ADD && slot == 1 {
+			data.OpSwapInput(op, 0, 1)
 		}
 	}
 	return 0
