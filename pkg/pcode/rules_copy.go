@@ -302,8 +302,6 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRuleDoubleOut(group) },
 	func(group string) Rule { return NewRuleDoubleLoad(group) },
 	func(group string) Rule { return NewRuleDoubleStore(group) },
-	func(group string) Rule { return NewRuleStringCopy(group) },
-	func(group string) Rule { return NewRuleStringStore(group) },
 }
 
 func BatchARules(group string) []Rule {
