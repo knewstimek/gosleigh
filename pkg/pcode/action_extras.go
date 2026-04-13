@@ -90,17 +90,28 @@ func (fc *FuncCallSpecs) InitActiveOutput() {
 	fc.FuncProto.SetActiveOutput(NewParamActive(false))
 }
 
-// CreatePlaceholder records that the stack pointer must be tracked through
-// the call. The full C++ path inserts a synthetic INDIRECT so that Heritage
-// keeps the pre-call SP version visible. For the Go port we mark the call
-// op but leave the INDIRECT synthesis to the existing ActionFuncLinkOutOnly
-// pipeline.
-// C++ parity: FuncCallSpecs::createPlaceholder
-// TODO known mismatch: INDIRECT insertion for stack-pointer tracking is not
-// performed here; the upgraded ActionFuncLink preserves the call-site
-// classification but the INDIRECT synthesis awaits the full fspec port.
-func (fc *FuncCallSpecs) CreatePlaceholder(_ *Funcdata, _ *address.Space) {
-	// Intentionally a no-op until the fspec placeholder path lands.
+// CreatePlaceholder appends a stack-relative LOAD as a fresh input to the
+// CALL op so later analysis can recover the calling convention's stack
+// position. The C++ path also stores the slot in setStackPlaceholderSlot so
+// resolveSpacebaseRelative can drop it later. The Go port drives the LOAD
+// insertion through OpStackLoad and tags the result varnode with the
+// spacebase-placeholder flag so RuleLoadPlaceholderClear can delete it once
+// the value is no longer needed.
+// C++ parity: fspec.cc FuncCallSpecs::createPlaceholder ~L4849
+// TODO known mismatch: setStackPlaceholderSlot side state is not tracked --
+// the slot is recoverable as fc.op.NumInput()-1 immediately after this call,
+// which matches every current call site.
+func (fc *FuncCallSpecs) CreatePlaceholder(data *Funcdata, spacebase *address.Space) {
+	if fc == nil || data == nil || fc.op == nil || spacebase == nil {
+		return
+	}
+	slot := fc.op.NumInput()
+	loadval := data.OpStackLoad(spacebase, 0, 1, fc.op, nil, false)
+	if loadval == nil {
+		return
+	}
+	data.OpInsertInput(fc.op, loadval, slot)
+	loadval.SetSpacebasePlaceholder()
 }
 
 // Deindirect converts a CALLIND op into a direct CALL whose target is newfd.
@@ -684,12 +695,316 @@ func (fd *Funcdata) HasLanedRegGenerated() bool {
 	return s.generated
 }
 
-// processLaneVarnode stands in for the TransformManager lane-splitting entry
-// point. When the full lane pipe lands this helper will build a
-// TransformManager, call its lane APIs, and return whether a rewrite
-// happened. For now it always reports "no rewrite" so the 3-mode walker in
-// ActionLaneDivide matches the C++ "allVarnodesProcessed" exit condition.
-// C++ parity: ActionLaneDivide::processVarnode
-func processLaneVarnode(_ *Funcdata, _ *Varnode, _ *LanedRegister, _ int) bool {
+// collectLaneSizes walks vn's def and descendants for PIECE / SUBPIECE ops
+// and registers any putative lane sizes that the LanedRegister allows.
+// C++ parity: coreaction.cc ActionLaneDivide::collectLaneSizes ~L510
+func collectLaneSizes(vn *Varnode, allowedLanes *LanedRegister, checkLanes *LanedRegister) {
+	if vn == nil || allowedLanes == nil || checkLanes == nil {
+		return
+	}
+	// Descendants: SUBPIECE consumers tell us that the big register was
+	// split into pieces of a particular size.
+	for _, op := range vn.DescendIter() {
+		if op == nil || op.Code() != CPUI_SUBPIECE {
+			continue
+		}
+		out := op.Output()
+		if out == nil {
+			continue
+		}
+		curSize := out.Size()
+		if allowedLanes.AllowedLane(curSize) {
+			checkLanes.AddLaneSize(curSize)
+		}
+	}
+	// Definition: a PIECE producer tells us the big register was assembled
+	// from smaller ones; the smaller of the two halves is the lane width.
+	if vn.IsWritten() {
+		def := vn.Def()
+		if def != nil && def.Code() == CPUI_PIECE {
+			in0 := def.Input(0)
+			in1 := def.Input(1)
+			if in0 != nil && in1 != nil {
+				curSize := in0.Size()
+				if in1.Size() < curSize {
+					curSize = in1.Size()
+				}
+				if allowedLanes.AllowedLane(curSize) {
+					checkLanes.AddLaneSize(curSize)
+				}
+			}
+		}
+	}
+}
+
+// processLaneVarnode mirrors ActionLaneDivide::processVarnode lane-discovery
+// path. It runs collectLaneSizes (mode 0/1) or falls back to the default
+// pointer-sized lane (mode 2), exactly per the C++ control flow.
+//
+// The actual rewrite -- LaneDivide::doTrace + apply -- requires the
+// LaneDivide TransformManager subclass declared in subflow.hh L426, which is
+// not yet ported. Until then this helper returns false so the outer 3-mode
+// walker in ActionLaneDivide.Apply sees "no rewrite" and the lane access map
+// is cleared cleanly. The discovery side runs real today so dropping in a
+// LaneDivide port later only needs to consume `checkLanes`.
+// C++ parity: coreaction.cc ActionLaneDivide::processVarnode ~L559
+// TODO known mismatch: subflow.hh LaneDivide TransformManager subclass not
+// ported; processVarnode never returns true even when checkLanes is non-empty.
+func processLaneVarnode(data *Funcdata, vn *Varnode, lanedRegister *LanedRegister, mode int) bool {
+	if data == nil || vn == nil || lanedRegister == nil {
+		return false
+	}
+	var checkLanes LanedRegister
+	if mode < 2 {
+		collectLaneSizes(vn, lanedRegister, &checkLanes)
+	} else {
+		// Default lane size mirrors getArch()->types->getSizeOfPointer().
+		ps := 4
+		if fp := data.GetFuncProto(); fp != nil {
+			if pm := fp.Model(); pm != nil && pm.PointerSize > 0 {
+				ps = pm.PointerSize
+			}
+		}
+		defaultSize := int32(ps)
+		if defaultSize != 4 {
+			defaultSize = 8
+		}
+		checkLanes.AddLaneSize(defaultSize)
+	}
+	// LaneDivide.doTrace() / apply() would consume checkLanes here; without
+	// the subflow port we exit so the outer walker advances cleanly.
+	_ = checkLanes
 	return false
+}
+
+// -----------------------------------------------------------------------------
+// Funcdata stack-relative pcode primitives (funcdata_op.cc subset)
+// -----------------------------------------------------------------------------
+
+// spacebaseRegisterMap caches the (stack space -> SP register VarnodeData)
+// mapping injected by loaders/tests so NewSpacebasePtr can fabricate the
+// stack-pointer Varnode without an AddrSpace::getSpacebase API on the Go
+// address.Space type.
+// C++ parity: AddrSpace::getSpacebase(0) container -- the per-space list of
+// (size, base reg) entries that the C++ AddrSpace owns directly.
+var spacebaseRegisterMap = map[*address.Space]VarnodeData{}
+
+// RegisterSpacebaseRegister wires the SP register location for the given
+// stack-like address space. Loaders call this once per space at construction
+// time; tests can call it manually before exercising NewSpacebasePtr.
+// C++ parity: AddrSpace::setSpacebase
+func RegisterSpacebaseRegister(stackSpace *address.Space, spReg VarnodeData) {
+	if stackSpace == nil {
+		return
+	}
+	if spReg.Space == nil || spReg.Size == 0 {
+		delete(spacebaseRegisterMap, stackSpace)
+		return
+	}
+	spacebaseRegisterMap[stackSpace] = spReg
+}
+
+// spacebaseRegisterFor returns the registered SP location for stackSpace,
+// or false if no loader registered one.
+func spacebaseRegisterFor(stackSpace *address.Space) (VarnodeData, bool) {
+	if stackSpace == nil {
+		return VarnodeData{}, false
+	}
+	vd, ok := spacebaseRegisterMap[stackSpace]
+	return vd, ok
+}
+
+// findExistingSpacebaseInput is the fallback used when no loader has
+// pre-registered an SP location: it scans the function's existing input
+// varnodes for one already flagged as a spacebase that points at the given
+// stack space. This matches the case where ApplyCallingConvention has
+// already created the SP varnode for the function entry.
+func findExistingSpacebaseInput(fd *Funcdata, stackSpace *address.Space) (VarnodeData, bool) {
+	if fd == nil || stackSpace == nil {
+		return VarnodeData{}, false
+	}
+	bank := fd.GetVarnodeBank()
+	if bank == nil {
+		return VarnodeData{}, false
+	}
+	for _, vn := range bank.AllVarnodes() {
+		if vn == nil || !vn.IsInput() || !vn.IsSpaceBase() {
+			continue
+		}
+		// The matched input is a real register varnode, so it lives in a
+		// processor-kind space; its associated stack space is the one the
+		// Funcdata has bound to it.
+		if vn.AssociatedSpacebase() != stackSpace {
+			continue
+		}
+		return VarnodeData{
+			Space:  vn.Space(),
+			Offset: vn.Offset(),
+			Size:   uint32(vn.Size()),
+		}, true
+	}
+	return VarnodeData{}, false
+}
+
+// NewSpacebasePtr fabricates a fresh Varnode at the SP register's storage
+// location. The C++ helper looks the location up via id->getSpacebase(0); the
+// Go port routes through the side map (preferred) or the Funcdata's existing
+// input scan as a fallback.
+// C++ parity: funcdata.cc Funcdata::newSpacebasePtr ~L275
+// TODO known mismatch: returns nil when neither path resolves; the caller
+// (createStackRef / opStackLoad) treats this as "no rewrite" instead of
+// throwing the LowlevelError the C++ version does.
+func (fd *Funcdata) NewSpacebasePtr(id *address.Space) *Varnode {
+	if fd == nil || id == nil {
+		return nil
+	}
+	point, ok := spacebaseRegisterFor(id)
+	if !ok {
+		point, ok = findExistingSpacebaseInput(fd, id)
+	}
+	if !ok || point.Space == nil || point.Size == 0 {
+		return nil
+	}
+	return fd.NewVarnode(int32(point.Size), address.Address{Space: point.Space, Offset: point.Offset})
+}
+
+// CreateStackRef builds a unique-space Varnode holding (SP + off) where SP
+// is the spacebase of spc. The new INT_ADD op is inserted before or after
+// the supplied insertion-point op.
+// C++ parity: funcdata_op.cc Funcdata::createStackRef ~L459
+// TODO known mismatch: the C++ helper also wraps the result in a SEGMENTOP
+// when the space has a SegmentOp registered (x86 real-mode); Gosleigh has no
+// SegmentOp registry yet, so the segment branch is omitted.
+func (fd *Funcdata) CreateStackRef(spc *address.Space, off uint64, op *PcodeOp, stackptr *Varnode, insertafter bool) *Varnode {
+	if fd == nil || spc == nil || op == nil {
+		return nil
+	}
+	if stackptr == nil {
+		stackptr = fd.NewSpacebasePtr(spc)
+		if stackptr == nil {
+			return nil
+		}
+	}
+	addrsize := stackptr.Size()
+	addop := fd.NewOp(2, op.Addr())
+	fd.OpSetOpcode(addop, CPUI_INT_ADD)
+	addout := fd.NewUniqueOut(addrsize, addop)
+	fd.OpSetInput(addop, stackptr, 0)
+	// byteToAddress: the C++ helper divides off by spc->getWordSize() before
+	// the constant lands in the INT_ADD. WordSize 0 is illegal but defended
+	// against in case a stub space slips through.
+	wordSize := uint64(spc.WordSize)
+	if wordSize > 1 {
+		off /= wordSize
+	}
+	fd.OpSetInput(addop, fd.NewConstant(addrsize, off), 1)
+	if insertafter {
+		fd.OpInsertAfter(addop, op)
+	} else {
+		fd.OpInsertBefore(addop, op)
+	}
+	return addout
+}
+
+// OpStackLoad builds a LOAD op that reads sz bytes from (SP + off) in spc.
+// The new LOAD is wired into the function's pcode list immediately after the
+// stack-ref INT_ADD that CreateStackRef just produced (regardless of the
+// caller-requested insertafter flag, which matches C++ exactly).
+// C++ parity: funcdata_op.cc Funcdata::opStackLoad ~L541
+// TODO known mismatch: the C++ helper passes spc->getContain() as the LOAD
+// space-id input; Gosleigh's address.Space has no Contain field so we use
+// spc itself (BindSpaceConstant pins the space identity onto the constant).
+func (fd *Funcdata) OpStackLoad(spc *address.Space, off uint64, sz int32, op *PcodeOp, stackref *Varnode, insertafter bool) *Varnode {
+	if fd == nil || spc == nil || op == nil || sz <= 0 {
+		return nil
+	}
+	addout := fd.CreateStackRef(spc, off, op, stackref, insertafter)
+	if addout == nil {
+		return nil
+	}
+	loadop := fd.NewOp(2, op.Addr())
+	fd.OpSetOpcode(loadop, CPUI_LOAD)
+	// LOAD input(0) is a constant varnode whose space identity is tracked
+	// by the side-map (BindSpaceConstant). Mirror the rules_loadstore.go
+	// idiom: build a 4-byte zero constant and bind the space.
+	spaceConst := fd.NewConstant(4, 0)
+	BindSpaceConstant(spaceConst, spc)
+	fd.OpSetInput(loadop, spaceConst, 0)
+	fd.OpSetInput(loadop, addout, 1)
+	res := fd.NewUniqueOut(sz, loadop)
+	if def := addout.Def(); def != nil {
+		fd.OpInsertAfter(loadop, def)
+	} else {
+		fd.OpInsertAfter(loadop, op)
+	}
+	return res
+}
+
+// SpacebaseConstant rewrites op.Input(slot) (a constant pointer) into a
+// PTRSUB(spacebase, encoded-offset) chain, optionally followed by an
+// INT_ADD when the original constant pointed inside (not exactly at) the
+// matched symbol. The original constant input on op is replaced with the
+// chain output so downstream uses see a typed pointer.
+// C++ parity: funcdata.cc Funcdata::spacebaseConstant ~L360
+// TODO known mismatch: the C++ helper also handles size-mismatched COPY
+// rewrites (zext / subpiece) and pushes a typelock through updateType. The
+// Go port handles the size-equal non-COPY branch only -- which is the only
+// shape ActionConstantPtr currently produces because it filters on opcode
+// before calling here.
+func (fd *Funcdata) SpacebaseConstant(op *PcodeOp, slot int, entryStart address.Address, rampoint address.Address, origval uint64, origsize int32) bool {
+	if fd == nil || op == nil || rampoint.Space == nil {
+		return false
+	}
+	sz := int32(rampoint.Space.AddrSize)
+	if sz <= 0 {
+		sz = origsize
+	}
+	tf := fd.TypeFactory()
+	if tf == nil {
+		return false
+	}
+	sbType := tf.GetTypeSpacebase(rampoint.Space)
+	ptrType := tf.GetPointer(sz, sbType, uint32(rampoint.Space.WordSize))
+
+	// extra is the byte delta from the entry's start to the rampoint, then
+	// converted to address units via the space's word size.
+	var extra uint64
+	if rampoint.Offset >= entryStart.Offset {
+		extra = rampoint.Offset - entryStart.Offset
+	}
+	if rampoint.Space.WordSize > 1 {
+		extra /= uint64(rampoint.Space.WordSize)
+	}
+
+	// Build a fresh constant-zero spacebase varnode. SpaceBase flag plus the
+	// pointer type lets later passes (rules_loadstore) recognise it as a
+	// valid spacebase for LOAD/STORE rewrites.
+	sbVn := fd.NewConstant(sz, 0)
+	sbVn.SetFlags(VarnodeSpaceBase)
+	BindSpaceConstant(sbVn, rampoint.Space)
+	SetVarnodeType(sbVn, ptrType)
+
+	// PTRSUB(sbVn, origval - extra). Both inputs are in address units.
+	newConstVal := origval - extra
+	ptrsub := fd.NewOp(2, op.Addr())
+	fd.OpSetOpcode(ptrsub, CPUI_PTRSUB)
+	ptrOut := fd.NewUniqueOut(sz, ptrsub)
+	fd.OpSetInput(ptrsub, sbVn, 0)
+	fd.OpSetInput(ptrsub, fd.NewConstant(sz, newConstVal), 1)
+	fd.OpInsertBefore(ptrsub, op)
+
+	currOut := ptrOut
+	if extra != 0 {
+		extraOp := fd.NewOp(2, op.Addr())
+		fd.OpSetOpcode(extraOp, CPUI_INT_ADD)
+		extraOut := fd.NewUniqueOut(sz, extraOp)
+		fd.OpSetInput(extraOp, currOut, 0)
+		fd.OpSetInput(extraOp, fd.NewConstant(sz, extra), 1)
+		fd.OpInsertBefore(extraOp, op)
+		currOut = extraOut
+	}
+
+	// Replace the original constant input on op with the chain output.
+	fd.OpSetInput(op, currOut, slot)
+	return true
 }

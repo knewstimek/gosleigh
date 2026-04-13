@@ -69,13 +69,20 @@ type CspecRegList struct {
 // CspecPrototype is a single calling convention prototype.
 // C++ parity: compiler.hh PrototypeModel
 type CspecPrototype struct {
-	Name       string       `xml:"name,attr"`
-	ExtraPop   int          `xml:"extrapop,attr"`
-	StackShift int          `xml:"stackshift,attr"`
-	Input      CspecInput   `xml:"input"`
-	Output     CspecOutput  `xml:"output"`
-	Unaffected CspecRegList `xml:"unaffected"`
+	Name         string       `xml:"name,attr"`
+	ExtraPop     int          `xml:"extrapop,attr"`
+	StackShift   int          `xml:"stackshift,attr"`
+	Input        CspecInput   `xml:"input"`
+	Output       CspecOutput  `xml:"output"`
+	Unaffected   CspecRegList `xml:"unaffected"`
 	KilledByCall CspecRegList `xml:"killedbycall"`
+	// LikelyTrash mirrors the <likelytrash> register list. Hosts call
+	// LikelyTrashRegs() to extract the names and then push them into each
+	// per-call FuncProto via FuncProto.SetLikelyTrash (declared in
+	// action_extras.go side-map style because funcproto.go's struct list is
+	// frozen for this slice).
+	// C++ parity: compiler.hh ProtoModel::likelytrash
+	LikelyTrash CspecRegList `xml:"likelytrash"`
 }
 
 // CspecDefaultProto wraps the <default_proto> element containing one <prototype>.
@@ -235,6 +242,28 @@ func (cs *CspecData) allInputPentries() []CspecPentry {
 		result = append(result, g.Pentries...)
 	}
 	return result
+}
+
+// LikelyTrashRegs returns the names of registers declared inside the
+// <likelytrash> block of the default prototype. Empty when the cspec does not
+// declare any. Hosts wire each per-call FuncProto via
+// FuncProto.SetLikelyTrash (action_extras.go) -- the parser exposes the raw
+// data here so loaders can resolve register names to VarnodeData on their
+// own schedule.
+// C++ parity: compiler.cc ProtoModel::decode parsing the <likelytrash> tag.
+func (cs *CspecData) LikelyTrashRegs() []string {
+	if cs == nil || cs.DefaultProto == nil {
+		return nil
+	}
+	regs := cs.DefaultProto.LikelyTrash.Registers
+	if len(regs) == 0 {
+		return nil
+	}
+	out := make([]string, 0, len(regs))
+	for _, r := range regs {
+		out = append(out, r.Name)
+	}
+	return out
 }
 
 // IntegerRegParams returns the ordered list of integer/pointer register parameter

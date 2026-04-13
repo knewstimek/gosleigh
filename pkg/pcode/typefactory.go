@@ -6,6 +6,8 @@ import (
 	"sort"
 	"strings"
 	"sync"
+
+	"gosleigh/pkg/address"
 )
 
 // TypeFactory interns structurally identical data-types into canonical instances.
@@ -62,6 +64,21 @@ func (f *TypeFactory) GetBase(size int32, meta metatype, name string) *Base {
 func (f *TypeFactory) GetVoid() *Void {
 	value := NewVoid()
 	return f.internVoid("void", value)
+}
+
+// GetTypeSpacebase returns the synthetic spacebase data-type for the given
+// address space. The C++ TypeFactory builds a dedicated TypeSpacebase that
+// carries the AddrSpace pointer and a function-scope address. Gosleigh does
+// not yet model TypeSpacebase as a distinct datatype class, so we return a
+// shared Base type carrying TYPE_SPACEBASE / SUB_SPACEBASE; callers wrap it
+// in a Pointer (via GetPointer) for the same downstream behavior.
+// C++ parity: type.cc TypeFactory::getTypeSpacebase ~L4413
+// TODO known mismatch: function-scope address (the second C++ argument) is
+// dropped; once a TypeSpacebase class lands the (space, scope_addr) tuple
+// will key the intern map.
+func (f *TypeFactory) GetTypeSpacebase(_ *address.Space) Datatype {
+	// Size 1 is a placeholder; the wrapping Pointer carries the real width.
+	return f.GetBase(1, TYPE_SPACEBASE, "spacebase")
 }
 
 func (f *TypeFactory) GetPointer(size int32, to Datatype, wordSize uint32) *Pointer {
