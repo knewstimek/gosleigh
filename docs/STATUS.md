@@ -1,9 +1,39 @@
 # 프로젝트 상태
 
-## 현재 단계: Rules 100% (161/161) 완료 / Actions 채우기 / H7-H9 보류 (2026-04-13 야간)
+## 현재 단계: Foundational fill 진행 (Rules 161, Actions 72, keystones K1-K3) (2026-04-14 새벽)
 
-Rules 161개 모두 포팅 완료 (10개 mini batch, 약 1시간 18분). H1~H6 완료.
-H8 (TestMSVC_Gcd)는 보류 -- foundational fill 끝낸 뒤 재개. Actions 7/59만 됨.
+오늘 밤 ~5시간 작업으로 전체 뼈대를 대폭 채움. Rules 161/161 + Actions 72/72 통계
+달성. 단 scaffold 상당수는 2차 파동에서 real 포팅으로 업그레이드됨.
+
+### Keystones 완료 (real port)
+- K1a/b/c: ParamActive + FuncProto 확장 + 8 prototype action real (ActionActiveParam,
+  ActiveReturn, InputPrototype, OutputPrototype, PrototypeTypes, DefaultParams,
+  ReturnRecovery, ReturnSplit)
+- K2 (A6): ScopeLocal + SymbolEntry + DynamicHash (~1376줄)
+- K3 (A8): JumpTable + JumpModel + JumpBasic scaffold + LoadTable (~1738줄)
+- K4+K5 helpers (A7): Datatype bitfield 모델 + GetInternalString + UserOpManage (~500줄)
+- Transform infrastructure: TransformManager/Var/Op + LaneDescription (926줄)
+
+### 2차 파동 real 포팅 (commits 57e2853 / fec6c90 / c6700b2 / 1dd9a66)
+- A9: actmainloop universalAction 순서 + Heritage guard/protectFreeStores/heritageTree
+  /placeMultiEquals/buildRefinement real (+499줄)
+- A10: 9 actions scaffold -> real (MapGlobals/HideShadow/RestrictLocal/InternalStorage
+  /DynamicMapping/DynamicSymbols/ShadowVar/SwitchNorm/RestructureVarnode) (+248줄)
+- A11: String rules transform() real (CALLOTHER + BUILTIN_STRNCPY 등) + BitField
+  PullAbsorb/InsertAbsorb absorb helpers real + TypeStruct bitfield decode path (+859줄)
+- A12: SplitVarnode Form classes 7 real (AddForm/SubForm/LogicalForm/ShiftForm
+  /PhiForm/CopyForceForm/LessConstForm) + RuleDouble* 실제 collapse 작동 (+1392줄)
+
+### 여전히 스캐폴드/스텁 (3차 파동 target)
+- H8 (TestMSVC_Gcd) 여전히 FAIL -- printc comma_separate + MergeMarker 2차 패스
+  버그, actmainloop fix 후에도 잔존
+- ActionConditionalConst/ConditionalExe 는 still TODO (condexe.cc 인프라 미포팅)
+- SplitVarnode Form 중 Equal1/2/3, LessThreeWay, MultForm, IndirectForm 는 stub
+- RuleDoubleStore reassignIndirects 는 stub (newVarnodeIop 의존)
+- A1 TODO-stubs: ConstantPtr, Constbase, Deindirect, FuncLink, LaneDivide,
+  LikelyTrash, ParamDouble 일부는 partial/low confidence
+- BitField rules 발화 체인: establishFields 의 worklist seed 가 빈 list,
+  type decode 측에 bitfield 값 주입 경로 미완
 
 ### 완료
 - [x] Git repo initialized
