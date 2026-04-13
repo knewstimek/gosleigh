@@ -609,6 +609,38 @@ func (fd *Funcdata) OpDestroyRecursive(op *PcodeOp) {
 	}
 }
 
+// DestroyVarnodeRecursive destroys a Varnode once it has no remaining readers,
+// recursing into its defining op if that op becomes dead as a result.
+// C++ parity: Funcdata::destroyVarnodeRecursive (funcdata_varnode.cc L543). The
+// auto-live and "still has descendants" guard mirror the C++ pre-check so that
+// the recursive walk never frees a Varnode that another op still observes.
+func (fd *Funcdata) DestroyVarnodeRecursive(vn *Varnode) {
+	if vn == nil {
+		return
+	}
+	if vn.IsAutoLive() || !vn.HasNoDescend() {
+		return
+	}
+	if !vn.IsWritten() {
+		fd.vbank.Destroy(vn)
+		return
+	}
+	fd.OpDestroyRecursive(vn.Def())
+}
+
+// OpInsertInput inserts a new input operand vn into op at slot, shifting the
+// existing operands at slot..n down one position.
+// C++ parity: Funcdata::opInsertInput (funcdata_op.cc L308). The helper is used
+// by the bitfield absorb rewrites to append the ZPULL/SPULL (position,width)
+// constants onto an existing one-operand op.
+func (fd *Funcdata) OpInsertInput(op *PcodeOp, vn *Varnode, slot int) {
+	if op == nil {
+		return
+	}
+	op.InsertInput(slot)
+	fd.OpSetInput(op, vn, slot)
+}
+
 // FindOp looks up a PcodeOp by its SeqNum.
 // C++ parity: Funcdata::findOp
 func (fd *Funcdata) FindOp(seq SeqNum) *PcodeOp {

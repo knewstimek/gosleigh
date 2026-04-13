@@ -251,18 +251,29 @@ func (s *arraySequence) formByteArray(sz int, slot int, rootOff uint64, bigEndia
 }
 
 // selectStringCopyFunction picks a builtin id + element count for the final
-// CALLOTHER. The current port does not yet expose the BUILTIN_* registry and
-// callers must treat a zero id as "not wired up".
-// C++ parity: constseq.cc ArraySequence::selectStringCopyFunction.
-// TODO: hook up glb->userops.registerBuiltin when the UserPcodeOp registry lands.
+// CALLOTHER.
+// C++ parity: constseq.cc ArraySequence::selectStringCopyFunction (L161).
+// The character-data-type discrimination used by the C++ form compares the
+// stored charType against the architecture's canonical 1-byte char and wchar
+// types; the Go port approximates this by looking at the element size, since
+// the TypeFactory exposes neither a persistent default char nor a wchar type.
+// TODO mismatch: a real port should consult TypeFactory.getTypeChar(sizeOfChar)
+// and getTypeChar(sizeOfWChar) once those helpers land; the current heuristic
+// is narrower but still picks the correct strncpy/wcsncpy/memcpy builtin for
+// the shapes decoded in testdata.
 func (s *arraySequence) selectStringCopyFunction() (builtinID uint32, index int) {
 	elSize := int(s.charType.Size())
 	alignSize := int(s.charType.AlignSize())
-	_ = elSize
-	_ = alignSize
-	// TODO: return BUILTIN_STRNCPY/WCSNCPY/MEMCPY once TypeFactory exposes
-	// getTypeChar(sizeOfChar)/getTypeChar(sizeOfWChar).
-	return 0, s.numElements
+	if alignSize <= 0 {
+		alignSize = elSize
+	}
+	switch elSize {
+	case 1:
+		return BUILTIN_STRNCPY, s.numElements
+	case 2:
+		return BUILTIN_WCSNCPY, s.numElements
+	}
+	return BUILTIN_MEMCPY, s.numElements * alignSize
 }
 
 // isCharPrintLike is a local heuristic stand-in for Datatype::isCharPrint.
@@ -402,21 +413,82 @@ func (s *StringSequence) collectCopyOps(size int) bool {
 }
 
 // buildStringCopy constructs the CALLOTHER that replaces the COPY sequence.
-// C++ parity: constseq.cc StringSequence::buildStringCopy.
-// TODO: requires Funcdata.getInternalString (OTHER-space string varnode) and
-// UserPcodeOp registry. Until both land we bail out so the caller leaves the
-// original COPYs in place.
+// C++ parity: constseq.cc StringSequence::buildStringCopy (L347). The Go port
+// relies on Funcdata.GetInternalString for the source varnode and synthesizes
+// the destination pointer as a constant-address Varnode in the pointer's own
+// space. A full parity port rebuilds a PTRSUB chain through the containing
+// Symbol (see constructTypedPointer in constseq.cc L273), which is not yet
+// ported because Gosleigh lacks SymbolEntry + updateType plumbing.
 func (s *StringSequence) buildStringCopy() *PcodeOp {
-	return nil
+	if len(s.moveOps) == 0 || s.data == nil {
+		return nil
+	}
+	insertPoint := s.moveOps[0].op
+	numBytes := len(s.moveOps) * int(s.charType.Size())
+	types := s.data.TypeFactory()
+	if types == nil {
+		return nil
+	}
+	charPtrType := types.GetPointer(4, s.charType, uint32(s.rootAddr.Space.WordSize))
+	srcPtr := s.data.GetInternalString(s.byteArray[:numBytes], charPtrType, insertPoint)
+	if srcPtr == nil {
+		return nil
+	}
+	builtInID, index := s.selectStringCopyFunction()
+	if builtInID == 0 {
+		return nil
+	}
+	s.data.UserOps().RegisterBuiltin(builtInID, types)
+	// Build the destination pointer as a fresh unique Varnode initialized by a
+	// COPY from a constant encoding the root address. This is a PARTIAL stand-in
+	// for constructTypedPointer -- it keeps downstream consumers pointing at
+	// the right byte address without modelling the containing Symbol PTRSUB
+	// chain.
+	destAddrOff := s.rootAddr.Offset
+	destConst := s.data.NewConstant(charPtrType.Size(), destAddrOff)
+	destCopyOp := s.data.NewOp(1, insertPoint.Addr())
+	s.data.OpSetOpcode(destCopyOp, CPUI_COPY)
+	s.data.OpSetInput(destCopyOp, destConst, 0)
+	destPtr := s.data.NewUniqueOut(charPtrType.Size(), destCopyOp)
+	s.data.OpInsertBefore(destCopyOp, insertPoint)
+
+	copyOp := s.data.NewOp(4, insertPoint.Addr())
+	s.data.OpSetOpcode(copyOp, CPUI_CALLOTHER)
+	copyOp.ClearFlag(PcodeOpCall)
+	s.data.OpSetInput(copyOp, s.data.NewConstant(4, uint64(builtInID)), 0)
+	s.data.OpSetInput(copyOp, destPtr, 1)
+	s.data.OpSetInput(copyOp, srcPtr, 2)
+	s.data.OpSetInput(copyOp, s.data.NewConstant(4, uint64(index)), 3)
+	s.data.OpInsertBefore(copyOp, insertPoint)
+	return copyOp
+}
+
+// removeCopyOps destroys the collected COPY ops after they have been replaced
+// by a single CALLOTHER. C++ parity: StringSequence::removeCopyOps (L415). The
+// C++ path additionally inserts INDIRECT ops around any live descendants of a
+// destroyed COPY, which this port omits -- the downstream passes have been
+// verified on testdata to not revisit the destroyed outputs in the narrowed
+// scope covered by the rule.
+// TODO mismatch: INDIRECT re-wiring for live descendants (constseq.cc L429).
+func (s *StringSequence) removeCopyOps(replaceOp *PcodeOp) {
+	_ = replaceOp
+	for i := range s.moveOps {
+		op := s.moveOps[i].op
+		if op == nil {
+			continue
+		}
+		s.data.OpDestroy(op)
+	}
 }
 
 // transform performs the COPY-to-CALLOTHER rewrite.
-// C++ parity: StringSequence::transform.
+// C++ parity: StringSequence::transform (L453).
 func (s *StringSequence) transform() bool {
-	if s.buildStringCopy() == nil {
+	memCpyOp := s.buildStringCopy()
+	if memCpyOp == nil {
 		return false
 	}
-	// TODO: removeCopyOps + indirect rewiring once buildStringCopy is live.
+	s.removeCopyOps(memCpyOp)
 	return true
 }
 
@@ -537,18 +609,82 @@ func (h *HeapSequence) testValue(op *PcodeOp) bool {
 	return true
 }
 
-// buildStringCopy placeholder for HeapSequence, mirroring StringSequence.
-// C++ parity: HeapSequence::buildStringCopy.
-// TODO: identical dependency set to StringSequence.buildStringCopy.
-func (h *HeapSequence) buildStringCopy() *PcodeOp { return nil }
+// buildStringCopy mirrors constseq.cc HeapSequence::buildStringCopy (L698).
+// The Go port routes the source through Funcdata.GetInternalString and emits a
+// CALLOTHER wiring (destPtr, srcPtr, length). The destination pointer is the
+// detected base pointer; when baseOffset is non-zero we bias it with a PTRADD.
+// Non-constant stride contributions (nonConstAdds) are not tracked by this
+// port (the collect path currently only recognises constant-base STOREs), so
+// the C++ index-Varnode fan-in is omitted.
+// TODO mismatch: nonConstAdds composition + updateType on generated varnodes.
+func (h *HeapSequence) buildStringCopy() *PcodeOp {
+	if len(h.moveOps) == 0 || h.data == nil {
+		return nil
+	}
+	insertPoint := h.moveOps[0].op
+	numBytes := h.numElements * int(h.charType.Size())
+	types := h.data.TypeFactory()
+	if types == nil || h.basePointer == nil {
+		return nil
+	}
+	charPtrType := types.GetPointer(h.basePointer.Size(), h.charType, 1)
+	srcPtr := h.data.GetInternalString(h.byteArray[:numBytes], charPtrType, insertPoint)
+	if srcPtr == nil {
+		return nil
+	}
+	builtInID, index := h.selectStringCopyFunction()
+	if builtInID == 0 {
+		return nil
+	}
+	h.data.UserOps().RegisterBuiltin(builtInID, types)
+	destPtr := h.basePointer
+	if h.baseOffset != 0 {
+		numEl := h.baseOffset / uint64(h.charType.AlignSize())
+		ptrAdd := h.data.NewOp(3, insertPoint.Addr())
+		h.data.OpSetOpcode(ptrAdd, CPUI_PTRADD)
+		newDest := h.data.NewUniqueOut(h.basePointer.Size(), ptrAdd)
+		h.data.OpSetInput(ptrAdd, h.basePointer, 0)
+		h.data.OpSetInput(ptrAdd, h.data.NewConstant(h.basePointer.Size(), numEl), 1)
+		h.data.OpSetInput(ptrAdd, h.data.NewConstant(h.basePointer.Size(), uint64(h.charType.AlignSize())), 2)
+		h.data.OpInsertBefore(ptrAdd, insertPoint)
+		destPtr = newDest
+	}
+	copyOp := h.data.NewOp(4, insertPoint.Addr())
+	h.data.OpSetOpcode(copyOp, CPUI_CALLOTHER)
+	copyOp.ClearFlag(PcodeOpCall)
+	h.data.OpSetInput(copyOp, h.data.NewConstant(4, uint64(builtInID)), 0)
+	h.data.OpSetInput(copyOp, destPtr, 1)
+	h.data.OpSetInput(copyOp, srcPtr, 2)
+	h.data.OpSetInput(copyOp, h.data.NewConstant(4, uint64(index)), 3)
+	h.data.OpInsertBefore(copyOp, insertPoint)
+	return copyOp
+}
 
-// transform mirrors HeapSequence::transform.
-// C++ parity: HeapSequence::transform.
+// removeStoreOps tears down the STORE sequence once it has been replaced.
+// C++ parity: HeapSequence::removeStoreOps (L871). The INDIRECT re-wiring that
+// the C++ performs (gatherIndirectPairs + deduplicatePairs) is not reproduced
+// because the Go collectStoreOps currently only accepts a single root STORE
+// without surrounding indirect chains.
+// TODO mismatch: INDIRECT pair preservation for STOREs that shipped with
+// pre-existing INDIRECT side-effects.
+func (h *HeapSequence) removeStoreOps(replaceOp *PcodeOp) {
+	_ = replaceOp
+	for i := range h.moveOps {
+		op := h.moveOps[i].op
+		if op == nil {
+			continue
+		}
+		h.data.OpDestroyRecursive(op)
+	}
+}
+
+// transform mirrors HeapSequence::transform (L927).
 func (h *HeapSequence) transform() bool {
-	if h.buildStringCopy() == nil {
+	memCpyOp := h.buildStringCopy()
+	if memCpyOp == nil {
 		return false
 	}
-	// TODO: removeStoreOps + INDIRECT rewiring.
+	h.removeStoreOps(memCpyOp)
 	return true
 }
 

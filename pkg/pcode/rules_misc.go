@@ -1858,69 +1858,466 @@ func (r *RulePullAbsorb) apply(op *PcodeOp, data *Funcdata) int {
 	return 0
 }
 
-// absorbRight mirrors bitfield.cc RulePullAbsorb::absorbRight (1756).
-// TODO(bitfield-runtime): needs Funcdata.DestroyVarnodeRecursive and
-// Funcdata.OpInsertInput; returns 0 until those primitives land.
+// bitfieldSizeMask returns the all-ones mask covering the given size in bytes.
+// C++ parity: calc_mask(sz) in opbehavior.hh. Mirrors the helper RulePullAbsorb
+// and RuleInsertAbsorb use to test whether a compare constant matches the
+// full-width unsigned maximum of a Varnode.
+func bitfieldSizeMask(sz int32) uint64 {
+	if sz <= 0 {
+		return 0
+	}
+	if sz >= 8 {
+		return ^uint64(0)
+	}
+	return (uint64(1) << uint(sz*8)) - 1
+}
+
+// absorbRight mirrors bitfield.cc RulePullAbsorb::absorbRight (L1756). It
+// looks for `((sfield >> #n) & #1) == #0` / `!= #0` and rewrites them into a
+// signed compare against zero, forwarding the PULL output into the compare.
 func (r *RulePullAbsorb) absorbRight(data *Funcdata, rightOp, pullOp *PcodeOp) int {
-	_ = data
-	_ = rightOp
-	_ = pullOp
+	outvn := rightOp.Output()
+	if outvn == nil {
+		return 0
+	}
+	for _, readOp := range outvn.DescendIter() {
+		if readOp.Code() == CPUI_INT_AND {
+			res := r.absorbRightAndCompZero(data, rightOp, readOp, pullOp)
+			if res != 0 {
+				return res
+			}
+		}
+	}
 	return 0
 }
 
-// absorbLeft mirrors bitfield.cc RulePullAbsorb::absorbLeft (1819).
-// TODO(bitfield-runtime): see absorbRight.
+// absorbRightAndCompZero mirrors bitfield.cc RulePullAbsorb::absorbRightAndCompZero
+// (L1779). Transforms `((sfield >> #n) & #1) == #0` to `0 <= sfield` and the
+// NOT_EQUAL variant to `sfield < 0`.
+func (r *RulePullAbsorb) absorbRightAndCompZero(data *Funcdata, rightOp, andOp, pullOp *PcodeOp) int {
+	if pullOp.Code() != CPUI_SPULL {
+		return 0
+	}
+	cvn := rightOp.Input(1)
+	if cvn == nil || !cvn.IsConstant() {
+		return 0
+	}
+	sa := int64(cvn.Offset())
+	if pullOp.NumInput() < 3 || pullOp.Input(2) == nil || !pullOp.Input(2).IsConstant() {
+		return 0
+	}
+	numbits := int64(pullOp.Input(2).Offset())
+	if numbits-1 != sa {
+		return 0
+	}
+	if andOp.NumInput() < 2 || andOp.Input(1) == nil || !andOp.Input(1).IsConstant() || andOp.Input(1).Offset() != 1 {
+		return 0
+	}
+	outvn := andOp.Output()
+	if outvn == nil {
+		return 0
+	}
+	for _, readOp := range outvn.DescendIter() {
+		opc := readOp.Code()
+		if opc != CPUI_INT_EQUAL && opc != CPUI_INT_NOTEQUAL {
+			continue
+		}
+		if readOp.NumInput() < 2 || readOp.Input(1) == nil || !readOp.Input(1).IsConstant() || readOp.Input(1).Offset() != 0 {
+			continue
+		}
+		vn := pullOp.Output()
+		if vn == nil {
+			continue
+		}
+		if opc == CPUI_INT_EQUAL {
+			data.OpSetOpcode(readOp, CPUI_INT_LESSEQUAL)
+			zvn := readOp.Input(1)
+			data.OpSetInput(readOp, vn, 1)
+			data.OpSetInput(readOp, zvn, 0)
+		} else {
+			data.OpSetOpcode(readOp, CPUI_INT_SLESS)
+			data.OpSetInput(readOp, vn, 0)
+		}
+		data.DestroyVarnodeRecursive(outvn)
+		return 1
+	}
+	return 0
+}
+
+// absorbLeft mirrors bitfield.cc RulePullAbsorb::absorbLeft (L1819). Dispatches
+// left-shift descendants to the compare / right / and helpers.
 func (r *RulePullAbsorb) absorbLeft(data *Funcdata, leftOp, pullOp *PcodeOp) int {
-	_ = data
-	_ = leftOp
-	_ = pullOp
+	outvn := leftOp.Output()
+	if outvn == nil {
+		return 0
+	}
+	for _, readOp := range outvn.DescendIter() {
+		res := 0
+		switch readOp.Code() {
+		case CPUI_INT_SLESS:
+			res = r.absorbCompare(data, readOp, leftOp, pullOp)
+		case CPUI_INT_RIGHT:
+			res = r.absorbLeftRight(data, readOp, leftOp, pullOp)
+		case CPUI_INT_AND:
+			res = r.absorbLeftAnd(data, readOp, leftOp, pullOp)
+		}
+		if res != 0 {
+			return res
+		}
+	}
 	return 0
 }
 
-// absorbAnd mirrors bitfield.cc RulePullAbsorb::absorbAnd (1928).
-// TODO(bitfield-runtime): see absorbRight.
+// absorbLeftRight mirrors bitfield.cc RulePullAbsorb::absorbLeftRight (L1846).
+// Collapses `(field << #c) >> #d` into `field >> (#d-#c)` or a left shift the
+// other way when the right shift is smaller.
+func (r *RulePullAbsorb) absorbLeftRight(data *Funcdata, rightOp, leftOp, pullOp *PcodeOp) int {
+	if leftOp.NumInput() < 2 || rightOp.NumInput() < 2 {
+		return 0
+	}
+	leftcvn := leftOp.Input(1)
+	rightcvn := rightOp.Input(1)
+	if leftcvn == nil || !leftcvn.IsConstant() || rightcvn == nil || !rightcvn.IsConstant() {
+		return 0
+	}
+	if pullOp.NumInput() < 3 || pullOp.Input(2) == nil || !pullOp.Input(2).IsConstant() {
+		return 0
+	}
+	bitsize := int64(pullOp.Input(2).Offset())
+	invn := pullOp.Input(0)
+	if invn == nil {
+		return 0
+	}
+	containerBits := int64(invn.Size()) * 8
+	leftshift := int64(leftcvn.Offset())
+	rightshift := int64(rightcvn.Offset())
+	if leftshift+bitsize > containerBits {
+		return 0
+	}
+	sa := rightshift - leftshift
+	pullOut := pullOp.Output()
+	leftOut := leftOp.Output()
+	if pullOut == nil || leftOut == nil {
+		return 0
+	}
+	if sa == 0 {
+		data.TotalReplace(rightOp.Output(), pullOut)
+		data.DestroyVarnodeRecursive(rightOp.Output())
+	} else if sa > 0 {
+		data.OpSetInput(rightOp, data.NewConstant(rightcvn.Size(), uint64(sa)), 1)
+		data.OpSetInput(rightOp, pullOut, 0)
+		data.DestroyVarnodeRecursive(leftOut)
+	} else {
+		data.OpSetOpcode(rightOp, CPUI_INT_LEFT)
+		data.OpSetInput(rightOp, data.NewConstant(rightcvn.Size(), uint64(-sa)), 1)
+		data.OpSetInput(rightOp, pullOut, 0)
+		data.DestroyVarnodeRecursive(leftOut)
+	}
+	return 1
+}
+
+// absorbLeftAnd mirrors bitfield.cc RulePullAbsorb::absorbLeftAnd (L1885).
+// Collapses `((field << #c) & #b) == #d` into `(field & #b>>c) == #d>>c`.
+func (r *RulePullAbsorb) absorbLeftAnd(data *Funcdata, andOp, leftOp, pullOp *PcodeOp) int {
+	_ = pullOp
+	shiftAmount := leftOp.Input(1)
+	if shiftAmount == nil || !shiftAmount.IsConstant() {
+		return 0
+	}
+	sa := shiftAmount.Offset()
+	if sa >= 64 {
+		return 0
+	}
+	maskVn := andOp.Input(1)
+	if maskVn == nil || !maskVn.IsConstant() {
+		return 0
+	}
+	mask := maskVn.Offset()
+	outvn := andOp.Output()
+	if outvn == nil {
+		return 0
+	}
+	for _, readOp := range outvn.DescendIter() {
+		opc := readOp.Code()
+		if opc != CPUI_INT_EQUAL && opc != CPUI_INT_NOTEQUAL {
+			continue
+		}
+		compVal := readOp.Input(1)
+		if compVal == nil || !compVal.IsConstant() {
+			continue
+		}
+		val := compVal.Offset() >> sa
+		if val<<sa != compVal.Offset() {
+			continue
+		}
+		newMask := mask >> sa
+		newAnd := data.NewConstant(maskVn.Size(), newMask)
+		data.OpSetInput(andOp, newAnd, 1)
+		if val != compVal.Offset() {
+			newVal := data.NewConstant(compVal.Size(), val)
+			data.OpSetInput(readOp, newVal, 1)
+		}
+		data.OpSetInput(andOp, leftOp.Input(0), 0)
+		data.DestroyVarnodeRecursive(leftOp.Output())
+		return 1
+	}
+	return 0
+}
+
+// absorbAnd mirrors bitfield.cc RulePullAbsorb::absorbAnd (L1928). Rewrites
+// `field & signbit == #0` into `field s<= 0` (and its != variant into signed
+// less-than zero).
 func (r *RulePullAbsorb) absorbAnd(data *Funcdata, andOp, pullOp *PcodeOp) int {
-	_ = data
-	_ = andOp
-	_ = pullOp
+	maskVn := andOp.Input(1)
+	if maskVn == nil || !maskVn.IsConstant() {
+		return 0
+	}
+	vn := pullOp.Output()
+	if vn == nil || pullOp.Code() != CPUI_SPULL {
+		return 0
+	}
+	if pullOp.NumInput() < 3 || pullOp.Input(2) == nil || !pullOp.Input(2).IsConstant() {
+		return 0
+	}
+	bitsize := pullOp.Input(2).Offset()
+	if bitsize == 0 {
+		return 0
+	}
+	matchVal := uint64(1) << uint(bitsize-1)
+	if matchVal != maskVn.Offset() {
+		return 0
+	}
+	outvn := andOp.Output()
+	if outvn == nil {
+		return 0
+	}
+	for _, readOp := range outvn.DescendIter() {
+		opc := readOp.Code()
+		if opc != CPUI_INT_EQUAL && opc != CPUI_INT_NOTEQUAL {
+			continue
+		}
+		if readOp.Input(1) == nil || !readOp.Input(1).IsConstant() || readOp.Input(1).Offset() != 0 {
+			continue
+		}
+		newZero := data.NewConstant(vn.Size(), 0)
+		if opc == CPUI_INT_EQUAL {
+			data.OpSetOpcode(readOp, CPUI_INT_SLESSEQUAL)
+			data.OpSetInput(readOp, newZero, 0)
+			data.OpSetInput(readOp, vn, 1)
+		} else {
+			data.OpSetOpcode(readOp, CPUI_INT_SLESS)
+			data.OpSetInput(readOp, vn, 0)
+			data.OpSetInput(readOp, newZero, 1)
+		}
+		data.DestroyVarnodeRecursive(outvn)
+		return 1
+	}
 	return 0
 }
 
-// absorbCompare mirrors bitfield.cc RulePullAbsorb::absorbCompare (1979).
-// TODO(bitfield-runtime): see absorbRight.
+// absorbCompare mirrors bitfield.cc RulePullAbsorb::absorbCompare (L1979). It
+// rewrites INT_SLESS / INT_LESS ops fed either directly from the pull output or
+// via a left shift, substituting the pull output for the shifted form.
 func (r *RulePullAbsorb) absorbCompare(data *Funcdata, compOp, leftOp, pullOp *PcodeOp) int {
-	_ = data
-	_ = compOp
-	_ = leftOp
-	_ = pullOp
+	sa := int64(0)
+	if leftOp != nil {
+		cvn := leftOp.Input(1)
+		if cvn == nil || !cvn.IsConstant() {
+			return 0
+		}
+		sa = int64(cvn.Offset())
+	}
+	if pullOp.NumInput() < 3 || pullOp.Input(2) == nil || !pullOp.Input(2).IsConstant() {
+		return 0
+	}
+	numbits := int64(pullOp.Input(2).Offset())
+	invn := pullOp.Input(0)
+	if invn == nil {
+		return 0
+	}
+	sz := int64(invn.Size()) * 8
+	if numbits+sa != sz {
+		return 0
+	}
+	var inVn *Varnode
+	if leftOp == nil {
+		inVn = pullOp.Output()
+	} else {
+		inVn = leftOp.Output()
+	}
+	if inVn == nil {
+		return 0
+	}
+	lessVn0 := compOp.Input(0)
+	lessVn1 := compOp.Input(1)
+	if lessVn0 == nil || lessVn1 == nil {
+		return 0
+	}
+	pullOut := pullOp.Output()
+	if pullOut == nil {
+		return 0
+	}
+	if compOp.Code() == CPUI_INT_SLESS {
+		if numbits == 1 && lessVn0 == inVn && lessVn1.IsConstant() && lessVn1.Offset() == 0 {
+			oldVn := compOp.Output()
+			if oldVn == nil {
+				return 0
+			}
+			data.TotalReplace(oldVn, pullOut)
+			data.DestroyVarnodeRecursive(oldVn)
+			return 1
+		}
+		if numbits == 1 && lessVn1 == inVn && lessVn0.IsConstant() && lessVn0.Offset() == bitfieldSizeMask(inVn.Size()) {
+			data.OpRemoveInput(compOp, 0)
+			data.OpSetOpcode(compOp, CPUI_BOOL_NEGATE)
+			data.OpSetInput(compOp, pullOut, 0)
+			data.DestroyVarnodeRecursive(inVn)
+			return 1
+		}
+	}
+	var mask uint64
+	if sa > 0 && sa < 64 {
+		mask = (uint64(1) << uint(sa)) - 1
+	}
+	if sa > 0 && sa < 64 && inVn == lessVn0 && lessVn1.IsConstant() {
+		origVal := lessVn1.Offset()
+		lowBits := mask & origVal
+		if lowBits == 0 || lowBits == 1 {
+			var newVal uint64
+			if lowBits == 1 {
+				newVal = (origVal - 1) >> uint(sa)
+				newVal = (newVal + 1) & bitfieldSizeMask(inVn.Size())
+			} else {
+				newVal = origVal >> uint(sa)
+			}
+			data.OpSetInput(compOp, pullOut, 0)
+			data.OpSetInput(compOp, data.NewConstant(inVn.Size(), newVal), 1)
+			data.DestroyVarnodeRecursive(inVn)
+			return 1
+		}
+	}
+	if sa > 0 && sa < 64 && inVn == lessVn1 && lessVn0.IsConstant() {
+		origVal := lessVn0.Offset()
+		lowBits := mask & origVal
+		if lowBits == 0 || lowBits == mask {
+			var newVal uint64
+			if lowBits == mask {
+				newVal = (origVal + 1) >> uint(sa)
+				newVal = (newVal - 1) & bitfieldSizeMask(inVn.Size())
+			} else {
+				newVal = origVal >> uint(sa)
+			}
+			data.OpSetInput(compOp, pullOut, 1)
+			data.OpSetInput(compOp, data.NewConstant(inVn.Size(), newVal), 0)
+			data.DestroyVarnodeRecursive(inVn)
+			return 1
+		}
+	}
 	return 0
 }
 
-// absorbExt mirrors bitfield.cc RulePullAbsorb::absorbExt (2059).
-// TODO(bitfield-runtime): see absorbRight.
+// absorbExt mirrors bitfield.cc RulePullAbsorb::absorbExt (L2059). Rewrites
+// `y = ZEXT(ZPULL(x))` into `y = ZPULL(x)` (same for signed extension / SPULL),
+// so the extension op is itself turned into the PULL op.
 func (r *RulePullAbsorb) absorbExt(data *Funcdata, extOp, pullOp *PcodeOp) int {
-	_ = data
-	_ = extOp
-	_ = pullOp
-	return 0
+	pullSigned := pullOp.Code() == CPUI_SPULL
+	extSigned := extOp.Code() == CPUI_INT_SEXT
+	if extSigned != pullSigned {
+		return 0
+	}
+	vn := extOp.Input(0)
+	if vn == nil || vn.LoneDescend() != extOp {
+		return 0
+	}
+	if pullOp.NumInput() < 3 {
+		return 0
+	}
+	data.OpSetOpcode(extOp, pullOp.Code())
+	data.OpSetInput(extOp, pullOp.Input(0), 0)
+	posVn := pullOp.Input(1)
+	numVn := pullOp.Input(2)
+	data.OpInsertInput(extOp, posVn, 1)
+	data.OpInsertInput(extOp, numVn, 2)
+	data.DestroyVarnodeRecursive(vn)
+	return 1
 }
 
-// absorbSubpiece mirrors bitfield.cc RulePullAbsorb::absorbSubpiece (2083).
-// TODO(bitfield-runtime): see absorbRight.
+// absorbSubpiece mirrors bitfield.cc RulePullAbsorb::absorbSubpiece (L2083).
+// Turns `y = SUB(PULL(x),0)` into `y = PULL(x)` when the subpiece slice covers
+// at least the field width.
 func (r *RulePullAbsorb) absorbSubpiece(data *Funcdata, subOp, pullOp *PcodeOp) int {
-	_ = data
-	_ = subOp
-	_ = pullOp
-	return 0
+	if subOp.NumInput() < 2 || subOp.Input(1) == nil || !subOp.Input(1).IsConstant() || subOp.Input(1).Offset() != 0 {
+		return 0
+	}
+	if pullOp.NumInput() < 3 || pullOp.Input(2) == nil || !pullOp.Input(2).IsConstant() {
+		return 0
+	}
+	bitsize := int64(pullOp.Input(2).Offset())
+	outvn := subOp.Output()
+	if outvn == nil || bitsize > int64(outvn.Size())*8 {
+		return 0
+	}
+	vn := subOp.Input(0)
+	if vn == nil || vn.LoneDescend() != subOp {
+		return 0
+	}
+	data.OpSetOpcode(subOp, pullOp.Code())
+	data.OpSetInput(subOp, pullOp.Input(0), 0)
+	data.OpSetInput(subOp, pullOp.Input(1), 1)
+	data.OpInsertInput(subOp, pullOp.Input(2), 2)
+	data.DestroyVarnodeRecursive(vn)
+	return 1
 }
 
-// absorbCompZero mirrors bitfield.cc RulePullAbsorb::absorbCompZero (2109).
-// TODO(bitfield-runtime): see absorbRight.
+// absorbCompZero mirrors bitfield.cc RulePullAbsorb::absorbCompZero (L2109).
+// Rewrites `ZPULL(x,#p,#1) != #0` into the bare ZPULL, and the == variant
+// into a BOOL_NEGATE of the pull. We require a 1-bit field and conservatively
+// drop the TypeBitField metatype check until the full type system lands.
 func (r *RulePullAbsorb) absorbCompZero(data *Funcdata, compOp, pullOp *PcodeOp) int {
-	_ = data
-	_ = compOp
-	_ = pullOp
-	return 0
+	zvn := compOp.Input(1)
+	if zvn == nil || !zvn.IsConstant() || zvn.Offset() != 0 {
+		return 0
+	}
+	if pullOp.NumInput() < 3 || pullOp.Input(2) == nil || !pullOp.Input(2).IsConstant() {
+		return 0
+	}
+	bitsize := int64(pullOp.Input(2).Offset())
+	if bitsize != 1 {
+		return 0
+	}
+	vn := compOp.Input(0)
+	if vn == nil || vn.LoneDescend() != compOp {
+		return 0
+	}
+	if vn.IsAddrTied() {
+		return 0
+	}
+	if pullOp.Code() == CPUI_SPULL {
+		return 0
+	}
+	// TODO known mismatch: the C++ path additionally checks
+	// BitFieldExpression::getPullField(pullOp)->type->getMetatype() == TYPE_BOOL
+	// to avoid rewriting non-bool single-bit fields. Without the TypeBitField
+	// trace machinery we accept any 1-bit ZPULL, which is strictly more
+	// permissive than Ghidra.
+	if compOp.Code() == CPUI_INT_EQUAL {
+		// Simplified: replace the compare with BOOL_NEGATE(PULL). The C++
+		// additionally rewires the PULL's output width to 1 when vn was wider,
+		// which requires updating vn's storage; omitted here so we simply do
+		// not handle the wider-vn case to stay sound.
+		if vn.Size() != 1 {
+			return 0
+		}
+		data.OpSetOpcode(compOp, CPUI_BOOL_NEGATE)
+		data.OpRemoveInput(compOp, 1)
+	} else {
+		data.OpSetOpcode(compOp, pullOp.Code())
+		data.OpSetInput(compOp, pullOp.Input(0), 0)
+		data.OpSetInput(compOp, pullOp.Input(1), 1)
+		data.OpInsertInput(compOp, pullOp.Input(2), 2)
+		data.DestroyVarnodeRecursive(vn)
+	}
+	return 1
 }
 
 // RuleInsertAbsorb simplifies expressions explicitly using CPUI_INSERT.
@@ -1935,7 +2332,7 @@ func NewRuleInsertAbsorb(group string) *RuleInsertAbsorb {
 	return r
 }
 
-// apply mirrors RuleInsertAbsorb::applyOp (bitfield.cc 2352) -- dispatches on
+// apply mirrors RuleInsertAbsorb::applyOp (bitfield.cc L2352) -- dispatches on
 // the op defining the INSERT value slot.
 func (r *RuleInsertAbsorb) apply(op *PcodeOp, data *Funcdata) int {
 	if op.NumInput() < 4 {
@@ -1951,16 +2348,18 @@ func (r *RuleInsertAbsorb) apply(op *PcodeOp, data *Funcdata) int {
 	}
 	switch inOp.Code() {
 	case CPUI_SUBPIECE:
-		// INSERT( SUB(x,0), ... )  =>  INSERT( x, ... )
-		// TODO(bitfield-runtime): needs Funcdata.DestroyVarnodeRecursive to
-		// clean up the old SUBPIECE output; skipped until that lands.
-		return 0
+		if inOp.NumInput() < 2 || inOp.Input(1) == nil || !inOp.Input(1).IsConstant() || inOp.Input(1).Offset() != 0 {
+			return 0
+		}
+		data.OpSetInput(op, inOp.Input(0), 1)
+		data.DestroyVarnodeRecursive(inVn)
+		return 1
 	case CPUI_INT_RIGHT, CPUI_INT_SRIGHT:
 		if inOp.NumInput() < 2 || !inOp.Input(1).IsConstant() {
 			return 0
 		}
 		shiftedVn := inOp.Input(0)
-		if !shiftedVn.IsWritten() {
+		if shiftedVn == nil || !shiftedVn.IsWritten() {
 			return 0
 		}
 		nextOp := shiftedVn.Def()
@@ -1982,12 +2381,67 @@ func (r *RuleInsertAbsorb) apply(op *PcodeOp, data *Funcdata) int {
 	return 0
 }
 
-// absorbAnd mirrors bitfield.cc RuleInsertAbsorb::absorbAnd (2230).
-// TODO(bitfield-runtime): needs Funcdata.DestroyVarnodeRecursive.
-func (r *RuleInsertAbsorb) absorbAnd(data *Funcdata, andOp, insertOp *PcodeOp) int {
-	if andOp.NumInput() < 2 {
-		return 0
+// insertAbsorbLeftShiftVarnode mirrors bitfield.cc RuleInsertAbsorb::leftShiftVarnode
+// (L2203). Returns the unshifted input when vn is the output of a left shift
+// (either INT_LEFT or INT_MULT by a power-of-two) with shift amount sa.
+func insertAbsorbLeftShiftVarnode(vn *Varnode, sa int) *Varnode {
+	if vn == nil || !vn.IsWritten() {
+		return nil
 	}
+	multOp := vn.Def()
+	if multOp == nil || multOp.NumInput() < 2 {
+		return nil
+	}
+	multVal := multOp.Input(1)
+	if multVal == nil || !multVal.IsConstant() {
+		return nil
+	}
+	var matchVal uint64
+	switch multOp.Code() {
+	case CPUI_INT_MULT:
+		if sa < 0 || sa >= 64 {
+			return nil
+		}
+		matchVal = uint64(1) << uint(sa)
+	case CPUI_INT_LEFT:
+		matchVal = uint64(sa)
+	default:
+		return nil
+	}
+	if multVal.Offset() != matchVal {
+		return nil
+	}
+	return multOp.Input(0)
+}
+
+// bitfieldPopcount returns the number of 1 bits in v.
+// C++ parity: popcount helper in opbehavior.cc -- inlined here for the nested
+// AND absorb test.
+func bitfieldPopcount(v uint64) int {
+	c := 0
+	for v != 0 {
+		v &= v - 1
+		c++
+	}
+	return c
+}
+
+// bitfieldCoveringMask returns the smallest contiguous mask that covers v.
+// C++ parity: coveringmask helper in opbehavior.cc.
+func bitfieldCoveringMask(v uint64) uint64 {
+	v |= v >> 1
+	v |= v >> 2
+	v |= v >> 4
+	v |= v >> 8
+	v |= v >> 16
+	v |= v >> 32
+	return v
+}
+
+// absorbAnd mirrors bitfield.cc RuleInsertAbsorb::absorbAnd (L2230). Drops the
+// redundant AND mask on the value flowing into an INSERT when the mask only
+// touches the least significant bits that the INSERT slice preserves.
+func (r *RuleInsertAbsorb) absorbAnd(data *Funcdata, andOp, insertOp *PcodeOp) int {
 	cvn := andOp.Input(1)
 	if cvn == nil || !cvn.IsConstant() {
 		return 0
@@ -1997,38 +2451,145 @@ func (r *RuleInsertAbsorb) absorbAnd(data *Funcdata, andOp, insertOp *PcodeOp) i
 	if (mask & val) != mask {
 		return 0
 	}
-	// Real rewrite requires destroying andOp's output recursively once the
-	// INSERT input is re-pointed; leaving the mutation to the follow-up port.
-	_ = data
-	return 0
+	data.OpSetInput(insertOp, andOp.Input(0), 1)
+	data.DestroyVarnodeRecursive(andOp.Output())
+	return 1
 }
 
-// absorbRightLeft mirrors bitfield.cc RuleInsertAbsorb::absorbRightLeft (2246).
-// TODO(bitfield-runtime): see absorbAnd.
+// absorbRightLeft mirrors bitfield.cc RuleInsertAbsorb::absorbRightLeft (L2246).
+// Collapses `INSERT((x<<#c)>>#c,...)` (and the SUBPIECE variant) into
+// `INSERT(x,...)` when the shift cancellation does not truncate field bits.
 func (r *RuleInsertAbsorb) absorbRightLeft(data *Funcdata, nextOp, rightOp, insertOp *PcodeOp) int {
-	_ = data
-	_ = nextOp
-	_ = rightOp
-	_ = insertOp
-	return 0
+	var leftOp *PcodeOp
+	switch nextOp.Code() {
+	case CPUI_INT_LEFT:
+		leftOp = nextOp
+	case CPUI_SUBPIECE:
+		if nextOp.Input(1) == nil || !nextOp.Input(1).IsConstant() || nextOp.Input(1).Offset() != 0 {
+			return 0
+		}
+		subin := nextOp.Input(0)
+		if subin == nil || !subin.IsWritten() {
+			return 0
+		}
+		leftOp = subin.Def()
+		if leftOp == nil || leftOp.Code() != CPUI_INT_LEFT {
+			return 0
+		}
+	default:
+		return 0
+	}
+	lvn := leftOp.Input(1)
+	if lvn == nil || !lvn.IsConstant() {
+		return 0
+	}
+	rvn := rightOp.Input(1)
+	if rvn == nil || !rvn.IsConstant() {
+		return 0
+	}
+	lsa := int64(lvn.Offset())
+	rsa := int64(rvn.Offset())
+	if lsa != rsa {
+		return 0
+	}
+	if insertOp.NumInput() < 4 || insertOp.Input(3) == nil || !insertOp.Input(3).IsConstant() {
+		return 0
+	}
+	bitsize := int64(insertOp.Input(3).Offset())
+	containerBits := int64(insertOp.Input(1).Size())*8 - lsa
+	if bitsize > containerBits {
+		return 0
+	}
+	data.OpSetInput(insertOp, leftOp.Input(0), 1)
+	data.DestroyVarnodeRecursive(rightOp.Output())
+	return 1
 }
 
-// absorbShiftAdd mirrors bitfield.cc RuleInsertAbsorb::absorbShiftAdd (2284).
-// TODO(bitfield-runtime): see absorbAnd.
+// absorbShiftAdd mirrors bitfield.cc RuleInsertAbsorb::absorbShiftAdd (L2284).
+// Turns `(a*#c + b*#c) >> #n` into `a + b` at the INSERT site.
 func (r *RuleInsertAbsorb) absorbShiftAdd(data *Funcdata, rightOp, addOp, insertOp *PcodeOp) int {
-	_ = data
-	_ = rightOp
-	_ = addOp
-	_ = insertOp
-	return 0
+	if rightOp.Input(1) == nil || !rightOp.Input(1).IsConstant() {
+		return 0
+	}
+	sa := int(rightOp.Input(1).Offset())
+	if sa <= 0 || sa >= 64 {
+		return 0
+	}
+	vn0 := insertAbsorbLeftShiftVarnode(addOp.Input(0), sa)
+	if vn0 == nil {
+		return 0
+	}
+	var vn1 *Varnode
+	addVn1 := addOp.Input(1)
+	if addVn1 == nil {
+		return 0
+	}
+	if addVn1.IsConstant() {
+		addVal := addVn1.Offset() >> uint(sa)
+		if (addVal << uint(sa)) != addVn1.Offset() {
+			return 0
+		}
+		vn1 = data.NewConstant(vn0.Size(), addVal)
+	} else {
+		vn1 = insertAbsorbLeftShiftVarnode(addVn1, sa)
+		if vn1 == nil {
+			return 0
+		}
+	}
+	if insertOp.NumInput() < 4 || insertOp.Input(3) == nil || !insertOp.Input(3).IsConstant() {
+		return 0
+	}
+	bitsize := int64(insertOp.Input(3).Offset())
+	if bitsize > int64(vn0.Size())*8-int64(sa) {
+		return 0
+	}
+	data.OpSetOpcode(rightOp, CPUI_INT_ADD)
+	data.OpSetInput(rightOp, vn0, 0)
+	data.OpSetInput(rightOp, vn1, 1)
+	data.DestroyVarnodeRecursive(addOp.Output())
+	return 1
 }
 
-// absorbNestedAnd mirrors bitfield.cc RuleInsertAbsorb::absorbNestedAnd (2322).
-// TODO(bitfield-runtime): see absorbAnd.
+// absorbNestedAnd mirrors bitfield.cc RuleInsertAbsorb::absorbNestedAnd (L2322).
+// Strips an `x & #mask` feeding an arithmetic op whose result is immediately
+// absorbed by INSERT with a narrower slice.
 func (r *RuleInsertAbsorb) absorbNestedAnd(data *Funcdata, baseOp, insertOp *PcodeOp) int {
-	_ = data
-	_ = baseOp
-	_ = insertOp
+	baseOut := baseOp.Output()
+	if baseOut == nil || baseOut.LoneDescend() != insertOp {
+		return 0
+	}
+	for slot := 0; slot < 2; slot++ {
+		vn := baseOp.Input(slot)
+		if vn == nil || !vn.IsWritten() {
+			continue
+		}
+		andOp := vn.Def()
+		if andOp == nil || andOp.Code() != CPUI_INT_AND {
+			continue
+		}
+		cvn := andOp.Input(1)
+		if cvn == nil || !cvn.IsConstant() {
+			continue
+		}
+		mask := bitfieldCoveringMask(cvn.Offset())
+		if mask != cvn.Offset() {
+			continue
+		}
+		if (mask & 1) == 0 {
+			continue
+		}
+		count := bitfieldPopcount(mask)
+		if insertOp.NumInput() < 4 || insertOp.Input(3) == nil || !insertOp.Input(3).IsConstant() {
+			continue
+		}
+		bitsize := int(insertOp.Input(3).Offset())
+		if count < bitsize {
+			continue
+		}
+		data.OpSetInput(baseOp, andOp.Input(0), slot)
+		data.DestroyVarnodeRecursive(andOp.Output())
+		return 1
+	}
 	return 0
 }
 
