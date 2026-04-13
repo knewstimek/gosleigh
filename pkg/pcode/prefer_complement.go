@@ -51,6 +51,7 @@ func replaceLessequal(fd *Funcdata, op *PcodeOp) bool {
 	if op == nil || op.NumInput() < 2 {
 		return false
 	}
+
 	in0 := op.Input(0)
 	in1 := op.Input(1)
 	isSigned := (op.Code() == CPUI_INT_SLESSEQUAL)
