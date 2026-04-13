@@ -34,6 +34,8 @@ type FuncProto struct {
 	params []*HighVariable
 	// output holds the recovered return HighVariable, if any.
 	output *HighVariable
+	// activeoutput holds the temporary active-return analysis state.
+	activeoutput *ParamActive
 	// locals holds the discovered local HighVariables in order.
 	locals []*HighVariable
 }
@@ -80,6 +82,7 @@ func (fp *FuncProto) Copy(other *FuncProto) {
 	fp.outputLocked = other.outputLocked
 	fp.params = append([]*HighVariable(nil), other.params...)
 	fp.output = other.output
+	fp.activeoutput = other.activeoutput
 	fp.locals = append([]*HighVariable(nil), other.locals...)
 }
 
@@ -199,6 +202,33 @@ func (fp *FuncProto) SetOutput(hv *HighVariable) {
 		return
 	}
 	fp.output = hv
+}
+
+// GetActiveOutput returns the temporary active return analysis state.
+// C++ parity: FuncProto::getActiveOutput
+func (fp *FuncProto) GetActiveOutput() *ParamActive {
+	if fp == nil {
+		return nil
+	}
+	return fp.activeoutput
+}
+
+// SetActiveOutput records the temporary active return analysis state.
+// C++ parity: FuncProto::setActiveOutput
+func (fp *FuncProto) SetActiveOutput(active *ParamActive) {
+	if fp == nil {
+		return
+	}
+	fp.activeoutput = active
+}
+
+// ClearActiveOutput clears the temporary active return analysis state.
+// C++ parity: FuncProto::clearActiveOutput
+func (fp *FuncProto) ClearActiveOutput() {
+	if fp == nil {
+		return
+	}
+	fp.activeoutput = nil
 }
 
 // GetModelExtraPop returns the prototype model's extra-pop setting.
@@ -504,6 +534,103 @@ func applyReturnRecovery(fd *Funcdata) {
 			op.SetNumInputs(retSlot)
 		}
 	}
+}
+
+// buildReturnOutput rewires a RETURN op to reflect the active return trials.
+// C++ parity: ActionReturnRecovery::buildReturnOutput
+func buildReturnOutput(active *ParamActive, retop *PcodeOp, data *Funcdata) {
+	if active == nil || retop == nil || data == nil || retop.NumInput() == 0 {
+		return
+	}
+	if retop.Input(0) == nil {
+		return
+	}
+	newparam := make([]*Varnode, 0, active.NumTrials()+1)
+	newparam = append(newparam, retop.Input(0))
+	for i := 0; i < active.NumTrials(); i++ {
+		curtrial := active.Trial(i)
+		if curtrial == nil || !curtrial.IsUsed() {
+			break
+		}
+		slot := int(curtrial.GetSlot())
+		if slot >= retop.NumInput() {
+			break
+		}
+		newparam = append(newparam, retop.Input(slot))
+	}
+	if len(newparam) <= 2 {
+		data.OpSetAllInput(retop, newparam)
+		return
+	}
+	if len(newparam) == 3 {
+		lovn := newparam[1]
+		hivn := newparam[2]
+		if lovn == nil || hivn == nil {
+			return
+		}
+		triallo := active.Trial(0)
+		trialhi := active.Trial(1)
+		if triallo == nil || trialhi == nil {
+			return
+		}
+		joinaddr := trialhi.GetAddress()
+		if triallo.GetAddress().Less(joinaddr) {
+			joinaddr = triallo.GetAddress()
+		}
+		newop := data.NewOp(2, retop.Addr())
+		data.OpSetOpcode(newop, CPUI_PIECE)
+		newwhole := data.NewVarnodeOut(trialhi.GetSize()+triallo.GetSize(), joinaddr, newop)
+		newwhole.SetAddlFlags(VarnodeWriteMask)
+		data.OpInsertBefore(newop, retop)
+		newparam[2] = newwhole
+		newparam = newparam[:3]
+		data.OpSetAllInput(retop, newparam)
+		data.OpSetInput(newop, hivn, 0)
+		data.OpSetInput(newop, lovn, 1)
+		return
+	}
+	newparam = newparam[:1]
+	offmatch := int32(0)
+	var preexist *Varnode
+	for i := 0; i < active.NumTrials(); i++ {
+		curtrial := active.Trial(i)
+		if curtrial == nil || !curtrial.IsUsed() {
+			break
+		}
+		slot := int(curtrial.GetSlot())
+		if slot >= retop.NumInput() {
+			break
+		}
+		if preexist == nil {
+			preexist = retop.Input(slot)
+			offmatch = curtrial.GetOffset() + curtrial.GetSize()
+			continue
+		}
+		if offmatch != curtrial.GetOffset() {
+			break
+		}
+		offmatch += curtrial.GetSize()
+		vn := retop.Input(slot)
+		if preexist == nil || vn == nil {
+			break
+		}
+		newop := data.NewOp(2, retop.Addr())
+		data.OpSetOpcode(newop, CPUI_PIECE)
+		addr := preexist.Addr()
+		if vn != nil && vn.Addr().Less(addr) {
+			addr = vn.Addr()
+		}
+		newout := data.NewVarnodeOut(preexist.Size()+vn.Size(), addr, newop)
+		newout.SetAddlFlags(VarnodeWriteMask)
+		data.OpSetInput(newop, vn, 0)
+		data.OpSetInput(newop, preexist, 1)
+		data.OpInsertBefore(newop, retop)
+		preexist = newout
+	}
+	if preexist != nil {
+		newparam = append(newparam, preexist)
+	}
+	data.OpSetAllInput(retop, newparam)
 }
 
 // onlyReturnUse reports whether ALL downstream consumers of vn lead exclusively

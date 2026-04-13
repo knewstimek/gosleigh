@@ -1120,3 +1120,175 @@ func (a *ActionActiveReturn) Apply(data *Funcdata) int {
 	}
 	return 0
 }
+
+// ActionReturnRecovery determines the return value carrier for the current function.
+// C++ parity: coreaction.hh ActionReturnRecovery
+type ActionReturnRecovery struct{ ActionBase }
+
+var _ Action = (*ActionReturnRecovery)(nil)
+
+// NewActionReturnRecovery constructs ActionReturnRecovery.
+// C++ parity: coreaction.hh ActionReturnRecovery::ActionReturnRecovery
+func NewActionReturnRecovery(group string) *ActionReturnRecovery {
+	act := &ActionReturnRecovery{}
+	act.ActionBase = NewActionBase(act, 0, "returnrecovery", group)
+	return act
+}
+
+// Clone clones ActionReturnRecovery for the provided group list.
+// C++ parity: coreaction.hh ActionReturnRecovery::clone
+func (a *ActionReturnRecovery) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionReturnRecovery(a.GetGroup())
+}
+
+// Apply determines the active return value from the current SSA graph.
+// C++ parity: coreaction.cc ActionReturnRecovery::apply
+func (a *ActionReturnRecovery) Apply(data *Funcdata) int {
+	fp := data.GetFuncProto()
+	if fp == nil {
+		return 0
+	}
+
+	active := NewParamActive(false)
+	fp.SetActiveOutput(active)
+
+	for _, op := range data.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN || op.HaltType() != 0 {
+			continue
+		}
+		for i := 1; i < op.NumInput(); i++ {
+			vn := op.Input(i)
+			if vn == nil || vn.IsConstant() {
+				continue
+			}
+			if !ancestorOpUseReturn(vn, op, i, 5, make(map[*PcodeOp]bool)) {
+				continue
+			}
+			trialIdx := active.WhichTrial(vn.Addr(), vn.Size())
+			if trialIdx < 0 {
+				active.RegisterTrial(vn.Addr(), vn.Size())
+				trialIdx = active.NumTrials() - 1
+			}
+			trial := active.Trial(trialIdx)
+			trial.MarkUsed()
+			trial.MarkActive()
+		}
+	}
+
+	active.SortTrials()
+	active.DeleteUnusedTrials()
+	if active.NumTrials() == 0 || active.NumUsed() == 0 {
+		fp.ClearUnlockedOutput()
+		return 0
+	}
+
+	changed := false
+	for _, op := range data.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN || op.HaltType() != 0 {
+			continue
+		}
+		buildReturnOutput(active, op, data)
+		changed = true
+	}
+
+	if changed {
+		a.count++
+	}
+	return 0
+}
+
+// ActionReturnSplit splits multi-entry return blocks into separate return paths.
+// C++ parity: blockaction.hh ActionReturnSplit
+type ActionReturnSplit struct{ ActionBase }
+
+var _ Action = (*ActionReturnSplit)(nil)
+
+// NewActionReturnSplit constructs ActionReturnSplit.
+// C++ parity: blockaction.hh ActionReturnSplit::ActionReturnSplit
+func NewActionReturnSplit(group string) *ActionReturnSplit {
+	act := &ActionReturnSplit{}
+	act.ActionBase = NewActionBase(act, 0, "returnsplit", group)
+	return act
+}
+
+// Clone clones ActionReturnSplit for the provided group list.
+// C++ parity: blockaction.hh ActionReturnSplit::clone
+func (a *ActionReturnSplit) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionReturnSplit(a.GetGroup())
+}
+
+// isReturnSplitSplittable reports whether a RETURN block is simple enough to split.
+// C++ parity: blockaction.cc ActionReturnSplit::isSplittable
+func isReturnSplitSplittable(b *BlockBasic) bool {
+	if b == nil {
+		return false
+	}
+	for _, op := range b.Ops() {
+		if op == nil {
+			continue
+		}
+		switch op.Code() {
+		case CPUI_MULTIEQUAL:
+			continue
+		case CPUI_COPY, CPUI_RETURN:
+			for i := 0; i < op.NumInput(); i++ {
+				in := op.Input(i)
+				if in == nil {
+					continue
+				}
+				if in.IsConstant() || in.IsAnnotation() {
+					continue
+				}
+				if in.IsFree() {
+					return false
+				}
+			}
+		default:
+			return false
+		}
+	}
+	return true
+}
+
+// Apply splits return blocks that have multiple incoming edges.
+// C++ parity: blockaction.cc ActionReturnSplit::apply
+func (a *ActionReturnSplit) Apply(data *Funcdata) int {
+	if data == nil {
+		return 0
+	}
+	if data.GetStructure().GetSize() == 0 {
+		return 0
+	}
+	if data.GetBasicBlocks() == nil {
+		return 0
+	}
+
+	changed := 0
+	for _, op := range data.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN || op.HaltType() != 0 {
+			continue
+		}
+		parent := op.Parent()
+		if parent == nil || parent.SizeIn() <= 1 {
+			continue
+		}
+		if !isReturnSplitSplittable(parent) {
+			continue
+		}
+		for i := parent.SizeIn() - 1; i >= 1; i-- {
+			data.NodeSplit(parent, i)
+			changed++
+		}
+	}
+
+	if changed > 0 {
+		a.count += changed
+	}
+	return 0
+}
