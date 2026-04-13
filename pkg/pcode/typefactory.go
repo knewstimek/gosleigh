@@ -32,6 +32,8 @@ func (f *TypeFactory) Intern(dt Datatype) Datatype {
 		return f.GetVoid()
 	case *Pointer:
 		return f.GetPointer(typed.Size(), typed.Pointee(), typed.WordSize())
+	case *PointerRel:
+		return f.GetPointerRel(typed.Size(), typed.Pointee(), typed.WordSize(), typed.Parent(), typed.ByteOffset())
 	case *Array:
 		return f.GetArray(typed.Count(), typed.Element())
 	case *Struct:
@@ -100,6 +102,26 @@ func (f *TypeFactory) GetEnum(size int32, enumMeta metatype, name string, values
 // where wordSize defaults to 1. ptrSize is the byte-width of the pointer itself.
 func (f *TypeFactory) GetPointerTo(pointee Datatype, ptrSize int32) *Pointer {
 	return f.GetPointer(ptrSize, pointee, 1)
+}
+
+// GetPointerRel interns a relative pointer pointing into a larger container.
+// C++ parity: TypeFactory::getTypePointerRel (type.hh declared; type.cc def).
+func (f *TypeFactory) GetPointerRel(size int32, pointee Datatype, wordSize uint32, parent Datatype, offset int32) *PointerRel {
+	canonicalTo := f.Intern(pointee)
+	canonicalParent := f.Intern(parent)
+	value := NewPointerRel(size, canonicalTo, wordSize, canonicalParent, offset)
+	key := fmt.Sprintf("ptrrel:%d:%d:%d:%x:%x", size, wordSize, offset, datatypeIdentity(canonicalTo), datatypeIdentity(canonicalParent))
+	return f.internPointerRel(key, value)
+}
+
+func (f *TypeFactory) internPointerRel(key string, value *PointerRel) *PointerRel {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if existing, ok := f.intern[key]; ok {
+		return existing.(*PointerRel)
+	}
+	f.intern[key] = value
+	return value
 }
 
 // GetExactType returns the interned Base type with the given size and metatype.

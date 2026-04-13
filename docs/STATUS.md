@@ -1,8 +1,9 @@
 # 프로젝트 상태
 
-## 현재 단계: H7/H8 진행 중 -- while-condition comma_separate + gcd 완성 (2026-04-13)
+## 현재 단계: Rules 100% (161/161) 완료 / Actions 채우기 / H7-H9 보류 (2026-04-13 야간)
 
-H1~H6 완료. H8 (TestMSVC_Gcd) 미완: 조건 iVar1=param_4 누락 + 루프 바디 비어있음.
+Rules 161개 모두 포팅 완료 (10개 mini batch, 약 1시간 18분). H1~H6 완료.
+H8 (TestMSVC_Gcd)는 보류 -- foundational fill 끝낸 뒤 재개. Actions 7/59만 됨.
 
 ### 완료
 - [x] Git repo initialized
