@@ -111,21 +111,51 @@ type Datatype interface {
 }
 
 // HasBitfields is the base implementation returning false for all primitive types.
-// C++ parity: Datatype::hasBitfields default in type.hh.
-// TODO(bitfield-typemodel): TypeStruct needs bitfield member support before any
-// Go Datatype can report true here. Once TypeBitField and struct-member bit
-// offsets are modeled, override this on *Struct to scan fields.
+// C++ parity: Datatype::hasBitfields default in type.hh. Composite types that
+// carry bitfield members (currently *Struct) override this.
 func (d datatypeBase) HasBitfields() bool { return false }
 
-// GetPtrInto unwraps a Pointer to its pointee, yielding a byte offset.
-// C++ parity: Datatype::getPtrInto (type.cc). For a plain pointer the offset is 0.
+// HasBitfields scans the struct's fields and reports whether any are modelled
+// as bitfields, or whether any field type itself contains bitfields.
+// C++ parity: Datatype::hasBitfields combined with the has_bitfields flag bit
+// that TypeStruct::assignFieldOffsets lights up when it finds a bitfield
+// member (type.cc ~L2383, L2745, L2107). We evaluate lazily instead of caching
+// a flag so struct construction does not need to be threaded through the
+// TypeFactory path used by the C++ code.
+func (s *Struct) HasBitfields() bool {
+	for _, f := range s.fields {
+		if f.IsBitfield {
+			return true
+		}
+		if f.Type != nil && f.Type.HasBitfields() {
+			return true
+		}
+	}
+	return false
+}
+
+// GetPtrInto unwraps a Pointer or PointerRel to its pointee, yielding a byte
+// offset into the containing object.
+// C++ parity: Datatype::getPtrInto (type.hh default + TypePointer::getPtrInto
+// + TypePointerRel::getPtrInto in type.cc ~L3018). For a plain pointer the
+// offset is zero. For a relative pointer, if the pointee is a structured
+// type the offset is zero and the pointee is returned; otherwise the offset
+// is the stored byte offset and the parent container is returned.
 // Returns (nil, 0) if the receiver is not a pointer-like type.
-// TODO(bitfield-typemodel): Does not yet handle TypePointerRel (offset != 0).
 func GetPtrInto(dt Datatype) (Datatype, int32) {
 	if dt == nil {
 		return nil, 0
 	}
-	if ptr, ok := dt.(*Pointer); ok {
+	switch ptr := dt.(type) {
+	case *PointerRel:
+		if ptr.to != nil {
+			meta := ptr.to.Metatype()
+			if meta == TYPE_STRUCT || meta == TYPE_UNION {
+				return ptr.to, 0
+			}
+		}
+		return ptr.parent, ptr.offset
+	case *Pointer:
 		return ptr.Pointee(), 0
 	}
 	return nil, 0
@@ -255,12 +285,22 @@ func NewArray(count int32, elem Datatype) *Array {
 func (a *Array) Element() Datatype { return a.elem }
 func (a *Array) Count() int32      { return a.count }
 
-// TypeField describes one byte-aligned field within a struct or union.
+// TypeField describes one field within a struct or union. Byte-aligned
+// fields leave BitOffset/BitSize zero and clear IsBitfield. Bitfield members
+// set IsBitfield and use BitOffset (least significant bit within the
+// containing byte run) and BitSize (width in bits).
+// C++ parity: class TypeField in type.hh plus the TypeBitField side-table
+// that TypeStruct::assignFieldOffsets folds in (type.cc ~L2360). The Go port
+// stores the bitfield description inline because struct members and
+// bitfields share a single field vector downstream.
 type TypeField struct {
-	Ident  int32
-	Offset int32
-	Name   string
-	Type   Datatype
+	Ident      int32
+	Offset     int32
+	Name       string
+	Type       Datatype
+	BitOffset  int32
+	BitSize    int32
+	IsBitfield bool
 }
 
 func (f TypeField) End() int32 {
@@ -393,6 +433,54 @@ func NewCode(name string, returnType Datatype, params []Datatype, variadic bool)
 func (c *Code) ReturnType() Datatype       { return c.returnType }
 func (c *Code) ParameterTypes() []Datatype { return cloneDatatypes(c.params) }
 func (c *Code) IsVariadic() bool           { return c.variadic }
+
+// PointerRel is a pointer that points \e into a larger container at a known
+// byte offset. Downstream rules use it to recover struct-field style accesses
+// where the raw pointer value is (basePtr + offset).
+// C++ parity: class TypePointerRel in type.hh. The Go port models the minimum
+// state GetPtrInto needs today: the final pointee, the containing parent,
+// the byte offset, and the plain pointer size/word-size.
+type PointerRel struct {
+	datatypeBase
+	to       Datatype
+	parent   Datatype
+	offset   int32
+	wordSize uint32
+}
+
+// NewPointerRel constructs a relative pointer with the given byte offset into
+// parent. pointee is the data-type the pointer targets through the offset.
+// C++ parity: TypePointerRel::TypePointerRel(int4,Datatype*,uint4,Datatype*,int4).
+func NewPointerRel(size int32, pointee Datatype, wordSize uint32, parent Datatype, off int32) *PointerRel {
+	base := newDatatypeBase(size, -1, TYPE_PTRREL, "")
+	base.submeta = SUB_PTRREL
+	if pointee != nil {
+		base.flags = pointee.Flags() & datatypeCoreType
+	}
+	return &PointerRel{
+		datatypeBase: base,
+		to:           pointee,
+		parent:       parent,
+		offset:       off,
+		wordSize:     wordSize,
+	}
+}
+
+// Pointee returns the immediate target of the relative pointer.
+// C++ parity: TypePointer::getPtrTo via TypePointerRel.
+func (p *PointerRel) Pointee() Datatype { return p.to }
+
+// Parent returns the containing data-type the offset is measured within.
+// C++ parity: TypePointerRel::getParent.
+func (p *PointerRel) Parent() Datatype { return p.parent }
+
+// ByteOffset returns the byte offset into the parent container.
+// C++ parity: TypePointerRel::getByteOffset.
+func (p *PointerRel) ByteOffset() int32 { return p.offset }
+
+// WordSize returns the word size of the relative pointer.
+// C++ parity: TypePointer::getWordSize.
+func (p *PointerRel) WordSize() uint32 { return p.wordSize }
 
 func subMetaForMetatype(meta metatype) subMetatype {
 	if int(meta) >= len(base2sub) {

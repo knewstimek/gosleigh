@@ -1,6 +1,10 @@
 package pcode
 
-import "gosleigh/pkg/address"
+import (
+	"hash/fnv"
+
+	"gosleigh/pkg/address"
+)
 
 // Funcdata flags -- processing state bitmask.
 // C++ parity: funcdata.hh Funcdata::Flags
@@ -54,6 +58,27 @@ type Funcdata struct {
 	// jumpTables tracks all recovered JumpTable objects for this function.
 	// C++ parity: funcdata.hh Funcdata::jumpvec
 	jumpTables []*JumpTable
+
+	// Architecture-adjacent services used by the op factories.
+	// C++ parity: these live on Architecture (glb) in the C++ code; the Go
+	// port attaches them to Funcdata so helpers like GetInternalString can
+	// allocate typed user-ops without a full glb.
+	typeFactory *TypeFactory
+	userOps     *UserOpManage
+
+	// internalStrings is the side-table Ghidra models via
+	// stringManager->registerInternalStringData. Keys are the 64-bit hashes
+	// passed through the BUILTIN_STRINGDATA CALLOTHER; values are the raw
+	// payload plus the element data-type.
+	internalStrings map[uint64]internalStringEntry
+}
+
+// internalStringEntry mirrors the per-address registry entry the C++
+// StringManager hands out when a constseq transform synthesizes a literal.
+type internalStringEntry struct {
+	addr     address.Address
+	data     []byte
+	charType Datatype
 }
 
 // NewFuncdata creates a Funcdata container for the named function.
@@ -989,4 +1014,130 @@ func (fd *Funcdata) ClearJumpTables() {
 		return
 	}
 	fd.jumpTables = nil
+}
+
+// ---------------------------------------------------------------------------
+// Type factory / user-op registry wiring
+// C++ parity: Architecture glb->types / glb->userops (userop.hh, architecture.hh)
+// ---------------------------------------------------------------------------
+
+// TypeFactory returns the lazily-constructed type factory for this function.
+// C++ parity: Funcdata::glb->types.
+func (fd *Funcdata) TypeFactory() *TypeFactory {
+	if fd.typeFactory == nil {
+		fd.typeFactory = NewTypeFactory()
+	}
+	return fd.typeFactory
+}
+
+// SetTypeFactory attaches an externally-built type factory, used when a host
+// architecture pre-populates the core types.
+func (fd *Funcdata) SetTypeFactory(tf *TypeFactory) { fd.typeFactory = tf }
+
+// UserOps returns the lazily-constructed user-op manager for this function.
+// C++ parity: Funcdata::glb->userops.
+func (fd *Funcdata) UserOps() *UserOpManage {
+	if fd.userOps == nil {
+		fd.userOps = NewUserOpManage()
+	}
+	return fd.userOps
+}
+
+// SetUserOps attaches an externally-built user-op registry.
+func (fd *Funcdata) SetUserOps(m *UserOpManage) { fd.userOps = m }
+
+// GetInternalString stores the given string payload as a synthetic constant
+// reachable through a BUILTIN_STRINGDATA CALLOTHER and returns a unique-space
+// Varnode holding the encoded address. readOp is the op that will consume
+// the returned Varnode -- the synthesized CALLOTHER is inserted immediately
+// before it so the payload definition dominates every use.
+// C++ parity: Funcdata::getInternalString (funcdata_varnode.cc ~L1432).
+// TODO mismatch: the C++ path routes the payload through
+// stringManager->registerInternalStringData and calls resVn->updateType. The
+// Go Varnode does not yet carry a Datatype field, so updateType is omitted
+// and the payload is held on the Funcdata itself keyed by FNV-1a hash.
+func (fd *Funcdata) GetInternalString(buf []byte, ptrType Datatype, readOp *PcodeOp) *Varnode {
+	if ptrType == nil || readOp == nil {
+		return nil
+	}
+	if ptrType.Metatype() != TYPE_PTR {
+		return nil
+	}
+	ptr, ok := ptrType.(*Pointer)
+	if !ok {
+		return nil
+	}
+	charType := ptr.Pointee()
+	hash := hashInternalString(readOp.Addr(), buf, charType)
+	if hash == 0 {
+		return nil
+	}
+	if fd.internalStrings == nil {
+		fd.internalStrings = make(map[uint64]internalStringEntry)
+	}
+	payload := make([]byte, len(buf))
+	copy(payload, buf)
+	fd.internalStrings[hash] = internalStringEntry{
+		addr:     readOp.Addr(),
+		data:     payload,
+		charType: charType,
+	}
+	fd.UserOps().RegisterBuiltin(BUILTIN_STRINGDATA, fd.TypeFactory())
+
+	stringOp := fd.NewOp(2, readOp.Addr())
+	fd.OpSetOpcode(stringOp, CPUI_CALLOTHER)
+	stringOp.ClearFlag(PcodeOpCall)
+	fd.OpSetInput(stringOp, fd.NewConstant(4, uint64(BUILTIN_STRINGDATA)), 0)
+	fd.OpSetInput(stringOp, fd.NewConstant(8, hash), 1)
+	resVn := fd.NewUniqueOut(ptrType.Size(), stringOp)
+	fd.OpInsertBefore(stringOp, readOp)
+	return resVn
+}
+
+// InternalStringData returns the raw bytes and element type registered for a
+// BUILTIN_STRINGDATA hash, or (nil, nil, false) if nothing was registered.
+// Helper for printc and downstream rule code that must recover the payload.
+func (fd *Funcdata) InternalStringData(hash uint64) ([]byte, Datatype, bool) {
+	if fd == nil || fd.internalStrings == nil {
+		return nil, nil, false
+	}
+	entry, ok := fd.internalStrings[hash]
+	if !ok {
+		return nil, nil, false
+	}
+	out := make([]byte, len(entry.data))
+	copy(out, entry.data)
+	return out, entry.charType, true
+}
+
+// hashInternalString produces the payload key used by GetInternalString.
+// C++ parity: StringManager::registerInternalStringData uses a running hash
+// over (address, bytes, element type id). The exact hashing scheme is not
+// observable outside the decompiler, so the Go port uses FNV-1a over the
+// same inputs -- any stable hash is sufficient as long as the Funcdata
+// registers and recovers the payload with the same function.
+func hashInternalString(addr address.Address, buf []byte, charType Datatype) uint64 {
+	h := fnv.New64a()
+	if addr.Space != nil {
+		h.Write([]byte(addr.Space.Name))
+	}
+	var off [8]byte
+	for i := 0; i < 8; i++ {
+		off[i] = byte(addr.Offset >> (8 * i))
+	}
+	h.Write(off[:])
+	h.Write(buf)
+	if charType != nil {
+		var id [8]byte
+		cid := charType.ID()
+		for i := 0; i < 8; i++ {
+			id[i] = byte(cid >> (8 * i))
+		}
+		h.Write(id[:])
+	}
+	sum := h.Sum64()
+	if sum == 0 {
+		sum = 1 // reserve 0 as the failure sentinel
+	}
+	return sum
 }
