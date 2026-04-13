@@ -2233,3 +2233,767 @@ func (a *ActionRestructureVarnode) Apply(data *Funcdata) int {
 	a.numpass++
 	return 0
 }
+
+// ---------------------------------------------------------------------------
+// ActionShadowVar -- REAL
+// ---------------------------------------------------------------------------
+
+// ActionShadowVar collapses two MULTIEQUAL ops in the same block header that
+// share identical inputs: the second is rewritten as a COPY of the first.
+// C++ parity: coreaction.hh ActionShadowVar; coreaction.cc ActionShadowVar::apply
+type ActionShadowVar struct {
+	ActionBase
+}
+
+var _ Action = (*ActionShadowVar)(nil)
+
+// NewActionShadowVar constructs ActionShadowVar.
+// C++ parity: coreaction.hh ActionShadowVar::ActionShadowVar
+func NewActionShadowVar(group string) *ActionShadowVar {
+	act := &ActionShadowVar{}
+	act.ActionBase = NewActionBase(act, 0, "shadowvar", group)
+	return act
+}
+
+// Clone clones ActionShadowVar for the provided group list.
+// C++ parity: coreaction.hh ActionShadowVar::clone
+func (a *ActionShadowVar) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionShadowVar(a.GetGroup())
+}
+
+// Apply folds shadow MULTIEQUALs in each basic block's header.
+// C++ parity: coreaction.cc ActionShadowVar::apply
+func (a *ActionShadowVar) Apply(data *Funcdata) int {
+	if data == nil {
+		return 0
+	}
+	bg := data.GetBasicBlocks()
+	if bg == nil {
+		return 0
+	}
+	for i := 0; i < bg.GetSize(); i++ {
+		fb := bg.GetBlock(i)
+		if fb == nil {
+			continue
+		}
+		bb, ok := fb.Concrete().(*BlockBasic)
+		if !ok || bb == nil || bb.EmptyOp() {
+			continue
+		}
+		// Gather MULTIEQUAL ops located at the block's starting address.
+		// C++ parity: the C++ iterates bl->beginOp() while op->getAddr() == startoffset.
+		ops := bb.Ops()
+		if len(ops) == 0 {
+			continue
+		}
+		startAddr := ops[0].Addr()
+		var phis []*PcodeOp
+		for _, op := range ops {
+			if op == nil || op.IsDead() {
+				continue
+			}
+			if op.Addr() != startAddr {
+				break
+			}
+			if op.Code() != CPUI_MULTIEQUAL {
+				continue
+			}
+			phis = append(phis, op)
+		}
+		if len(phis) < 2 {
+			continue
+		}
+		// For each pair, check whether all inputs match -- if so, later op
+		// becomes a COPY of the earlier one's output.
+		// C++ parity: previousOp() walk in ShadowVar::apply.
+		for j := 1; j < len(phis); j++ {
+			op := phis[j]
+			for k := 0; k < j; k++ {
+				prev := phis[k]
+				if prev.NumInput() != op.NumInput() {
+					continue
+				}
+				allSame := true
+				for s := 0; s < op.NumInput(); s++ {
+					if prev.Input(s) != op.Input(s) {
+						allSame = false
+						break
+					}
+				}
+				if !allSame || prev.Output() == nil {
+					continue
+				}
+				// Rewrite op as COPY(prev.Output).
+				for s := op.NumInput() - 1; s >= 1; s-- {
+					data.OpUnsetInput(op, s)
+				}
+				data.OpSetOpcode(op, CPUI_COPY)
+				op.SetNumInputs(1)
+				data.OpUnsetInput(op, 0)
+				data.OpSetInput(op, prev.Output(), 0)
+				a.count++
+				break
+			}
+		}
+	}
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// ActionVarnodeProps -- REAL (subset)
+// ---------------------------------------------------------------------------
+
+// ActionVarnodeProps processes special Varnode properties: replace zero-value
+// varnodes (nzmask & consume == 0) with constant zero.
+// C++ parity: coreaction.hh ActionVarnodeProps; coreaction.cc ActionVarnodeProps::apply
+type ActionVarnodeProps struct {
+	ActionBase
+}
+
+var _ Action = (*ActionVarnodeProps)(nil)
+
+// NewActionVarnodeProps constructs ActionVarnodeProps.
+// C++ parity: coreaction.hh ActionVarnodeProps::ActionVarnodeProps
+func NewActionVarnodeProps(group string) *ActionVarnodeProps {
+	act := &ActionVarnodeProps{}
+	act.ActionBase = NewActionBase(act, 0, "varnodeprops", group)
+	return act
+}
+
+// Clone clones ActionVarnodeProps for the provided group list.
+// C++ parity: coreaction.hh ActionVarnodeProps::clone
+func (a *ActionVarnodeProps) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionVarnodeProps(a.GetGroup())
+}
+
+// totalReplaceConstant replaces every use of vn with a freshly materialised
+// constant of the given value. It is the Go equivalent of the C++ helper
+// Funcdata::totalReplaceConstant used by ActionVarnodeProps::apply.
+// C++ parity: funcdata_varnode.cc Funcdata::totalReplaceConstant
+func totalReplaceConstant(data *Funcdata, vn *Varnode, val uint64) {
+	if data == nil || vn == nil {
+		return
+	}
+	uses := vn.DescendIter()
+	for _, useOp := range uses {
+		slot := useOp.GetSlot(vn)
+		if slot < 0 {
+			continue
+		}
+		c := data.NewConstant(vn.Size(), val)
+		data.OpUnsetInput(useOp, slot)
+		data.OpSetInput(useOp, c, slot)
+	}
+}
+
+// Apply replaces varnodes whose non-zero mask intersected with consumed bits is
+// empty with a constant zero (excluding constants, annotations, and COPY 0).
+// TODO known mismatch: the readonlypropagate, volatile-replace, and
+// autoLiveHold branches from the C++ require Funcdata::fillinReadOnly,
+// Funcdata::replaceVolatile, and VarnodeAutoLiveHold clearing which are not
+// present in Gosleigh. Only the NZMask/consume zero branch is ported.
+// C++ parity: coreaction.cc ActionVarnodeProps::apply
+func (a *ActionVarnodeProps) Apply(data *Funcdata) int {
+	if data == nil {
+		return 0
+	}
+	// Snapshot the list so iteration is safe across totalReplaceConstant.
+	vns := data.GetVarnodeBank().AllVarnodes()
+	for _, vn := range vns {
+		if vn == nil || vn.IsAnnotation() || vn.IsConstant() {
+			continue
+		}
+		if vn.Size() <= 0 || vn.Size() > 8 {
+			continue
+		}
+		if vn.NZMask()&vn.Consumed() != 0 {
+			continue
+		}
+		// Don't replace a COPY 0 -- let constant propagation handle it.
+		if vn.IsWritten() {
+			def := vn.Def()
+			if def != nil && def.Code() == CPUI_COPY {
+				in := def.Input(0)
+				if in != nil && in.IsConstant() && in.Offset() == 0 {
+					continue
+				}
+			}
+		}
+		if vn.HasNoDescend() {
+			continue
+		}
+		totalReplaceConstant(data, vn, 0)
+		a.count++
+	}
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// ActionConditionalConst -- PARTIAL
+// ---------------------------------------------------------------------------
+
+// ActionConditionalConst propagates boolean values known along one edge of a
+// CBRANCH into MULTIEQUAL phis reachable from that edge.
+// C++ parity: coreaction.hh ActionConditionalConst; coreaction.cc
+// ActionConditionalConst::apply and its helpers (pushConstant,
+// propagateConstant, findConstCompare, placeMultipleConstants, ...).
+type ActionConditionalConst struct {
+	ActionBase
+}
+
+var _ Action = (*ActionConditionalConst)(nil)
+
+// NewActionConditionalConst constructs ActionConditionalConst.
+// C++ parity: coreaction.hh ActionConditionalConst::ActionConditionalConst
+func NewActionConditionalConst(group string) *ActionConditionalConst {
+	act := &ActionConditionalConst{}
+	act.ActionBase = NewActionBase(act, 0, "conditionalconst", group)
+	return act
+}
+
+// Clone clones ActionConditionalConst for the provided group list.
+// C++ parity: coreaction.hh ActionConditionalConst::clone
+func (a *ActionConditionalConst) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionConditionalConst(a.GetGroup())
+}
+
+// Apply walks each CBRANCH to find boolean varnodes with multiple readers; if
+// the boolean varnode is read again inside a dominated block, the read can be
+// replaced by the known constant (0 on the false branch, 1 on the true branch).
+// TODO known mismatch: the C++ action is ~362 lines built on top of
+// FlowBlock::restrictedByConditional, FlowBlock::getFalseOut/getTrueOut,
+// getOutRevIndex, PcodeOpNode reach analysis, placeMultipleConstants, and
+// placeCopy helpers (coreaction.cc ActionConditionalConst::collectReachable /
+// flowTogether / placeCopy / handlePhiNodes / propagateConstant /
+// pushConstant / testAlternatePath). Gosleigh only has a light BlockBasic /
+// FlowBlock port, so this port restricts itself to the simple case:
+// boolean varnode with descendants inside the dominating true/false branch.
+// The broader MULTIEQUAL-aware propagation and placeCopy machinery are
+// tracked as follow-on work.
+// C++ parity: coreaction.cc ActionConditionalConst::apply
+func (a *ActionConditionalConst) Apply(data *Funcdata) int {
+	if data == nil {
+		return 0
+	}
+	bg := data.GetBasicBlocks()
+	if bg == nil {
+		return 0
+	}
+	for i := 0; i < bg.GetSize(); i++ {
+		fb := bg.GetBlock(i)
+		if fb == nil {
+			continue
+		}
+		bb, ok := fb.Concrete().(*BlockBasic)
+		if !ok || bb == nil {
+			continue
+		}
+		cBranch := bb.LastOp()
+		if cBranch == nil || cBranch.IsDead() || cBranch.Code() != CPUI_CBRANCH {
+			continue
+		}
+		if cBranch.NumInput() < 2 {
+			continue
+		}
+		boolVn := cBranch.Input(1)
+		if boolVn == nil || boolVn.IsConstant() {
+			continue
+		}
+		// Skip when the boolean has a single reader -- no substitution gain.
+		if boolVn.LoneDescend() != nil {
+			continue
+		}
+		// Determine which edge corresponds to true / false.
+		// C++ parity: cBranch->isBooleanFlip() flips the polarity.
+		flip := cBranch.HasFlag(PcodeOpBooleanFlip)
+		// Replace remaining descendants of boolVn with the appropriate constant
+		// if the descendant's block is (crudely) dominated by the taken edge.
+		// We approximate dominance by "descendant op parent is one of the
+		// CBRANCH out-blocks" rather than full dominator analysis.
+		// TODO known mismatch: this drops the restrictedByConditional test.
+		for _, useOp := range boolVn.DescendIter() {
+			if useOp == nil || useOp == cBranch || useOp.IsDead() {
+				continue
+			}
+			useBlk := useOp.Parent()
+			if useBlk == nil {
+				continue
+			}
+			// Test whether the use block is one of the two out-blocks of bb.
+			var polarity int // 0 = false branch, 1 = true branch
+			matched := false
+			for s := 0; s < fb.SizeOut(); s++ {
+				edge := fb.OutEdge(s)
+				out := edge.Point
+				if out == nil {
+					continue
+				}
+				if ob, ok := out.Concrete().(*BlockBasic); ok && ob == useBlk {
+					polarity = s
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				continue
+			}
+			var val uint64
+			// C++ parity: false branch -> constant 0, true branch -> constant 1,
+			// flipped by isBooleanFlip().
+			if (polarity == 1) != flip {
+				val = 1
+			} else {
+				val = 0
+			}
+			slot := useOp.GetSlot(boolVn)
+			if slot < 0 {
+				continue
+			}
+			c := data.NewConstant(boolVn.Size(), val)
+			data.OpUnsetInput(useOp, slot)
+			data.OpSetInput(useOp, c, slot)
+			a.count++
+		}
+	}
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// ActionConditionalExe -- TODO
+// ---------------------------------------------------------------------------
+
+// ActionConditionalExe trims control flow whose branches cancel dataflow.
+// C++ parity: condexe.hh ActionConditionalExe; condexe.cc
+// ActionConditionalExe::apply, which drives ConditionalExecution::trial and
+// ConditionalExecution::execute over every BlockBasic until no more changes.
+type ActionConditionalExe struct {
+	ActionBase
+}
+
+var _ Action = (*ActionConditionalExe)(nil)
+
+// NewActionConditionalExe constructs ActionConditionalExe.
+// C++ parity: condexe.hh ActionConditionalExe::ActionConditionalExe
+func NewActionConditionalExe(group string) *ActionConditionalExe {
+	act := &ActionConditionalExe{}
+	act.ActionBase = NewActionBase(act, 0, "conditionalexe", group)
+	return act
+}
+
+// Clone clones ActionConditionalExe for the provided group list.
+// C++ parity: condexe.hh ActionConditionalExe::clone
+func (a *ActionConditionalExe) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionConditionalExe(a.GetGroup())
+}
+
+// Apply is a TODO stub: condexe.cc ConditionalExecution (trial / execute /
+// discoverCbranch / verifyCondition / discoverConditionalZero) is not yet
+// ported. Without that class, eliminating conditionally dead dataflow is not
+// feasible -- skipping this action keeps parity-observable output unchanged.
+// C++ parity: condexe.cc ActionConditionalExe::apply
+func (a *ActionConditionalExe) Apply(data *Funcdata) int {
+	_ = data
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// ActionSwitchNorm -- TODO
+// ---------------------------------------------------------------------------
+
+// ActionSwitchNorm normalises jumptable switches (labels + fold-in guards).
+// C++ parity: coreaction.hh ActionSwitchNorm; coreaction.cc
+// ActionSwitchNorm::apply and jumptable.cc JumpTable::recoverLabels /
+// foldInNormalization / foldInGuards.
+type ActionSwitchNorm struct {
+	ActionBase
+}
+
+var _ Action = (*ActionSwitchNorm)(nil)
+
+// NewActionSwitchNorm constructs ActionSwitchNorm.
+// C++ parity: coreaction.hh ActionSwitchNorm::ActionSwitchNorm
+func NewActionSwitchNorm(group string) *ActionSwitchNorm {
+	act := &ActionSwitchNorm{}
+	act.ActionBase = NewActionBase(act, 0, "switchnorm", group)
+	return act
+}
+
+// Clone clones ActionSwitchNorm for the provided group list.
+// C++ parity: coreaction.hh ActionSwitchNorm::clone
+func (a *ActionSwitchNorm) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionSwitchNorm(a.GetGroup())
+}
+
+// Apply is a TODO stub: Gosleigh does not yet port the JumpTable machinery
+// (jumptable.cc JumpTable::matchModel, recoverLabels, foldInNormalization,
+// foldInGuards), so there is nothing to normalise. Once JumpTable lands this
+// should iterate data.numJumpTables().
+// C++ parity: coreaction.cc ActionSwitchNorm::apply
+func (a *ActionSwitchNorm) Apply(data *Funcdata) int {
+	_ = data
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// ActionSegmentize -- TODO
+// ---------------------------------------------------------------------------
+
+// ActionSegmentize rewrites segmentop user-ops into the CPUI_SEGMENTOP form.
+// C++ parity: coreaction.hh ActionSegmentize; coreaction.cc
+// ActionSegmentize::apply drives Architecture::userops::getSegmentOp and
+// SegmentOp::unify.
+type ActionSegmentize struct {
+	ActionBase
+	localCount int
+}
+
+var _ Action = (*ActionSegmentize)(nil)
+
+// NewActionSegmentize constructs ActionSegmentize.
+// C++ parity: coreaction.hh ActionSegmentize::ActionSegmentize
+func NewActionSegmentize(group string) *ActionSegmentize {
+	act := &ActionSegmentize{}
+	act.ActionBase = NewActionBase(act, 0, "segmentize", group)
+	return act
+}
+
+// Reset resets per-function state.
+// C++ parity: coreaction.hh ActionSegmentize::reset
+func (a *ActionSegmentize) Reset(data *Funcdata) {
+	a.localCount = 0
+}
+
+// Clone clones ActionSegmentize for the provided group list.
+// C++ parity: coreaction.hh ActionSegmentize::clone
+func (a *ActionSegmentize) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionSegmentize(a.GetGroup())
+}
+
+// Apply is a TODO stub: the SegmentOp user-op registry from
+// Architecture::userops and SegmentOp::unify (userop.cc / globalcontext.cc)
+// is not ported. On architectures without segmented memory (x86, ARM) the
+// real action is also a no-op, so the stub is observationally correct today.
+// C++ parity: coreaction.cc ActionSegmentize::apply
+func (a *ActionSegmentize) Apply(data *Funcdata) int {
+	_ = data
+	// Mimic the once-per-function guard so future ports don't re-run.
+	if a.localCount > 0 {
+		return 0
+	}
+	a.localCount = 1
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// ActionRestrictLocal -- TODO
+// ---------------------------------------------------------------------------
+
+// ActionRestrictLocal marks stack slots that are used as function call
+// parameters or saved-registers as "not mapped" in the local scope.
+// C++ parity: coreaction.hh ActionRestrictLocal; coreaction.cc
+// ActionRestrictLocal::apply relies on Funcdata::getCallSpecs and
+// FuncCallSpecs::getSpacebaseOffset / ProtoParameter iteration, plus
+// FuncProto::effectBegin/endIter for saved-register EffectRecord entries.
+type ActionRestrictLocal struct {
+	ActionBase
+}
+
+var _ Action = (*ActionRestrictLocal)(nil)
+
+// NewActionRestrictLocal constructs ActionRestrictLocal.
+// C++ parity: coreaction.hh ActionRestrictLocal::ActionRestrictLocal
+func NewActionRestrictLocal(group string) *ActionRestrictLocal {
+	act := &ActionRestrictLocal{}
+	act.ActionBase = NewActionBase(act, 0, "restrictlocal", group)
+	return act
+}
+
+// Clone clones ActionRestrictLocal for the provided group list.
+// C++ parity: coreaction.hh ActionRestrictLocal::clone
+func (a *ActionRestrictLocal) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionRestrictLocal(a.GetGroup())
+}
+
+// Apply is a TODO stub: Gosleigh lacks Funcdata::getCallSpecs /
+// FuncCallSpecs (fspec.cc) and FuncProto::effectBegin/effectEnd iteration
+// over EffectRecord saved-register info, so no stack slots can be flagged.
+// C++ parity: coreaction.cc ActionRestrictLocal::apply
+func (a *ActionRestrictLocal) Apply(data *Funcdata) int {
+	_ = data
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// ActionUnjustifiedParams -- TODO
+// ---------------------------------------------------------------------------
+
+// ActionUnjustifiedParams grows input parameter varnodes that do not fit the
+// prototype's justification container.
+// C++ parity: coreaction.hh ActionUnjustifiedParams; coreaction.cc
+// ActionUnjustifiedParams::apply calls FuncProto::unjustifiedInputParam and
+// Funcdata::adjustInputVarnodes to widen the affected input range.
+type ActionUnjustifiedParams struct {
+	ActionBase
+}
+
+var _ Action = (*ActionUnjustifiedParams)(nil)
+
+// NewActionUnjustifiedParams constructs ActionUnjustifiedParams.
+// C++ parity: coreaction.hh ActionUnjustifiedParams::ActionUnjustifiedParams
+func NewActionUnjustifiedParams(group string) *ActionUnjustifiedParams {
+	act := &ActionUnjustifiedParams{}
+	act.ActionBase = NewActionBase(act, 0, "unjustparams", group)
+	return act
+}
+
+// Clone clones ActionUnjustifiedParams for the provided group list.
+// C++ parity: coreaction.hh ActionUnjustifiedParams::clone
+func (a *ActionUnjustifiedParams) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionUnjustifiedParams(a.GetGroup())
+}
+
+// Apply is a TODO stub: FuncProto::unjustifiedInputParam (fspec.cc) and
+// Funcdata::adjustInputVarnodes (funcdata_varnode.cc) are not yet ported;
+// without them there is no way to detect or widen mis-sized input slots.
+// C++ parity: coreaction.cc ActionUnjustifiedParams::apply
+func (a *ActionUnjustifiedParams) Apply(data *Funcdata) int {
+	_ = data
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// ActionHideShadow -- TODO
+// ---------------------------------------------------------------------------
+
+// ActionHideShadow hides shadow HighVariables created by speculative merges.
+// C++ parity: coreaction.hh ActionHideShadow; coreaction.cc
+// ActionHideShadow::apply calls Merge::hideShadows on every HighVariable.
+type ActionHideShadow struct {
+	ActionBase
+}
+
+var _ Action = (*ActionHideShadow)(nil)
+
+// NewActionHideShadow constructs ActionHideShadow.
+// C++ parity: coreaction.hh ActionHideShadow::ActionHideShadow
+func NewActionHideShadow(group string) *ActionHideShadow {
+	act := &ActionHideShadow{}
+	act.ActionBase = NewActionBase(act, ActionRuleOncePerFunc, "hideshadow", group)
+	return act
+}
+
+// Clone clones ActionHideShadow for the provided group list.
+// C++ parity: coreaction.hh ActionHideShadow::clone
+func (a *ActionHideShadow) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionHideShadow(a.GetGroup())
+}
+
+// Apply is a TODO stub: Merge::hideShadows (merge.cc) is not ported and the
+// Go Merge type has no HighVariable-level mark bit to replicate the
+// shadow-marking sweep.
+// C++ parity: coreaction.cc ActionHideShadow::apply
+func (a *ActionHideShadow) Apply(data *Funcdata) int {
+	_ = data
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// ActionDynamicMapping -- TODO
+// ---------------------------------------------------------------------------
+
+// ActionDynamicMapping resolves dynamic Symbol entries by hashing live
+// Varnodes against the function's DynamicHash table.
+// C++ parity: coreaction.hh ActionDynamicMapping; coreaction.cc
+// ActionDynamicMapping::apply walks ScopeLocal::beginDynamic/endDynamic and
+// calls Funcdata::attemptDynamicMapping on each SymbolEntry.
+type ActionDynamicMapping struct {
+	ActionBase
+}
+
+var _ Action = (*ActionDynamicMapping)(nil)
+
+// NewActionDynamicMapping constructs ActionDynamicMapping.
+// C++ parity: coreaction.hh ActionDynamicMapping::ActionDynamicMapping
+func NewActionDynamicMapping(group string) *ActionDynamicMapping {
+	act := &ActionDynamicMapping{}
+	act.ActionBase = NewActionBase(act, 0, "dynamicmapping", group)
+	return act
+}
+
+// Clone clones ActionDynamicMapping for the provided group list.
+// C++ parity: coreaction.hh ActionDynamicMapping::clone
+func (a *ActionDynamicMapping) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionDynamicMapping(a.GetGroup())
+}
+
+// Apply is a TODO stub: ScopeLocal::beginDynamic, DynamicHash (dynamic.cc),
+// and Funcdata::attemptDynamicMapping are not ported. The Go ScopeLocal
+// carries no dynamic SymbolEntry list yet.
+// C++ parity: coreaction.cc ActionDynamicMapping::apply
+func (a *ActionDynamicMapping) Apply(data *Funcdata) int {
+	_ = data
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// ActionDynamicSymbols -- TODO
+// ---------------------------------------------------------------------------
+
+// ActionDynamicSymbols makes the final attachment pass for dynamically-mapped
+// symbols after type recovery has stabilised.
+// C++ parity: coreaction.hh ActionDynamicSymbols; coreaction.cc
+// ActionDynamicSymbols::apply calls Funcdata::attemptDynamicMappingLate on
+// every dynamic SymbolEntry in ScopeLocal.
+type ActionDynamicSymbols struct {
+	ActionBase
+}
+
+var _ Action = (*ActionDynamicSymbols)(nil)
+
+// NewActionDynamicSymbols constructs ActionDynamicSymbols.
+// C++ parity: coreaction.hh ActionDynamicSymbols::ActionDynamicSymbols
+func NewActionDynamicSymbols(group string) *ActionDynamicSymbols {
+	act := &ActionDynamicSymbols{}
+	act.ActionBase = NewActionBase(act, ActionRuleOncePerFunc, "dynamicsymbols", group)
+	return act
+}
+
+// Clone clones ActionDynamicSymbols for the provided group list.
+// C++ parity: coreaction.hh ActionDynamicSymbols::clone
+func (a *ActionDynamicSymbols) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionDynamicSymbols(a.GetGroup())
+}
+
+// Apply is a TODO stub: requires the same dynamic-hash infrastructure as
+// ActionDynamicMapping plus Funcdata::attemptDynamicMappingLate.
+// C++ parity: coreaction.cc ActionDynamicSymbols::apply
+func (a *ActionDynamicSymbols) Apply(data *Funcdata) int {
+	_ = data
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// ActionPrototypeWarnings -- PARTIAL
+// ---------------------------------------------------------------------------
+
+// ActionPrototypeWarnings emits user-facing warnings about prototypes that
+// cannot be represented accurately.
+// C++ parity: coreaction.hh ActionPrototypeWarnings; coreaction.cc
+// ActionPrototypeWarnings::apply drives Funcdata::getOverride and iterates
+// FuncCallSpecs for per-call warnings.
+type ActionPrototypeWarnings struct {
+	ActionBase
+}
+
+var _ Action = (*ActionPrototypeWarnings)(nil)
+
+// NewActionPrototypeWarnings constructs ActionPrototypeWarnings.
+// C++ parity: coreaction.hh ActionPrototypeWarnings::ActionPrototypeWarnings
+func NewActionPrototypeWarnings(group string) *ActionPrototypeWarnings {
+	act := &ActionPrototypeWarnings{}
+	act.ActionBase = NewActionBase(act, ActionRuleOncePerFunc, "prototypewarnings", group)
+	return act
+}
+
+// Clone clones ActionPrototypeWarnings for the provided group list.
+// C++ parity: coreaction.hh ActionPrototypeWarnings::clone
+func (a *ActionPrototypeWarnings) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionPrototypeWarnings(a.GetGroup())
+}
+
+// Apply emits a single warning header when the Funcdata has no attached
+// FuncProto. The C++ action produces several warnings derived from
+// Override::generateOverrideMessages, FuncProto::hasInputErrors /
+// hasOutputErrors / isModelUnknown, and per-call FuncCallSpecs errors; all
+// of these fields are absent from Gosleigh's FuncProto and so their
+// branches are skipped.
+// TODO known mismatch: missing Override, FuncProto::hasInputErrors, and
+// FuncCallSpecs::hasInputErrors / hasOutputErrors equivalents.
+// C++ parity: coreaction.cc ActionPrototypeWarnings::apply
+func (a *ActionPrototypeWarnings) Apply(data *Funcdata) int {
+	if data == nil {
+		return 0
+	}
+	if data.GetFuncProto() == nil {
+		data.warningHeader("Prototype unavailable; parameter locations may be inaccurate")
+	}
+	return 0
+}
+
+// ---------------------------------------------------------------------------
+// ActionInternalStorage -- TODO
+// ---------------------------------------------------------------------------
+
+// ActionInternalStorage marks STOREs to compiler-internal registers with the
+// "unmapped" bit so they do not appear as addressable memory.
+// C++ parity: coreaction.hh ActionInternalStorage; coreaction.cc
+// ActionInternalStorage::apply walks FuncProto::internalBegin/internalEnd
+// over VarnodeData entries and flags matching CPUI_STORE ops via
+// setStoreUnmapped(). Relies on Varnode::isEventualConstant.
+type ActionInternalStorage struct {
+	ActionBase
+}
+
+var _ Action = (*ActionInternalStorage)(nil)
+
+// NewActionInternalStorage constructs ActionInternalStorage.
+// C++ parity: coreaction.hh ActionInternalStorage::ActionInternalStorage
+func NewActionInternalStorage(group string) *ActionInternalStorage {
+	act := &ActionInternalStorage{}
+	act.ActionBase = NewActionBase(act, ActionRuleOncePerFunc, "internalstorage", group)
+	return act
+}
+
+// Clone clones ActionInternalStorage for the provided group list.
+// C++ parity: coreaction.hh ActionInternalStorage::clone
+func (a *ActionInternalStorage) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionInternalStorage(a.GetGroup())
+}
+
+// Apply is a TODO stub: FuncProto::internalBegin / internalEnd, the
+// store-unmapped PcodeOp flag, and Varnode::isEventualConstant are all
+// absent from Gosleigh's port.
+// C++ parity: coreaction.cc ActionInternalStorage::apply
+func (a *ActionInternalStorage) Apply(data *Funcdata) int {
+	_ = data
+	return 0
+}
