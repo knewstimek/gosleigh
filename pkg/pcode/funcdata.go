@@ -418,6 +418,33 @@ func (fd *Funcdata) NewIndirectCreation(callOp *PcodeOp, sp *address.Space, off 
 	return op
 }
 
+// C++ parity: Funcdata::markIndirectCreation
+func (fd *Funcdata) MarkIndirectCreation(indop *PcodeOp, possibleOutput bool) {
+	if indop == nil {
+		return
+	}
+	outvn := indop.Output()
+	in0 := indop.Input(0)
+	indop.SetFlag(PcodeOpIndirectCreation)
+	if in0 == nil || !in0.IsConstant() {
+		panic("Indirect creation not properly formed")
+	}
+	if !possibleOutput {
+		in0.SetFlags(VarnodeIndirectCreation)
+	}
+	if outvn != nil {
+		outvn.SetFlags(VarnodeIndirectCreation)
+	}
+}
+
+// C++ parity: funcdata_varnode.cc Funcdata::transferVarnodeProperties
+func (fd *Funcdata) TransferVarnodeProperties(src, dst *Varnode, bytePos int32) {
+	// TODO known mismatch: the full C++ property transfer logic is not yet ported.
+	_ = src
+	_ = dst
+	_ = bytePos
+}
+
 // VarnodesBySpace returns all varnodes in the given address space.
 func (fd *Funcdata) VarnodesBySpace(spc *address.Space) []*Varnode {
 	return fd.vbank.BySpace(spc)
