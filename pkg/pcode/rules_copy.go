@@ -229,8 +229,8 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRuleSubNormal(group) },
 	func(group string) Rule { return NewRuleSborrow(group) },
 	func(group string) Rule { return NewRuleLessNotEqualBoolAnd(group) },
-	func(group string) Rule { return NewRuleSignForm(group) },    // CDQ: SUBPIECE(INT_SEXT(x),c) -> INT_SRIGHT
-	func(group string) Rule { return NewRuleOrSextForm(group) },  // IDIV dividend: INT_OR(..SRIGHT..) -> INT_SEXT
+	func(group string) Rule { return NewRuleSignForm(group) },   // CDQ: SUBPIECE(INT_SEXT(x),c) -> INT_SRIGHT
+	func(group string) Rule { return NewRuleOrSextForm(group) }, // IDIV dividend: INT_OR(..SRIGHT..) -> INT_SEXT
 	// pointer rules -- C++ ActionPool::registerRule equivalents; inserted before identityel
 	func(group string) Rule { return NewRulePtrArith(group) },
 	func(group string) Rule { return NewRulePtraddUndo(group) },
@@ -245,8 +245,8 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRulePtrsubAddConst(group) },
 	func(group string) Rule { return NewRulePtrsubCollapse(group) },
 	func(group string) Rule { return NewRulePtrFlowCopy(group) },
-		func(group string) Rule { return NewRuleSLessEqual2Constant(group) },
-		func(group string) Rule { return NewRuleLessEqual(group) },
+	func(group string) Rule { return NewRuleSLessEqual2Constant(group) },
+	func(group string) Rule { return NewRuleLessEqual(group) },
 	func(group string) Rule { return NewRuleIdentityEl(group) },
 	// rules_ghidra_port.go: new C++ parity ports
 	func(group string) Rule { return NewRuleCollectTerms(group) },
@@ -277,6 +277,8 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRuleExtensionPush(group) },
 	func(group string) Rule { return NewRulePieceStructure(group) },
 	func(group string) Rule { return NewRulePushMultiME(group) },
+	// C++ groups under floatprecision pool; tentatively in BatchA pending dedicated pool
+	func(group string) Rule { return NewRuleInt2FloatCollapse(group) },
 }
 
 func BatchARules(group string) []Rule {

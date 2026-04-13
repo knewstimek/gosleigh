@@ -353,3 +353,14 @@ func RegisterTypeOps() []TypeOp {
 
 	return inst
 }
+
+// C++ parity: typeop.cc TypeOpFloatInt2Float::preferredZextSize
+func preferredZextSizeFloatInt2Float(inSize int) int {
+	if inSize < 4 {
+		return 4
+	}
+	if inSize < 8 {
+		return 8
+	}
+	return inSize + 1
+}

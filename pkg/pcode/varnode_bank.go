@@ -76,6 +76,18 @@ func CompareLocDef(a, b *Varnode) int {
 	// 5. If both written: compare by defining op SeqNum
 	fa := a.flags & (VarnodeInput | VarnodeWritten)
 	if fa == VarnodeWritten {
+		if a.def == nil || b.def == nil {
+			if a.def == nil && b.def == nil {
+				if a.createIndex != b.createIndex {
+					return cmpUint32(a.createIndex, b.createIndex)
+				}
+				return 0
+			}
+			if a.def == nil {
+				return -1
+			}
+			return 1
+		}
 		seqA := a.def.Seq()
 		seqB := b.def.Seq()
 		if !SeqNumEqual(seqA, seqB) {
@@ -108,6 +120,18 @@ func CompareDefLoc(a, b *Varnode) int {
 	}
 	// 2. If both written: compare by defining op SeqNum
 	if fa == VarnodeWritten {
+		if a.def == nil || b.def == nil {
+			if a.def == nil && b.def == nil {
+				if a.createIndex != b.createIndex {
+					return cmpUint32(a.createIndex, b.createIndex)
+				}
+				return 0
+			}
+			if a.def == nil {
+				return -1
+			}
+			return 1
+		}
 		seqA := a.def.Seq()
 		seqB := b.def.Seq()
 		if !SeqNumEqual(seqA, seqB) {
