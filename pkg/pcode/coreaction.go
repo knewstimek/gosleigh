@@ -751,3 +751,67 @@ func (a *ActionExtraPopSetup) Apply(data *Funcdata) int {
 	_ = data
 	return 0
 }
+
+// ActionActiveParam determines active parameters for the current function.
+// C++ parity: coreaction.hh ActionActiveParam
+type ActionActiveParam struct{ ActionBase }
+
+var _ Action = (*ActionActiveParam)(nil)
+
+// NewActionActiveParam constructs ActionActiveParam.
+// C++ parity: coreaction.hh ActionActiveParam::ActionActiveParam
+func NewActionActiveParam(group string) *ActionActiveParam {
+	act := &ActionActiveParam{}
+	act.ActionBase = NewActionBase(act, 0, "activeparam", group)
+	return act
+}
+
+// Clone clones ActionActiveParam for the provided group list.
+// C++ parity: coreaction.hh ActionActiveParam::clone
+func (a *ActionActiveParam) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionActiveParam(a.GetGroup())
+}
+
+// Apply determines active parameters from the current SSA graph.
+// C++ parity: coreaction.cc ActionActiveParam::apply
+func (a *ActionActiveParam) Apply(data *Funcdata) int {
+	if ApplyActiveParamModel(data) {
+		a.count++
+	}
+	return 0
+}
+
+// ActionActiveReturn determines active return values for the current function.
+// C++ parity: coreaction.hh ActionActiveReturn
+type ActionActiveReturn struct{ ActionBase }
+
+var _ Action = (*ActionActiveReturn)(nil)
+
+// NewActionActiveReturn constructs ActionActiveReturn.
+// C++ parity: coreaction.hh ActionActiveReturn::ActionActiveReturn
+func NewActionActiveReturn(group string) *ActionActiveReturn {
+	act := &ActionActiveReturn{}
+	act.ActionBase = NewActionBase(act, 0, "activereturn", group)
+	return act
+}
+
+// Clone clones ActionActiveReturn for the provided group list.
+// C++ parity: coreaction.hh ActionActiveReturn::clone
+func (a *ActionActiveReturn) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionActiveReturn(a.GetGroup())
+}
+
+// Apply determines the active return value from the current SSA graph.
+// C++ parity: coreaction.cc ActionActiveReturn::apply
+func (a *ActionActiveReturn) Apply(data *Funcdata) int {
+	if ApplyActiveReturnModel(data) {
+		a.count++
+	}
+	return 0
+}
