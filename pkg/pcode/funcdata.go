@@ -18,6 +18,9 @@ const (
 	FuncNoCode             uint32 = 0x0080
 	FuncUnimplPresent      uint32 = 0x0800
 	FuncBadDataPresent     uint32 = 0x1000
+	// FuncDoublePrecisOn enables the ActionParamDouble join path.
+	// C++ parity: funcdata.hh Funcdata::double_precis_on (0x2000)
+	FuncDoublePrecisOn uint32 = 0x2000
 )
 
 // Funcdata is the central container for all data structures associated

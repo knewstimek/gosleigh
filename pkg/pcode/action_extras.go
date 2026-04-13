@@ -139,28 +139,217 @@ func (fc *FuncCallSpecs) ForceSet(_ *Funcdata, proto FuncProto) {
 
 // CheckInputSplit reports whether the ABI permits splitting a CONCAT piece
 // parameter into two consecutive trials.
-// C++ parity: FuncCallSpecs::checkInputSplit
-// TODO known mismatch: the full C++ query consults ParamList::checkSplit.
-// Gosleigh's ProtoModel does not yet expose that query so we conservatively
-// answer false -- the upgraded ActionParamDouble therefore walks the pieces
-// but never splits.
-func (fc *FuncCallSpecs) CheckInputSplit(_ address.Address, _ int32, _ int32) bool {
-	return false
+// C++ parity: FuncCallSpecs::checkInputSplit -> FuncProto::checkInputSplit
+// -> ParamListStandard::checkSplit (fspec.cc:1342).
+//
+// The C++ routine asks the ParamList to resolve both halves against its
+// ParamEntry table; both halves must map to legal input entries. Gosleigh
+// does not yet port ParamEntry, so we run the closest available query:
+// for stack-space splits we require both halves to fall in the parameter
+// area and respect the ProtoModel's ParamAlign. For register-space splits
+// we answer false -- the full ParamEntry port will replace that branch.
+func (fc *FuncCallSpecs) CheckInputSplit(loc address.Address, size int32, splitpoint int32) bool {
+	if fc == nil || fc.FuncProto.model == nil {
+		return false
+	}
+	if size <= 0 || splitpoint <= 0 || splitpoint >= size {
+		return false
+	}
+	if loc.Space == nil || loc.Space.Kind != address.SpaceKindStack {
+		// TODO known mismatch: register-space splits need ParamEntry.findEntry.
+		return false
+	}
+	model := fc.FuncProto.model
+	align := uint64(model.ParamAlign)
+	if align == 0 {
+		align = 1
+	}
+	// Lo piece is at loc, Hi piece is at loc + splitpoint (in byte units --
+	// stack space has WordSize 1). Both halves must fit inside the parameter
+	// area and start on a ParamAlign boundary.
+	base := uint64(0)
+	if model.ParamBaseOffset > 0 {
+		base = uint64(model.ParamBaseOffset)
+	}
+	off1 := loc.Offset
+	off2 := loc.Offset + uint64(splitpoint)
+	if !model.IsParamOffset(off1) || !model.IsParamOffset(off2) {
+		return false
+	}
+	if off1 < base || off2 < base {
+		return false
+	}
+	if ((off1 - base) % align) != 0 {
+		return false
+	}
+	if ((off2 - base) % align) != 0 {
+		return false
+	}
+	return true
 }
 
 // CheckInputJoin reports whether two adjacent input slots can be merged into
 // a double-precision whole parameter.
-// C++ parity: FuncCallSpecs::checkInputJoin
-// TODO known mismatch: same ParamList::checkJoin gap as checkInputSplit.
-func (fc *FuncCallSpecs) CheckInputJoin(_ int, _ bool, _ *Varnode, _ *Varnode) bool {
-	return false
+// C++ parity: FuncCallSpecs::checkInputJoin (fspec.cc:5349) ->
+// FuncProto::checkInputJoin -> ParamListStandard::checkJoin (fspec.cc:1315).
+//
+// The Go port mirrors the C++ preflight: reject when the call is still
+// classifying its inputs, require the ishislot flag to match the slot order,
+// and require the declared trial sizes to match the varnode sizes at that
+// slot. After that we defer to the same stack-vs-register discrimination as
+// CheckInputSplit: stack halves must be contiguous and ParamAlign-aligned;
+// register-space halves get a TODO.
+func (fc *FuncCallSpecs) CheckInputJoin(slot1 int, ishislot bool, vn1 *Varnode, vn2 *Varnode) bool {
+	if fc == nil || vn1 == nil || vn2 == nil || fc.FuncProto.model == nil {
+		return false
+	}
+	// C++ returns false when input recovery is still active; coreaction.cc
+	// only calls this from the !isInputActive branch so the guard normally
+	// short-circuits false when the call-site has an in-flight ParamActive.
+	if fc.IsInputActive() {
+		return false
+	}
+	active := fc.getActiveInputState()
+	if active == nil {
+		return false
+	}
+	if slot1 < 0 || slot1+1 >= active.NumTrials() {
+		return false
+	}
+	var hislot, loslot *ParamTrial
+	if ishislot {
+		hislot = active.TrialForInputVarnode(slot1)
+		loslot = active.TrialForInputVarnode(slot1 + 1)
+		if hislot == nil || loslot == nil {
+			return false
+		}
+		if hislot.GetSize() != vn1.Size() || loslot.GetSize() != vn2.Size() {
+			return false
+		}
+	} else {
+		loslot = active.TrialForInputVarnode(slot1)
+		hislot = active.TrialForInputVarnode(slot1 + 1)
+		if hislot == nil || loslot == nil {
+			return false
+		}
+		if loslot.GetSize() != vn1.Size() || hislot.GetSize() != vn2.Size() {
+			return false
+		}
+	}
+	hiaddr := hislot.GetAddress()
+	hisize := hislot.GetSize()
+	loaddr := loslot.GetAddress()
+	losize := loslot.GetSize()
+	return checkParamJoin(fc.FuncProto.model, hiaddr, hisize, loaddr, losize)
+}
+
+// checkParamJoin is the stack-space approximation of
+// ParamListStandard::checkJoin used by CheckInputJoin.
+// C++ parity: fspec.cc ParamListStandard::checkJoin (stack branch only).
+func checkParamJoin(model *ProtoModel, hiaddr address.Address, hisize int32, loaddr address.Address, losize int32) bool {
+	if model == nil {
+		return false
+	}
+	if hisize <= 0 || losize <= 0 {
+		return false
+	}
+	if hiaddr.Space == nil || loaddr.Space == nil {
+		return false
+	}
+	if hiaddr.Space != loaddr.Space {
+		return false
+	}
+	if hiaddr.Space.Kind != address.SpaceKindStack {
+		// TODO known mismatch: register-space joins need ParamEntry.findEntry.
+		return false
+	}
+	// Contiguity check. Endianness of the stack space decides which piece is
+	// at the lower address.
+	var lowAddr, highAddr address.Address
+	var lowSize int32
+	if hiaddr.Space.BigEndian {
+		lowAddr = hiaddr
+		lowSize = hisize
+		highAddr = loaddr
+	} else {
+		lowAddr = loaddr
+		lowSize = losize
+		highAddr = hiaddr
+	}
+	if lowAddr.Offset+uint64(lowSize) != highAddr.Offset {
+		return false
+	}
+	if !model.IsParamOffset(hiaddr.Offset) || !model.IsParamOffset(loaddr.Offset) {
+		return false
+	}
+	align := uint64(model.ParamAlign)
+	if align == 0 {
+		align = 1
+	}
+	base := uint64(0)
+	if model.ParamBaseOffset > 0 {
+		base = uint64(model.ParamBaseOffset)
+	}
+	if hiaddr.Offset < base || loaddr.Offset < base {
+		return false
+	}
+	if ((hiaddr.Offset - base) % align) != 0 {
+		return false
+	}
+	if ((loaddr.Offset - base) % align) != 0 {
+		return false
+	}
+	return true
 }
 
 // DoInputJoin records a successful input-join so later analysis passes pick
 // up the merged varnode.
-// C++ parity: FuncCallSpecs::doInputJoin
-func (fc *FuncCallSpecs) DoInputJoin(_ int, _ bool) {
-	// No persistent state yet; matches CheckInputJoin always-false.
+// C++ parity: FuncCallSpecs::doInputJoin (fspec.cc:5376). The C++ routine
+// builds a join-space address via Architecture::constructJoinAddress before
+// calling ParamActive::joinTrial. Gosleigh does not yet expose a join space,
+// so we collapse the two trials at the low-address piece which preserves the
+// slot mapping even though the synthetic address is not join-space.
+// TODO known mismatch: join-space addresses are not synthesized; downstream
+// code that inspects the joined trial's GetAddress() sees the low piece.
+func (fc *FuncCallSpecs) DoInputJoin(slot1 int, ishislot bool) {
+	if fc == nil {
+		return
+	}
+	if fc.IsInputLocked() {
+		return
+	}
+	active := fc.getActiveInputState()
+	if active == nil {
+		return
+	}
+	if slot1 < 0 || slot1+1 >= active.NumTrials() {
+		return
+	}
+	trial1 := active.TrialForInputVarnode(slot1)
+	trial2 := active.TrialForInputVarnode(slot1 + 1)
+	if trial1 == nil || trial2 == nil {
+		return
+	}
+	addr1 := trial1.GetAddress()
+	addr2 := trial2.GetAddress()
+	totalsz := trial1.GetSize() + trial2.GetSize()
+	// Approximation of constructJoinAddress: pick the low piece.
+	var joinaddr address.Address
+	if ishislot {
+		// slot1 is hi, slot1+1 is lo -- lo address goes first on little-endian.
+		if addr1.Space != nil && addr1.Space.BigEndian {
+			joinaddr = addr1
+		} else {
+			joinaddr = addr2
+		}
+	} else {
+		if addr1.Space != nil && addr1.Space.BigEndian {
+			joinaddr = addr2
+		} else {
+			joinaddr = addr1
+		}
+	}
+	active.JoinTrial(int32(slot1), joinaddr, totalsz)
 }
 
 // fcActiveInputMap stores the per-FuncCallSpecs ParamActive for active-input
@@ -196,26 +385,54 @@ func (fc *FuncCallSpecs) setActiveInputState(p *ParamActive) {
 // FuncProto extensions (fspec.hh / fspec.cc subset)
 // -----------------------------------------------------------------------------
 
-// TrashBegin returns the start of the trash-register list.
-// C++ parity: FuncProto::trashBegin
-// TODO known mismatch: trash-register list is not yet loaded from the .sla
-// compiler specification; we return an empty slice so the upgraded
-// ActionLikelyTrash walks zero candidates.
+// fpTrashListMap stores the per-FuncProto likelyTrash override so that the
+// funcproto.go declaration list stays untouched. The side-map pattern mirrors
+// fcActiveInputMap above.
+// C++ parity: FuncProto::likelytrash field (container only)
+var fpTrashListMap = map[*FuncProto][]VarnodeData{}
+
+// SetLikelyTrash installs the likelyTrash override list. Called by the
+// compiler spec loader once the <likelytrash> section is ported.
+// C++ parity: FuncProto::likelytrash write path (decodeLikelyTrash).
+// TODO known mismatch: nothing wires this today; the compiler spec loader
+// needs to call it after parsing <likelytrash> registers.
+func (fp *FuncProto) SetLikelyTrash(entries []VarnodeData) {
+	if fp == nil {
+		return
+	}
+	if len(entries) == 0 {
+		delete(fpTrashListMap, fp)
+		return
+	}
+	fpTrashListMap[fp] = append([]VarnodeData(nil), entries...)
+}
+
+// TrashBegin returns the start of the trash-register list. The C++ routine
+// falls back to the ProtoModel's list when the per-call override is empty;
+// this Go port mirrors the fallback through the side map.
+// C++ parity: FuncProto::trashBegin (fspec.cc:4260)
+// TODO known mismatch: the ProtoModel side of the fallback still has no
+// backing store, so the fallback path returns an empty slice until the
+// compiler spec loader starts populating the map via SetLikelyTrash or its
+// ProtoModel counterpart.
 func (fp *FuncProto) TrashBegin() []VarnodeData {
 	if fp == nil {
 		return nil
+	}
+	if entries, ok := fpTrashListMap[fp]; ok {
+		return entries
 	}
 	return nil
 }
 
 // TrashEnd is a marker companion to TrashBegin; Go iteration uses the slice
 // length directly so this helper is kept only for documentation parity.
-// C++ parity: FuncProto::trashEnd
+// C++ parity: FuncProto::trashEnd (fspec.cc:4269)
 func (fp *FuncProto) TrashEnd() int {
 	if fp == nil {
 		return 0
 	}
-	return 0
+	return len(fpTrashListMap[fp])
 }
 
 // PossibleInputParam reports whether (addr,sz) could be a legal parameter
@@ -238,30 +455,86 @@ func (fp *FuncProto) PossibleInputParam(addr address.Address, sz int32) bool {
 // ScopeLocal extensions (database.hh Scope subset)
 // -----------------------------------------------------------------------------
 
-// FindFunctionByAddress returns the Funcdata whose entry address matches the
-// given code address. Used by ActionDeindirect when a CALLIND target resolves
-// to a constant pointer into code.
-// C++ parity: Scope::queryFunction
-// TODO known mismatch: the global function table is not yet populated on the
-// ScopeLocal side; we return nil so the deindirect walk falls through without
-// modification, matching the behaviour of a missing symbol lookup in C++.
-func (sl *ScopeLocal) FindFunctionByAddress(_ address.Address) *Funcdata {
+// scopeFunctionRegistry stores a per-scope lookup table from code address to
+// Funcdata so that FindFunctionByAddress and QueryExternalRefFunction can
+// return real results once the loader registers the process-wide function
+// list. A side map is used instead of a ScopeLocal field to keep
+// scopelocal.go's declaration list untouched.
+// C++ parity: Scope::queryFunction indirect table (mapScope + stackFunction)
+type scopeFunctionTable struct {
+	direct   map[address.Address]*Funcdata
+	external map[address.Address]*Funcdata
+}
+
+var scopeFunctionRegistry = map[*ScopeLocal]*scopeFunctionTable{}
+
+func scopeFunctionEnsure(sl *ScopeLocal) *scopeFunctionTable {
 	if sl == nil {
 		return nil
 	}
-	return nil
+	tab, ok := scopeFunctionRegistry[sl]
+	if !ok {
+		tab = &scopeFunctionTable{
+			direct:   map[address.Address]*Funcdata{},
+			external: map[address.Address]*Funcdata{},
+		}
+		scopeFunctionRegistry[sl] = tab
+	}
+	return tab
+}
+
+// RegisterFunctionAt installs a direct address -> Funcdata mapping. The
+// loader must call this for every recovered sibling function so that
+// ActionDeindirect can resolve constant callees.
+// C++ parity: Scope::addSymbolInternal for FunctionSymbol (data path only)
+func (sl *ScopeLocal) RegisterFunctionAt(addr address.Address, fd *Funcdata) {
+	if sl == nil || fd == nil {
+		return
+	}
+	scopeFunctionEnsure(sl).direct[addr] = fd
+}
+
+// RegisterExternalFunctionAt installs an external-ref -> Funcdata mapping.
+// C++ parity: Scope::addExternalRef (partial)
+func (sl *ScopeLocal) RegisterExternalFunctionAt(addr address.Address, fd *Funcdata) {
+	if sl == nil || fd == nil {
+		return
+	}
+	scopeFunctionEnsure(sl).external[addr] = fd
+}
+
+// FindFunctionByAddress returns the Funcdata whose entry address matches the
+// given code address. Used by ActionDeindirect when a CALLIND target resolves
+// to a constant pointer into code.
+// C++ parity: Scope::queryFunction (database.cc:1287)
+// TODO known mismatch: the loader does not yet call RegisterFunctionAt so
+// the direct map is empty in practice. Once the loader wires up the process
+// function list this helper returns real hits without further code changes.
+func (sl *ScopeLocal) FindFunctionByAddress(addr address.Address) *Funcdata {
+	if sl == nil {
+		return nil
+	}
+	tab, ok := scopeFunctionRegistry[sl]
+	if !ok {
+		return nil
+	}
+	return tab.direct[addr]
 }
 
 // QueryExternalRefFunction returns the Funcdata reached by following the
 // external-reference at the given address.
-// C++ parity: Scope::queryExternalRefFunction
-// TODO known mismatch: external-reference table is not yet modelled; returns
-// nil so ActionDeindirect skips the external branch.
-func (sl *ScopeLocal) QueryExternalRefFunction(_ address.Address) *Funcdata {
+// C++ parity: Scope::queryExternalRefFunction (database.cc:1416)
+// TODO known mismatch: external-reference table is not yet populated; the
+// side map is empty until the loader calls RegisterExternalFunctionAt.
+func (sl *ScopeLocal) QueryExternalRefFunction(addr address.Address) *Funcdata {
 	if sl == nil {
 		return nil
 	}
-	return nil
+	tab, ok := scopeFunctionRegistry[sl]
+	if !ok {
+		return nil
+	}
+	return tab.external[addr]
 }
 
 // -----------------------------------------------------------------------------
@@ -270,15 +543,26 @@ func (sl *ScopeLocal) QueryExternalRefFunction(_ address.Address) *Funcdata {
 
 // IsDoublePrecisOn reports whether the architecture wants double-precision
 // parameter recovery.
-// C++ parity: Funcdata::isDoublePrecisOn
-// TODO known mismatch: Architecture::double_precis_port is not yet tracked;
-// we answer false so the upgraded ActionParamDouble skips the
-// double-precision fallback path until the flag lands.
+// C++ parity: Funcdata::isDoublePrecisOn (funcdata.hh:169)
 func (fd *Funcdata) IsDoublePrecisOn() bool {
 	if fd == nil {
 		return false
 	}
-	return false
+	return fd.HasFlag(FuncDoublePrecisOn)
+}
+
+// SetDoublePrecisRecovery toggles the double_precis_on flag on the owning
+// Funcdata. Callers use this to enable the ActionParamDouble join path.
+// C++ parity: Funcdata::setDoublePrecisRecovery (funcdata.hh:167)
+func (fd *Funcdata) SetDoublePrecisRecovery(val bool) {
+	if fd == nil {
+		return
+	}
+	if val {
+		fd.SetFlag(FuncDoublePrecisOn)
+	} else {
+		fd.ClearFlag(FuncDoublePrecisOn)
+	}
 }
 
 // FindCoveredInput returns the input-flagged Varnode that completely covers
