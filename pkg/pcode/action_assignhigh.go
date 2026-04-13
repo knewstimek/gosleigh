@@ -64,9 +64,8 @@ func assignInitialHighVariables(data *Funcdata) {
 }
 
 func (a *ActionAssignHigh) Apply(data *Funcdata) int {
+	// C++ parity: ActionAssignHigh::apply calls Funcdata::setHighLevel() only.
+	// No merging here -- that belongs to ActionMergeRequired/ActionMergeAdjacent/ActionMergeType.
 	assignInitialHighVariables(data)
-	merge := NewMerge(data)
-	merge.mergeByDatatype()
-	merge.mergeAdjacentCopies()
 	return 0
 }

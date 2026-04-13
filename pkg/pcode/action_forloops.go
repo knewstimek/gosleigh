@@ -136,6 +136,20 @@ func tryMarkForLoop(data *Funcdata, wdo *BlockWhileDo) {
 		return
 	}
 
+	// testTerminal check: the varnode that loopDef reads from the tail slot must
+	// be explicit. If it is implied (single-use temp), the iterate statement
+	// cannot stand as a for-loop iterator clause.
+	// C++ parity: BlockWhileDo::testTerminal (block.cc:3271)
+	//   "if (!vn->isExplicit()) return (PcodeOp*)0;"
+	// This check requires ActionMarkExplicit/ActionMarkImplied to have run first;
+	// call ActionForLoops only after those passes.
+	if tailSlot >= 0 && loopDef != nil {
+		tailVn := loopDef.Input(tailSlot)
+		if tailVn != nil && !tailVn.IsExplicit() {
+			return
+		}
+	}
+
 	// Mark iterateOp as NonPrinting so emitOps skips it in the body.
 	// C++ parity: Funcdata::opMarkNonPrinting(iterateOp)
 	iterateOp.SetFlag(PcodeOpNonPrinting)

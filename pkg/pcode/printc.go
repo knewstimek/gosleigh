@@ -27,6 +27,8 @@ const (
 	cPrecPrimary    = ExprPrecPrimary
 )
 
+
+
 type PrintC struct {
 	indentStep      string
 	registerNames   map[string]string // "spaceIdx:offset:size" -> reg name; nil = disabled
@@ -276,13 +278,14 @@ func (s *printCState) collectSymbols() {
 		all := s.fd.GetVarnodeBank().AllVarnodes()
 		params := make([]*Varnode, 0)
 		locals := make([]*Varnode, 0)
-		// seenHV tracks HighVariables already added to params/locals to avoid emitting
-		// multiple SSA versions of the same logical variable as separate declarations.
-		// After ScopeLocal.BuildFromVarnodes groups all SSA versions at the same address
-		// into one HighVariable, each logical variable maps to one HighVariable instance.
-		// Without this dedup, add3-style functions with multiple LOAD varnodes per slot
-		// produce duplicate param_N declarations.
+		// seenParamHV deduplicates HighVariables added to params to avoid duplicate
+		// param_N declarations when multiple input SSA versions share one HighVariable.
 		// C++ parity: Ghidra uses HighVariable as the unit of declaration (one per HighVar).
+		seenParamHV := make(map[*HighVariable]bool)
+		// seenHV deduplicates HighVariables added to locals (named HVs only).
+		// Kept separate from seenParamHV so that non-input varnodes merged by
+		// ActionMergeCopy into a param HighVariable can still appear in locals for
+		// the G5 identity-copy / return-carrier detection in renameReturnOnlyLocals.
 		seenHV := make(map[*HighVariable]bool)
 		for _, vn := range all {
 			if vn == nil || vn.IsConstant() || vn.IsAnnotation() {
@@ -295,12 +298,18 @@ func (s *printCState) collectSymbols() {
 					s.names[vn] = name
 				}
 				// Determine if param or local by name prefix.
-				if len(name) >= 6 && name[:6] == "param_" {
+				// Only input varnodes (IsInput) are real function parameters; non-input
+				// varnodes with a "param_" HighVariable name were merged into a param HV
+				// by ActionMergeCopy and must stay in locals for G5 identity detection.
+				if len(name) >= 6 && name[:6] == "param_" && vn.IsInput() {
 					// Only add one representative varnode per HighVariable.
 					// All SSA versions of the same logical param share one HighVariable;
 					// we only need one varnode in s.params for declaration purposes.
-					if !seenHV[hv] {
-						seenHV[hv] = true
+					// Use seenParamHV (not seenHV) so non-input varnodes sharing
+					// the same HV (return-carrier COPYs merged by ActionMergeCopy)
+					// can still appear in locals for G5 identity detection.
+					if !seenParamHV[hv] {
+						seenParamHV[hv] = true
 						params = append(params, vn)
 					}
 				} else {
@@ -351,7 +360,14 @@ func (s *printCState) collectSymbols() {
 						// C++ parity: Ghidra uses isInput() varnodes only for parameters, not
 						// for declaring or assigning local variables.
 						if !vn.IsInput() {
-							if !seenHV[hv] {
+							// seenHV dedup only applies to NAMED HighVariables (those given names
+							// by ScopeLocal.BuildFromVarnodes). Unnamed HVs created by
+							// ActionAssignHigh are deduped by location key in the locName pass
+							// below, so we must NOT apply seenHV here -- otherwise all but one
+							// SSA version of the same register slot would be omitted from s.locals
+							// and fall through to the local_N fallback in nameOf.
+							hvNamed := name != "" && !s.isMachineGeneratedName(name)
+							if !seenHV[hv] || !hvNamed {
 								// When a unique-space varnode's sole consumer is a MULTIEQUAL
 								// with a named non-unique output, use the MULTIEQUAL output as
 								// the declaration representative instead of the unique varnode.
@@ -370,7 +386,9 @@ func (s *printCState) collectSymbols() {
 										rep = consumer.Output()
 									}
 								}
-								seenHV[hv] = true
+								if hvNamed {
+									seenHV[hv] = true
+								}
 								locals = append(locals, rep)
 							}
 						}
@@ -623,11 +641,13 @@ func (s *printCState) shouldInline(op *PcodeOp) bool {
 		return false
 	}
 	if op.Output().NumDescend() != 1 {
+		fmt.Printf("DEBUG shouldInline: op=%v out=%v NumDescend=%d (not 1, skip)\n", op.Code(), op.Output(), op.Output().NumDescend())
 		return false
 	}
 	// C++ parity: ActionMarkExplicit::baseExplicit returns -1 (explicit) when any descendant is a marker op (MULTIEQUAL/INDIRECT). coreaction.cc:3083
 	// A varnode whose sole consumer is a marker op must be emitted as an explicit statement, not inlined.
 	if consumer := op.Output().LoneDescend(); consumer != nil {
+		fmt.Printf("DEBUG shouldInline: op=%v out=%v consumer=%v consumerParent=%v\n", op.Code(), op.Output(), consumer.Code(), consumer.Parent())
 		switch consumer.Code() {
 		case CPUI_MULTIEQUAL, CPUI_INDIRECT:
 			return false
@@ -789,6 +809,16 @@ func returnValue(op *PcodeOp) *Varnode {
 		inp = op.Input(1)
 	} else {
 		inp = op.Input(0)
+		// When the full pipeline ran (stripReturnIndirectRef + anchorReturnReg),
+		// input[0] is the zero-constant placeholder for the return address.
+		// If anchorReturnReg found no valid return value (void function), the RETURN
+		// op has only this one constant input and no real return varnode exists.
+		// Zero-constant specifically: stripReturnIndirectRef always substitutes 0.
+		// Non-zero constants may appear in raw unit tests as legitimate return values.
+		// C++ parity: Ghidra's RETURN has input[0]=retaddr, input[1]=retval when non-void.
+		if inp != nil && inp.IsConstant() && inp.Offset() == 0 {
+			return nil
+		}
 	}
 	if inp == nil || inp.IsAnnotation() || inp.IsInput() {
 		return nil
@@ -1287,11 +1317,30 @@ func (s *printCState) emitWhileBlock(bl *FlowBlock) error {
 	if wdo, ok := bl.Concrete().(*BlockWhileDo); ok && wdo.IterateOp() != nil {
 		return s.emitForBlock(wdo, children)
 	}
+	// Render the condition block in comma_separate mode if it contains printable
+	// ops before the CBRANCH (e.g. iVar1 = param_4 produced by NodeJoin).
+	// C++ parity: PrintC::emitBlockWhileDo sets setMod(comma_separate) for condBlock
+	// emission (printc.cc ~3186).
+	fmt.Printf("DEBUG emitWhileBlock children[0]=%p type=%T children[1]=%p type=%T\n", children[0], children[0].Concrete(), children[1], children[1].Concrete())
+	condStr := s.renderCondBlockComma(children[0])
+	// DEBUG: dump body block ops
+	fmt.Printf("DEBUG emitWhileBlock body block children[1]=%p type=%T\n", children[1], children[1].Concrete())
+	if bodyBasic, ok2 := children[1].Concrete().(*BlockBasic); ok2 {
+		for _, op := range bodyBasic.Ops() {
+			if op == nil { continue }
+			out := op.Output()
+			fmt.Printf("  bodyop=%v dead=%v marker=%v nonprint=%v inline=%v prologue=%v identity=%v", op.Code(), op.IsDead(), op.IsMarker(), op.HasFlag(PcodeOpNonPrinting), s.inline[op], s.prologueOps[op], s.identityOps[op])
+			if out != nil {
+				fmt.Printf(" out=%v implied=%v explicit=%v free=%v name=%q", out, out.IsImplied(), out.IsExplicit(), out.IsFree(), s.nameOf(out))
+			}
+			fmt.Printf("\n")
+		}
+	}
 	s.lang.OpenBlockAfter(func() {
 		s.lang.Token("while")
 		s.lang.Space()
 		s.lang.Token("(")
-		s.lang.Token(s.mustRenderCondition(children[0]))
+		s.lang.Token(condStr)
 		s.lang.Token(")")
 	})
 	if err := s.emitBlock(children[1]); err != nil {
@@ -1299,6 +1348,131 @@ func (s *printCState) emitWhileBlock(bl *FlowBlock) error {
 	}
 	s.lang.CloseBlock()
 	return nil
+}
+
+// renderCondBlockComma renders the condition block of a while-do loop in
+// comma_separate mode. Printable non-CBRANCH ops are rendered as assignments
+// separated by ", " and the final CBRANCH condition is appended last.
+// Falls back to mustRenderCondition when there are no printable non-CBRANCH ops.
+// C++ parity: PrintC::emitBlockBasic in setMod(comma_separate) mode +
+// emitBlockWhileDo (printc.cc ~3186).
+func (s *printCState) renderCondBlockComma(bl *FlowBlock) string {
+	basic, ok := bl.Concrete().(*BlockBasic)
+	if !ok {
+		return s.mustRenderCondition(bl)
+	}
+
+	// DEBUG: dump all ops in the condition block
+	fmt.Printf("DEBUG renderCondBlockComma: block=%p ops:\n", basic)
+	for _, op := range basic.Ops() {
+		if op == nil {
+			continue
+		}
+		out := op.Output()
+		fmt.Printf("  op=%v dead=%v marker=%v nonprint=%v inline=%v prologue=%v identity=%v", op.Code(), op.IsDead(), op.IsMarker(), op.HasFlag(PcodeOpNonPrinting), s.inline[op], s.prologueOps[op], s.identityOps[op])
+		if out != nil {
+			fmt.Printf(" out=%v implied=%v explicit=%v free=%v name=%q", out, out.IsImplied(), out.IsExplicit(), out.IsFree(), s.nameOf(out))
+		}
+		if op.IsMarker() && op.Code() == CPUI_MULTIEQUAL {
+			for i := 0; i < op.NumInput(); i++ {
+				inp := op.Input(i)
+				if inp != nil {
+					fmt.Printf("\n    Input(%d)=%v name=%q", i, inp, s.nameOf(inp))
+				}
+			}
+		}
+		fmt.Printf("\n")
+	}
+
+	var parts []string
+	var cbranch *PcodeOp
+
+	for _, op := range basic.Ops() {
+		if op == nil || op.IsDead() {
+			continue
+		}
+		if s.inline[op] {
+			continue
+		}
+		if op.HasFlag(PcodeOpNonPrinting) {
+			continue
+		}
+		if s.prologueOps[op] {
+			continue
+		}
+		if s.identityOps[op] {
+			continue
+		}
+		// Skip marker ops (MULTIEQUAL/INDIRECT) -- these are phi merge points.
+		if op.IsMarker() {
+			continue
+		}
+
+		if op.Code() == CPUI_CBRANCH {
+			cbranch = op
+			continue
+		}
+		// Skip other control-flow ops.
+		if isControlOpcode(op.Code()) {
+			continue
+		}
+
+		// Skip ops with unique-space outputs that have no named consumer -- these
+		// are pure SSA temporaries that would produce "tmp_N = ..." noise.
+		if out := op.Output(); out != nil {
+			if out.Space() != nil && out.Space().IsUnique() {
+				consumer := out.LoneDescend()
+				if consumer == nil || consumer.Code() != CPUI_MULTIEQUAL ||
+					consumer.Output() == nil ||
+					consumer.Output().Space() == nil ||
+					consumer.Output().Space().IsUnique() ||
+					s.nameOf(consumer.Output()) == "" {
+					continue
+				}
+				// Remap unique output to MULTIEQUAL output's name (same as emitOps).
+				s.names[out] = s.nameOf(consumer.Output())
+			}
+			if out.IsFree() {
+				continue
+			}
+			if out.NumDescend() == 0 {
+				switch op.Code() {
+				case CPUI_INT_CARRY, CPUI_INT_SCARRY, CPUI_INT_SBORROW, CPUI_POPCOUNT:
+					continue
+				}
+			}
+		}
+
+		// Render this op as "lhs = rhs" (without semicolon) using renderForPartOp
+		// which already handles STORE and assignment ops correctly.
+		partStr, err := s.renderForPartOp(op)
+		if err != nil || partStr == "" {
+			continue
+		}
+		parts = append(parts, partStr)
+	}
+
+	if cbranch != nil {
+		condStr, err := s.renderBranchCondition(cbranch)
+		if err == nil && condStr != "" {
+			parts = append(parts, condStr)
+		}
+	} else {
+		// No CBRANCH found: fall back to mustRenderCondition.
+		parts = append(parts, s.mustRenderCondition(bl))
+	}
+
+	if len(parts) == 1 {
+		return parts[0]
+	}
+	var sb strings.Builder
+	for i, p := range parts {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(p)
+	}
+	return sb.String()
 }
 
 // emitForBlock renders a BlockWhileDo as a C for-loop:

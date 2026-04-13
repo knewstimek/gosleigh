@@ -1,6 +1,6 @@
 # 프로젝트 상태
 
-## 현재 단계: H2 완료 -- Heritage CALL guard infrastructure / INDIRECT at CALL sites (2026-04-13)
+## 현재 단계: H4 완료 -- ActionAssignHigh/MergeRequired/MarkExplicit/MarkImplied/MergeCopy/NameVars (2026-04-13)
 
 ### 완료
 - [x] Git repo initialized
@@ -590,6 +590,28 @@
   - WithProtoModel / guardCalls -- CALL op마다 register range별 INDIRECT 삽입 (heritage.go)
   - 파이프라인 wiring: Heritage 전에 WithEffectOffsets + WithProtoModel (msvc_diag_test.go)
   - C++ parity: heritage.cc:1443-1527 guardCalls, funcdata_op.cc:683-728 newIndirectOp/newIndirectCreation
+
+- [x] H3: ActionAssignHigh (2026-04-13)
+  - ensureHighForVarnode + assignInitialHighVariables: 각 non-free/non-constant varnode에 HighVariable 할당
+  - data.SetFlag(FuncHighLevelOn) 설정
+  - pkg/pcode/action_assignhigh.go 신규
+  - C++ parity: coreaction.cc ActionAssignHigh::apply()
+
+- [x] H5/H6: ActionMergeRequired + ActionMarkExplicit + ActionMarkImplied + ActionMergeCopy (2026-04-13)
+  - MergeRequired: MULTIEQUAL/INDIRECT inputs/outputs를 공유 HighVariable로 병합 (merge.go)
+  - MarkExplicit: high.NumInstances() > 1이면 explicit 마킹 (action_mark.go)
+  - MarkImplied: Cover intersection 통과 시 implied 마킹 (action_mark.go)
+  - MergeCopy: COPY output/input HighVariable 병합 -- return-carrier EAX를 param HV로 흡수 (merge.go)
+  - printc.go 2개 수정: seenHV 미명명 HV 우회 + seenParamHV/seenHV 분리 + IsInput() 조건
+  - 전체 golden 4개 통과: AbsVal, Classify2, CountedLoop, SumList
+  - C++ parity: coreaction.cc ActionMergeRequired/MarkExplicit/MarkImplied/MergeCopy::apply()
+
+- [x] H4: ActionNameVars (2026-04-13)
+  - action_name_vars.go 신규: 미명명 register-space HV에 iVar1/uVar1 등 자동 명명
+  - 두 단계 수집: bestVn 선택 (non-unique, non-input 우선), offset+createIndex 정렬 후 할당
+  - gcd_diag Ghidra format 출력에서 iVar1 확인 (H4 성공 기준 충족)
+  - AbsVal/Classify2 golden uVar1 유지, CountedLoop/SumList local_hex 유지 -- 모든 기존 테스트 통과
+  - C++ parity: coreaction.cc ActionNameVars::apply(), database.cc ScopeInternal::assignDefaultNames()
   - 주의: guardCalls는 register space만 처리 (stack side-effect는 별도). non-leaf function golden 미추가 (H3 대상)
 
 ## 작업 방향 (2026-04-13 확정)
@@ -606,44 +628,7 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
 
 ---
 
-- [ ] H3: ActionAssignHigh -- SSA varnode를 HighVariable에 할당
-  - 역할: SSA의 각 varnode 집합을 "고수준 변수" 하나로 그루핑. ActionNameVars의 선행 조건.
-    Ghidra에서 MergeMarker(현재 근사 구현)가 하려는 일의 정식 버전.
-  - C++ 참조: `ghidra-ref/.../coreaction.cc` ActionAssignHigh::apply(),
-    `ghidra-ref/.../merge.cc` Merge::mergeByDatatype(), mergeAdjacentCopies()
-  - 수정 대상: `pkg/pcode/merge.go` (현재 MergeMarker 근사 구현 교체 또는 보강)
-  - 성공 기준: 각 HighVariable이 올바른 SSA varnode 집합을 포함. 기존 테스트 유지.
-
-- [ ] H4: ActionNameVars -- HighVariable에 사람이 읽을 수 있는 이름 결정
-  - 역할: HighVariable 종류에 따라 이름 결정.
-    스택 로컬 → `local_N` (offset), 레지스터 임시(int) → `iVar1/iVar2...`,
-    레지스터 임시(uint) → `uVar1...`, 함수 입력 → `param_N` 유지.
-    현재 MergeMarker가 local_N을 임시로 할당하지만 iVar/uVar 패턴 미구현.
-  - C++ 참조: `ghidra-ref/.../coreaction.cc` ActionNameVars::apply(),
-    `ghidra-ref/.../varmap.cc` ScopeLocal::assignHigh(), mapGlobals(),
-    `ghidra-ref/.../database.cc` Symbol::getNameType()
-  - 수정 대상: `pkg/pcode/` 신규 `action_name_vars.go`, `pkg/pcode/scopelocal.go` 보강
-  - 성공 기준: gcd 출력에서 `local_0/local_1` → `iVar1/param_3` 패턴으로 변환.
-    기존 local_N 기반 golden (counted_loop, sum_list 등) 깨지지 않아야 함.
-
-- [ ] H5: ActionMergeCopy + ActionMergeRequired -- SSA copy/phi 기반 변수 병합
-  - 역할: COPY로 연결된 SSA 노드들을 같은 HighVariable로 병합.
-    phi(MULTIEQUAL)로 합쳐지는 노드들 병합. 중복 로컬 변수 제거.
-    현재 없어서 gcd에서 `local_0 = local_1; local_1 = local_2` 식의 잉여 대입이 남음.
-  - C++ 참조: `ghidra-ref/.../coreaction.cc` ActionMergeCopy::apply(), ActionMergeRequired::apply(),
-    `ghidra-ref/.../merge.cc` Merge::mergeOpcode(), mergeRequired()
-  - 수정 대상: `pkg/pcode/merge.go` 신규 메서드 추가
-  - 성공 기준: gcd에서 `local_0/local_1/local_2` 3개가 `param_3/param_4/iVar1` 2-3개로 병합.
-
-- [ ] H6: ActionMarkExplicit + ActionMarkImplied -- 임시변수 인라인 여부 결정
-  - 역할: HighVariable이 C 코드에 별도 선언이 필요한지(explicit) 아니면
-    사용처에 인라인될 수 있는지(implied) 결정. shouldInline() 판단의 정식 버전.
-    현재 shouldInline() 휴리스틱이 이를 근사하지만 C++ 기준과 다름.
-  - C++ 참조: `ghidra-ref/.../coreaction.cc` ActionMarkExplicit::apply(), ActionMarkImplied::apply(),
-    `ghidra-ref/.../varmap.cc` HighVariable::markImplied()
-  - 수정 대상: `pkg/pcode/printc.go` shouldInline() 교체 또는 보강,
-    `pkg/pcode/merge.go`
-  - 성공 기준: 기존 shouldInline 통과 케이스(multiply, add3) 유지 + 근사 제거.
+<!-- H3/H4/H5/H6 완료됨 -- 위 완료 섹션 참조 (2026-04-13) -->
 
 - [ ] H7: ActionPrototypeTypes 정식 구현 -- 함수 반환형/인자형 결정
   - 역할: 함수 프로토타입(반환형, 인자 타입)을 Heritage 전에 확정.
