@@ -2437,14 +2437,15 @@ func (a *ActionVarnodeProps) Apply(data *Funcdata) int {
 }
 
 // ---------------------------------------------------------------------------
-// ActionConditionalConst -- PARTIAL
+// ActionConditionalConst -- REAL (port of coreaction.cc lines 4080-4557)
 // ---------------------------------------------------------------------------
 
 // ActionConditionalConst propagates boolean values known along one edge of a
 // CBRANCH into MULTIEQUAL phis reachable from that edge.
 // C++ parity: coreaction.hh ActionConditionalConst; coreaction.cc
 // ActionConditionalConst::apply and its helpers (pushConstant,
-// propagateConstant, findConstCompare, placeMultipleConstants, ...).
+// propagateConstant, findConstCompare, placeMultipleConstants, collectReachable,
+// flowTogether, placeCopy, handlePhiNodes, testAlternatePath).
 type ActionConditionalConst struct {
 	ActionBase
 }
@@ -2468,20 +2469,17 @@ func (a *ActionConditionalConst) Clone(groups ActionGroupList) Action {
 	return NewActionConditionalConst(a.GetGroup())
 }
 
-// Apply walks each CBRANCH to find boolean varnodes with multiple readers; if
-// the boolean varnode is read again inside a dominated block, the read can be
-// replaced by the known constant (0 on the false branch, 1 on the true branch).
-// TODO known mismatch: the C++ action is ~362 lines built on top of
-// FlowBlock::restrictedByConditional, FlowBlock::getFalseOut/getTrueOut,
-// getOutRevIndex, PcodeOpNode reach analysis, placeMultipleConstants, and
-// placeCopy helpers (coreaction.cc ActionConditionalConst::collectReachable /
-// flowTogether / placeCopy / handlePhiNodes / propagateConstant /
-// pushConstant / testAlternatePath). Gosleigh only has a light BlockBasic /
-// FlowBlock port, so this port restricts itself to the simple case:
-// boolean varnode with descendants inside the dominating true/false branch.
-// The broader MULTIEQUAL-aware propagation and placeCopy machinery are
-// tracked as follow-on work.
-// C++ parity: coreaction.cc ActionConditionalConst::apply
+// Apply walks each CBRANCH, building a worklist of constPoints, and delegates
+// the heavy lifting to condConstContext.propagateConstant which performs the
+// full reach / flowTogether / placeCopy analysis from condexe.go. Each hit
+// advances a.count so the main loop will iterate.
+// C++ parity: coreaction.cc ActionConditionalConst::apply (lines 4525-4557)
+// TODO known mismatch:
+//   - Gosleigh has no Funcdata::numHeritagePasses, so useMultiequal is always
+//     enabled. C++ defers phi-node propagation until the stack space has been
+//     heritaged at least once.
+//   - pushConstant is limited to the straight-COPY case because
+//     PcodeOp::executeSimple is not ported yet.
 func (a *ActionConditionalConst) Apply(data *Funcdata) int {
 	if data == nil {
 		return 0
@@ -2489,6 +2487,12 @@ func (a *ActionConditionalConst) Apply(data *Funcdata) int {
 	bg := data.GetBasicBlocks()
 	if bg == nil {
 		return 0
+	}
+	ctx := &condConstContext{
+		data:       data,
+		useMulti:   true,
+		markedOps:  make(map[*PcodeOp]bool),
+		markedVars: make(map[*Varnode]bool),
 	}
 	for i := 0; i < bg.GetSize(); i++ {
 		fb := bg.GetBlock(i)
@@ -2507,70 +2511,52 @@ func (a *ActionConditionalConst) Apply(data *Funcdata) int {
 			continue
 		}
 		boolVn := cBranch.Input(1)
-		if boolVn == nil || boolVn.IsConstant() {
+		if boolVn == nil {
 			continue
 		}
-		// Skip when the boolean has a single reader -- no substitution gain.
-		if boolVn.LoneDescend() != nil {
+		if fb.SizeOut() < 2 {
 			continue
 		}
-		// Determine which edge corresponds to true / false.
-		// C++ parity: cBranch->isBooleanFlip() flips the polarity.
-		flip := cBranch.HasFlag(PcodeOpBooleanFlip)
-		// Replace remaining descendants of boolVn with the appropriate constant
-		// if the descendant's block is (crudely) dominated by the taken edge.
-		// We approximate dominance by "descendant op parent is one of the
-		// CBRANCH out-blocks" rather than full dominator analysis.
-		// TODO known mismatch: this drops the restrictedByConditional test.
-		for _, useOp := range boolVn.DescendIter() {
-			if useOp == nil || useOp == cBranch || useOp.IsDead() {
-				continue
+		var blockDom [2]bool
+		blockDom[0] = restrictedByConditional(fb.OutEdge(0).Point, fb)
+		blockDom[1] = restrictedByConditional(fb.OutEdge(1).Point, fb)
+		flipEdge := cBranch.HasFlag(PcodeOpBooleanFlip)
+		var points []constPoint
+		if boolVn.LoneDescend() == nil {
+			falseVal := uint64(0)
+			trueVal := uint64(1)
+			if flipEdge {
+				falseVal, trueVal = 1, 0
 			}
-			useBlk := useOp.Parent()
-			if useBlk == nil {
-				continue
-			}
-			// Test whether the use block is one of the two out-blocks of bb.
-			var polarity int // 0 = false branch, 1 = true branch
-			matched := false
-			for s := 0; s < fb.SizeOut(); s++ {
-				edge := fb.OutEdge(s)
-				out := edge.Point
-				if out == nil {
-					continue
-				}
-				if ob, ok := out.Concrete().(*BlockBasic); ok && ob == useBlk {
-					polarity = s
-					matched = true
-					break
-				}
-			}
-			if !matched {
-				continue
-			}
-			var val uint64
-			// C++ parity: false branch -> constant 0, true branch -> constant 1,
-			// flipped by isBooleanFlip().
-			if (polarity == 1) != flip {
-				val = 1
-			} else {
-				val = 0
-			}
-			slot := useOp.GetSlot(boolVn)
-			if slot < 0 {
-				continue
-			}
-			c := data.NewConstant(boolVn.Size(), val)
-			data.OpUnsetInput(useOp, slot)
-			data.OpSetInput(useOp, c, slot)
-			a.count++
+			points = append(points, constPoint{
+				vn:         boolVn,
+				value:      falseVal,
+				constBlock: fb.FalseOut(),
+				inSlot:     fb.OutRevIndex(0),
+				blockIsDom: blockDom[0],
+			})
+			points = append(points, constPoint{
+				vn:         boolVn,
+				value:      trueVal,
+				constBlock: fb.TrueOut(),
+				inSlot:     fb.OutRevIndex(1),
+				blockIsDom: blockDom[1],
+			})
 		}
+		ctx.findConstCompare(&points, boolVn, fb, blockDom, flipEdge)
+		if len(points) == 0 {
+			continue
+		}
+		before := ctx.changed
+		ctx.propagateConstant(points)
+		delta := ctx.changed - before
+		a.count += delta
 	}
 	return 0
 }
 
 // ---------------------------------------------------------------------------
-// ActionConditionalExe -- TODO
+// ActionConditionalExe -- REAL (driver for condexe.go ConditionalExecution)
 // ---------------------------------------------------------------------------
 
 // ActionConditionalExe trims control flow whose branches cancel dataflow.
@@ -2600,13 +2586,43 @@ func (a *ActionConditionalExe) Clone(groups ActionGroupList) Action {
 	return NewActionConditionalExe(a.GetGroup())
 }
 
-// Apply is a TODO stub: condexe.cc ConditionalExecution (trial / execute /
-// discoverCbranch / verifyCondition / discoverConditionalZero) is not yet
-// ported. Without that class, eliminating conditionally dead dataflow is not
-// feasible -- skipping this action keeps parity-observable output unchanged.
+// Apply iterates all basic blocks looking for modifiable conditional-execute
+// configurations, calling ConditionalExecution.Trial then .Execute on every
+// hit until a pass makes no changes. Matches C++ coreaction.cc lines 4478-4503.
 // C++ parity: condexe.cc ActionConditionalExe::apply
+// TODO known mismatch: the C++ implementation first bails out if
+// data.hasUnreachableBlocks() is true. Gosleigh has no such method; instead
+// we trust Trial() to reject malformed iblocks via testIBlock/findInitPre.
 func (a *ActionConditionalExe) Apply(data *Funcdata) int {
-	_ = data
+	if data == nil {
+		return 0
+	}
+	bg := data.GetBasicBlocks()
+	if bg == nil {
+		return 0
+	}
+	condexe := NewConditionalExecution(data)
+	for {
+		changed := false
+		for i := 0; i < bg.GetSize(); i++ {
+			fb := bg.GetBlock(i)
+			if fb == nil {
+				continue
+			}
+			bb, ok := fb.Concrete().(*BlockBasic)
+			if !ok || bb == nil {
+				continue
+			}
+			if condexe.Trial(bb) {
+				condexe.Execute()
+				a.count++
+				changed = true
+			}
+		}
+		if !changed {
+			break
+		}
+	}
 	return 0
 }
 
