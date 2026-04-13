@@ -831,15 +831,418 @@ func splitVarnodeFindCopies(in *SplitVarnode, splitvec *[]SplitVarnode) {
 	}
 }
 
-// C++ parity: SplitVarnode::applyRuleIn
-// The Form classes (AddForm/SubForm/LogicalForm/...) are not yet ported, so
-// this function currently produces no transforms. RuleDoubleIn still invokes
-// it, and returning 0 is parity-compatible with an empty form set.
-// TODO(parity): port AddForm, SubForm, LogicalForm, Equal1/2/3Form,
-// LessConstForm, LessThreeWay, ShiftForm, MultForm, PhiForm, IndirectForm,
-// CopyForceForm then extend this switch to call their applyRule methods.
+// C++ parity: SplitVarnode::isWholePhiFeasible
+// Similar to IsWholeFeasible, but the whole must be defined before the end of
+// the given basic block.
+func (s *SplitVarnode) IsWholePhiFeasible(bl *FlowBlock) bool {
+	if s.IsConstant() {
+		return false
+	}
+	if !s.findWholeSplitToPieces() {
+		if !s.findWholeBuiltFromPieces() {
+			if !s.findDefinitionPoint() {
+				return false
+			}
+		}
+	}
+	if s.defblock == nil {
+		return true
+	}
+	if bl != nil {
+		if bb, ok := bl.Concrete().(*BlockBasic); ok && bb == s.defblock {
+			return true
+		}
+	}
+	cur := bl
+	for cur != nil {
+		cur = cur.ImmedDom()
+		if cur == nil {
+			return false
+		}
+		if bb, ok := cur.Concrete().(*BlockBasic); ok && bb == s.defblock {
+			return true
+		}
+	}
+	return false
+}
+
+// C++ parity: SplitVarnode::findCreateOutputWhole
+// Create a whole Varnode as a unique register. The caller must later wire it
+// as the output of some PcodeOp.
+func (s *SplitVarnode) FindCreateOutputWhole(data *Funcdata) {
+	s.lo.SetPrecisLo()
+	s.hi.SetPrecisHi()
+	if s.whole != nil {
+		return
+	}
+	s.whole = data.vbank.CreateUnique(s.wholesize)
+}
+
+// C++ parity: SplitVarnode::createJoinedWhole
+// Build the whole using the contiguous storage of the pieces when possible.
+// The join-address fallback (constructJoinAddress) is not yet plumbed in
+// Gosleigh, so we fall back to a unique Varnode and record a TODO.
+func (s *SplitVarnode) CreateJoinedWhole(data *Funcdata) {
+	s.lo.SetPrecisLo()
+	s.hi.SetPrecisHi()
+	if s.whole != nil {
+		return
+	}
+	if addr, ok := SplitVarnodeIsAddrTiedContiguous(s.lo, s.hi); ok {
+		s.whole = data.NewVarnode(s.wholesize, addr)
+		s.whole.SetAddlFlags(VarnodeWriteMask)
+		return
+	}
+	// TODO(parity): constructJoinAddress (double.cc:573). Use a unique as a
+	// safe fallback so the rewrite still proceeds; semantics for non-contiguous
+	// joined wholes may differ until the join-space plumbing is ported.
+	s.whole = data.vbank.CreateUnique(s.wholesize)
+	s.whole.SetAddlFlags(VarnodeWriteMask)
+}
+
+// buildPieceFromWhole converts the defining op of one piece (lo or hi) into a
+// SUBPIECE of the freshly created whole.
+// C++ parity: SplitVarnode::buildLoFromWhole / buildHiFromWhole (double.cc:583/621)
+func (s *SplitVarnode) buildPieceFromWhole(data *Funcdata, piece *Varnode, offset int32) {
+	pieceOp := piece.Def()
+	if pieceOp == nil {
+		return
+	}
+	whole := s.whole
+	offConst := data.NewConstant(4, uint64(offset))
+	inlist := []*Varnode{whole, offConst}
+	switch pieceOp.Code() {
+	case CPUI_MULTIEQUAL:
+		// Reinsert at top of block so the MULTIEQUAL prefix stays contiguous.
+		bb := pieceOp.Parent()
+		data.OpUninsert(pieceOp)
+		data.OpSetOpcode(pieceOp, CPUI_SUBPIECE)
+		data.OpSetAllInput(pieceOp, inlist)
+		data.OpInsertBegin(pieceOp, bb)
+	case CPUI_INDIRECT:
+		// TODO(parity): PcodeOp::getOpFromConst chain for affector; the C++
+		// path reinserts after the affector. Without that plumbing we just
+		// rewrite in place -- legal but may leave the op mis-ordered.
+		data.OpSetOpcode(pieceOp, CPUI_SUBPIECE)
+		data.OpSetAllInput(pieceOp, inlist)
+	default:
+		data.OpSetOpcode(pieceOp, CPUI_SUBPIECE)
+		data.OpSetAllInput(pieceOp, inlist)
+	}
+}
+
+// C++ parity: SplitVarnode::buildLoFromWhole
+func (s *SplitVarnode) BuildLoFromWhole(data *Funcdata) {
+	s.buildPieceFromWhole(data, s.lo, 0)
+}
+
+// C++ parity: SplitVarnode::buildHiFromWhole
+func (s *SplitVarnode) BuildHiFromWhole(data *Funcdata) {
+	s.buildPieceFromWhole(data, s.hi, s.lo.Size())
+}
+
+// C++ parity: SplitVarnode::getTrueFalse (double.cc:916)
+func SplitVarnodeGetTrueFalse(boolop *PcodeOp, flip bool) (trueout, falseout *BlockBasic) {
+	parent := boolop.Parent()
+	trueBlock, _ := parent.TrueOut().Concrete().(*BlockBasic)
+	falseBlock, _ := parent.FalseOut().Concrete().(*BlockBasic)
+	isFlipped := boolop.HasFlag(PcodeOpBooleanFlip)
+	if isFlipped != flip {
+		return falseBlock, trueBlock
+	}
+	return trueBlock, falseBlock
+}
+
+// C++ parity: SplitVarnode::otherwiseEmpty (double.cc:938)
+// Return true if the basic block containing branchop only executes the
+// branch plus (optionally) the op producing its boolean input.
+func SplitVarnodeOtherwiseEmpty(branchop *PcodeOp) bool {
+	bl := branchop.Parent()
+	if bl.SizeIn() != 1 {
+		return false
+	}
+	var otherop *PcodeOp
+	vn := branchop.Input(1)
+	if vn != nil && vn.IsWritten() {
+		otherop = vn.Def()
+	}
+	for _, op := range bl.Ops() {
+		if op == otherop || op == branchop {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// C++ parity: SplitVarnode::verifyMultNegOne (double.cc:965)
+func SplitVarnodeVerifyMultNegOne(op *PcodeOp) bool {
+	if op == nil || op.Code() != CPUI_INT_MULT {
+		return false
+	}
+	in1 := op.Input(1)
+	if !in1.IsConstant() {
+		return false
+	}
+	return in1.Offset() == doubleMaskOfSize(in1.Size())
+}
+
+// doubleMaskOfSize returns the byte-wide all-ones mask for the given size,
+// matching ghidra's calc_mask helper for double-precision rewrites.
+func doubleMaskOfSize(size int32) uint64 {
+	if size <= 0 {
+		return 0
+	}
+	if size >= 8 {
+		return ^uint64(0)
+	}
+	return (uint64(1) << (uint(size) * 8)) - 1
+}
+
+// C++ parity: SplitVarnode::prepareBinaryOp (double.cc:984)
+func SplitVarnodePrepareBinaryOp(out, in1, in2 *SplitVarnode) *PcodeOp {
+	existop := out.FindOutExist()
+	if existop == nil {
+		return nil
+	}
+	if !in1.IsWholeFeasible(existop) {
+		return nil
+	}
+	if !in2.IsWholeFeasible(existop) {
+		return nil
+	}
+	return existop
+}
+
+// C++ parity: SplitVarnode::createBinaryOp (double.cc:1005)
+func SplitVarnodeCreateBinaryOp(data *Funcdata, out, in1, in2 *SplitVarnode, existop *PcodeOp, opc OpCode) {
+	out.FindCreateOutputWhole(data)
+	in1.FindCreateWhole(data)
+	in2.FindCreateWhole(data)
+	if existop.Code() != CPUI_PIECE {
+		newop := data.NewOp(2, existop.Addr())
+		data.OpSetOpcode(newop, opc)
+		data.OpSetOutput(newop, out.whole)
+		data.OpSetInput(newop, in1.whole, 0)
+		data.OpSetInput(newop, in2.whole, 1)
+		data.OpInsertBefore(newop, existop)
+		out.BuildLoFromWhole(data)
+		out.BuildHiFromWhole(data)
+	} else {
+		data.OpSetOpcode(existop, opc)
+		data.OpSetInput(existop, in1.whole, 0)
+		data.OpSetInput(existop, in2.whole, 1)
+	}
+}
+
+// C++ parity: SplitVarnode::prepareShiftOp (double.cc:1037)
+func SplitVarnodePrepareShiftOp(out, in *SplitVarnode) *PcodeOp {
+	existop := out.FindOutExist()
+	if existop == nil {
+		return nil
+	}
+	if !in.IsWholeFeasible(existop) {
+		return nil
+	}
+	return existop
+}
+
+// C++ parity: SplitVarnode::createShiftOp (double.cc:1058)
+func SplitVarnodeCreateShiftOp(data *Funcdata, out, in *SplitVarnode, sa *Varnode, existop *PcodeOp, opc OpCode) {
+	out.FindCreateOutputWhole(data)
+	in.FindCreateWhole(data)
+	if sa.IsConstant() {
+		sa = data.NewConstant(sa.Size(), sa.Offset())
+	}
+	if existop.Code() != CPUI_PIECE {
+		newop := data.NewOp(2, existop.Addr())
+		data.OpSetOpcode(newop, opc)
+		data.OpSetOutput(newop, out.whole)
+		data.OpSetInput(newop, in.whole, 0)
+		data.OpSetInput(newop, sa, 1)
+		data.OpInsertBefore(newop, existop)
+		out.BuildLoFromWhole(data)
+		out.BuildHiFromWhole(data)
+	} else {
+		data.OpSetOpcode(existop, opc)
+		data.OpSetInput(existop, in.whole, 0)
+		data.OpSetInput(existop, sa, 1)
+	}
+}
+
+// C++ parity: SplitVarnode::prepareBoolOp (double.cc:1241)
+func SplitVarnodePrepareBoolOp(in1, in2 *SplitVarnode, testop *PcodeOp) bool {
+	if !in1.IsWholeFeasible(testop) {
+		return false
+	}
+	if !in2.IsWholeFeasible(testop) {
+		return false
+	}
+	return true
+}
+
+// C++ parity: SplitVarnode::replaceBoolOp (double.cc:1259)
+func SplitVarnodeReplaceBoolOp(data *Funcdata, boolop *PcodeOp, in1, in2 *SplitVarnode, opc OpCode) {
+	in1.FindCreateWhole(data)
+	in2.FindCreateWhole(data)
+	data.OpSetOpcode(boolop, opc)
+	data.OpSetInput(boolop, in1.whole, 0)
+	data.OpSetInput(boolop, in2.whole, 1)
+}
+
+// C++ parity: SplitVarnode::createBoolOp (double.cc:1279)
+func SplitVarnodeCreateBoolOp(data *Funcdata, cbranch *PcodeOp, in1, in2 *SplitVarnode, opc OpCode) {
+	addrop := cbranch
+	boolvn := cbranch.Input(1)
+	if boolvn != nil && boolvn.IsWritten() {
+		addrop = boolvn.Def()
+	}
+	in1.FindCreateWhole(data)
+	in2.FindCreateWhole(data)
+	newop := data.NewOp(2, addrop.Addr())
+	data.OpSetOpcode(newop, opc)
+	newbool := data.NewUniqueOut(1, newop)
+	data.OpSetInput(newop, in1.whole, 0)
+	data.OpSetInput(newop, in2.whole, 1)
+	data.OpInsertBefore(newop, cbranch)
+	data.OpSetInput(cbranch, newbool, 1)
+}
+
+// C++ parity: SplitVarnode::preparePhiOp (double.cc:1306)
+func SplitVarnodePreparePhiOp(out *SplitVarnode, inlist []SplitVarnode) *PcodeOp {
+	existop := out.findEarliestSplitPoint()
+	if existop == nil {
+		return nil
+	}
+	if existop.Code() != CPUI_MULTIEQUAL {
+		// Matches the LowlevelError throw in C++: treat as failure.
+		return nil
+	}
+	bl := existop.Parent()
+	for i := range inlist {
+		if bl == nil || i >= bl.SizeIn() {
+			return nil
+		}
+		if !inlist[i].IsWholePhiFeasible(bl.InEdge(i).Point) {
+			return nil
+		}
+	}
+	return existop
+}
+
+// C++ parity: SplitVarnode::createPhiOp (double.cc:1331)
+func SplitVarnodeCreatePhiOp(data *Funcdata, out *SplitVarnode, inlist []SplitVarnode, existop *PcodeOp) {
+	out.FindCreateOutputWhole(data)
+	for i := range inlist {
+		inlist[i].FindCreateWhole(data)
+	}
+	numin := len(inlist)
+	newop := data.NewOp(numin, existop.Addr())
+	data.OpSetOpcode(newop, CPUI_MULTIEQUAL)
+	data.OpSetOutput(newop, out.whole)
+	for i := range inlist {
+		data.OpSetInput(newop, inlist[i].whole, i)
+	}
+	data.OpInsertBefore(newop, existop)
+	out.BuildLoFromWhole(data)
+	out.BuildHiFromWhole(data)
+}
+
+// C++ parity: SplitVarnode::prepareIndirectOp (double.cc:1358)
+func SplitVarnodePrepareIndirectOp(in *SplitVarnode, affector *PcodeOp) bool {
+	return in.IsWholeFeasible(affector)
+}
+
+// C++ parity: SplitVarnode::replaceCopyForce (double.cc:1402)
+// Replaces a pair of COPY-to-addr-forced varnodes with a single wider COPY.
+// The ReturnCopy special form is not yet plumbed (needs PcodeOp.isReturnCopy/
+// markReturnCopy); we implement the common case and leave the return-copy
+// branch as a TODO.
+func SplitVarnodeReplaceCopyForce(data *Funcdata, addr address.Address, in *SplitVarnode, copylo, copyhi *PcodeOp) {
+	inVn := in.whole
+	wholeCopy := data.NewOp(1, copyhi.Addr())
+	data.OpSetOpcode(wholeCopy, CPUI_COPY)
+	outVn := data.NewVarnodeOut(in.wholesize, addr, wholeCopy)
+	outVn.SetFlags(VarnodeAddrForce)
+	data.OpSetInput(wholeCopy, inVn, 0)
+	data.OpInsertBefore(wholeCopy, copyhi)
+	data.OpDestroy(copyhi)
+	data.OpDestroy(copylo)
+}
+
+// C++ parity: SplitVarnode::applyRuleIn (double.cc:1090)
+// Walk each piece of the split input and dispatch to the Form classes for
+// every descendant op, returning 1 on the first successful transform.
 func SplitVarnodeApplyRuleIn(in *SplitVarnode, data *Funcdata) int {
-	_ = in
-	_ = data
+	for i := 0; i < 2; i++ {
+		var vn *Varnode
+		if i == 0 {
+			vn = in.hi
+		} else {
+			vn = in.lo
+		}
+		if vn == nil {
+			continue
+		}
+		workishi := i == 0
+		// Take a snapshot of the descendant list: transforms may mutate it.
+		descs := append([]*PcodeOp(nil), vn.DescendIter()...)
+		for _, workop := range descs {
+			if workop.IsDead() {
+				continue
+			}
+			switch workop.Code() {
+			case CPUI_INT_ADD:
+				var addform AddForm
+				if addform.ApplyRule(in, workop, workishi, data) {
+					return 1
+				}
+				var subform SubForm
+				if subform.ApplyRule(in, workop, workishi, data) {
+					return 1
+				}
+			case CPUI_INT_AND:
+				var logicalform LogicalForm
+				if logicalform.ApplyRule(in, workop, workishi, data) {
+					return 1
+				}
+			case CPUI_INT_OR, CPUI_INT_XOR:
+				var logicalform LogicalForm
+				if logicalform.ApplyRule(in, workop, workishi, data) {
+					return 1
+				}
+			case CPUI_INT_LESS, CPUI_INT_LESSEQUAL, CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL:
+				var lessconstform LessConstForm
+				if lessconstform.ApplyRule(in, workop, workishi, data) {
+					return 1
+				}
+			case CPUI_INT_LEFT:
+				var shiftform ShiftForm
+				if shiftform.ApplyRuleLeft(in, workop, workishi, data) {
+					return 1
+				}
+			case CPUI_INT_RIGHT, CPUI_INT_SRIGHT:
+				var shiftform ShiftForm
+				if shiftform.ApplyRuleRight(in, workop, workishi, data) {
+					return 1
+				}
+			case CPUI_MULTIEQUAL:
+				var phiform PhiForm
+				if phiform.ApplyRule(in, workop, workishi, data) {
+					return 1
+				}
+			case CPUI_COPY:
+				if workop.Output() != nil && workop.Output().IsAddrForce() {
+					var copyform CopyForceForm
+					if copyform.ApplyRule(in, workop, workishi, data) {
+						return 1
+					}
+				}
+			default:
+				// Equal1/2/3Form, LessThreeWay, MultForm, IndirectForm are
+				// not yet ported. See double_forms.go for the TODO list.
+			}
+		}
+	}
 	return 0
 }
