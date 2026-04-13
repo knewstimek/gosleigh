@@ -2588,3 +2588,60 @@ func (r *RuleDoubleStore) apply(op *PcodeOp, data *Funcdata) int {
 	}
 	return 0
 }
+
+// RuleStringCopy is the Go port of RuleStringCopy::applyOp in constseq.cc.
+type RuleStringCopy struct{ batchRule }
+
+// NewRuleStringCopy is the Go port of RuleStringCopy::RuleStringCopy in constseq.cc.
+func NewRuleStringCopy(group string) *RuleStringCopy {
+	r := &RuleStringCopy{}
+	r.batchRule = newBatchRule(group, "stringcopy", []OpCode{CPUI_COPY}, r.apply, func(g string) Rule { return NewRuleStringCopy(g) })
+	return r
+}
+
+// apply is the Go port of RuleStringCopy::applyOp in constseq.cc.
+func (r *RuleStringCopy) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.NumInput() < 1 || op.Input(0) == nil || !op.Input(0).IsConstant() || op.Output() == nil {
+		return 0
+	}
+	// TODO: Port the full container/type and sequence analysis from constseq.cc.
+	seq := NewStringSequence(data, op.Output().Type(), nil, op, op.Output().Addr())
+	if !seq.IsValid() {
+		return 0
+	}
+	if !seq.Transform() {
+		return 0
+	}
+	return 1
+}
+
+// RuleStringStore is the Go port of RuleStringStore::applyOp in constseq.cc.
+type RuleStringStore struct{ batchRule }
+
+// NewRuleStringStore is the Go port of RuleStringStore::RuleStringStore in constseq.cc.
+func NewRuleStringStore(group string) *RuleStringStore {
+	r := &RuleStringStore{}
+	r.batchRule = newBatchRule(group, "stringstore", []OpCode{CPUI_STORE}, r.apply, func(g string) Rule { return NewRuleStringStore(g) })
+	return r
+}
+
+// apply is the Go port of RuleStringStore::applyOp in constseq.cc.
+func (r *RuleStringStore) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.NumInput() < 3 || op.Input(2) == nil || !op.Input(2).IsConstant() || op.Input(1) == nil {
+		return 0
+	}
+	ct := op.Input(1).TypeReadFacing(op)
+	ptr, ok := ct.(*Pointer)
+	if !ok || ptr.Pointee() == nil {
+		return 0
+	}
+	// TODO: Port the full heap-string detection and CALLOTHER rewrite logic from constseq.cc.
+	seq := NewHeapSequence(data, ptr.Pointee(), op)
+	if !seq.IsValid() {
+		return 0
+	}
+	if !seq.Transform() {
+		return 0
+	}
+	return 1
+}
