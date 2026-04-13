@@ -292,6 +292,21 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRuleSplitLoad(group) },
 	func(group string) Rule { return NewRuleSplitStore(group) },
 	func(group string) Rule { return NewRuleSubfloatConvert(group) },
+	// bitfield.go rules -- real control-flow ports; short-circuit on HasBitfields()==false
+	func(group string) Rule { return NewRuleBitFieldStore(group) },
+	func(group string) Rule { return NewRuleBitFieldLoad(group) },
+	func(group string) Rule { return NewRuleBitFieldOut(group) },
+	func(group string) Rule { return NewRuleBitFieldIn(group) },
+	func(group string) Rule { return NewRulePullAbsorb(group) },
+	func(group string) Rule { return NewRuleInsertAbsorb(group) },
+	// double.go rules -- real ports of RuleDouble*
+	func(group string) Rule { return NewRuleDoubleIn(group) },
+	func(group string) Rule { return NewRuleDoubleOut(group) },
+	func(group string) Rule { return NewRuleDoubleLoad(group) },
+	func(group string) Rule { return NewRuleDoubleStore(group) },
+	// constseq.go rules -- real ports of RuleStringCopy / RuleStringStore
+	func(group string) Rule { return NewRuleStringCopy(group) },
+	func(group string) Rule { return NewRuleStringStore(group) },
 }
 
 func BatchARules(group string) []Rule {

@@ -217,6 +217,12 @@ func (vn *Varnode) ClearImplied()  { vn.ClearFlags(VarnodeImplied) }
 func (vn *Varnode) SetExplicit()   { vn.SetFlags(VarnodeExplicit) }
 func (vn *Varnode) ClearExplicit() { vn.ClearFlags(VarnodeExplicit) }
 
+// C++ parity: Varnode::setPrecisLo / setPrecisHi in varnode.hh.
+func (vn *Varnode) SetPrecisLo()   { vn.SetFlags(VarnodePrecisLo) }
+func (vn *Varnode) ClearPrecisLo() { vn.ClearFlags(VarnodePrecisLo) }
+func (vn *Varnode) SetPrecisHi()   { vn.SetFlags(VarnodePrecisHi) }
+func (vn *Varnode) ClearPrecisHi() { vn.ClearFlags(VarnodePrecisHi) }
+
 // ---------------------------------------------------------------------------
 // Descendant management
 // ---------------------------------------------------------------------------
