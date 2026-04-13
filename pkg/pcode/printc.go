@@ -636,6 +636,45 @@ func dedupVarnodes(in []*Varnode) []*Varnode {
 	return out
 }
 
+// shouldInline decides whether an op's output should be inlined into its sole
+// consumer (i.e., the op does not emit a standalone statement).
+//
+// H8 DIAGNOSTIC NOTE (2026-04-13):
+// TestMSVC_Gcd still fails because Gosleigh does not reproduce Ghidra's
+//
+//   while (iVar1 = param_4, iVar1 != 0) {
+//     param_4 = param_3 % iVar1;
+//     param_3 = iVar1;
+//   }
+//
+// Root causes identified so far:
+//   1. HighVariable over-merging: ActionMergeMarker previously merged register:0x4
+//      (ECX/iVar1) and register:0x8 (EDX) into one HV via chains of unique-space
+//      COPYs, and even absorbed stack:0x4 (param_3) and stack:0x8 (param_4)
+//      into the same HV. FIXED by adding addr-tied and physical-rep guards in
+//      mergeTestRequired (merge.go).
+//   2. Missing `iVar1 = param_4` COPY in the join block: Ghidra's output emits
+//      this COPY as part of the while-condition (via setMod(comma_separate)).
+//      In Gosleigh the corresponding MULTIEQUAL phi stays as a phi marker op
+//      and is skipped by emitBlockBasic (notPrinted()). The C++ equivalent COPY
+//      appears because Merge::trimOpInput inserts a real CPUI_COPY at the end
+//      of the predecessor block when Cover conflicts force a trim; that COPY
+//      then survives as a printable statement. Gosleigh's Cover.rebuild misses
+//      the cross-block liveness overlap for register varnodes that feed a
+//      joinblock phi, so trimOpInput never fires and no printable COPY exists.
+//      Remaining work: fix Cover.rebuild to extend the iVar1 (reg:0x4) live
+//      range through the joinblock's MULTIEQUAL read points; once that reports
+//      a level-2 intersection with the param_4 phi the trim COPY will appear
+//      automatically and renderCondBlockComma will pick it up.
+//   3. Body-block register:0x0 (EAX) elimination: the `mov eax, ecx` COPY in
+//      the raw asm is lost during optimization, so INT_SREM inputs both render
+//      as iVar1 instead of `param_3 % iVar1`. This is likely a RuleCopyPropagate
+//      interacting with the over-merge fix; needs follow-up investigation once
+//      (2) lands.
+//
+// The shouldInline tweak below (non-unique output with cross-block consumer
+// forces a statement) fixes a related secondary issue but not the root cause.
+// C++ parity: ActionMarkExplicit::baseExplicit in coreaction.cc:3083.
 func (s *printCState) shouldInline(op *PcodeOp) bool {
 	if op == nil || op.Output() == nil || op.IsDead() {
 		return false
@@ -646,11 +685,27 @@ func (s *printCState) shouldInline(op *PcodeOp) bool {
 	}
 	// C++ parity: ActionMarkExplicit::baseExplicit returns -1 (explicit) when any descendant is a marker op (MULTIEQUAL/INDIRECT). coreaction.cc:3083
 	// A varnode whose sole consumer is a marker op must be emitted as an explicit statement, not inlined.
-	if consumer := op.Output().LoneDescend(); consumer != nil {
+	consumer := op.Output().LoneDescend()
+	if consumer != nil {
 		fmt.Printf("DEBUG shouldInline: op=%v out=%v consumer=%v consumerParent=%v\n", op.Code(), op.Output(), consumer.Code(), consumer.Parent())
 		switch consumer.Code() {
 		case CPUI_MULTIEQUAL, CPUI_INDIRECT:
 			return false
+		}
+	}
+	// An op whose output lives in a non-unique space (register/stack) and
+	// carries a distinct HighVariable must surface as a user-visible statement
+	// rather than be inlined into its consumer. C++ parity: printc.cc
+	// emitBlockBasic skips markers via notPrinted() but explicit named outputs
+	// are always emitted as statements.
+	if out := op.Output(); out != nil && out.Space() != nil && !out.Space().IsUnique() {
+		if hv := out.High(); hv != nil && hv.Name() != "" {
+			// When the consumer is a cross-block COPY that lives in a join/loop-head
+			// block, the body assignment must be rendered. A same-HV inline would
+			// produce the same text, but the body op carries the actual statement.
+			if consumer != nil && consumer.Parent() != op.Parent() {
+				return false
+			}
 		}
 	}
 	switch op.Code() {
