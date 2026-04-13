@@ -50,6 +50,10 @@ type Funcdata struct {
 	funcProto  *FuncProto
 	scopeLocal *ScopeLocal
 	callSpecs  []*FuncCallSpecs
+
+	// jumpTables tracks all recovered JumpTable objects for this function.
+	// C++ parity: funcdata.hh Funcdata::jumpvec
+	jumpTables []*JumpTable
 }
 
 // NewFuncdata creates a Funcdata container for the named function.
@@ -791,4 +795,67 @@ func (fd *Funcdata) CseFindInBlock(op *PcodeOp, vn *Varnode, bl *BlockBasic, ear
 		}
 	}
 	return nil
+}
+
+// ---------------------------------------------------------------------------
+// Jump table accessors
+// ---------------------------------------------------------------------------
+
+// JumpTables returns the slice of recovered jump tables for this function.
+// C++ parity: funcdata.hh Funcdata::numJumpTables / getJumpTable
+func (fd *Funcdata) JumpTables() []*JumpTable {
+	if fd == nil {
+		return nil
+	}
+	return fd.jumpTables
+}
+
+// NumJumpTables returns the number of recovered jump tables.
+// C++ parity: funcdata.hh Funcdata::numJumpTables
+func (fd *Funcdata) NumJumpTables() int {
+	if fd == nil {
+		return 0
+	}
+	return len(fd.jumpTables)
+}
+
+// GetJumpTable returns the i-th jump table (or nil for out-of-range indices).
+// C++ parity: funcdata.hh Funcdata::getJumpTable
+func (fd *Funcdata) GetJumpTable(i int) *JumpTable {
+	if fd == nil || i < 0 || i >= len(fd.jumpTables) {
+		return nil
+	}
+	return fd.jumpTables[i]
+}
+
+// AddJumpTable appends jt to the function's jump table list.
+// C++ parity: funcdata.hh Funcdata::installJumpTable (partial)
+func (fd *Funcdata) AddJumpTable(jt *JumpTable) {
+	if fd == nil || jt == nil {
+		return
+	}
+	fd.jumpTables = append(fd.jumpTables, jt)
+}
+
+// FindJumpTable locates a jump table by the BRANCHIND PcodeOp it models.
+// C++ parity: funcdata.hh Funcdata::findJumpTable
+func (fd *Funcdata) FindJumpTable(op *PcodeOp) *JumpTable {
+	if fd == nil || op == nil {
+		return nil
+	}
+	for _, jt := range fd.jumpTables {
+		if jt.IndirectOp() == op {
+			return jt
+		}
+	}
+	return nil
+}
+
+// ClearJumpTables drops all jump tables (used during full reprocessing).
+// C++ parity: funcdata.cc Funcdata::clearJumpTables
+func (fd *Funcdata) ClearJumpTables() {
+	if fd == nil {
+		return
+	}
+	fd.jumpTables = nil
 }
