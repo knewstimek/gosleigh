@@ -111,8 +111,17 @@ func NewBitfieldTypeField(ident int32, byteOffset int32, name string, logicalTyp
 // contain one or more bitfield members. It is the Go-level counterpart of the
 // C++ TypeFactory::decodeStructure branch that folds a TypeBitField side
 // table into the containing TypeStruct (see type.cc L2383 where the
-// has_bitfields flag is promoted). Non-bitfield members pass through the
-// same internment path as GetStruct so the two constructors share storage.
+// has_bitfields flag is promoted). Because the Go type model stores bitfield
+// metadata inline on TypeField rather than in a parallel TypeBitField list,
+// the bitfield path shares GetStruct internment exactly, and the bitfield
+// descriptor (IsBitfield/BitOffset/BitSize) is part of the intern key via
+// fieldsKey. Callers must tag bitfield members with IsBitfield=true (use
+// NewBitfieldTypeField) before handing them to this function -- otherwise
+// Struct.HasBitfields will report false and the BitField rules will skip
+// the struct.
+// C++ parity: TypeFactory::decodeStructure + TypeStruct::decodeBitField
+// (type.cc ~L2127) plus the has_bitfields promotion in
+// TypeStruct::assignFieldOffsets.
 func (f *TypeFactory) GetBitfieldStruct(name string, fields []TypeField) *Struct {
 	return f.GetStruct(name, fields)
 }
@@ -300,7 +309,16 @@ func fieldsKey(fields []TypeField) string {
 	}
 	var builder strings.Builder
 	for _, field := range fields {
-		builder.WriteString(fmt.Sprintf("%d:%s:%x;", field.Offset, field.Name, datatypeIdentity(field.Type)))
+		// Include the bitfield descriptor so two structs that only differ in
+		// bit layout hash to distinct keys. Non-bitfield members encode the
+		// zero descriptor ("|0|0|0") which is harmless.
+		bit := byte('0')
+		if field.IsBitfield {
+			bit = '1'
+		}
+		builder.WriteString(fmt.Sprintf("%d:%s:%x|%c|%d|%d;",
+			field.Offset, field.Name, datatypeIdentity(field.Type),
+			bit, field.BitOffset, field.BitSize))
 	}
 	return builder.String()
 }

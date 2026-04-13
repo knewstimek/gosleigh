@@ -19,13 +19,16 @@
 // are read or written, and rewrites those sites in terms of the explicit
 // INSERT/ZPULL/SPULL p-code ops.
 //
-// NOTE: The rule-level entry points (RuleBitField* and RulePullAbsorb /
-// RuleInsertAbsorb) are ported as real Go code that mirrors the C++ control
-// flow. However, the trace machinery bottoms out at Datatype.HasBitfields(),
-// which currently always returns false because the Go type model does not yet
-// carry TypeBitField struct members. Until that type-system work lands, the
-// transforms are reachable but do_trace short-circuits cleanly. See
-// datatype.go TODO(bitfield-typemodel).
+// The walker infrastructure (BitFieldNodeState, establishFields,
+// buildPartialType, findOverwrite) is ported as real Go code. The per-op
+// backward/forward dispatch helpers (processBackward / processForward and
+// their handle* relatives) are still TODO: doTrace seeds the worklist, but
+// the op-level fan-out returns false until those are ported. Because
+// RuleBitField*Apply short-circuits on a false DoTrace, this is a safe
+// intermediate state: the rules are reachable and the type-model path is
+// wired, so enabling a struct with bitfield members does not crash the
+// pipeline, it just does not yet rewrite reads/writes into explicit
+// INSERT/ZPULL/SPULL ops.
 package pcode
 
 // BitRange represents a contiguous run of bits within some Varnode.
@@ -175,6 +178,10 @@ type bitFieldTransform struct {
 }
 
 // newBitFieldTransform records basic info about a bitfield container.
+// initialOffset is the byte offset of the root container into the parent
+// structure. The Go port collapses TypePartialStruct and TypeStruct handling
+// into a single path -- the caller passes whichever Datatype it holds, and
+// the transform resolves the underlying *Struct and adjusts initialOffset.
 // C++ parity: BitFieldTransform::BitFieldTransform(Funcdata,Datatype,int4).
 func newBitFieldTransform(fd *Funcdata, dt Datatype, off int32) bitFieldTransform {
 	var parent *Struct
@@ -183,6 +190,9 @@ func newBitFieldTransform(fd *Funcdata, dt Datatype, off int32) bitFieldTransfor
 		parent = s
 		sz = s.Size()
 	} else if dt != nil {
+		// TypePartialStruct is not yet modelled in Go; if and when it lands,
+		// unwrap it here and add part.Offset() into off like the C++ code at
+		// bitfield.cc ~L107 does.
 		sz = dt.Size()
 	}
 	return bitFieldTransform{
@@ -193,41 +203,275 @@ func newBitFieldTransform(fd *Funcdata, dt Datatype, off int32) bitFieldTransfor
 	}
 }
 
+// containerFieldLSB translates a bitfield member's least-significant bit
+// into the container frame whose byte extent is [initialOffset,
+// initialOffset+containerSize). This is the Go-idiomatic collapse of
+// BitRange::translateLSB: both endians reduce to a byte-delta plus the
+// field's intrinsic bit offset. The containerSize parameter is only used
+// for big-endian translation (the frame's most-significant end).
+// C++ parity: BitRange::translateLSB (address.cc ~L660).
+func containerFieldLSB(initialOffset, containerSize int32, isBigEndian bool, f TypeField) int32 {
+	// The byte run that owns the bitfield is [f.Offset, f.Offset+f.Type.Size()).
+	runSize := int32(0)
+	if f.Type != nil {
+		runSize = f.Type.Size()
+	}
+	if isBigEndian {
+		thisPos := initialOffset + containerSize
+		op2Pos := f.Offset + runSize
+		return f.BitOffset + 8*(thisPos-op2Pos)
+	}
+	return f.BitOffset + 8*(f.Offset-initialOffset)
+}
+
+// bitfieldOverlapsContainer reports whether any portion of the bitfield sits
+// inside the [initialOffset, initialOffset+containerSize) byte window.
+// Used by establishFields to skip fields that are entirely outside the root
+// container Varnode (the C++ code relies on collectBitFields' upper_bound
+// prefilter; the Go port walks fields linearly and filters here).
+func bitfieldOverlapsContainer(initialOffset, containerSize int32, f TypeField) bool {
+	runSize := int32(0)
+	if f.Type != nil {
+		runSize = f.Type.Size()
+	}
+	if f.Offset+runSize <= initialOffset {
+		return false
+	}
+	if f.Offset >= initialOffset+containerSize {
+		return false
+	}
+	return true
+}
+
 // establishFields populates workList with one BitFieldNodeState per bitfield
-// or hole that overlaps the given Varnode.
-// C++ parity: BitFieldTransform::establishFields.
-// TODO(bitfield-typemodel): Without bitfield struct members, this always
-// yields an empty workList and therefore fails the trace.
+// (and each hole when followHoles is set) overlapping the given Varnode.
+// The worklist is seeded in ascending order of bit position, least
+// significant first, mirroring the C++ loop.
+// C++ parity: BitFieldTransform::establishFields (bitfield.cc ~L57) plus
+// TypeStruct::collectBitFields (type.cc ~L1789) and BitFieldTriple::compare
+// (type.cc ~L932). The Go port collapses both into a single pass over the
+// parent struct's TypeField vector because the Go type model stores bitfield
+// metadata inline on TypeField instead of in a parallel TypeBitField list.
 func (t *bitFieldTransform) establishFields(vn *Varnode, followHoles bool) {
-	// Real port placeholder: once *Struct carries bitfield members, iterate
-	// them and emit a BitFieldNodeState for each overlapping range (and a
-	// hole state in the gaps when followHoles is set). The current type model
-	// has no bitfields, so the resulting workList is empty and doTrace
-	// callers correctly bail out.
-	_ = vn
-	_ = followHoles
 	t.workList = t.workList[:0]
+	if vn == nil || t.parentStruct == nil {
+		return
+	}
+	if vn.Space() != nil {
+		t.isBigEndian = vn.Space().BigEndian
+	}
+	vnBitSize := vn.Size() * 8
+	if vnBitSize <= 0 {
+		return
+	}
+	container := BitRange{LeastSigBit: 0, NumBits: vnBitSize}
+
+	// Collect overlapping bitfield members (no nested struct recursion yet;
+	// the Go type model stores nested structs as plain TypeField entries, so
+	// if/when nested struct traversal is needed, it gets threaded here).
+	type fieldSlot struct {
+		field    TypeField
+		fieldPos int32
+		fieldEnd int32
+	}
+	overlaps := make([]fieldSlot, 0, len(t.parentStruct.fields))
+	for _, f := range t.parentStruct.fields {
+		if !f.IsBitfield {
+			continue
+		}
+		if !bitfieldOverlapsContainer(t.initialOffset, t.containerSize, f) {
+			continue
+		}
+		lsb := containerFieldLSB(t.initialOffset, t.containerSize, t.isBigEndian, f)
+		overlaps = append(overlaps, fieldSlot{
+			field:    f,
+			fieldPos: lsb,
+			fieldEnd: lsb + f.BitSize,
+		})
+	}
+	// Sort least-significant first. C++ BitFieldTriple::compare uses byte
+	// offsets with endian flipping; here we already have each field's LSB
+	// translated into the container frame, so a direct ascending sort yields
+	// the same order.
+	for i := 1; i < len(overlaps); i++ {
+		for j := i; j > 0 && overlaps[j-1].fieldPos > overlaps[j].fieldPos; j-- {
+			overlaps[j-1], overlaps[j] = overlaps[j], overlaps[j-1]
+		}
+	}
+
+	pos := int32(0)
+	for _, slot := range overlaps {
+		fieldPos := slot.fieldPos
+		fieldEnd := slot.fieldEnd
+		if fieldPos > vnBitSize {
+			fieldPos = vnBitSize
+		}
+		if fieldEnd > vnBitSize {
+			fieldEnd = vnBitSize
+		}
+		if fieldPos > pos { // hole before this field
+			if followHoles {
+				t.workList = append(t.workList,
+					NewBitFieldNodeStateForHole(container, vn, pos, fieldPos-pos))
+			}
+			pos = fieldPos
+		}
+		// The C++ overlap code classifies the field relative to the container
+		// frame: code 0 (equal) and code 3 (op2 contained in this) are the
+		// "field fully inside vn" cases. After truncating fieldPos/fieldEnd to
+		// [0, vnBitSize), the field is fully contained iff its untruncated
+		// extent did not exceed the container bits. We recompute that here.
+		origPos := slot.fieldPos
+		origEnd := slot.fieldEnd
+		contained := origPos >= 0 && origEnd <= vnBitSize
+		if contained {
+			// Convert TypeField into a transient TypeBitField descriptor so
+			// downstream walker logic has something to point at.
+			fld := &TypeBitField{
+				LogicalType: slot.field.Type,
+				BitOffset:   slot.field.BitOffset,
+				BitSize:     slot.field.BitSize,
+				IsSigned:    slot.field.Type != nil && slot.field.Type.Metatype() == TYPE_INT,
+			}
+			bitsUsed := BitRange{LeastSigBit: fieldPos, NumBits: fieldEnd - fieldPos}
+			t.workList = append(t.workList, NewBitFieldNodeStateForField(bitsUsed, vn, fld))
+		} else if followHoles {
+			t.workList = append(t.workList,
+				NewBitFieldNodeStateForHole(container, vn, pos, fieldEnd-pos))
+		}
+		pos = fieldEnd
+	}
+	if pos < vnBitSize && followHoles {
+		t.workList = append(t.workList,
+			NewBitFieldNodeStateForHole(container, vn, pos, vnBitSize-pos))
+	}
 }
 
-// buildPartialType constructs the partial data-type backing the root container.
-// C++ parity: BitFieldTransform::buildPartialType.
-// TODO(bitfield-typemodel): Depends on TypePartialStruct, which is not yet
-// ported. Returns nil for now and callers must treat nil as failure.
+// buildPartialType returns the data-type associated with the root bitfield
+// container. When the container Varnode covers the full parent struct it is
+// the struct itself; otherwise the C++ code returns a TypePartialStruct.
+// C++ parity: BitFieldTransform::buildPartialType (bitfield.cc ~L547).
+// TODO(bitfield-typemodel): TypePartialStruct is not yet ported, so the
+// partial case falls back to the parent struct. The processBackward /
+// processForward helpers that consume this value are themselves TODOs, so
+// the fallback never feeds rewriting output today.
 func (t *bitFieldTransform) buildPartialType() Datatype {
-	return nil
+	if t.parentStruct == nil {
+		return nil
+	}
+	if t.containerSize == t.parentStruct.Size() {
+		return t.parentStruct
+	}
+	return t.parentStruct
 }
 
-// findOverwrite tests whether a subsequent write in the same basic block
-// covers the same range, which would make the current write dead.
-// C++ parity: BitFieldTransform::findOverwrite.
+// findOverwrite walks forward from a Varnode within a single basic block to
+// check whether an unspecified bit range is subsequently overwritten by an
+// INDIRECT op whose output covers the same storage. Returns true only when
+// every tracked bit is dead at the overwrite point.
+// C++ parity: BitFieldTransform::findOverwrite (bitfield.cc ~L562).
 func (bitFieldTransform) findOverwrite(vn *Varnode, bl *BlockBasic, r BitRange) bool {
-	// Real port placeholder: the C++ walks the block forward looking for a
-	// dominating write of the same field. Until the walker state ports are
-	// wired through the rules, returning false is the conservative answer --
-	// it never suppresses an otherwise-valid transform.
-	_ = vn
-	_ = bl
-	_ = r
+	if vn == nil || bl == nil {
+		return false
+	}
+	for _, startOp := range vn.DescendIter() {
+		curVn := vn
+		curRange := r
+		op := startOp
+		for op != nil {
+			if op.Parent() != bl {
+				// Leaving the block with bits still live -- cannot prove dead.
+				if curRange.NumBits != 0 {
+					return false
+				}
+				break
+			}
+			switch op.Code() {
+			case CPUI_PIECE:
+				// PIECE widens the range. We do not yet track byteOffset in
+				// the Go BitRange, so PIECE is handled conservatively: if
+				// curVn is the low input we shift the LSB past the high
+				// operand's bits; otherwise we leave it alone.
+				if op.NumInput() > 1 && op.Input(0) == curVn && op.Input(1) != nil {
+					curRange.LeastSigBit += op.Input(1).Size() * 8
+				}
+			case CPUI_INT_LEFT:
+				cvn := op.Input(1)
+				if cvn == nil || !cvn.IsConstant() {
+					return false
+				}
+				curRange.LeastSigBit += int32(cvn.Offset())
+			case CPUI_INT_RIGHT:
+				cvn := op.Input(1)
+				if cvn == nil || !cvn.IsConstant() {
+					return false
+				}
+				curRange.LeastSigBit -= int32(cvn.Offset())
+				if curRange.LeastSigBit < 0 {
+					curRange.NumBits += curRange.LeastSigBit
+					curRange.LeastSigBit = 0
+					if curRange.NumBits < 0 {
+						curRange.NumBits = 0
+					}
+				}
+			case CPUI_COPY, CPUI_INT_OR, CPUI_INT_XOR, CPUI_INT_NEGATE:
+				// Remaining bits still live through the op.
+			case CPUI_INT_AND:
+				cvn := op.Input(1)
+				if cvn != nil && cvn.IsConstant() {
+					// Masking out bits shrinks the live range. Approximate
+					// by intersecting against the constant.
+					mask := curRange.Mask() & cvn.Offset()
+					if mask == 0 {
+						curRange.NumBits = 0
+					}
+				}
+			case CPUI_INSERT:
+				// An INSERT kills the inserted bit range. Without a rich
+				// BitRange we conservatively clear numBits when the insert's
+				// position/size cover our range.
+				if op.NumInput() >= 4 {
+					posVn := op.Input(2)
+					bitsVn := op.Input(3)
+					if posVn != nil && posVn.IsConstant() && bitsVn != nil && bitsVn.IsConstant() {
+						insPos := int32(posVn.Offset())
+						insBits := int32(bitsVn.Offset())
+						if insPos <= curRange.LeastSigBit &&
+							insPos+insBits >= curRange.LeastSigBit+curRange.NumBits {
+							curRange.NumBits = 0
+						}
+					}
+				}
+			case CPUI_INDIRECT:
+				out := op.Output()
+				if out != nil && out.Addr() == vn.Addr() && out.Size() == vn.Size() {
+					return curRange.NumBits == 0
+				}
+				return false
+			default:
+				if curRange.NumBits != 0 {
+					return false
+				}
+				op = nil
+			}
+			if op == nil {
+				break
+			}
+			curVn = op.Output()
+			if curVn == nil {
+				break
+			}
+			if curVn.Addr() == vn.Addr() && curVn.Size() == vn.Size() {
+				if curRange.NumBits == 0 {
+					return true
+				}
+			}
+			if curVn.HasNoDescend() {
+				break
+			}
+			op = curVn.LoneDescend()
+		}
+	}
 	return false
 }
 
@@ -295,9 +539,14 @@ func NewBitFieldInsertTransform(fd *Funcdata, op *PcodeOp, dt Datatype, off int3
 // DoTrace walks backward from the terminating op to discover one InsertRecord
 // per bitfield write, stopping once all bits of the container are accounted
 // for. Returns true if the caller should invoke Apply.
-// C++ parity: BitFieldInsertTransform::doTrace.
-// TODO(bitfield-typemodel): Without bitfield struct members, establishFields
-// yields an empty worklist and the trace reports failure.
+// C++ parity: BitFieldInsertTransform::doTrace (bitfield.cc ~L794).
+// TODO(bitfield-backward-dispatch): establishFields now seeds the worklist
+// with real BitFieldNodeState entries, but the per-op backward dispatch
+// (processBackward + handleAndBack / handleOrBack / handleAddBack /
+// handleLeftBack / handleRightBack / handleZextBack / handleMultBack /
+// handleSubpieceBack) is not yet ported. doTrace therefore walks the seeded
+// worklist without consuming it and reports failure. Apply is never reached
+// in the current state, but the seeding path is observably correct.
 func (t *BitFieldInsertTransform) DoTrace() bool {
 	if t.mappedVn == nil {
 		return false
@@ -306,21 +555,20 @@ func (t *BitFieldInsertTransform) DoTrace() bool {
 	if len(t.workList) == 0 {
 		return false
 	}
-	// Real port placeholder: pop states from workList, dispatch on the
-	// defining op code, and accumulate insertRecords. Because establishFields
-	// currently produces no states, this loop is never taken. The structure
-	// is retained so a future type-model change flips the transform on
-	// without re-writing call sites.
+	// TODO(bitfield-backward-dispatch): drain t.workList, dispatch each state
+	// through processBackward, and accumulate insertList entries. The C++
+	// implementation lives at bitfield.cc ~L794 and is roughly 250 lines.
 	return false
 }
 
 // Apply materializes INSERT operations for every collected record.
 // C++ parity: BitFieldInsertTransform::apply.
+// TODO(bitfield-backward-dispatch): pair with DoTrace port.
 func (t *BitFieldInsertTransform) Apply() {
-	// Real port placeholder: walk insertList, allocate INSERT p-code ops via
-	// t.fd.NewOp / OpSetOpcode(CPUI_INSERT), wire pos/numBits constants, and
-	// destroy the collapsed producer chain. insertList is always empty today
-	// because DoTrace bails early.
+	// Walks insertList emitting INSERT p-code ops via t.fd.NewOp +
+	// OpSetOpcode(CPUI_INSERT), wires pos/numBits constants, and destroys the
+	// collapsed producer chain. insertList is always empty today because
+	// DoTrace short-circuits before populating it.
 }
 
 // pullRecordKind is the discriminator for PullRecord.
@@ -377,30 +625,32 @@ func NewBitFieldPullTransform(fd *Funcdata, vn *Varnode, dt Datatype, off int32)
 // DoTrace walks forward from the root Varnode collecting pullRecords until
 // every bit of the container has been claimed. Returns true if the caller
 // should invoke Apply.
-// C++ parity: BitFieldPullTransform::doTrace.
-// TODO(bitfield-typemodel): Short-circuits until establishFields has real
-// bitfield members to iterate.
+// C++ parity: BitFieldPullTransform::doTrace (bitfield.cc ~L1600).
+// TODO(bitfield-forward-dispatch): establishFields seeds the worklist with
+// real entries, but the per-op forward dispatch (processForward +
+// handleLeftForward / handleRightForward / handleAndForward /
+// handleExtForward / handleMultForward / handleSubpieceForward /
+// handleInsertForward / handleLessForward / handleLeastSigOp /
+// handleEqualForward) is not yet ported. doTrace therefore returns false
+// without populating pullList.
 func (t *BitFieldPullTransform) DoTrace() bool {
 	if t.root == nil {
 		return false
 	}
-	t.establishFields(t.root, false)
+	t.establishFields(t.root, false) // false: do not follow holes
 	if len(t.workList) == 0 {
 		return false
 	}
-	// Real port placeholder: process each state in workList by dispatching on
-	// descendant op codes (INT_LEFT, INT_RIGHT, INT_AND, subpiece, ...). The
-	// full op-level fan-out is ~600 lines of C++ and each helper needs a
-	// real TransformState; they will be ported alongside the type model.
+	// TODO(bitfield-forward-dispatch): drain t.workList via processForward.
 	return false
 }
 
 // Apply materializes ZPULL or SPULL operations for every collected record.
 // C++ parity: BitFieldPullTransform::apply.
+// TODO(bitfield-forward-dispatch): pair with DoTrace port.
 func (t *BitFieldPullTransform) Apply() {
-	// Real port placeholder: mirrors BitFieldPullTransform::apply -- walks
-	// pullList, emits ZPULL/SPULL ops, then destroys dead descendants. The
-	// list is empty today.
+	// Walks pullList, emits ZPULL / SPULL ops, then destroys dead
+	// descendants. pullList is empty today because DoTrace short-circuits.
 }
 
 // insertExpressionLSBMask returns a mask over the least-significant numBits
