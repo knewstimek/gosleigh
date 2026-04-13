@@ -68,3 +68,4 @@ Ghidra decompiler/Sleigh runtime을 Go로 다시 구현하는 프로젝트. stan
 - 현재 우선순위는 SLEIGH 기반 translation/runtime이며, 이것도 전체 디컴파일 경로의 일부다.
 - 기존 host의 disassembler를 바로 대체한다고 가정하지 않는다.
 
+- 컨텍스트 압축 무한 반복 방지: 서브에이전트가 매 턴 압축-재기동을 반복하면 오케스트레이터가 직접 구현해도 된다. 이유를 주석으로 남길 것.

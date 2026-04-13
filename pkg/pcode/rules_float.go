@@ -150,6 +150,98 @@ func (r *RuleUnsigned2Float) apply(op *PcodeOp, data *Funcdata) int {
 	return 0
 }
 
+// C++ parity: ruleaction.cc RuleInt2FloatCollapse
+type RuleInt2FloatCollapse struct{ batchRule }
+
+// C++ parity: ruleaction.cc RuleInt2FloatCollapse
+func NewRuleInt2FloatCollapse(group string) *RuleInt2FloatCollapse {
+	r := &RuleInt2FloatCollapse{}
+	r.batchRule = newBatchRule(group, "int2floatcollapse", []OpCode{CPUI_FLOAT_INT2FLOAT}, r.apply, func(g string) Rule {
+		return NewRuleInt2FloatCollapse(g)
+	})
+	return r
+}
+
+// C++ parity: ruleaction.cc RuleInt2FloatCollapse::applyOp
+func (r *RuleInt2FloatCollapse) apply(op *PcodeOp, data *Funcdata) int {
+	if op.Input(0) == nil || !op.Input(0).IsWritten() {
+		return 0
+	}
+	zextop := op.Input(0).Def()
+	if zextop == nil || zextop.Code() != CPUI_INT_ZEXT {
+		return 0
+	}
+	basevn := zextop.Input(0)
+	if basevn == nil || basevn.IsFree() {
+		return 0
+	}
+	out := op.Output()
+	if out == nil {
+		return 0
+	}
+	multiop := out.LoneDescend()
+	if multiop == nil || multiop.Code() != CPUI_MULTIEQUAL || multiop.NumInput() != 2 {
+		return 0
+	}
+	slot := multiop.GetSlot(out)
+	if slot < 0 {
+		return 0
+	}
+	otherout := multiop.Input(1 - slot)
+	if otherout == nil || !otherout.IsWritten() {
+		return 0
+	}
+	op2 := otherout.Def()
+	if op2 == nil || op2.Code() != CPUI_FLOAT_INT2FLOAT || op2.Input(0) != basevn {
+		return 0
+	}
+	parent := multiop.Parent()
+	if parent == nil {
+		return 0
+	}
+	cond, dir2unsigned := parent.FlowBlock.FindCondition(&parent.FlowBlock, slot, &parent.FlowBlock, 1-slot)
+	if cond == nil {
+		return 0
+	}
+	condBasic, ok := cond.Concrete().(*BlockBasic)
+	if !ok || condBasic == nil {
+		return 0
+	}
+	cbranch := condBasic.LastOp()
+	if cbranch == nil || cbranch.Code() != CPUI_CBRANCH || cbranch.Input(1) == nil || !cbranch.Input(1).IsWritten() || cbranch.HasFlag(PcodeOpBooleanFlip) {
+		return 0
+	}
+	compare := cbranch.Input(1).Def()
+	if compare == nil || compare.Code() != CPUI_INT_SLESS || compare.NumInput() != 2 {
+		return 0
+	}
+	switch {
+	case compare.Input(1) != nil && isZeroConst(compare.Input(1)):
+		if compare.Input(0) != basevn || dir2unsigned != 1 {
+			return 0
+		}
+	case compare.Input(0) != nil && compare.Input(0).IsConstant() && compare.Input(0).Offset() == maskForSize(basevn.Size()):
+		if compare.Input(1) != basevn || dir2unsigned == 1 {
+			return 0
+		}
+	default:
+		return 0
+	}
+	outbl := multiop.Parent()
+	data.OpUninsert(multiop)
+	data.OpSetOpcode(multiop, CPUI_FLOAT_INT2FLOAT)
+	data.OpRemoveInput(multiop, 0)
+	multiop.SetNumInputs(1)
+	newzext := data.NewOp(1, multiop.Addr())
+	data.OpSetOpcode(newzext, CPUI_INT_ZEXT)
+	newout := data.NewUniqueOut(int32(preferredZextSizeFloatInt2Float(int(basevn.Size()))), newzext)
+	data.OpSetInput(newzext, basevn, 0)
+	data.OpSetInput(multiop, newout, 0)
+	data.OpInsertBegin(multiop, outbl)
+	data.OpInsertBefore(newzext, multiop)
+	return 1
+}
+
 type RuleFloatSign struct{ batchRule }
 
 func NewRuleFloatSign(group string) *RuleFloatSign {

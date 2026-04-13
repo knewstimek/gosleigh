@@ -181,6 +181,36 @@ func (b *FlowBlock) FalseOut() *FlowBlock { return b.outEdges[0].Point }
 // TrueOut returns the true branch target (outEdges[1]).
 func (b *FlowBlock) TrueOut() *FlowBlock { return b.outEdges[1].Point }
 
+// C++ parity: block.cc FlowBlock::findCondition
+func (b *FlowBlock) FindCondition(bl1 *FlowBlock, edge1 int, bl2 *FlowBlock, edge2 int) (*FlowBlock, int) {
+	if b == nil || bl1 == nil || bl2 == nil || edge1 < 0 || edge2 < 0 || edge1 >= bl1.SizeIn() || edge2 >= bl2.SizeIn() {
+		return nil, -1
+	}
+	cond := bl1.InEdge(edge1).Point
+	for cond != nil && cond.SizeOut() != 2 {
+		if cond.SizeOut() != 1 {
+			return nil, -1
+		}
+		bl1 = cond
+		edge1 = 0
+		if bl1.SizeIn() == 0 {
+			return nil, -1
+		}
+		cond = bl1.InEdge(0).Point
+	}
+	for cond != nil && bl2.InEdge(edge2).Point != cond {
+		bl2 = bl2.InEdge(edge2).Point
+		if bl2 == nil || bl2.SizeOut() != 1 {
+			return nil, -1
+		}
+		edge2 = 0
+	}
+	if cond == nil {
+		return nil, -1
+	}
+	return cond, bl1.InRevIndex(edge1)
+}
+
 // AddInEdge adds a bidirectional edge: b <- source.
 // The new edge is appended to b.inEdges and source.outEdges with
 // cross-referencing ReverseIndex values.
