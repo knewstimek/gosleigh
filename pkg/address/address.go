@@ -39,6 +39,13 @@ func (a Address) Add(delta uint64) Address {
 	return Address{Space: a.Space, Offset: a.Offset + delta}
 }
 
+// C++ parity: address.cc Address::renormalize
+func (a *Address) Renormalize(size int32) {
+	// TODO known mismatch: Go currently has no join-space backing store.
+	// The C++ version only adjusts join-space addresses here.
+	_ = size
+}
+
 func (a Address) String() string {
 	if a.Space == nil {
 		return "<invalid>"

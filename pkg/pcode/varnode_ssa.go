@@ -176,16 +176,16 @@ func (vn *Varnode) HasFlags(fl uint32) bool { return vn.flags&fl != 0 }
 // Boolean queries
 // ---------------------------------------------------------------------------
 
-func (vn *Varnode) IsConstant() bool      { return vn.flags&VarnodeConstant != 0 }
-func (vn *Varnode) IsAnnotation() bool    { return vn.flags&VarnodeAnnotation != 0 }
-func (vn *Varnode) IsInput() bool         { return vn.flags&VarnodeInput != 0 }
-func (vn *Varnode) IsWritten() bool       { return vn.flags&VarnodeWritten != 0 }
-func (vn *Varnode) IsFree() bool          { return vn.flags&(VarnodeWritten|VarnodeInput) == 0 }
-func (vn *Varnode) IsImplied() bool       { return vn.flags&VarnodeImplied != 0 }
-func (vn *Varnode) IsExplicit() bool      { return vn.flags&VarnodeExplicit != 0 }
-func (vn *Varnode) IsMark() bool          { return vn.flags&VarnodeMark != 0 }
-func (vn *Varnode) SetMark()              { vn.flags |= VarnodeMark }
-func (vn *Varnode) ClearMark()            { vn.flags &^= VarnodeMark }
+func (vn *Varnode) IsConstant() bool   { return vn.flags&VarnodeConstant != 0 }
+func (vn *Varnode) IsAnnotation() bool { return vn.flags&VarnodeAnnotation != 0 }
+func (vn *Varnode) IsInput() bool      { return vn.flags&VarnodeInput != 0 }
+func (vn *Varnode) IsWritten() bool    { return vn.flags&VarnodeWritten != 0 }
+func (vn *Varnode) IsFree() bool       { return vn.flags&(VarnodeWritten|VarnodeInput) == 0 }
+func (vn *Varnode) IsImplied() bool    { return vn.flags&VarnodeImplied != 0 }
+func (vn *Varnode) IsExplicit() bool   { return vn.flags&VarnodeExplicit != 0 }
+func (vn *Varnode) IsMark() bool       { return vn.flags&VarnodeMark != 0 }
+func (vn *Varnode) SetMark()           { vn.flags |= VarnodeMark }
+func (vn *Varnode) ClearMark()         { vn.flags &^= VarnodeMark }
 func (vn *Varnode) IsAddrTied() bool {
 	return vn.flags&(VarnodeAddrTied|VarnodeInsert) == (VarnodeAddrTied | VarnodeInsert)
 }
@@ -207,10 +207,15 @@ func (vn *Varnode) IsMapped() bool        { return vn.flags&VarnodeMapped != 0 }
 func (vn *Varnode) IsProtoPartial() bool  { return vn.flags&VarnodeProtoPartial != 0 }
 func (vn *Varnode) HasNoDescend() bool    { return len(vn.descend) == 0 }
 
-func (vn *Varnode) SetImplied()      { vn.SetFlags(VarnodeImplied) }
-func (vn *Varnode) ClearImplied()    { vn.ClearFlags(VarnodeImplied) }
-func (vn *Varnode) SetExplicit()     { vn.SetFlags(VarnodeExplicit) }
-func (vn *Varnode) ClearExplicit()   { vn.ClearFlags(VarnodeExplicit) }
+// C++ parity: varnode.hh Varnode::isIndirectZero
+func (vn *Varnode) IsIndirectZero() bool {
+	return vn != nil && vn.flags&(VarnodeConstant|VarnodeIndirectCreation) == (VarnodeConstant|VarnodeIndirectCreation)
+}
+
+func (vn *Varnode) SetImplied()    { vn.SetFlags(VarnodeImplied) }
+func (vn *Varnode) ClearImplied()  { vn.ClearFlags(VarnodeImplied) }
+func (vn *Varnode) SetExplicit()   { vn.SetFlags(VarnodeExplicit) }
+func (vn *Varnode) ClearExplicit() { vn.ClearFlags(VarnodeExplicit) }
 
 // ---------------------------------------------------------------------------
 // Descendant management
