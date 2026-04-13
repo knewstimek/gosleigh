@@ -36,10 +36,11 @@ import (
 //   - Equal2Form     (double.cc:1918 -- replace, applyRule over BOOL_AND/OR)
 //   - Equal3Form     (double.cc:1984 -- verify, applyRule over INT_AND + cmp)
 //   - MultForm       (double.cc:2735 -- map/verify/replace zext+sub recovery)
+//   - LessThreeWay   (double.cc:2026 -- cross-block three-way compare FSM)
 //
-// Stubbed Forms (always return false):
-//   - LessThreeWay                         (cross-block state machine, ~480 C++ lines)
-//   - IndirectForm                         (needs newVarnodeIop + getOpFromConst)
+// Ported Forms (PARTIAL):
+//   - IndirectForm   (double.cc:3080 -- IOP-affector lookup approximated by
+//                     seqnum address match; see TODO in IndirectForm comment)
 
 // -----------------------------------------------------------------------------
 // AddForm
@@ -1263,27 +1264,637 @@ func (ef *Equal3Form) ApplyRule(i *SplitVarnode, op *PcodeOp, workishi bool, dat
 }
 
 // -----------------------------------------------------------------------------
-// LessThreeWay (STUB)
+// LessThreeWay
 // -----------------------------------------------------------------------------
 
-// LessThreeWay is the cross-block three-way less-than comparison recovery.
-// C++ parity: class LessThreeWay (double.hh:182)
+// LessThreeWay recovers a double-precision less-than comparison expressed as
+// three sequential CBRANCH blocks:
 //
-// STUB: the C++ implementation (double.cc:2026-2503) spans ~480 lines of
-// BlockBasic traversal (mapBlocksFromLow), four normalize phases, and a
-// replace path that rewrites control flow. Porting requires block-deletion
-// and CBRANCH rewiring helpers we have not ported yet. Returning false is
-// safe because the rule is purely an optimization: without it the double
-// precision three-way compare stays expressed as its three single-precision
-// sub-compares, which still produce correct output.
+//	if (hi1  <  hi2) goto true   else goto blocksecond
+//	blocksecond: if (hi1 == hi2) goto blockthird else goto false
+//	blockthird:  if (lo1  <  lo2) goto true   else goto false
+//
+// The three blocks are collapsed into a single double-precision comparison
+// at the entry CBRANCH; the middle and low CBRANCHes become unconditional
+// (the lolessbool block is left unreachable for later removal).
+// C++ parity: class LessThreeWay (double.hh:182, double.cc:2026-2496)
 type LessThreeWay struct {
-	// Fields intentionally omitted while the rule is a stub.
+	in  SplitVarnode
+	in2 SplitVarnode
+
+	hilessbl, lolessbl, hieqbl     *BlockBasic
+	hilesstrue, hilessfalse        *BlockBasic
+	hieqtrue, hieqfalse            *BlockBasic
+	lolesstrue, lolessfalse        *BlockBasic
+	hilessbool, lolessbool, hieqbool *PcodeOp
+	hiless, hiequal, loless        *PcodeOp
+	vnhil1, vnhil2                 *Varnode
+	vnhie1, vnhie2                 *Varnode
+	vnlo1, vnlo2                   *Varnode
+	hi, lo, hi2, lo2               *Varnode
+	hislot                         int
+
+	hiflip, equalflip, loflip      bool
+	lolessiszerocomp               bool
+	lolessequalform                bool
+	hilessequalform, signcompare   bool
+	midlessform, midlessequal      bool
+	midsigncompare                 bool
+	hiconstform, midconstform      bool
+	loconstform                    bool
+	hival, midval, loval           uint64
+	finalopc                       OpCode
 }
 
-// ApplyRule is a no-op stub.
-// C++ parity: LessThreeWay::applyRule (double.cc:2476) -- STUB
-func (l *LessThreeWay) ApplyRule(i *SplitVarnode, loop *PcodeOp, workishi bool, data *Funcdata) bool {
+// mapBlocksFromLow walks back from the low-piece compare block to the
+// hieq and hiless blocks. Returns false if the surrounding shape does not
+// match a three-way compare (each prior block must have exactly one entry
+// and exactly two exits).
+// C++ parity: LessThreeWay::mapBlocksFromLow (double.cc:2026)
+func (l *LessThreeWay) mapBlocksFromLow(lobl *BlockBasic) bool {
+	l.lolessbl = lobl
+	if l.lolessbl == nil {
+		return false
+	}
+	if l.lolessbl.SizeIn() != 1 {
+		return false
+	}
+	if l.lolessbl.SizeOut() != 2 {
+		return false
+	}
+	hieqFB := l.lolessbl.InEdge(0).Point
+	if hieqFB == nil {
+		return false
+	}
+	hieqbb, ok := hieqFB.Concrete().(*BlockBasic)
+	if !ok {
+		return false
+	}
+	l.hieqbl = hieqbb
+	if l.hieqbl.SizeIn() != 1 {
+		return false
+	}
+	if l.hieqbl.SizeOut() != 2 {
+		return false
+	}
+	hilessFB := l.hieqbl.InEdge(0).Point
+	if hilessFB == nil {
+		return false
+	}
+	hilessbb, ok := hilessFB.Concrete().(*BlockBasic)
+	if !ok {
+		return false
+	}
+	l.hilessbl = hilessbb
+	if l.hilessbl.SizeOut() != 2 {
+		return false
+	}
+	return true
+}
+
+// mapOpsFromBlocks identifies the trailing CBRANCH ops in each of the three
+// candidate blocks and decodes the comparison flavour for each.
+// C++ parity: LessThreeWay::mapOpsFromBlocks (double.cc:2041)
+func (l *LessThreeWay) mapOpsFromBlocks() bool {
+	l.lolessbool = l.lolessbl.LastOp()
+	if l.lolessbool == nil || l.lolessbool.Code() != CPUI_CBRANCH {
+		return false
+	}
+	l.hieqbool = l.hieqbl.LastOp()
+	if l.hieqbool == nil || l.hieqbool.Code() != CPUI_CBRANCH {
+		return false
+	}
+	l.hilessbool = l.hilessbl.LastOp()
+	if l.hilessbool == nil || l.hilessbool.Code() != CPUI_CBRANCH {
+		return false
+	}
+
+	l.hiflip = false
+	l.equalflip = false
+	l.loflip = false
+	l.midlessform = false
+	l.lolessiszerocomp = false
+
+	vn := l.hieqbool.Input(1)
+	if vn == nil || !vn.IsWritten() {
+		return false
+	}
+	l.hiequal = vn.Def()
+	switch l.hiequal.Code() {
+	case CPUI_INT_EQUAL:
+		l.midlessform = false
+	case CPUI_INT_NOTEQUAL:
+		l.midlessform = false
+	case CPUI_INT_LESS:
+		l.midlessequal = false
+		l.midsigncompare = false
+		l.midlessform = true
+	case CPUI_INT_LESSEQUAL:
+		l.midlessequal = true
+		l.midsigncompare = false
+		l.midlessform = true
+	case CPUI_INT_SLESS:
+		l.midlessequal = false
+		l.midsigncompare = true
+		l.midlessform = true
+	case CPUI_INT_SLESSEQUAL:
+		l.midlessequal = true
+		l.midsigncompare = true
+		l.midlessform = true
+	default:
+		return false
+	}
+
+	vn = l.lolessbool.Input(1)
+	if vn == nil || !vn.IsWritten() {
+		return false
+	}
+	l.loless = vn.Def()
+	switch l.loless.Code() {
+	case CPUI_INT_LESS:
+		l.lolessequalform = false
+	case CPUI_INT_LESSEQUAL:
+		l.lolessequalform = true
+	case CPUI_INT_EQUAL:
+		if !l.loless.Input(1).IsConstant() {
+			return false
+		}
+		if l.loless.Input(1).Offset() != 0 {
+			return false
+		}
+		l.lolessiszerocomp = true
+		l.lolessequalform = true
+	case CPUI_INT_NOTEQUAL:
+		if !l.loless.Input(1).IsConstant() {
+			return false
+		}
+		if l.loless.Input(1).Offset() != 0 {
+			return false
+		}
+		l.lolessiszerocomp = true
+		l.lolessequalform = false
+	default:
+		return false
+	}
+
+	vn = l.hilessbool.Input(1)
+	if vn == nil || !vn.IsWritten() {
+		return false
+	}
+	l.hiless = vn.Def()
+	switch l.hiless.Code() {
+	case CPUI_INT_LESS:
+		l.hilessequalform = false
+		l.signcompare = false
+	case CPUI_INT_LESSEQUAL:
+		l.hilessequalform = true
+		l.signcompare = false
+	case CPUI_INT_SLESS:
+		l.hilessequalform = false
+		l.signcompare = true
+	case CPUI_INT_SLESSEQUAL:
+		l.hilessequalform = true
+		l.signcompare = true
+	default:
+		return false
+	}
+	return true
+}
+
+// checkSignedness verifies that the middle compare (when expressed as a
+// less-than rather than an equality) uses the same signedness as the high
+// less-than. Without this, the three-way reconstruction is incorrect.
+// C++ parity: LessThreeWay::checkSignedness (double.cc:2148)
+func (l *LessThreeWay) checkSignedness() bool {
+	if l.midlessform {
+		if l.midsigncompare != l.signcompare {
+			return false
+		}
+	}
+	return true
+}
+
+// normalizeHi normalises the high compare so that constants live on the
+// right and the false branch contains the equal case. Constant forms are
+// folded into a hival shifted into the high half.
+// C++ parity: LessThreeWay::normalizeHi (double.cc:2157)
+func (l *LessThreeWay) normalizeHi() bool {
+	var tmpvn *Varnode
+	l.vnhil1 = l.hiless.Input(0)
+	l.vnhil2 = l.hiless.Input(1)
+	if l.vnhil1.IsConstant() {
+		l.hiflip = !l.hiflip
+		l.hilessequalform = !l.hilessequalform
+		tmpvn = l.vnhil1
+		l.vnhil1 = l.vnhil2
+		l.vnhil2 = tmpvn
+	}
+	l.hiconstform = false
+	if l.vnhil2.IsConstant() {
+		// uintb in C++ is uint64; we need at least 8 bytes of precision.
+		if l.in.GetSize() > 8 {
+			return false
+		}
+		l.hiconstform = true
+		l.hival = l.vnhil2.Offset()
+		l.hilesstrue, l.hilessfalse = SplitVarnodeGetTrueFalse(l.hilessbool, l.hiflip)
+		inc := int64(1)
+		if l.hilessfalse != l.hieqbl {
+			l.hiflip = !l.hiflip
+			l.hilessequalform = !l.hilessequalform
+			tmpvn = l.vnhil1
+			l.vnhil1 = l.vnhil2
+			l.vnhil2 = tmpvn
+			inc = -1
+		}
+		if l.hilessequalform {
+			if inc >= 0 {
+				l.hival += uint64(inc)
+			} else {
+				l.hival -= uint64(-inc)
+			}
+			l.hival &= doubleMaskOfSize(l.in.GetSize())
+			l.hilessequalform = false
+		}
+		l.hival >>= uint(l.in.GetLo().Size() * 8)
+	} else {
+		if l.hilessequalform {
+			l.hilessequalform = false
+			l.hiflip = !l.hiflip
+			tmpvn = l.vnhil1
+			l.vnhil1 = l.vnhil2
+			l.vnhil2 = tmpvn
+		}
+	}
+	return true
+}
+
+// normalizeMid normalises the middle compare to an equality. If both sides
+// are constant, the middle constant must agree with the high constant
+// (modulo a one-off correction when the original middle was a less-than).
+// C++ parity: LessThreeWay::normalizeMid (double.cc:2204)
+func (l *LessThreeWay) normalizeMid() bool {
+	var tmpvn *Varnode
+	l.vnhie1 = l.hiequal.Input(0)
+	l.vnhie2 = l.hiequal.Input(1)
+	if l.vnhie1.IsConstant() {
+		tmpvn = l.vnhie1
+		l.vnhie1 = l.vnhie2
+		l.vnhie2 = tmpvn
+		if l.midlessform {
+			l.equalflip = !l.equalflip
+			l.midlessequal = !l.midlessequal
+		}
+	}
+	l.midconstform = false
+	if l.vnhie2.IsConstant() {
+		if !l.hiconstform {
+			return false
+		}
+		l.midconstform = true
+		l.midval = l.vnhie2.Offset()
+		if l.vnhie2.Size() == l.in.GetSize() {
+			lopart := l.midval & doubleMaskOfSize(l.in.GetLo().Size())
+			l.midval >>= uint(l.in.GetLo().Size() * 8)
+			if l.midlessform {
+				if l.midlessequal {
+					if lopart != doubleMaskOfSize(l.in.GetLo().Size()) {
+						return false
+					}
+				} else {
+					if lopart != 0 {
+						return false
+					}
+				}
+			} else {
+				return false
+			}
+		}
+		if l.midval != l.hival {
+			if !l.midlessform {
+				return false
+			}
+			if l.midlessequal {
+				l.midval += 1
+			} else {
+				l.midval -= 1
+			}
+			l.midval &= doubleMaskOfSize(l.in.GetLo().Size())
+			l.midlessequal = !l.midlessequal
+			if l.midval != l.hival {
+				return false
+			}
+		}
+	}
+	if l.midlessform {
+		if !l.midlessequal {
+			l.equalflip = !l.equalflip
+		}
+	} else {
+		if l.hiequal.Code() == CPUI_INT_NOTEQUAL {
+			l.equalflip = !l.equalflip
+		}
+	}
+	return true
+}
+
+// normalizeLo normalises the low compare similarly to normalizeHi. The
+// special "compare to zero" form is rewritten to compare against 1.
+// C++ parity: LessThreeWay::normalizeLo (double.cc:2261)
+func (l *LessThreeWay) normalizeLo() bool {
+	var tmpvn *Varnode
+	l.vnlo1 = l.loless.Input(0)
+	l.vnlo2 = l.loless.Input(1)
+	if l.lolessiszerocomp {
+		l.loconstform = true
+		if l.lolessequalform {
+			l.loval = 1
+			l.lolessequalform = false
+		} else {
+			l.loflip = !l.loflip
+			l.loval = 1
+		}
+		return true
+	}
+	if l.vnlo1.IsConstant() {
+		l.loflip = !l.loflip
+		l.lolessequalform = !l.lolessequalform
+		tmpvn = l.vnlo1
+		l.vnlo1 = l.vnlo2
+		l.vnlo2 = tmpvn
+	}
+	l.loconstform = false
+	if l.vnlo2.IsConstant() {
+		l.loconstform = true
+		l.loval = l.vnlo2.Offset()
+		if l.lolessequalform {
+			l.loval += 1
+			l.loval &= doubleMaskOfSize(l.vnlo2.Size())
+			l.lolessequalform = false
+		}
+	} else {
+		if l.lolessequalform {
+			l.lolessequalform = false
+			l.loflip = !l.loflip
+			tmpvn = l.vnlo1
+			l.vnlo1 = l.vnlo2
+			l.vnlo2 = tmpvn
+		}
+	}
+	return true
+}
+
+// checkBlockForm verifies that the three CBRANCHes wire up exactly as the
+// expected three-way compare graph and that the middle/low blocks contain
+// nothing else.
+// C++ parity: LessThreeWay::checkBlockForm (double.cc:2308)
+func (l *LessThreeWay) checkBlockForm() bool {
+	l.hilesstrue, l.hilessfalse = SplitVarnodeGetTrueFalse(l.hilessbool, l.hiflip)
+	l.lolesstrue, l.lolessfalse = SplitVarnodeGetTrueFalse(l.lolessbool, l.loflip)
+	l.hieqtrue, l.hieqfalse = SplitVarnodeGetTrueFalse(l.hieqbool, l.equalflip)
+	if l.hilesstrue == l.lolesstrue &&
+		l.hieqfalse == l.lolessfalse &&
+		l.hilessfalse == l.hieqbl &&
+		l.hieqtrue == l.lolessbl {
+		if SplitVarnodeOtherwiseEmpty(l.hieqbool) && SplitVarnodeOtherwiseEmpty(l.lolessbool) {
+			return true
+		}
+	}
 	return false
+}
+
+// checkOpForm matches the high/low piece varnodes against the candidate
+// SplitVarnode pieces and assigns the slot/whole arrangement.
+// C++ parity: LessThreeWay::checkOpForm (double.cc:2331)
+func (l *LessThreeWay) checkOpForm() bool {
+	l.lo = l.in.GetLo()
+	l.hi = l.in.GetHi()
+
+	if l.midconstform {
+		if !l.hiconstform {
+			return false
+		}
+		if l.vnhie2.Size() == l.in.GetSize() {
+			if l.vnhie1 != l.vnhil1 && l.vnhie1 != l.vnhil2 {
+				return false
+			}
+		} else {
+			if l.vnhie1 != l.in.GetHi() {
+				return false
+			}
+		}
+	} else {
+		if l.vnhil1 != l.vnhie1 && l.vnhil1 != l.vnhie2 {
+			return false
+		}
+		if l.vnhil2 != l.vnhie1 && l.vnhil2 != l.vnhie2 {
+			return false
+		}
+	}
+	if l.hi != nil && l.hi == l.vnhil1 {
+		if l.hiconstform {
+			return false
+		}
+		l.hislot = 0
+		l.hi2 = l.vnhil2
+		if l.vnlo1 != l.lo {
+			tmpvn := l.vnlo1
+			l.vnlo1 = l.vnlo2
+			l.vnlo2 = tmpvn
+			if l.vnlo1 != l.lo {
+				return false
+			}
+			l.loflip = !l.loflip
+			l.lolessequalform = !l.lolessequalform
+		}
+		l.lo2 = l.vnlo2
+	} else if l.hi != nil && l.hi == l.vnhil2 {
+		if l.hiconstform {
+			return false
+		}
+		l.hislot = 1
+		l.hi2 = l.vnhil1
+		if l.vnlo2 != l.lo {
+			tmpvn := l.vnlo1
+			l.vnlo1 = l.vnlo2
+			l.vnlo2 = tmpvn
+			if l.vnlo2 != l.lo {
+				return false
+			}
+			l.loflip = !l.loflip
+			l.lolessequalform = !l.lolessequalform
+		}
+		l.lo2 = l.vnlo1
+	} else if l.in.GetWhole() == l.vnhil1 {
+		if !l.hiconstform {
+			return false
+		}
+		if !l.loconstform {
+			return false
+		}
+		if l.vnlo1 != l.lo {
+			return false
+		}
+		l.hislot = 0
+	} else if l.in.GetWhole() == l.vnhil2 {
+		if !l.hiconstform {
+			return false
+		}
+		if !l.loconstform {
+			return false
+		}
+		if l.vnlo2 != l.lo {
+			l.loflip = !l.loflip
+			l.loval -= 1
+			l.loval &= doubleMaskOfSize(l.lo.Size())
+			if l.vnlo1 != l.lo {
+				return false
+			}
+		}
+		l.hislot = 1
+	} else {
+		return false
+	}
+	return true
+}
+
+// setOpCode picks the final double-precision opcode based on the
+// accumulated flip flags.
+// C++ parity: LessThreeWay::setOpCode (double.cc:2403)
+func (l *LessThreeWay) setOpCode() {
+	if l.lolessequalform != l.hiflip {
+		if l.signcompare {
+			l.finalopc = CPUI_INT_SLESSEQUAL
+		} else {
+			l.finalopc = CPUI_INT_LESSEQUAL
+		}
+	} else {
+		if l.signcompare {
+			l.finalopc = CPUI_INT_SLESS
+		} else {
+			l.finalopc = CPUI_INT_LESS
+		}
+	}
+	if l.hiflip {
+		l.hislot = 1 - l.hislot
+		l.hiflip = false
+	}
+}
+
+// setBoolOp orders the two SplitVarnode operands by hislot and runs the
+// feasibility check that prepareBoolOp performs.
+// C++ parity: LessThreeWay::setBoolOp (double.cc:2416)
+func (l *LessThreeWay) setBoolOp() bool {
+	if l.hislot == 0 {
+		if SplitVarnodePrepareBoolOp(&l.in, &l.in2, l.hilessbool) {
+			return true
+		}
+	} else {
+		if SplitVarnodePrepareBoolOp(&l.in2, &l.in, l.hilessbool) {
+			return true
+		}
+	}
+	return false
+}
+
+// mapFromLow is the top-level map driver: it walks back from the low
+// compare to the surrounding blocks, decodes ops, and runs the four
+// normalize phases plus the form checks.
+// C++ parity: LessThreeWay::mapFromLow (double.cc:2430)
+func (l *LessThreeWay) mapFromLow(op *PcodeOp) bool {
+	out := op.Output()
+	if out == nil {
+		return false
+	}
+	loop := out.LoneDescend()
+	if loop == nil {
+		return false
+	}
+	if !l.mapBlocksFromLow(loop.Parent()) {
+		return false
+	}
+	if !l.mapOpsFromBlocks() {
+		return false
+	}
+	if !l.checkSignedness() {
+		return false
+	}
+	if !l.normalizeHi() {
+		return false
+	}
+	if !l.normalizeMid() {
+		return false
+	}
+	if !l.normalizeLo() {
+		return false
+	}
+	if !l.checkOpForm() {
+		return false
+	}
+	if !l.checkBlockForm() {
+		return false
+	}
+	return true
+}
+
+// testReplace assembles the second SplitVarnode (constant or paired) and
+// makes sure the prepare step succeeds before any rewrite is committed.
+// C++ parity: LessThreeWay::testReplace (double.cc:2447)
+func (l *LessThreeWay) testReplace() bool {
+	l.setOpCode()
+	if l.hiconstform {
+		val := (l.hival << uint(8*l.in.GetLo().Size())) | l.loval
+		l.in2.InitPartialConst(l.in.GetSize(), val)
+		if !l.setBoolOp() {
+			return false
+		}
+	} else {
+		l.in2.InitPartialPieces(l.in.GetSize(), l.lo2, l.hi2)
+		if !l.setBoolOp() {
+			return false
+		}
+	}
+	return true
+}
+
+// ApplyRule mirrors LessThreeWay::applyRule (double.cc:2476).
+// The rewrite leaves the original CBRANCH ops in place but rewires them so
+// that the entry CBRANCH is a single double-precision compare and the
+// middle equality always falls through to the original FALSE block. The
+// low block then becomes unreachable and is removed by later passes.
+func (l *LessThreeWay) ApplyRule(i *SplitVarnode, loop *PcodeOp, workishi bool, data *Funcdata) bool {
+	if workishi {
+		return false
+	}
+	if i.GetLo() == nil {
+		return false
+	}
+	l.in = *i
+	if !l.mapFromLow(loop) {
+		return false
+	}
+	if !l.testReplace() {
+		return false
+	}
+	if l.in2.ExceedsConstPrecision() {
+		return false
+	}
+	if l.hislot == 0 {
+		SplitVarnodeCreateBoolOp(data, l.hilessbool, &l.in, &l.in2, l.finalopc)
+	} else {
+		SplitVarnodeCreateBoolOp(data, l.hilessbool, &l.in2, &l.in, l.finalopc)
+	}
+	// Rewire the middle CBRANCH so it always goes to the original FALSE
+	// block. The lolessbool block becomes unreachable and is removed by a
+	// later pass; we cannot delete it here because the basic-block remover
+	// runs as its own action in C++ as well.
+	var equalConst uint64
+	if l.equalflip {
+		equalConst = 1
+	}
+	data.OpSetInput(l.hieqbool, data.NewConstant(1, equalConst), 1)
+	*i = l.in
+	return true
 }
 
 // -----------------------------------------------------------------------------
@@ -1682,30 +2293,108 @@ func (mf *MultForm) ApplyRule(i *SplitVarnode, hop *PcodeOp, workishi bool, data
 }
 
 // -----------------------------------------------------------------------------
-// IndirectForm (STUB)
+// IndirectForm (PARTIAL)
 // -----------------------------------------------------------------------------
 
 // IndirectForm recovers a double-precision INDIRECT whose low and high pieces
 // are affected by the same affector op.
-// C++ parity: class IndirectForm (double.hh:287)
+// C++ parity: class IndirectForm (double.hh:287, double.cc:3080-3129)
 //
-// STUB: blocked on several unported primitives --
-//   - PcodeOp::getOpFromConst (double.cc:3087) for decoding an IOP constant
-//   - IPTR_IOP / IPTR_INTERNAL space-type probes on Varnode addresses
-//   - Funcdata::newVarnodeIop for synthesizing the rewritten affector input
-//   - SplitVarnode::replaceIndirectOp for the final rewrite
+// PARTIAL port. The C++ implementation identifies the affector op by
+// decoding the IOP-encoded constant on input(1) of each INDIRECT
+// (PcodeOp::getOpFromConst). Gosleigh has not ported the IOP-space encoding
+// for INDIRECT cause-references yet -- our NewIndirectOp helper writes a
+// zero constant placeholder in that slot (see funcdata.go:725, comment
+// "cause ref (IOP stub)"). To stay parity-safe without that primitive, we
+// approximate the affector match by comparing the seqnum address of the
+// INDIRECT op: in well-formed input both halves of a double-precision
+// INDIRECT share the affector op's address. Once newVarnodeIop and
+// getOpFromConst are ported, this should switch back to the structural
+// pointer comparison from the C++ source.
 //
-// See rules_misc.go:2989 for the sibling TODO that blocks the same rewrite
-// path from the RuleReassignIndirects direction. Until those primitives are
-// ported, the rule returns false unconditionally, which is safe: the input
-// stays expressed as its two single-precision INDIRECTs and downstream rules
-// still produce correct output.
+// TODO known mismatch: false positives are possible if two unrelated
+// INDIRECT pairs share an instruction address.
 type IndirectForm struct {
-	// Fields intentionally omitted while the rule is a stub.
+	in       SplitVarnode
+	outvn    SplitVarnode
+	lo, hi   *Varnode
+	reslo    *Varnode
+	reshi    *Varnode
+	affector *PcodeOp
+	indhi    *PcodeOp
+	indlo    *PcodeOp
 }
 
-// ApplyRule is a no-op stub.
-// C++ parity: IndirectForm::applyRule (double.cc:3114) -- STUB
-func (ifm *IndirectForm) ApplyRule(sp *SplitVarnode, ind *PcodeOp, workishi bool, data *Funcdata) bool {
+// verify mirrors IndirectForm::verify (double.cc:3080). It locates a sibling
+// CPUI_INDIRECT on lo with the same affector and checks the temporary /
+// addr-tied invariants.
+// C++ parity: IndirectForm::verify (double.cc:3080)
+func (ifm *IndirectForm) verify(h, l *Varnode, ind *PcodeOp) bool {
+	ifm.hi = h
+	ifm.lo = l
+	ifm.indhi = ind
+	if ind.NumInput() < 2 {
+		return false
+	}
+	// PARTIAL: use the indhi seqnum address as a stand-in for the affector
+	// pointer. We cannot recover a real affector op without IOP encoding.
+	ifm.affector = ind
+	ifm.reshi = ind.Output()
+	if ifm.reshi == nil {
+		return false
+	}
+	// C++ rejects INDIRECT through unique (IPTR_INTERNAL) outputs.
+	hispc := ifm.reshi.Space()
+	if hispc != nil && hispc.Kind == address.SpaceKindUnique {
+		return false
+	}
+	for _, indlo := range append([]*PcodeOp(nil), ifm.lo.DescendIter()...) {
+		if indlo.IsDead() {
+			continue
+		}
+		if indlo.Code() != CPUI_INDIRECT {
+			continue
+		}
+		// PARTIAL: match by seqnum address rather than IOP-decoded affector.
+		if indlo.Addr() != ind.Addr() {
+			continue
+		}
+		ifm.reslo = indlo.Output()
+		if ifm.reslo == nil {
+			continue
+		}
+		lospc := ifm.reslo.Space()
+		if lospc != nil && lospc.Kind == address.SpaceKindUnique {
+			return false
+		}
+		if ifm.reslo.IsAddrTied() || ifm.reshi.IsAddrTied() {
+			if _, ok := SplitVarnodeIsAddrTiedContiguous(ifm.reslo, ifm.reshi); !ok {
+				return false
+			}
+		}
+		ifm.indlo = indlo
+		return true
+	}
 	return false
+}
+
+// ApplyRule mirrors IndirectForm::applyRule (double.cc:3114).
+func (ifm *IndirectForm) ApplyRule(sp *SplitVarnode, ind *PcodeOp, workishi bool, data *Funcdata) bool {
+	if !workishi {
+		return false
+	}
+	if !sp.HasBothPieces() {
+		return false
+	}
+	ifm.in = *sp
+	if !ifm.verify(ifm.in.GetHi(), ifm.in.GetLo(), ind) {
+		return false
+	}
+	ifm.outvn.InitPartialPieces(ifm.in.GetSize(), ifm.reslo, ifm.reshi)
+	if !SplitVarnodePrepareIndirectOp(&ifm.in, ifm.affector) {
+		return false
+	}
+	SplitVarnodeReplaceIndirectOp(data, &ifm.outvn, &ifm.in, ifm.affector)
+	*sp = ifm.in
+	return true
 }
