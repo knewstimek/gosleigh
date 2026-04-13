@@ -1,6 +1,8 @@
 # 프로젝트 상태
 
-## 현재 단계: H4 완료 -- ActionAssignHigh/MergeRequired/MarkExplicit/MarkImplied/MergeCopy/NameVars (2026-04-13)
+## 현재 단계: H7/H8 진행 중 -- while-condition comma_separate + gcd 완성 (2026-04-13)
+
+H1~H6 완료. H8 (TestMSVC_Gcd) 미완: 조건 iVar1=param_4 누락 + 루프 바디 비어있음.
 
 ### 완료
 - [x] Git repo initialized
