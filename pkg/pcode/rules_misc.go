@@ -1168,3 +1168,272 @@ func AddBatchCMiscRules(pool *ActionPool, group string) int {
 	}
 	return len(rules)
 }
+
+// RuleSubvarAnd::applyOp -- subflow.cc.
+type RuleSubvarAnd struct{ batchRule }
+
+// NewRuleSubvarAnd is the Go port of RuleSubvarAnd::RuleSubvarAnd in subflow.cc.
+func NewRuleSubvarAnd(group string) *RuleSubvarAnd {
+	r := &RuleSubvarAnd{}
+	r.batchRule = newBatchRule(group, "subvar_and", []OpCode{CPUI_INT_AND}, r.apply, func(g string) Rule { return NewRuleSubvarAnd(g) })
+	return r
+}
+
+// RuleSubvarAnd::getOpList -- subflow.cc.
+func (r *RuleSubvarAnd) getOpList() []OpCode {
+	return []OpCode{CPUI_INT_AND}
+}
+
+// RuleSubvarAnd::applyOp -- subflow.cc.
+func (r *RuleSubvarAnd) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.Output() == nil || !op.Input(1).IsConstant() {
+		return 0
+	}
+	vn := op.Input(0)
+	outvn := op.Output()
+	if outvn.Consumed() != op.Input(1).Offset() {
+		return 0
+	}
+	if (outvn.Consumed() & 1) == 0 {
+		return 0
+	}
+	var cmask uint64
+	if outvn.Consumed() == 1 {
+		cmask = 1
+	} else {
+		cmask = maskForSize(vn.Size()) >> 8
+		for cmask != 0 {
+			if cmask == outvn.Consumed() {
+				break
+			}
+			cmask >>= 8
+		}
+	}
+	if cmask == 0 || outvn.HasNoDescend() {
+		return 0
+	}
+	subflow := NewSubvariableFlow(data, vn, cmask, false, false, false)
+	if !subflow.DoTrace() {
+		return 0
+	}
+	subflow.DoReplacement()
+	return 1
+}
+
+// RuleSubvarSubpiece::applyOp -- subflow.cc.
+type RuleSubvarSubpiece struct{ batchRule }
+
+// NewRuleSubvarSubpiece is the Go port of RuleSubvarSubpiece::RuleSubvarSubpiece in subflow.cc.
+func NewRuleSubvarSubpiece(group string) *RuleSubvarSubpiece {
+	r := &RuleSubvarSubpiece{}
+	r.batchRule = newBatchRule(group, "subvar_subpiece", []OpCode{CPUI_SUBPIECE}, r.apply, func(g string) Rule { return NewRuleSubvarSubpiece(g) })
+	return r
+}
+
+// RuleSubvarSubpiece::getOpList -- subflow.cc.
+func (r *RuleSubvarSubpiece) getOpList() []OpCode {
+	return []OpCode{CPUI_SUBPIECE}
+}
+
+// RuleSubvarSubpiece::applyOp -- subflow.cc.
+func (r *RuleSubvarSubpiece) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.Output() == nil {
+		return 0
+	}
+	vn := op.Input(0)
+	outvn := op.Output()
+	flowsize := outvn.Size()
+	sa := int32(op.Input(1).Offset())
+	if flowsize+sa > 8 {
+		return 0
+	}
+	mask := maskForSize(flowsize) << uint(8*sa)
+	aggressive := outvn.HasPtrFlow()
+	if !aggressive {
+		if (vn.Consumed() & mask) != vn.Consumed() {
+			return 0
+		}
+		if outvn.HasNoDescend() {
+			return 0
+		}
+	}
+	big := false
+	if flowsize >= 8 && vn.IsInput() && vn.LoneDescend() == op {
+		big = true
+	}
+	subflow := NewSubvariableFlow(data, vn, mask, aggressive, false, big)
+	if !subflow.DoTrace() {
+		return 0
+	}
+	subflow.DoReplacement()
+	return 1
+}
+
+// RuleSubvarCompZero::applyOp -- subflow.cc.
+type RuleSubvarCompZero struct{ batchRule }
+
+// NewRuleSubvarCompZero is the Go port of RuleSubvarCompZero::RuleSubvarCompZero in subflow.cc.
+func NewRuleSubvarCompZero(group string) *RuleSubvarCompZero {
+	r := &RuleSubvarCompZero{}
+	r.batchRule = newBatchRule(group, "subvar_compzero", []OpCode{CPUI_INT_NOTEQUAL, CPUI_INT_EQUAL}, r.apply, func(g string) Rule { return NewRuleSubvarCompZero(g) })
+	return r
+}
+
+// RuleSubvarCompZero::getOpList -- subflow.cc.
+func (r *RuleSubvarCompZero) getOpList() []OpCode {
+	return []OpCode{CPUI_INT_NOTEQUAL, CPUI_INT_EQUAL}
+}
+
+// RuleSubvarCompZero::applyOp -- subflow.cc.
+func (r *RuleSubvarCompZero) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.Output() == nil || !op.Input(1).IsConstant() {
+		return 0
+	}
+	vn := op.Input(0)
+	mask := vn.NZMask()
+	bitnum := bits.TrailingZeros64(mask)
+	if mask == 0 || (mask>>uint(bitnum)) != 1 {
+		return 0
+	}
+	if op.Input(1).Offset() != mask && op.Input(1).Offset() != 0 {
+		return 0
+	}
+	if op.Output().HasNoDescend() {
+		return 0
+	}
+	if vn.IsWritten() && vn.Def() != nil {
+		andop := vn.Def()
+		if andop.NumInput() == 0 {
+			return 0
+		}
+		vn0 := andop.Input(0)
+		switch andop.Code() {
+		case CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_RIGHT:
+			if vn0.IsConstant() {
+				return 0
+			}
+			mask0 := vn0.Consumed() & vn0.NZMask()
+			wholemask := maskForSize(vn0.Size()) & mask0
+			if (wholemask&0xff) == 0xff || (wholemask&0xff00) == 0xff00 {
+				return 0
+			}
+		}
+	}
+	subflow := NewSubvariableFlow(data, vn, mask, false, false, false)
+	if !subflow.DoTrace() {
+		return 0
+	}
+	subflow.DoReplacement()
+	return 1
+}
+
+// RuleSubvarShift::applyOp -- subflow.cc.
+type RuleSubvarShift struct{ batchRule }
+
+// NewRuleSubvarShift is the Go port of RuleSubvarShift::RuleSubvarShift in subflow.cc.
+func NewRuleSubvarShift(group string) *RuleSubvarShift {
+	r := &RuleSubvarShift{}
+	r.batchRule = newBatchRule(group, "subvar_shift", []OpCode{CPUI_INT_RIGHT}, r.apply, func(g string) Rule { return NewRuleSubvarShift(g) })
+	return r
+}
+
+// RuleSubvarShift::getOpList -- subflow.cc.
+func (r *RuleSubvarShift) getOpList() []OpCode {
+	return []OpCode{CPUI_INT_RIGHT}
+}
+
+// RuleSubvarShift::applyOp -- subflow.cc.
+func (r *RuleSubvarShift) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.Output() == nil || op.Input(0).Size() != 1 || !op.Input(1).IsConstant() {
+		return 0
+	}
+	vn := op.Input(0)
+	sa := int32(op.Input(1).Offset())
+	mask := vn.NZMask()
+	if (mask >> uint(sa)) != 1 {
+		return 0
+	}
+	mask = (mask >> uint(sa)) << uint(sa)
+	if op.Output().HasNoDescend() {
+		return 0
+	}
+	subflow := NewSubvariableFlow(data, vn, mask, false, false, false)
+	if !subflow.DoTrace() {
+		return 0
+	}
+	subflow.DoReplacement()
+	return 1
+}
+
+// RuleSubvarZext::applyOp -- subflow.cc.
+type RuleSubvarZext struct{ batchRule }
+
+// NewRuleSubvarZext is the Go port of RuleSubvarZext::RuleSubvarZext in subflow.cc.
+func NewRuleSubvarZext(group string) *RuleSubvarZext {
+	r := &RuleSubvarZext{}
+	r.batchRule = newBatchRule(group, "subvar_zext", []OpCode{CPUI_INT_ZEXT}, r.apply, func(g string) Rule { return NewRuleSubvarZext(g) })
+	return r
+}
+
+// RuleSubvarZext::getOpList -- subflow.cc.
+func (r *RuleSubvarZext) getOpList() []OpCode {
+	return []OpCode{CPUI_INT_ZEXT}
+}
+
+// RuleSubvarZext::applyOp -- subflow.cc.
+func (r *RuleSubvarZext) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.Output() == nil {
+		return 0
+	}
+	vn := op.Output()
+	invn := op.Input(0)
+	mask := maskForSize(invn.Size())
+	subflow := NewSubvariableFlow(data, vn, mask, invn.HasPtrFlow(), false, false)
+	if !subflow.DoTrace() {
+		return 0
+	}
+	subflow.DoReplacement()
+	return 1
+}
+
+// RuleSubvarSext::applyOp -- subflow.cc.
+type RuleSubvarSext struct {
+	batchRule
+	isaggressive bool
+}
+
+// NewRuleSubvarSext is the Go port of RuleSubvarSext::RuleSubvarSext in subflow.cc.
+func NewRuleSubvarSext(group string) *RuleSubvarSext {
+	r := &RuleSubvarSext{}
+	r.batchRule = newBatchRule(group, "subvar_sext", []OpCode{CPUI_INT_SEXT}, r.apply, func(g string) Rule { return NewRuleSubvarSext(g) })
+	return r
+}
+
+// RuleSubvarSext::getOpList -- subflow.cc.
+func (r *RuleSubvarSext) getOpList() []OpCode {
+	return []OpCode{CPUI_INT_SEXT}
+}
+
+// RuleSubvarSext::applyOp -- subflow.cc.
+func (r *RuleSubvarSext) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || op.Output() == nil {
+		return 0
+	}
+	vn := op.Output()
+	invn := op.Input(0)
+	mask := maskForSize(invn.Size())
+	subflow := NewSubvariableFlow(data, vn, mask, r.isaggressive, true, false)
+	if !subflow.DoTrace() {
+		return 0
+	}
+	subflow.DoReplacement()
+	return 1
+}
+
+// RuleSubvarSext::reset -- subflow.cc.
+func (r *RuleSubvarSext) Reset(data *Funcdata) {
+	// TODO known mismatch: the architecture-level aggressive_ext_trim flag is not yet
+	// surfaced in Gosleigh, so this stays conservative.
+	_ = data
+	r.isaggressive = false
+}
