@@ -788,6 +788,161 @@ func (h *Heritage) AnnotateFloatTypes() {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Heritage::guard / protectFreeStores / buildRefinement / heritageTree wrappers
+// Ported from heritage.cc to give ActionHeritage a stable API surface.
+// These wrappers keep parity with the C++ entry points without rewriting the
+// internal pipeline (which already lives in Heritage()/HeritageRange()).
+// ---------------------------------------------------------------------------
+
+// Guard inserts INDIRECT/INDIRECT_CREATION ops at CALL sites and marks the
+// reads/writes of the given address range with ActiveHeritage.  This is the
+// outer entry that C++ Heritage::placeMultiequals calls before constructing
+// MULTIEQUAL nodes.
+//
+// The current Go pipeline performs the call-site guard (guardCalls) and the
+// ActiveHeritage marking inline inside placeMultiequals; Guard exposes the
+// same effect as a separate callable for code paths (ActionHeritage,
+// stack-pointer flow refinement) that need to pre-guard a slot.
+//
+// addIndirects mirrors the C++ flag of the same name -- when false, only the
+// read/write flag bookkeeping runs.
+//
+// C++ parity: heritage.cc Heritage::guard (lines 1156-1199)
+func (h *Heritage) Guard(addr address.Address, size int32, addIndirects bool,
+	reads, writes, inputs []*Varnode) {
+
+	for _, vn := range reads {
+		vn.SetActiveHeritage()
+	}
+	for _, vn := range writes {
+		vn.SetActiveHeritage()
+	}
+	for _, vn := range inputs {
+		vn.SetActiveHeritage()
+	}
+	if !addIndirects {
+		return
+	}
+	// Only the call-site guard is wired in Go; guardStores/guardLoads/
+	// guardReturns are not yet ported (see heritage.cc lines 1538-1652).
+	// TODO C++ parity: port Heritage::guardStores, guardLoads, guardReturns.
+	h.guardCalls(addr.Space, addr.Offset, size)
+}
+
+// ProtectFreeStores walks all CPUI_STORE ops whose pointer ultimately resolves
+// to a free Varnode in the given space and marks them as spacebase STOREs so
+// that subsequent SSA construction treats them as aliasing the stack/global
+// slot rather than as opaque memory writes.
+//
+// The returned slice contains the STOREs that were marked; the second return
+// value is true when at least one new STORE was added (matches the C++ bool
+// return that signals "rerun heritage").
+//
+// C++ parity: heritage.cc Heritage::protectFreeStores (lines 944-972)
+func (h *Heritage) ProtectFreeStores(spc *address.Space) ([]*PcodeOp, bool) {
+	var freeStores []*PcodeOp
+	hasNew := false
+	for _, op := range h.fd.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() {
+			continue
+		}
+		if op.Code() != CPUI_STORE {
+			continue
+		}
+		if op.NumInput() < 2 {
+			continue
+		}
+		vn := op.Input(1)
+		// Walk through trivial COPY / INT_ADD-with-constant chains to find the
+		// underlying base.  This mirrors the inner while-loop in C++.
+		for vn != nil && vn.IsWritten() {
+			defOp := vn.Def()
+			if defOp == nil {
+				break
+			}
+			code := defOp.Code()
+			if code == CPUI_COPY {
+				vn = defOp.Input(0)
+				continue
+			}
+			if code == CPUI_INT_ADD && defOp.NumInput() == 2 &&
+				defOp.Input(1) != nil && defOp.Input(1).IsConstant() {
+				vn = defOp.Input(0)
+				continue
+			}
+			break
+		}
+		if vn == nil {
+			continue
+		}
+		if vn.IsFree() && vn.Space() == spc {
+			// Mark op as spacebase STORE.  Funcdata.opMarkSpacebasePtr is not
+			// yet ported as a public method; until then we set the flag bit
+			// directly via the op's helper.  The flag value matches the C++
+			// PcodeOp::spacebase_ptr constant.
+			// TODO C++ parity: add Funcdata.OpMarkSpacebasePtr wrapper.
+			op.SetFlag(PcodeOpSpacebasePtr)
+			freeStores = append(freeStores, op)
+			hasNew = true
+		}
+	}
+	return freeStores, hasNew
+}
+
+// BuildRefinement returns a per-byte refinement array for the given address
+// range and varnode list.  Each non-zero entry refine[i] indicates the start
+// of a sub-element of size (refine[i+0..]) inside the range -- callers split
+// the merged range into these sub-tasks before placing MULTIEQUAL ops.
+//
+// The output array has length size+1 (the C++ code allocates size+1 entries
+// to make the boundary at the end terminate the final element cleanly).
+//
+// C++ parity: heritage.cc Heritage::buildRefinement (lines 1704-1714)
+func (h *Heritage) BuildRefinement(addr address.Address, size int32, vnlist []*Varnode) []int32 {
+	refine := make([]int32, size+1)
+	for _, vn := range vnlist {
+		if vn == nil {
+			continue
+		}
+		curaddr := vn.Addr()
+		if curaddr.Space != addr.Space {
+			continue
+		}
+		if curaddr.Offset < addr.Offset {
+			continue
+		}
+		diff := int32(curaddr.Offset - addr.Offset)
+		sz := vn.Size()
+		if diff < 0 || diff+sz > size {
+			continue
+		}
+		refine[diff] = 1
+		refine[diff+sz] = 1
+	}
+	return refine
+}
+
+// HeritageTree is the public alias for the SSA tree-building pass.  It
+// matches the C++ method name Heritage::heritage; the existing Heritage()
+// method on this type is kept for callers that already use it.
+//
+// C++ parity: heritage.cc Heritage::heritage (lines 2663-2778)
+func (h *Heritage) HeritageTree(graph *BlockGraph) {
+	h.Heritage(graph)
+}
+
+// PlaceMultiEquals exposes the C++ Heritage::placeMultiequals entry point.
+// The Go pipeline already invokes the equivalent logic from inside
+// Heritage(); this wrapper lets ActionHeritage call it directly when it
+// only needs the MULTIEQUAL placement step for an explicit address range.
+//
+// C++ parity: heritage.cc Heritage::placeMultiequals (lines 2599-2645)
+func (h *Heritage) PlaceMultiEquals(graph *BlockGraph, addr address.Address, size int32,
+	reads, writes, inputs []*Varnode) {
+	h.placeMultiequals(graph, addr, size, reads, writes, inputs)
+}
+
 // isFloatOpcode returns true for opcodes that compute floating-point results.
 func isFloatOpcode(code OpCode) bool {
 	switch code {
