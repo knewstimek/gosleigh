@@ -1,9 +1,97 @@
 # 프로젝트 상태
 
-## 현재 단계: Foundational fill 진행 (Rules 161, Actions 72, keystones K1-K3) (2026-04-14 새벽)
+## 현재 단계: H8 MergeMarker 체인 디버그 진행 중 (2026-04-14 아침)
 
-오늘 밤 ~5시간 작업으로 전체 뼈대를 대폭 채움. Rules 161/161 + Actions 72/72 통계
-달성. 단 scaffold 상당수는 2차 파동에서 real 포팅으로 업그레이드됨.
+2026-04-14 새벽~아침 세션에서 H8(TestMSVC_Gcd) 근본 원인 4단 파이프라인으로 좁혀 냄.
+다섯 개의 parity fix 커밋 추가. TestMSVC_Gcd 여전히 FAIL, 나머지 loader 테스트 PASS 유지,
+regression 0. 다음 세션 시작 포인트는 `### H8 근본 원인 맵` 참조.
+
+### 2026-04-14 H8 파이프라인 디버그 커밋
+- `e04d0ac` **merge.go mergeOpcode Cover intersection guard**. C++ parity:
+  `merge.cc Merge::mergeOpcode`가 `Merge::merge(h1,h2,false)` 래퍼를 호출하고
+  그 래퍼 안에서 `testCache.intersection` 체크하는데 Go는 래퍼를 생략하고
+  `mergeHighVariables`를 직접 호출해서 교차 검사 누락. 같은 공간(same-space)
+  merge에 한해 intersection 체크 추가.
+- `b33f6a2` **rules_misc.go RulePushMultiME cross-space substitute guard**.
+  `functionalEqualityLevel==1` 분기가 생성하는 substitute MULTIEQUAL의 입력
+  `buf1[0]`과 `buf2[0]`이 서로 다른 물리 저장 클래스(예: stack slot vs register)일 때
+  downstream mergeMarker가 두 HighVariable을 하나로 붕괴시키는 것을 방지. Gcd의
+  `register:0x8` snapshot이 stack `param_4`와 합쳐지던 정확한 bug site.
+- `e6a082d` **action_mark.go markImpliedCheckCover LOAD/CALL cover-containment
+  port** (`coreaction.cc markImplied`). 이전엔 known-mismatch stub으로 false 반환.
+- `143344a` **.mcp.json gorchera 제거** (프로젝트 스코프).
+- `2f5b50e` **action_forloops.go addrTied cross-COPY iterator rejection + pipeline
+  reorder**. `tryMarkForLoop`에서 iterateOp이 pure COPY이고 in/out이 서로 다른
+  addrTied 저장 주소일 때 (예: `param_3 = param_4`) for-loop 변환 거부.
+  `msvc_diag_test.go runPipelineGhidra`에서 ActionMergeCopy를 ActionForLoops
+  앞으로 재배치해 post-merge HV 상태 기반 판정.
+
+### H8 근본 원인 맵 (2026-04-14 아침 기준)
+
+TestMSVC_Gcd 현재 출력 (golden 불일치):
+```
+void processEntry entry(undefined4 param_1,undefined4 param_2,int param_3,int param_4)
+{
+    int iVar2;
+    tmp_130 = param_4 == 0;
+    for (; !tmp_130; param_3 = param_4) {
+        iVar2 = param_3 % param_4;
+        tmp_130 = iVar2 == 0;
+        param_4 = iVar2;
+    }
+    return;
+}
+```
+Ghidra golden (`testdata/ghidra_golden/ghidra_golden.json` `gcd_x86_32`):
+```
+int iVar1;
+while (iVar1 = param_4, iVar1 != 0) {
+    param_4 = param_3 % iVar1;
+    param_3 = iVar1;
+}
+```
+
+근본 원인은 세 개의 상호 연결된 gap임:
+
+1. **Cross-variable COPY를 iterateOp으로 선택** (`pkg/pcode/action_forloops.go`)
+   - 현재 iterateOp은 `COPY register:0x4 -> unique:0xae433` 형태로, addrTied
+     양쪽이 아닌 register/unique 쌍. `2f5b50e`의 addrTied 체크로 안 잡힘.
+   - C++ parity: `block.cc BlockWhileDo::testIterateForm` (라인 3287-3314)을
+     직역 포팅하면 iterator가 loopVar HV를 input tree에서 찾지 못할 때 거부.
+     직역 포팅을 시도했으나 CountedLoop/SumList까지 거부하는 regression.
+     원인: 이들 테스트의 iterateOp은 register COPY이고 stack HV 와의 merge가
+     Go side에서 완전하지 않아 HV 정체성 비교가 실패.
+   - 수정 방향: testIterateForm의 strict HV identity 매칭 대신 느슨한 기준
+     (addr 또는 symbol entry 동일성) 시도 필요. 또는 ActionMergeCopy 자체를
+     더 엄격히 돌려서 cross-space 병합을 완료시키는 쪽.
+
+2. **PrintC emitWhileBlock에 comma_separate 모드 미구현 (부분)**
+   (`pkg/pcode/printc.go` `emitWhileBlock`, `renderCondBlockComma`)
+   - `renderCondBlockComma`는 존재하고 호출도 되는데 gcd의 cond block에
+     `iVar1 = param_4` 형태의 snapshot COPY가 실제로 들어오지 못함. 그 결과
+     `while (!tmp_130)` 단독 조건만 렌더. snapshot COPY를 cond block head로
+     끌어올리는 경로 누락.
+   - C++ parity: `printc.cc PrintC::emitBlockWhileDo` (코드 3186 부근)에서
+     `setMod(comma_separate)` 모드로 condBlock 전체를 comma-separated list로
+     찍음. Go는 cond block에 printable op이 있을 때만 fallback하는 구조.
+
+3. **tmp_N unique-space 유출 + ActionNameVars 누락**
+   (`pkg/pcode/action_name_vars.go` `ActionNameVars.Apply`, 라인 135)
+   - 현재 ActionNameVars는 non-unique non-input 인스턴스가 있는 HighVariable만
+     iVar1/uVar1 이름 부여. Gcd의 snapshot HV는 unique-space 인스턴스만 있을
+     때 네이밍 스킵 -> printc의 default fallback이 `tmp_<offset>` 형식으로 출력.
+   - C++ parity: `variable.cc ScopeInternal::assignDefaultNames`는 storage class
+     관계없이 명명. Go side는 의도적으로 보수화된 것으로 보이나 Gcd 시나리오
+     관통에는 부족.
+
+진행 순서 제안:
+1. **Go Heritage/NodeJoin의 SSA shape을 Ghidra와 비교** -- 왜 Go는 `register:0x8`와
+   `stack:0x8`를 구분 못하는 MULTIEQUAL이 생성되는가. `testdata/sla/x86.pspec`
+   기반 리프트 출력을 C++ Ghidra의 동일 입력 출력과 나란히 덤프해 볼 것.
+2. **정말로 불가능하면 emitWhileBlock 측에서 hoist** -- cond block 머리에
+   snapshot COPY 삽입 루틴을 직접 실행(ActionBlockStructure 확장).
+3. **ActionNameVars 기준 완화** -- unique-space HV 중 loop-carried 표시가 있는
+   것만 iVar 네이밍 허용.
 
 ### Keystones 완료 (real port)
 - K1a/b/c: ParamActive + FuncProto 확장 + 8 prototype action real (ActionActiveParam,
