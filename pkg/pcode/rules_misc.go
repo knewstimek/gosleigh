@@ -1,7 +1,6 @@
 package pcode
 
 import (
-	"fmt"
 	"math/bits"
 
 	"gosleigh/pkg/address"
@@ -964,12 +963,33 @@ func (r *RulePushMultiME) apply(op *PcodeOp, data *Funcdata) int {
 	var buf1, buf2 [2]*Varnode
 	res := functionalEqualityLevel(in1, in2, buf1[:], buf2[:])
 	if res < 0 || res > 1 {
-		fmt.Printf("PUSHME skip: res=%d in1=%v in2=%v\n", res, in1, in2)
 		return 0
 	}
 	op1 := in1.Def()
 	if op1.Code() == CPUI_SUBPIECE {
 		return 0
+	}
+
+	// Guard: if res==1 the applying branch below would create a substitute
+	// MULTIEQUAL whose inputs are buf1[0] and buf2[0]. When those live in
+	// different physical storage classes (e.g., stack slot vs register) the
+	// downstream mergeMarker pass would collapse their HighVariables into a
+	// single HV and the distinction between a loop-head register snapshot and
+	// the stack slot is lost, producing semantically incorrect output. Ghidra
+	// C++ does not hit this because its Heritage/NodeJoin stages yield a
+	// different SSA shape; Gosleigh currently produces the pathological
+	// MULTIEQUAL for gcd_x86_32 and similar frameless loops. TODO: investigate
+	// Go Heritage parity so this guard can be removed.
+	if res == 1 {
+		a := buf1[0]
+		b := buf2[0]
+		if a != nil && b != nil && a.Space() != nil && b.Space() != nil {
+			sameSpace := a.Space() == b.Space()
+			if !sameSpace && !a.Space().IsUnique() && !b.Space().IsUnique() &&
+				!a.IsConstant() && !b.IsConstant() {
+				return 0
+			}
+		}
 	}
 
 	bl := op.Parent()
@@ -981,7 +1001,6 @@ func (r *RulePushMultiME) apply(op *PcodeOp, data *Funcdata) int {
 		}
 		substitute := findSubstituteForME(buf1[0], buf2[0], bl, earliest, data)
 		if substitute == nil {
-			fmt.Printf("PUSHME COPY skip: no substitute in1=%v in2=%v buf1=%v buf2=%v\n", in1, in2, buf1[0], buf2[0])
 			return 0
 		}
 		data.TotalReplace(op.Output(), substitute.Output())
@@ -991,20 +1010,11 @@ func (r *RulePushMultiME) apply(op *PcodeOp, data *Funcdata) int {
 
 	op2 := in2.Def()
 	if in1.LoneDescend() != op {
-		fmt.Printf("PUSHME skip: in1 not lone descend, in1=%v op1=%v numDesc=%d\n", in1, op1.Code(), in1.NumDescend())
-		for _, d := range in1.DescendIter() {
-			fmt.Printf("  in1 desc: %v parent=%v\n", d.Code(), d.Parent())
-		}
 		return 0
 	}
 	if in2.LoneDescend() != op {
-		fmt.Printf("PUSHME skip: in2 not lone descend, in2=%v op2=%v numDesc=%d\n", in2, op2.Code(), in2.NumDescend())
-		for _, d := range in2.DescendIter() {
-			fmt.Printf("  in2 desc: %v parent=%v\n", d.Code(), d.Parent())
-		}
 		return 0
 	}
-	fmt.Printf("PUSHME applying: op=%v in1=%v in2=%v res=%d buf1=%v buf2=%v\n", op.Code(), in1, in2, res, buf1[0], buf2[0])
 
 	outvn := op.Output()
 	data.OpSetOutput(op1, outvn)
