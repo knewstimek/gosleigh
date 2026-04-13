@@ -105,6 +105,30 @@ type Datatype interface {
 	IsIncomplete() bool
 	NeedsResolution() bool
 	IsPointerToArray() bool
+	// HasBitfields reports whether any field of a composite type is a bitfield.
+	// C++ parity: Datatype::hasBitfields (type.hh). Default: false.
+	HasBitfields() bool
+}
+
+// HasBitfields is the base implementation returning false for all primitive types.
+// C++ parity: Datatype::hasBitfields default in type.hh.
+// TODO(bitfield-typemodel): TypeStruct needs bitfield member support before any
+// Go Datatype can report true here. Once TypeBitField and struct-member bit
+// offsets are modeled, override this on *Struct to scan fields.
+func (d datatypeBase) HasBitfields() bool { return false }
+
+// GetPtrInto unwraps a Pointer to its pointee, yielding a byte offset.
+// C++ parity: Datatype::getPtrInto (type.cc). For a plain pointer the offset is 0.
+// Returns (nil, 0) if the receiver is not a pointer-like type.
+// TODO(bitfield-typemodel): Does not yet handle TypePointerRel (offset != 0).
+func GetPtrInto(dt Datatype) (Datatype, int32) {
+	if dt == nil {
+		return nil, 0
+	}
+	if ptr, ok := dt.(*Pointer); ok {
+		return ptr.Pointee(), 0
+	}
+	return nil, 0
 }
 
 type datatypeBase struct {

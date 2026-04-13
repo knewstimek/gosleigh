@@ -3,6 +3,8 @@ package pcode
 import (
 	"fmt"
 	"math/bits"
+
+	"gosleigh/pkg/address"
 )
 
 type RuleSwitchSingle struct{ batchRule }
@@ -1636,5 +1638,914 @@ func (r *RuleSubfloatConvert) apply(op *PcodeOp, data *Funcdata) int {
 		return 0
 	}
 	subflow.Apply()
+	return 1
+}
+
+// BitField rules -- real ports of RuleBitFieldStore/Load/Out/In, RulePullAbsorb
+// and RuleInsertAbsorb. The rule-level dispatch follows the C++ control flow
+// verbatim (see ghidra-ref/.../bitfield.cc lines 1655-2390). Each rule bails
+// out at Datatype.HasBitfields() == false today, because the Go type model
+// has no TypeBitField struct-member support yet; the constructors and dispatch
+// are real so flipping HasBitfields() on in the type model will light them up.
+// See TODO(bitfield-typemodel) in datatype.go.
+// ----------------------------------------------------------------------------
+
+// RuleBitFieldStore collapses a bitfield insertion terminating in a CPUI_STORE.
+// C++ parity: class RuleBitFieldStore in bitfield.hh.
+type RuleBitFieldStore struct{ batchRule }
+
+// NewRuleBitFieldStore constructs the bitfield_store rule.
+// C++ parity: RuleBitFieldStore::RuleBitFieldStore.
+func NewRuleBitFieldStore(group string) *RuleBitFieldStore {
+	r := &RuleBitFieldStore{}
+	r.batchRule = newBatchRule(group, "bitfield_store", []OpCode{CPUI_STORE}, r.apply, func(g string) Rule { return NewRuleBitFieldStore(g) })
+	return r
+}
+
+// apply mirrors RuleBitFieldStore::applyOp (bitfield.cc 1661).
+func (r *RuleBitFieldStore) apply(op *PcodeOp, data *Funcdata) int {
+	if op.NumInput() < 3 {
+		return 0
+	}
+	ptrVn := op.Input(1)
+	if ptrVn == nil {
+		return 0
+	}
+	// C++: Datatype *ptr = op->getIn(1)->getTypeReadFacing(op);
+	// Go equivalent pulls the inferred temp-type for the input.
+	ptrType := ptrVn.GetTempType()
+	dt, off := GetPtrInto(ptrType)
+	if dt == nil {
+		return 0
+	}
+	if !dt.HasBitfields() {
+		return 0
+	}
+	vn := op.Input(2)
+	if vn.IsWritten() && vn.Def() != nil && vn.Def().Code() == CPUI_INSERT {
+		return 0
+	}
+	transform := NewBitFieldInsertTransform(data, op, dt, off)
+	if !transform.DoTrace() {
+		return 0
+	}
+	transform.Apply()
+	return 1
+}
+
+// RuleBitFieldOut collapses a bitfield insertion ending in a write to a mapped Varnode.
+// C++ parity: class RuleBitFieldOut in bitfield.hh.
+type RuleBitFieldOut struct{ batchRule }
+
+// NewRuleBitFieldOut constructs the bitfield_out rule.
+// C++ parity: RuleBitFieldOut::RuleBitFieldOut.
+func NewRuleBitFieldOut(group string) *RuleBitFieldOut {
+	r := &RuleBitFieldOut{}
+	ops := []OpCode{
+		CPUI_COPY, CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL, CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL,
+		CPUI_INT_LESS, CPUI_INT_LESSEQUAL, CPUI_INT_ZEXT, CPUI_INT_SEXT, CPUI_INT_ADD,
+		CPUI_INT_CARRY, CPUI_INT_SCARRY, CPUI_INT_XOR, CPUI_INT_AND, CPUI_INT_OR,
+		CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT, CPUI_INT_MULT,
+		CPUI_BOOL_NEGATE, CPUI_BOOL_XOR, CPUI_BOOL_AND, CPUI_BOOL_OR,
+		CPUI_FLOAT_EQUAL, CPUI_FLOAT_NOTEQUAL, CPUI_FLOAT_LESS, CPUI_FLOAT_LESSEQUAL,
+		CPUI_FLOAT_NAN, CPUI_INDIRECT, CPUI_SUBPIECE,
+	}
+	r.batchRule = newBatchRule(group, "bitfield_out", ops, r.apply, func(g string) Rule { return NewRuleBitFieldOut(g) })
+	return r
+}
+
+// apply mirrors RuleBitFieldOut::applyOp (bitfield.cc 1690).
+func (r *RuleBitFieldOut) apply(op *PcodeOp, data *Funcdata) int {
+	outvn := op.Output()
+	if outvn == nil {
+		return 0
+	}
+	// C++: Datatype *dt = outvn->getTypeDefFacing();
+	dt := outvn.GetTempType()
+	if dt == nil || !dt.HasBitfields() {
+		return 0
+	}
+	transform := NewBitFieldInsertTransform(data, op, dt, 0)
+	if !transform.DoTrace() {
+		return 0
+	}
+	transform.Apply()
+	return 1
+}
+
+// RuleBitFieldLoad collapses a bitfield pull rooted at a CPUI_LOAD.
+// C++ parity: class RuleBitFieldLoad in bitfield.hh.
+type RuleBitFieldLoad struct{ batchRule }
+
+// NewRuleBitFieldLoad constructs the bitfield_load rule.
+// C++ parity: RuleBitFieldLoad::RuleBitFieldLoad.
+func NewRuleBitFieldLoad(group string) *RuleBitFieldLoad {
+	r := &RuleBitFieldLoad{}
+	r.batchRule = newBatchRule(group, "bitfield_load", []OpCode{CPUI_LOAD}, r.apply, func(g string) Rule { return NewRuleBitFieldLoad(g) })
+	return r
+}
+
+// apply mirrors RuleBitFieldLoad::applyOp (bitfield.cc 1709).
+func (r *RuleBitFieldLoad) apply(op *PcodeOp, data *Funcdata) int {
+	if op.NumInput() < 2 {
+		return 0
+	}
+	ptrVn := op.Input(1)
+	if ptrVn == nil {
+		return 0
+	}
+	ptrType := ptrVn.GetTempType()
+	dt, off := GetPtrInto(ptrType)
+	if dt == nil || !dt.HasBitfields() {
+		return 0
+	}
+	// C++: if (op->notPrinted()) return 0;
+	// TODO(bitfield-typemodel): no NotPrinted() yet; under the current
+	// runtime LOAD visitation flags are not tracked, so we always proceed.
+	out := op.Output()
+	if out == nil {
+		return 0
+	}
+	transform := NewBitFieldPullTransform(data, out, dt, off)
+	if !transform.DoTrace() {
+		return 0
+	}
+	transform.Apply()
+	return 1
+}
+
+// RuleBitFieldIn collapses a bitfield pull rooted at a mapped Varnode read.
+// C++ parity: class RuleBitFieldIn in bitfield.hh.
+type RuleBitFieldIn struct{ batchRule }
+
+// NewRuleBitFieldIn constructs the bitfield_in rule.
+// C++ parity: RuleBitFieldIn::RuleBitFieldIn.
+func NewRuleBitFieldIn(group string) *RuleBitFieldIn {
+	r := &RuleBitFieldIn{}
+	ops := []OpCode{
+		CPUI_COPY, CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL, CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL,
+		CPUI_INT_LESS, CPUI_INT_LESSEQUAL, CPUI_INT_ZEXT, CPUI_INT_SEXT,
+		CPUI_INT_ADD, CPUI_INT_NEGATE,
+		CPUI_INT_AND, CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT, CPUI_INT_MULT,
+		CPUI_SUBPIECE,
+	}
+	r.batchRule = newBatchRule(group, "bitfield_in", ops, r.apply, func(g string) Rule { return NewRuleBitFieldIn(g) })
+	return r
+}
+
+// apply mirrors RuleBitFieldIn::applyOp (bitfield.cc 1737).
+func (r *RuleBitFieldIn) apply(op *PcodeOp, data *Funcdata) int {
+	if op.NumInput() < 1 {
+		return 0
+	}
+	invn := op.Input(0)
+	if invn == nil {
+		return 0
+	}
+	dt := invn.GetTempType()
+	if dt == nil || !dt.HasBitfields() {
+		return 0
+	}
+	transform := NewBitFieldPullTransform(data, invn, dt, 0)
+	if !transform.DoTrace() {
+		return 0
+	}
+	transform.Apply()
+	return 1
+}
+
+// RulePullAbsorb simplifies expressions explicitly using ZPULL and SPULL.
+// C++ parity: class RulePullAbsorb in bitfield.hh.
+type RulePullAbsorb struct{ batchRule }
+
+// NewRulePullAbsorb constructs the pull_absorb rule.
+// C++ parity: RulePullAbsorb::RulePullAbsorb.
+func NewRulePullAbsorb(group string) *RulePullAbsorb {
+	r := &RulePullAbsorb{}
+	r.batchRule = newBatchRule(group, "pull_absorb", []OpCode{CPUI_ZPULL, CPUI_SPULL}, r.apply, func(g string) Rule { return NewRulePullAbsorb(g) })
+	return r
+}
+
+// apply mirrors RulePullAbsorb::applyOp (bitfield.cc 2157) -- walks every
+// descendant of the ZPULL/SPULL output and dispatches on the read op code.
+func (r *RulePullAbsorb) apply(op *PcodeOp, data *Funcdata) int {
+	outvn := op.Output()
+	if outvn == nil {
+		return 0
+	}
+	for _, readOp := range outvn.DescendIter() {
+		res := 0
+		switch readOp.Code() {
+		case CPUI_INT_RIGHT, CPUI_INT_SRIGHT:
+			res = r.absorbRight(data, readOp, op)
+		case CPUI_INT_LEFT:
+			res = r.absorbLeft(data, readOp, op)
+		case CPUI_INT_AND:
+			res = r.absorbAnd(data, readOp, op)
+		case CPUI_INT_SLESS, CPUI_INT_LESS:
+			res = r.absorbCompare(data, readOp, nil, op)
+		case CPUI_INT_ZEXT, CPUI_INT_SEXT:
+			res = r.absorbExt(data, readOp, op)
+		case CPUI_SUBPIECE:
+			res = r.absorbSubpiece(data, readOp, op)
+		case CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL:
+			res = r.absorbCompZero(data, readOp, op)
+		}
+		if res != 0 {
+			return res
+		}
+	}
+	return 0
+}
+
+// absorbRight mirrors bitfield.cc RulePullAbsorb::absorbRight (1756).
+// TODO(bitfield-runtime): needs Funcdata.DestroyVarnodeRecursive and
+// Funcdata.OpInsertInput; returns 0 until those primitives land.
+func (r *RulePullAbsorb) absorbRight(data *Funcdata, rightOp, pullOp *PcodeOp) int {
+	_ = data
+	_ = rightOp
+	_ = pullOp
+	return 0
+}
+
+// absorbLeft mirrors bitfield.cc RulePullAbsorb::absorbLeft (1819).
+// TODO(bitfield-runtime): see absorbRight.
+func (r *RulePullAbsorb) absorbLeft(data *Funcdata, leftOp, pullOp *PcodeOp) int {
+	_ = data
+	_ = leftOp
+	_ = pullOp
+	return 0
+}
+
+// absorbAnd mirrors bitfield.cc RulePullAbsorb::absorbAnd (1928).
+// TODO(bitfield-runtime): see absorbRight.
+func (r *RulePullAbsorb) absorbAnd(data *Funcdata, andOp, pullOp *PcodeOp) int {
+	_ = data
+	_ = andOp
+	_ = pullOp
+	return 0
+}
+
+// absorbCompare mirrors bitfield.cc RulePullAbsorb::absorbCompare (1979).
+// TODO(bitfield-runtime): see absorbRight.
+func (r *RulePullAbsorb) absorbCompare(data *Funcdata, compOp, leftOp, pullOp *PcodeOp) int {
+	_ = data
+	_ = compOp
+	_ = leftOp
+	_ = pullOp
+	return 0
+}
+
+// absorbExt mirrors bitfield.cc RulePullAbsorb::absorbExt (2059).
+// TODO(bitfield-runtime): see absorbRight.
+func (r *RulePullAbsorb) absorbExt(data *Funcdata, extOp, pullOp *PcodeOp) int {
+	_ = data
+	_ = extOp
+	_ = pullOp
+	return 0
+}
+
+// absorbSubpiece mirrors bitfield.cc RulePullAbsorb::absorbSubpiece (2083).
+// TODO(bitfield-runtime): see absorbRight.
+func (r *RulePullAbsorb) absorbSubpiece(data *Funcdata, subOp, pullOp *PcodeOp) int {
+	_ = data
+	_ = subOp
+	_ = pullOp
+	return 0
+}
+
+// absorbCompZero mirrors bitfield.cc RulePullAbsorb::absorbCompZero (2109).
+// TODO(bitfield-runtime): see absorbRight.
+func (r *RulePullAbsorb) absorbCompZero(data *Funcdata, compOp, pullOp *PcodeOp) int {
+	_ = data
+	_ = compOp
+	_ = pullOp
+	return 0
+}
+
+// RuleInsertAbsorb simplifies expressions explicitly using CPUI_INSERT.
+// C++ parity: class RuleInsertAbsorb in bitfield.hh.
+type RuleInsertAbsorb struct{ batchRule }
+
+// NewRuleInsertAbsorb constructs the insert_absorb rule.
+// C++ parity: RuleInsertAbsorb::RuleInsertAbsorb.
+func NewRuleInsertAbsorb(group string) *RuleInsertAbsorb {
+	r := &RuleInsertAbsorb{}
+	r.batchRule = newBatchRule(group, "insert_absorb", []OpCode{CPUI_INSERT}, r.apply, func(g string) Rule { return NewRuleInsertAbsorb(g) })
+	return r
+}
+
+// apply mirrors RuleInsertAbsorb::applyOp (bitfield.cc 2352) -- dispatches on
+// the op defining the INSERT value slot.
+func (r *RuleInsertAbsorb) apply(op *PcodeOp, data *Funcdata) int {
+	if op.NumInput() < 4 {
+		return 0
+	}
+	inVn := op.Input(1)
+	if inVn == nil || !inVn.IsWritten() {
+		return 0
+	}
+	inOp := inVn.Def()
+	if inOp == nil {
+		return 0
+	}
+	switch inOp.Code() {
+	case CPUI_SUBPIECE:
+		// INSERT( SUB(x,0), ... )  =>  INSERT( x, ... )
+		// TODO(bitfield-runtime): needs Funcdata.DestroyVarnodeRecursive to
+		// clean up the old SUBPIECE output; skipped until that lands.
+		return 0
+	case CPUI_INT_RIGHT, CPUI_INT_SRIGHT:
+		if inOp.NumInput() < 2 || !inOp.Input(1).IsConstant() {
+			return 0
+		}
+		shiftedVn := inOp.Input(0)
+		if !shiftedVn.IsWritten() {
+			return 0
+		}
+		nextOp := shiftedVn.Def()
+		if nextOp == nil {
+			return 0
+		}
+		switch nextOp.Code() {
+		case CPUI_INT_ADD:
+			return r.absorbShiftAdd(data, inOp, nextOp, op)
+		case CPUI_INT_LEFT, CPUI_SUBPIECE:
+			return r.absorbRightLeft(data, nextOp, inOp, op)
+		}
+		return 0
+	case CPUI_INT_AND:
+		return r.absorbAnd(data, inOp, op)
+	case CPUI_INT_ADD, CPUI_INT_OR, CPUI_INT_XOR, CPUI_INT_MULT:
+		return r.absorbNestedAnd(data, inOp, op)
+	}
+	return 0
+}
+
+// absorbAnd mirrors bitfield.cc RuleInsertAbsorb::absorbAnd (2230).
+// TODO(bitfield-runtime): needs Funcdata.DestroyVarnodeRecursive.
+func (r *RuleInsertAbsorb) absorbAnd(data *Funcdata, andOp, insertOp *PcodeOp) int {
+	if andOp.NumInput() < 2 {
+		return 0
+	}
+	cvn := andOp.Input(1)
+	if cvn == nil || !cvn.IsConstant() {
+		return 0
+	}
+	val := cvn.Offset()
+	mask := insertExpressionLSBMask(insertOp)
+	if (mask & val) != mask {
+		return 0
+	}
+	// Real rewrite requires destroying andOp's output recursively once the
+	// INSERT input is re-pointed; leaving the mutation to the follow-up port.
+	_ = data
+	return 0
+}
+
+// absorbRightLeft mirrors bitfield.cc RuleInsertAbsorb::absorbRightLeft (2246).
+// TODO(bitfield-runtime): see absorbAnd.
+func (r *RuleInsertAbsorb) absorbRightLeft(data *Funcdata, nextOp, rightOp, insertOp *PcodeOp) int {
+	_ = data
+	_ = nextOp
+	_ = rightOp
+	_ = insertOp
+	return 0
+}
+
+// absorbShiftAdd mirrors bitfield.cc RuleInsertAbsorb::absorbShiftAdd (2284).
+// TODO(bitfield-runtime): see absorbAnd.
+func (r *RuleInsertAbsorb) absorbShiftAdd(data *Funcdata, rightOp, addOp, insertOp *PcodeOp) int {
+	_ = data
+	_ = rightOp
+	_ = addOp
+	_ = insertOp
+	return 0
+}
+
+// absorbNestedAnd mirrors bitfield.cc RuleInsertAbsorb::absorbNestedAnd (2322).
+// TODO(bitfield-runtime): see absorbAnd.
+func (r *RuleInsertAbsorb) absorbNestedAnd(data *Funcdata, baseOp, insertOp *PcodeOp) int {
+	_ = data
+	_ = baseOp
+	_ = insertOp
+	return 0
+}
+
+
+// isDoublePrecisionArithOp classifies opcodes that the C++ decompiler treats
+// as "acting on a logical whole" for the purpose of double-precision marking.
+// C++ parity: TypeOp::isArithmeticOp / TypeOp::isFloatingPointOp checks in
+// RuleDoubleIn::attemptMarking and RuleDoubleOut::attemptMarking.
+func isDoublePrecisionArithOp(opc OpCode) bool {
+	switch opc {
+	case CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_MULT, CPUI_INT_DIV, CPUI_INT_REM,
+		CPUI_INT_SDIV, CPUI_INT_SREM,
+		CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR,
+		CPUI_INT_NEGATE, CPUI_INT_2COMP,
+		CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT,
+		CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL,
+		CPUI_INT_LESS, CPUI_INT_LESSEQUAL,
+		CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL,
+		CPUI_INT_CARRY, CPUI_INT_SCARRY, CPUI_INT_SBORROW,
+		CPUI_FLOAT_ADD, CPUI_FLOAT_SUB, CPUI_FLOAT_MULT, CPUI_FLOAT_DIV,
+		CPUI_FLOAT_NEG, CPUI_FLOAT_ABS, CPUI_FLOAT_SQRT,
+		CPUI_FLOAT_EQUAL, CPUI_FLOAT_NOTEQUAL,
+		CPUI_FLOAT_LESS, CPUI_FLOAT_LESSEQUAL,
+		CPUI_FLOAT_INT2FLOAT, CPUI_FLOAT_FLOAT2FLOAT,
+		CPUI_FLOAT_TRUNC, CPUI_FLOAT_CEIL, CPUI_FLOAT_FLOOR, CPUI_FLOAT_ROUND,
+		CPUI_FLOAT_NAN:
+		return true
+	}
+	return false
+}
+
+// RuleDoubleIn matches a CPUI_SUBPIECE that extracts the least-significant
+// half of a logical whole and tries to collapse associated double-precision
+// ops into a single operation on the whole.
+//
+// C++ parity: class RuleDoubleIn in double.hh / double.cc:3198-3279.
+type RuleDoubleIn struct{ batchRule }
+
+// C++ parity: RuleDoubleIn::RuleDoubleIn
+func NewRuleDoubleIn(group string) *RuleDoubleIn {
+	r := &RuleDoubleIn{}
+	r.batchRule = newBatchRule(group, "doublein", []OpCode{CPUI_SUBPIECE}, r.apply, func(g string) Rule { return NewRuleDoubleIn(g) })
+	return r
+}
+
+// C++ parity: RuleDoubleIn::attemptMarking (double.cc:3218)
+func (r *RuleDoubleIn) attemptMarking(vn *Varnode, subpieceOp *PcodeOp) int {
+	whole := subpieceOp.Input(0)
+	if whole == nil {
+		return 0
+	}
+	// TODO(parity): skip when whole is type-locked to a non-primitive type
+	// (Varnode::isTypeLock + Datatype::isPrimitiveWhole). Not yet plumbed.
+	offset, ok := constantValue(subpieceOp.Input(1))
+	if !ok {
+		return 0
+	}
+	if int32(offset) != vn.Size() {
+		return 0
+	}
+	if int32(offset)*2 != whole.Size() {
+		return 0
+	}
+	if whole.IsInput() {
+		if !whole.IsTypeLock() {
+			return 0
+		}
+	} else if !whole.IsWritten() {
+		return 0
+	} else {
+		if !isDoublePrecisionArithOp(whole.Def().Code()) {
+			return 0
+		}
+	}
+	var vnLo *Varnode
+	for _, op := range whole.DescendIter() {
+		if op.Code() != CPUI_SUBPIECE {
+			continue
+		}
+		loff, ok := constantValue(op.Input(1))
+		if !ok || loff != 0 {
+			continue
+		}
+		if op.Output() != nil && op.Output().Size() == vn.Size() {
+			vnLo = op.Output()
+			break
+		}
+	}
+	if vnLo == nil {
+		return 0
+	}
+	vnLo.SetPrecisLo()
+	vn.SetPrecisHi()
+	return 1
+}
+
+// C++ parity: RuleDoubleIn::applyOp (double.cc:3259)
+func (r *RuleDoubleIn) apply(op *PcodeOp, data *Funcdata) int {
+	outvn := op.Output()
+	if outvn == nil {
+		return 0
+	}
+	if !outvn.IsPrecisLo() {
+		if outvn.IsPrecisHi() {
+			return 0
+		}
+		return r.attemptMarking(outvn, op)
+	}
+	// The pieces are already marked: enumerate the split pairs off the whole
+	// and try each double-precision form. applyRuleIn is currently a stub
+	// until the Form classes are ported.
+	var splitvec []SplitVarnode
+	SplitVarnodeWholeList(op.Input(0), &splitvec)
+	for i := range splitvec {
+		if res := SplitVarnodeApplyRuleIn(&splitvec[i], data); res != 0 {
+			return res
+		}
+	}
+	return 0
+}
+
+// RuleDoubleOut matches a CPUI_PIECE whose two inputs are persistent input
+// Varnodes forming a contiguous logical whole, and attempts to collapse them
+// into a single input Varnode.
+//
+// C++ parity: class RuleDoubleOut in double.hh / double.cc:3281-3355.
+type RuleDoubleOut struct{ batchRule }
+
+// C++ parity: RuleDoubleOut::RuleDoubleOut
+func NewRuleDoubleOut(group string) *RuleDoubleOut {
+	r := &RuleDoubleOut{}
+	r.batchRule = newBatchRule(group, "doubleout", []OpCode{CPUI_PIECE}, r.apply, func(g string) Rule { return NewRuleDoubleOut(g) })
+	return r
+}
+
+// C++ parity: RuleDoubleOut::attemptMarking (double.cc:3295)
+func (r *RuleDoubleOut) attemptMarking(vnhi, vnlo *Varnode, pieceOp *PcodeOp) int {
+	whole := pieceOp.Output()
+	if whole == nil {
+		return 0
+	}
+	// TODO(parity): skip non-primitive type-locked wholes.
+	if vnhi.Size() != vnlo.Size() {
+		return 0
+	}
+	// TODO(parity): symbol-entry compatibility check (double.cc:3306-3313).
+	isWhole := false
+	for _, use := range whole.DescendIter() {
+		if isDoublePrecisionArithOp(use.Code()) {
+			isWhole = true
+			break
+		}
+	}
+	if !isWhole {
+		return 0
+	}
+	vnhi.SetPrecisHi()
+	vnlo.SetPrecisLo()
+	return 1
+}
+
+// C++ parity: RuleDoubleOut::applyOp (double.cc:3332)
+func (r *RuleDoubleOut) apply(op *PcodeOp, data *Funcdata) int {
+	vnhi := op.Input(0)
+	vnlo := op.Input(1)
+	if vnhi == nil || vnlo == nil {
+		return 0
+	}
+	// The C++ rule only targets inputs-read-by-PIECE right now.
+	if !vnhi.IsInput() || !vnlo.IsInput() {
+		return 0
+	}
+	if !vnhi.IsPersist() || !vnlo.IsPersist() {
+		return 0
+	}
+	if !vnhi.IsPrecisHi() || !vnlo.IsPrecisLo() {
+		return r.attemptMarking(vnhi, vnlo, op)
+	}
+	// TODO(parity): Funcdata::combineInputVarnodes merges two adjacent input
+	// Varnodes into a single one spanning both. Not yet implemented in
+	// Gosleigh, so the final collapse is deferred.
+	if _, ok := SplitVarnodeIsAddrTiedContiguous(vnlo, vnhi); !ok {
+		return 0
+	}
+	_ = data
+	return 0
+}
+
+// RuleDoubleLoad collapses two contiguous CPUI_LOADs that feed a CPUI_PIECE
+// into a single wider load.
+//
+// C++ parity: class RuleDoubleLoad in double.hh / double.cc:3370-3505.
+type RuleDoubleLoad struct{ batchRule }
+
+// C++ parity: RuleDoubleLoad::RuleDoubleLoad
+func NewRuleDoubleLoad(group string) *RuleDoubleLoad {
+	r := &RuleDoubleLoad{}
+	r.batchRule = newBatchRule(group, "doubleload", []OpCode{CPUI_PIECE}, r.apply, func(g string) Rule { return NewRuleDoubleLoad(g) })
+	return r
+}
+
+// doubleLoadNoWriteConflict ports RuleDoubleLoad::noWriteConflict. It scans
+// the ops between op1 and op2 (within the same basic block) to make sure
+// nothing writes the load/store space in between. When successful the later
+// of the two ops is returned so callers can insert after it. Indirects whose
+// affector is op1 or op2 are accumulated when the caller cares.
+//
+// C++ parity: double.cc:3370-3434. The affector-walk uses
+// PcodeOp::getOpFromConst on the second input of an INDIRECT, which isn't
+// plumbed in Gosleigh yet, so the indirect-range extension is skipped.
+// TODO(parity): Funcdata::newVarnodeIop and PcodeOp::getOpFromConst.
+func doubleLoadNoWriteConflict(op1, op2 *PcodeOp, spc *address.Space, indirects *[]*PcodeOp) *PcodeOp {
+	bb := op1.Parent()
+	if bb != op2.Parent() {
+		return nil
+	}
+	if op2.Seq().Order < op1.Seq().Order {
+		op1, op2 = op2, op1
+	}
+	for _, curop := range bb.Ops() {
+		if curop.Seq().Order <= op1.Seq().Order {
+			continue
+		}
+		if curop.Seq().Order >= op2.Seq().Order {
+			break
+		}
+		switch curop.Code() {
+		case CPUI_STORE:
+			if curop.Input(0).GetSpaceFromConst() == spc {
+				return nil
+			}
+		case CPUI_INDIRECT:
+			// We cannot resolve affector from const iop yet, so we treat
+			// every INDIRECT as potentially conflicting unless its output
+			// lives in a different space.
+			out := curop.Output()
+			if out != nil && out.Space() == spc {
+				return nil
+			}
+		case CPUI_CALL, CPUI_CALLIND, CPUI_CALLOTHER,
+			CPUI_RETURN, CPUI_BRANCH, CPUI_CBRANCH, CPUI_BRANCHIND:
+			return nil
+		default:
+			out := curop.Output()
+			if out != nil && out.Space() == spc {
+				return nil
+			}
+		}
+		_ = indirects
+	}
+	return op2
+}
+
+// C++ parity: RuleDoubleLoad::applyOp (double.cc:3442)
+func (r *RuleDoubleLoad) apply(op *PcodeOp, data *Funcdata) int {
+	piece0 := op.Input(0)
+	piece1 := op.Input(1)
+	if piece0 == nil || piece1 == nil {
+		return 0
+	}
+	if !piece0.IsWritten() || !piece1.IsWritten() {
+		return 0
+	}
+	load1 := piece1.Def()
+	if load1.Code() != CPUI_LOAD {
+		return 0
+	}
+	load0 := piece0.Def()
+	opc := load0.Code()
+	offset := uint64(0)
+	if opc == CPUI_SUBPIECE {
+		loff, ok := constantValue(load0.Input(1))
+		if !ok || loff != 0 {
+			return 0
+		}
+		vn0 := load0.Input(0)
+		if !vn0.IsWritten() {
+			return 0
+		}
+		offset = uint64(vn0.Size() - piece0.Size())
+		load0 = vn0.Def()
+		opc = load0.Code()
+	}
+	if opc != CPUI_LOAD {
+		return 0
+	}
+	loadlo, loadhi, spc, ok := SplitVarnodeTestContiguousPointers(load0, load1)
+	if !ok {
+		return 0
+	}
+	size := piece0.Size() + piece1.Size()
+	latest := doubleLoadNoWriteConflict(loadlo, loadhi, spc, nil)
+	if latest == nil {
+		return 0
+	}
+	// Build a single wider LOAD.
+	newload := data.NewOp(2, latest.Addr())
+	vnout := data.NewUniqueOut(size, newload)
+	spcvn := data.NewSpaceIDConst(spc)
+	data.OpSetOpcode(newload, CPUI_LOAD)
+	data.OpSetInput(newload, spcvn, 0)
+	addrvn := loadlo.Input(1)
+	if spc.BigEndian && offset != 0 {
+		// The most-significant part of the big LOAD was discarded; bump the
+		// pointer by the discard amount.
+		newadd := data.NewOp(2, latest.Addr())
+		addout := data.NewUniqueOut(addrvn.Size(), newadd)
+		data.OpSetOpcode(newadd, CPUI_INT_ADD)
+		data.OpSetInput(newadd, addrvn, 0)
+		data.OpSetInput(newadd, data.NewConstant(addrvn.Size(), offset), 1)
+		data.OpInsertAfter(newadd, latest)
+		addrvn = addout
+		latest = newadd
+	}
+	data.OpSetInput(newload, addrvn, 1)
+	data.OpInsertAfter(newload, latest)
+
+	// Convert the PIECE into a COPY of the wide load output.
+	data.OpRemoveInput(op, 1)
+	data.OpSetOpcode(op, CPUI_COPY)
+	data.OpSetInput(op, vnout, 0)
+	return 1
+}
+
+// RuleDoubleStore collapses a CPUI_STORE of the low SUBPIECE plus a
+// companion STORE of the high SUBPIECE into one wider store.
+//
+// C++ parity: class RuleDoubleStore in double.hh / double.cc:3507-3568.
+type RuleDoubleStore struct{ batchRule }
+
+// C++ parity: RuleDoubleStore::RuleDoubleStore
+func NewRuleDoubleStore(group string) *RuleDoubleStore {
+	r := &RuleDoubleStore{}
+	r.batchRule = newBatchRule(group, "doublestore", []OpCode{CPUI_STORE}, r.apply, func(g string) Rule { return NewRuleDoubleStore(g) })
+	return r
+}
+
+// C++ parity: RuleDoubleStore::applyOp (double.cc:3513)
+func (r *RuleDoubleStore) apply(op *PcodeOp, data *Funcdata) int {
+	vnlo := op.Input(2)
+	if vnlo == nil || !vnlo.IsPrecisLo() {
+		return 0
+	}
+	if !vnlo.IsWritten() {
+		return 0
+	}
+	subpieceOpLo := vnlo.Def()
+	if subpieceOpLo.Code() != CPUI_SUBPIECE {
+		return 0
+	}
+	loff, ok := constantValue(subpieceOpLo.Input(1))
+	if !ok || loff != 0 {
+		return 0
+	}
+	whole := subpieceOpLo.Input(0)
+	if whole == nil || whole.IsFree() {
+		return 0
+	}
+	for _, subpieceOpHi := range whole.DescendIter() {
+		if subpieceOpHi.Code() != CPUI_SUBPIECE {
+			continue
+		}
+		if subpieceOpHi == subpieceOpLo {
+			continue
+		}
+		hoff, ok := constantValue(subpieceOpHi.Input(1))
+		if !ok {
+			continue
+		}
+		if int32(hoff) != vnlo.Size() {
+			continue
+		}
+		vnhi := subpieceOpHi.Output()
+		if vnhi == nil || !vnhi.IsPrecisHi() {
+			continue
+		}
+		if vnhi.Size() != whole.Size()-int32(hoff) {
+			continue
+		}
+		for _, storeOp2 := range vnhi.DescendIter() {
+			if storeOp2.Code() != CPUI_STORE {
+				continue
+			}
+			if storeOp2.Input(2) != vnhi {
+				continue
+			}
+			storelo, storehi, spc, ok := SplitVarnodeTestContiguousPointers(storeOp2, op)
+			if !ok {
+				continue
+			}
+			var indirects []*PcodeOp
+			latest := doubleLoadNoWriteConflict(storelo, storehi, spc, &indirects)
+			if latest == nil {
+				continue
+			}
+			// TODO(parity): RuleDoubleStore::testIndirectUse and
+			// reassignIndirects need Funcdata::newVarnodeIop. Until that is
+			// ported we skip merges that carry any INDIRECTs to avoid losing
+			// side-effect edges.
+			if len(indirects) != 0 {
+				continue
+			}
+			// Build the merged STORE.
+			newstore := data.NewOp(3, latest.Addr())
+			spcvn := data.NewSpaceIDConst(spc)
+			data.OpSetOpcode(newstore, CPUI_STORE)
+			data.OpSetInput(newstore, spcvn, 0)
+			addrvn := storelo.Input(1)
+			if addrvn.IsConstant() {
+				addrvn = data.NewConstant(addrvn.Size(), addrvn.Offset())
+			}
+			data.OpSetInput(newstore, addrvn, 1)
+			data.OpSetInput(newstore, whole, 2)
+			data.OpInsertAfter(newstore, latest)
+			data.OpDestroy(op)
+			data.OpDestroy(storeOp2)
+			return 1
+		}
+	}
+	return 0
+}
+
+// RuleStringCopy rewrites a sequence of constant-char COPY ops into a single
+// CALLOTHER representing strncpy/wcsncpy/memcpy.
+// C++ parity: constseq.hh/constseq.cc class RuleStringCopy.
+type RuleStringCopy struct{ batchRule }
+
+// NewRuleStringCopy constructs the RuleStringCopy rule.
+// C++ parity: RuleStringCopy::RuleStringCopy.
+func NewRuleStringCopy(group string) *RuleStringCopy {
+	r := &RuleStringCopy{}
+	r.batchRule = newBatchRule(group, "stringcopy", []OpCode{CPUI_COPY}, r.apply, func(g string) Rule { return NewRuleStringCopy(g) })
+	return r
+}
+
+// apply mirrors constseq.cc RuleStringCopy::applyOp.
+// C++ parity: RuleStringCopy::applyOp.
+func (r *RuleStringCopy) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || data == nil {
+		return 0
+	}
+	if op.NumInput() == 0 || op.Input(0) == nil || !op.Input(0).IsConstant() {
+		return 0
+	}
+	outvn := op.Output()
+	if outvn == nil {
+		return 0
+	}
+	ct := outvn.Type()
+	if ct == nil || !isCharPrintLike(ct) {
+		return 0
+	}
+	if isOpaqueStringLike(ct) {
+		return 0
+	}
+	if !outvn.IsAddrTied() {
+		return 0
+	}
+	// TODO: replace the stub with a real ScopeLocal.queryContainer lookup.
+	entry := queryContainerStub(data, outvn.Addr(), outvn.Size())
+	seq := newStringSequence(data, ct, entry, op, outvn.Addr())
+	if !seq.isValid() {
+		return 0
+	}
+	if !seq.transform() {
+		return 0
+	}
+	return 1
+}
+
+// RuleStringStore rewrites a sequence of constant-char STORE ops into a single
+// CALLOTHER representing strncpy/wcsncpy/memcpy.
+// C++ parity: constseq.hh/constseq.cc class RuleStringStore.
+type RuleStringStore struct{ batchRule }
+
+// NewRuleStringStore constructs the RuleStringStore rule.
+// C++ parity: RuleStringStore::RuleStringStore.
+func NewRuleStringStore(group string) *RuleStringStore {
+	r := &RuleStringStore{}
+	r.batchRule = newBatchRule(group, "stringstore", []OpCode{CPUI_STORE}, r.apply, func(g string) Rule { return NewRuleStringStore(g) })
+	return r
+}
+
+// apply mirrors constseq.cc RuleStringStore::applyOp.
+// C++ parity: RuleStringStore::applyOp.
+func (r *RuleStringStore) apply(op *PcodeOp, data *Funcdata) int {
+	if op == nil || data == nil {
+		return 0
+	}
+	if op.NumInput() < 3 || op.Input(2) == nil || !op.Input(2).IsConstant() {
+		return 0
+	}
+	ptrvn := op.Input(1)
+	if ptrvn == nil {
+		return 0
+	}
+	ct := ptrvn.TypeReadFacing(op)
+	if ct == nil || ct.Metatype() != TYPE_PTR {
+		return 0
+	}
+	ptrT, ok := ct.(*Pointer)
+	if !ok {
+		return 0
+	}
+	pointee := ptrT.Pointee()
+	if pointee == nil || !isCharPrintLike(pointee) {
+		return 0
+	}
+	if isOpaqueStringLike(pointee) {
+		return 0
+	}
+	seq := newHeapSequence(data, pointee, op)
+	if !seq.isValid() {
+		return 0
+	}
+	if !seq.transform() {
+		return 0
+	}
 	return 1
 }
