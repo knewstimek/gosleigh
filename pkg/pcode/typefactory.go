@@ -85,6 +85,38 @@ func (f *TypeFactory) GetStruct(name string, fields []TypeField) *Struct {
 	return f.internStruct(key, value)
 }
 
+// NewBitfieldTypeField constructs a TypeField describing a bitfield member.
+// C++ parity: the TypeStruct decoder in type.cc (decodeStructure ~L2360) sets
+// the bitfield marker while parsing <field> elements that carry a bit offset
+// and bit size. Gosleigh's .sla / XML decoder for composites is still pending,
+// so this helper is the programmatic surrogate -- callers that build struct
+// types from code (tests, host integrators) route bitfield members through
+// it so the downstream Struct.HasBitfields check lights up.
+// logicalType is the containing integer type, byteOffset is the offset of the
+// underlying byte run inside the struct, bitOffset is the least significant
+// bit of the field within that run, and bitSize is the field width.
+func NewBitfieldTypeField(ident int32, byteOffset int32, name string, logicalType Datatype, bitOffset, bitSize int32) TypeField {
+	return TypeField{
+		Ident:      ident,
+		Offset:     byteOffset,
+		Name:       name,
+		Type:       logicalType,
+		BitOffset:  bitOffset,
+		BitSize:    bitSize,
+		IsBitfield: true,
+	}
+}
+
+// GetBitfieldStruct is the typefactory entry point for composite types that
+// contain one or more bitfield members. It is the Go-level counterpart of the
+// C++ TypeFactory::decodeStructure branch that folds a TypeBitField side
+// table into the containing TypeStruct (see type.cc L2383 where the
+// has_bitfields flag is promoted). Non-bitfield members pass through the
+// same internment path as GetStruct so the two constructors share storage.
+func (f *TypeFactory) GetBitfieldStruct(name string, fields []TypeField) *Struct {
+	return f.GetStruct(name, fields)
+}
+
 func (f *TypeFactory) GetUnion(name string, fields []TypeField) *Union {
 	canonicalFields := f.internFields(fields)
 	value := NewUnion(name, canonicalFields)
