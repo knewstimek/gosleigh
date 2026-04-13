@@ -298,6 +298,10 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRuleBitFieldIn(group) },
 	func(group string) Rule { return NewRulePullAbsorb(group) },
 	func(group string) Rule { return NewRuleInsertAbsorb(group) },
+	func(group string) Rule { return NewRuleDoubleIn(group) },
+	func(group string) Rule { return NewRuleDoubleOut(group) },
+	func(group string) Rule { return NewRuleDoubleLoad(group) },
+	func(group string) Rule { return NewRuleDoubleStore(group) },
 }
 
 func BatchARules(group string) []Rule {
