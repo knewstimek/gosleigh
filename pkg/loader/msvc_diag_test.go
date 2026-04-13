@@ -150,13 +150,11 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 	pcode.NewActionMergeRequired("analysis").Apply(result.Funcdata)
 	pcode.NewActionMarkExplicit("analysis").Apply(result.Funcdata)
 	pcode.NewActionMarkImplied("analysis").Apply(result.Funcdata)
-	// ActionForLoops runs after MarkExplicit/MarkImplied so that testTerminal's
-	// IsExplicit check correctly rejects for-loop detection when the iterate
-	// varnode is implied (e.g. gcd single-use ECX after NodeJoin).
-	// C++ parity: BlockWhileDo::finalizePrinting (testTerminal) runs after MarkExplicit
-	// in the main decompile loop (coreaction.cc ~5736 MarkExplicit before FinalStructure).
-	pcode.NewActionForLoops("analysis").Apply(result.Funcdata)
+	// ActionMergeCopy must run before ActionForLoops so the cross-variable COPY
+	// rejection in tryMarkForLoop sees post-merge HighVariables. C++ parity:
+	// BlockWhileDo::finalizePrinting runs during PrintC emit, after all merges.
 	pcode.NewActionMergeCopy("analysis").Apply(result.Funcdata)
+	pcode.NewActionForLoops("analysis").Apply(result.Funcdata)
 	// H4: ActionNameVars -- assign iVar1/uVar1 names to unnamed register-space HVs.
 	// C++ parity: coreaction.cc ActionNameVars::apply() + ScopeLocal::assignDefaultNames().
 	pcode.NewActionNameVars("analysis").Apply(result.Funcdata)

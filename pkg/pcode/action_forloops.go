@@ -140,12 +140,27 @@ func tryMarkForLoop(data *Funcdata, wdo *BlockWhileDo) {
 	// be explicit. If it is implied (single-use temp), the iterate statement
 	// cannot stand as a for-loop iterator clause.
 	// C++ parity: BlockWhileDo::testTerminal (block.cc:3271)
-	//   "if (!vn->isExplicit()) return (PcodeOp*)0;"
-	// This check requires ActionMarkExplicit/ActionMarkImplied to have run first;
-	// call ActionForLoops only after those passes.
 	if tailSlot >= 0 && loopDef != nil {
 		tailVn := loopDef.Input(tailSlot)
 		if tailVn != nil && !tailVn.IsExplicit() {
+			return
+		}
+	}
+
+	// Cross-variable COPY rejection: if the candidate iterateOp is a pure COPY
+	// between two *distinct* addrTied varnodes (e.g. gcd's
+	// `param_3 = param_4`), the COPY is a snapshot/alias assignment, not an
+	// iterator. Promoting it to the for-loop iterator slot reorders it
+	// relative to the body write of the source slot, breaking semantics.
+	// Legitimate for-loop iterators update the loop variable in place and are
+	// either non-COPY (INT_ADD/PTRADD) or single-slot COPYs between a
+	// register helper and the addrTied iterator storage (only one side
+	// addrTied). Here we only reject when BOTH sides are addrTied at
+	// distinct storage addresses.
+	if iterateOp.Code() == CPUI_COPY && iterateOp.Output() != nil && iterateOp.NumInput() > 0 {
+		out := iterateOp.Output()
+		in := iterateOp.Input(0)
+		if in != nil && out.IsAddrTied() && in.IsAddrTied() && out.Addr() != in.Addr() {
 			return
 		}
 	}
