@@ -49,6 +49,7 @@ type Funcdata struct {
 	// C++ parity: Funcdata::proto, Funcdata::localmap
 	funcProto  *FuncProto
 	scopeLocal *ScopeLocal
+	callSpecs  []*FuncCallSpecs
 }
 
 // NewFuncdata creates a Funcdata container for the named function.
@@ -101,6 +102,44 @@ func (fd *Funcdata) GetScopeLocal() *ScopeLocal { return fd.scopeLocal }
 
 // SetScopeLocal attaches a local variable scope.
 func (fd *Funcdata) SetScopeLocal(sl *ScopeLocal) { fd.scopeLocal = sl }
+
+// NumCalls returns the number of CALL/CALLIND ops currently tracked.
+// C++ parity: Funcdata::numCalls
+func (fd *Funcdata) NumCalls() int {
+	if fd == nil {
+		return 0
+	}
+	fd.ensureCallSpecs()
+	return len(fd.callSpecs)
+}
+
+// GetCallSpecs returns the i-th call-spec wrapper.
+// C++ parity: Funcdata::getCallSpecs
+func (fd *Funcdata) GetCallSpecs(i int) *FuncCallSpecs {
+	if fd == nil {
+		return nil
+	}
+	fd.ensureCallSpecs()
+	if i < 0 || i >= len(fd.callSpecs) {
+		return nil
+	}
+	return fd.callSpecs[i]
+}
+
+func (fd *Funcdata) ensureCallSpecs() {
+	if fd == nil || fd.callSpecs != nil {
+		return
+	}
+	for _, op := range fd.obank.AllOps() {
+		if op == nil {
+			continue
+		}
+		switch op.Code() {
+		case CPUI_CALL, CPUI_CALLIND:
+			fd.callSpecs = append(fd.callSpecs, newFuncCallSpecs(fd, op))
+		}
+	}
+}
 
 // StartProcessing marks the function as entering the main analysis phase.
 // C++ parity: funcdata.hh Funcdata::startProcessing

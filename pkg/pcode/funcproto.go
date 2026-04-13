@@ -32,6 +32,8 @@ type FuncProto struct {
 
 	// params holds the discovered parameter HighVariables in order.
 	params []*HighVariable
+	// output holds the recovered return HighVariable, if any.
+	output *HighVariable
 	// locals holds the discovered local HighVariables in order.
 	locals []*HighVariable
 }
@@ -44,6 +46,60 @@ func NewFuncProto(model *ProtoModel) *FuncProto {
 
 // Model returns the underlying calling convention model.
 func (fp *FuncProto) Model() *ProtoModel { return fp.model }
+
+// HasModel reports whether a calling convention model is attached.
+// C++ parity: FuncProto::hasModel
+func (fp *FuncProto) HasModel() bool {
+	return fp != nil && fp.model != nil
+}
+
+// HasMatchingModel reports whether the attached model matches the provided one.
+// C++ parity: FuncProto::hasMatchingModel
+func (fp *FuncProto) HasMatchingModel(model *ProtoModel) bool {
+	return fp != nil && fp.model == model
+}
+
+// SetModel attaches a calling convention model.
+// C++ parity: FuncProto::setModel
+func (fp *FuncProto) SetModel(model *ProtoModel) {
+	if fp == nil {
+		return
+	}
+	fp.model = model
+}
+
+// Copy copies the prototype state from another FuncProto.
+// C++ parity: FuncProto::copy
+func (fp *FuncProto) Copy(other *FuncProto) {
+	if fp == nil || other == nil {
+		return
+	}
+	fp.model = other.model
+	fp.inputLocked = other.inputLocked
+	fp.modelLocked = other.modelLocked
+	fp.outputLocked = other.outputLocked
+	fp.params = append([]*HighVariable(nil), other.params...)
+	fp.output = other.output
+	fp.locals = append([]*HighVariable(nil), other.locals...)
+}
+
+// SetInternal records an internally synthesized prototype.
+// TODO known mismatch: Ghidra's FuncProto::setInternal also tracks internal storage
+// and extra callsite metadata; Gosleigh only records the model and return type.
+// C++ parity: FuncProto::setInternal
+func (fp *FuncProto) SetInternal(model *ProtoModel, vt Datatype) {
+	if fp == nil {
+		return
+	}
+	fp.model = model
+	if vt == nil {
+		fp.output = nil
+		return
+	}
+	out := NewHighVariable("return")
+	out.SetType(vt)
+	fp.output = out
+}
 
 // ClearInput clears the currently classified input parameters.
 // C++ parity: funcdata.hh FuncProto::clearInput
@@ -90,6 +146,81 @@ func (fp *FuncProto) SetInputLocked(val bool) {
 	}
 	fp.inputLocked = val
 }
+
+// IsModelLocked reports whether the prototype model is locked.
+// C++ parity: FuncProto::isModelLocked
+func (fp *FuncProto) IsModelLocked() bool {
+	if fp == nil {
+		return false
+	}
+	return fp.modelLocked
+}
+
+// IsOutputLocked reports whether the return value is locked.
+// C++ parity: FuncProto::isOutputLocked
+func (fp *FuncProto) IsOutputLocked() bool {
+	if fp == nil {
+		return false
+	}
+	return fp.outputLocked
+}
+
+// ClearUnlockedInput clears recovered parameters when the prototype is not locked.
+// C++ parity: FuncProto::clearUnlockedInput
+func (fp *FuncProto) ClearUnlockedInput() {
+	if fp == nil || fp.inputLocked {
+		return
+	}
+	fp.params = nil
+}
+
+// ClearUnlockedOutput clears a recovered return value when it is not locked.
+// C++ parity: FuncProto::clearUnlockedOutput
+func (fp *FuncProto) ClearUnlockedOutput() {
+	if fp == nil || fp.outputLocked {
+		return
+	}
+	fp.output = nil
+}
+
+// GetOutput returns the recovered return value, if any.
+// C++ parity: FuncProto::getOutput
+func (fp *FuncProto) GetOutput() *HighVariable {
+	if fp == nil {
+		return nil
+	}
+	return fp.output
+}
+
+// SetOutput records the recovered return value.
+// C++ parity: FuncProto::setOutput
+func (fp *FuncProto) SetOutput(hv *HighVariable) {
+	if fp == nil {
+		return
+	}
+	fp.output = hv
+}
+
+// GetModelExtraPop returns the prototype model's extra-pop setting.
+// TODO known mismatch: ProtoModel extra-pop tracking is not yet ported.
+// C++ parity: FuncProto::getModelExtraPop
+func (fp *FuncProto) GetModelExtraPop() int32 {
+	_ = fp
+	return 0
+}
+
+// HasThisPointer reports whether the prototype models an implicit this pointer.
+// TODO known mismatch: Ghidra's this-pointer flags are not yet modeled.
+// C++ parity: FuncProto::hasThisPointer
+func (fp *FuncProto) HasThisPointer() bool {
+	_ = fp
+	return false
+}
+
+// PrepareThisPointer is a placeholder for this-pointer normalization.
+// TODO known mismatch: Ghidra's FuncProto::updateThisPointer is not yet ported.
+// C++ parity: FuncProto::updateThisPointer
+func (fp *FuncProto) PrepareThisPointer() {}
 
 // AddParam registers a parameter HighVariable (in ABI order).
 func (fp *FuncProto) AddParam(hv *HighVariable) {
