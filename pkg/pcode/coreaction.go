@@ -14,6 +14,8 @@
 
 package pcode
 
+import "gosleigh/pkg/address"
+
 // ActionStart gathers raw p-code for a function.
 // C++ parity: coreaction.hh ActionStart
 type ActionStart struct{ ActionBase }
@@ -2211,24 +2213,24 @@ func restructureProtectSwitchPaths(data *Funcdata) {
 
 // Apply drives ScopeLocal::restructureVarnode and switch-path protection.
 // C++ parity: coreaction.cc ActionRestructureVarnode::apply
-// TODO known mismatch: ScopeLocal::restructureVarnode and
-// Funcdata::syncVarnodesWithSymbols are currently stubs (see funcdata.go);
-// once they are ported they should be wired in below.
+// TODO known mismatch: ScopeLocal::restructureVarnode is partial -- the Go
+// port runs the alias/overlap walk but does not yet rebuild every SymbolEntry
+// from the Varnode footprint (database.cc ScopeLocal::restructureVarnode).
+// Jumptable-recovery-on mode is not yet distinguished from normal runs
+// (funcdata.hh Funcdata::isJumptableRecoveryOn), so protectSwitchPaths is
+// always enabled like the unconditional fallback arm.
 func (a *ActionRestructureVarnode) Apply(data *Funcdata) int {
 	if data == nil {
 		return 0
 	}
 	sl := data.GetScopeLocal()
-	_ = sl
 	aliasyes := a.numpass != 0
-	// TODO known mismatch: sl.restructureVarnode(aliasyes) not yet ported.
-	_ = aliasyes
+	if sl != nil {
+		sl.RestructureVarnode(data, aliasyes)
+	}
 	if data.SyncVarnodesWithSymbols(sl, false, aliasyes) {
 		a.count++
 	}
-	// TODO known mismatch: FuncJumpTableRecoveryOn flag is not yet defined;
-	// jump-table recovery mode is not distinguished from normal runs.
-	// C++ parity: Funcdata::isJumptableRecoveryOn (funcdata.hh).
 	restructureProtectSwitchPaths(data)
 	a.numpass++
 	return 0
@@ -2639,13 +2641,34 @@ func (a *ActionSwitchNorm) Clone(groups ActionGroupList) Action {
 	return NewActionSwitchNorm(a.GetGroup())
 }
 
-// Apply is a TODO stub: Gosleigh does not yet port the JumpTable machinery
-// (jumptable.cc JumpTable::matchModel, recoverLabels, foldInNormalization,
-// foldInGuards), so there is nothing to normalise. Once JumpTable lands this
-// should iterate data.numJumpTables().
-// C++ parity: coreaction.cc ActionSwitchNorm::apply
+// Apply iterates every recovered JumpTable and, for ones that have not yet
+// been labelled, runs matchModel -> recoverLabels -> foldInNormalization.
+// foldInGuards is always re-run to pick up newly collapsed guards.
+// C++ parity: coreaction.cc ActionSwitchNorm::apply (lines 4559-4576)
+// TODO known mismatch: data.getStructure().clear() is not wired up because
+// the Go Funcdata has no structured-block cache yet (blockaction.cc). Each
+// foldInGuards success still bumps the action count as in the C++ path so
+// the restart loop re-evaluates downstream rules.
 func (a *ActionSwitchNorm) Apply(data *Funcdata) int {
-	_ = data
+	if data == nil {
+		return 0
+	}
+	for i := 0; i < data.NumJumpTables(); i++ {
+		jt := data.GetJumpTable(i)
+		if jt == nil {
+			continue
+		}
+		if !jt.IsLabelled() {
+			jt.MatchModel(data)
+			jt.RecoverLabels(data)
+			jt.FoldInNormalization(data)
+			a.count++
+		}
+		if jt.FoldInGuards(data) {
+			// C++ calls data.getStructure().clear() here; see TODO above.
+			a.count++
+		}
+	}
 	return 0
 }
 
@@ -2735,12 +2758,48 @@ func (a *ActionRestrictLocal) Clone(groups ActionGroupList) Action {
 	return NewActionRestrictLocal(a.GetGroup())
 }
 
-// Apply is a TODO stub: Gosleigh lacks Funcdata::getCallSpecs /
-// FuncCallSpecs (fspec.cc) and FuncProto::effectBegin/effectEnd iteration
-// over EffectRecord saved-register info, so no stack slots can be flagged.
-// C++ parity: coreaction.cc ActionRestrictLocal::apply
+// Apply walks each tracked call site and removes the stack slots used as
+// parameter passing from the local scope, then walks FuncProto saved
+// registers to flag their storage as unmapped. Both sub-passes short-circuit
+// when the underlying metadata is missing.
+// C++ parity: coreaction.cc ActionRestrictLocal::apply (lines 1958-2003)
+// TODO known mismatch: the real iteration needs FuncCallSpecs::getSpacebaseOffset,
+// FuncCallSpecs::getParam, FuncProto::effectBegin/effectEnd (EffectRecord),
+// and ScopeLocal::markNotMapped / isUnaffectedStorage. None of those are
+// ported yet, so the inner bodies degrade to no-ops and only the driver
+// wiring runs -- when the helpers land this function will pick them up.
 func (a *ActionRestrictLocal) Apply(data *Funcdata) int {
-	_ = data
+	if data == nil {
+		return 0
+	}
+	sl := data.GetScopeLocal()
+	if sl == nil {
+		return 0
+	}
+	// Sub-pass 1: stack slots used by call parameters.
+	// C++ parity: ActionRestrictLocal::apply (first for loop).
+	for i := 0; i < data.NumCalls(); i++ {
+		fc := data.GetCallSpecs(i)
+		if fc == nil {
+			continue
+		}
+		if !fc.IsInputLocked() {
+			continue
+		}
+		// TODO known mismatch: FuncCallSpecs::getSpacebaseOffset and
+		// FuncCallSpecs::getParam are not ported; without them the
+		// per-parameter markNotMapped call cannot be issued. The loop
+		// stays here so the driver fires once those helpers exist.
+		_ = fc
+	}
+	// Sub-pass 2: saved-register storage from effect records.
+	// C++ parity: ActionRestrictLocal::apply (effect record loop).
+	if data.GetFuncProto() != nil {
+		// TODO known mismatch: FuncProto::effectBegin / effectEnd and
+		// EffectRecord::killedbycall are absent; saved-register sweep
+		// is currently a no-op (see funcproto.go).
+		_ = data.GetFuncProto()
+	}
 	return 0
 }
 
@@ -2815,12 +2874,32 @@ func (a *ActionHideShadow) Clone(groups ActionGroupList) Action {
 	return NewActionHideShadow(a.GetGroup())
 }
 
-// Apply is a TODO stub: Merge::hideShadows (merge.cc) is not ported and the
-// Go Merge type has no HighVariable-level mark bit to replicate the
-// shadow-marking sweep.
-// C++ parity: coreaction.cc ActionHideShadow::apply
+// Apply walks every written Varnode, mark-guards each HighVariable to hit
+// it exactly once, and calls Merge::hideShadows. Gosleigh lacks a persistent
+// Funcdata.Merge accessor so we spin up a local Merge for the sweep; the
+// mark bit on HighVariable is also absent, so we use a seen-set instead.
+// C++ parity: coreaction.cc ActionHideShadow::apply (lines 4842-4860)
+// TODO known mismatch: Merge::hideShadows is a stub (see merge.go) so the
+// count never increments even when the driver fires correctly.
 func (a *ActionHideShadow) Apply(data *Funcdata) int {
-	_ = data
+	if data == nil {
+		return 0
+	}
+	merge := NewMerge(data)
+	seen := make(map[*HighVariable]bool)
+	for _, vn := range data.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.IsFree() || !vn.IsWritten() {
+			continue
+		}
+		high := vn.High()
+		if high == nil || seen[high] {
+			continue
+		}
+		seen[high] = true
+		if merge.HideShadows(high) {
+			a.count++
+		}
+	}
 	return 0
 }
 
@@ -2856,12 +2935,38 @@ func (a *ActionDynamicMapping) Clone(groups ActionGroupList) Action {
 	return NewActionDynamicMapping(a.GetGroup())
 }
 
-// Apply is a TODO stub: ScopeLocal::beginDynamic, DynamicHash (dynamic.cc),
-// and Funcdata::attemptDynamicMapping are not ported. The Go ScopeLocal
-// carries no dynamic SymbolEntry list yet.
-// C++ parity: coreaction.cc ActionDynamicMapping::apply
+// Apply walks every dynamic SymbolEntry attached to the local scope and
+// attempts to resolve it via DynamicHash.FindVarnode. On a successful
+// resolution the Varnode is attached to the entry the same way
+// attemptDynamicMapping does in C++.
+// C++ parity: coreaction.cc ActionDynamicMapping::apply (lines 4863-4878)
+// TODO known mismatch: Funcdata::attemptDynamicMapping (funcdata_varnode.cc)
+// does more than AttachEntryToVarnode -- it also reconciles multi-equal
+// replacements and the lateAttach list. DynamicHash.FindVarnode itself is
+// a linear address-only scan (see dynamic.go) so multi-collision lookups
+// return a coarser match than C++ uniqueHash.
 func (a *ActionDynamicMapping) Apply(data *Funcdata) int {
-	_ = data
+	if data == nil {
+		return 0
+	}
+	sl := data.GetScopeLocal()
+	if sl == nil {
+		return 0
+	}
+	var dhash DynamicHash
+	for _, entry := range sl.DynamicEntries() {
+		if entry == nil {
+			continue
+		}
+		dhash.Clear()
+		useAddr := entry.FirstUseAddress()
+		vn := dhash.FindVarnode(data, useAddr, entry.Hash())
+		if vn == nil {
+			continue
+		}
+		sl.AttachEntryToVarnode(vn, entry)
+		a.count++
+	}
 	return 0
 }
 
@@ -2897,11 +3002,41 @@ func (a *ActionDynamicSymbols) Clone(groups ActionGroupList) Action {
 	return NewActionDynamicSymbols(a.GetGroup())
 }
 
-// Apply is a TODO stub: requires the same dynamic-hash infrastructure as
-// ActionDynamicMapping plus Funcdata::attemptDynamicMappingLate.
-// C++ parity: coreaction.cc ActionDynamicSymbols::apply
+// Apply is the late-attachment companion to ActionDynamicMapping. It runs
+// after type recovery has stabilised and re-hashes every dynamic entry,
+// attaching it to whichever Varnode currently matches. Entries that resolve
+// are counted; unresolved ones are left alone so later passes can retry.
+// C++ parity: coreaction.cc ActionDynamicSymbols::apply (lines 4880-4895)
+// TODO known mismatch: Funcdata::attemptDynamicMappingLate additionally
+// walks the MULTIEQUAL fan-in and uses DynamicHash::uniqueHash with method
+// bumping. The Go DynamicHash.UniqueHash is a stub that always calls
+// CalcHash(method=0), so late mapping has looser collision resolution.
 func (a *ActionDynamicSymbols) Apply(data *Funcdata) int {
-	_ = data
+	if data == nil {
+		return 0
+	}
+	sl := data.GetScopeLocal()
+	if sl == nil {
+		return 0
+	}
+	var dhash DynamicHash
+	for _, entry := range sl.DynamicEntries() {
+		if entry == nil {
+			continue
+		}
+		dhash.Clear()
+		useAddr := entry.FirstUseAddress()
+		vn := dhash.FindVarnode(data, useAddr, entry.Hash())
+		if vn == nil {
+			continue
+		}
+		// The late pass additionally forces a unique hash so the same
+		// entry is reproducibly re-attached across restarts. UniqueHash
+		// currently delegates to CalcHash(method=0) -- see dynamic.go.
+		dhash.UniqueHash(vn, data)
+		sl.AttachEntryToVarnode(vn, entry)
+		a.count++
+	}
 	return 0
 }
 
@@ -2989,11 +3124,67 @@ func (a *ActionInternalStorage) Clone(groups ActionGroupList) Action {
 	return NewActionInternalStorage(a.GetGroup())
 }
 
-// Apply is a TODO stub: FuncProto::internalBegin / internalEnd, the
-// store-unmapped PcodeOp flag, and Varnode::isEventualConstant are all
-// absent from Gosleigh's port.
-// C++ parity: coreaction.cc ActionInternalStorage::apply
+// Apply walks the FuncProto internal-storage register list and marks every
+// CPUI_STORE that targets one of those locations (and whose address operand
+// is an eventual constant) with PcodeOpStoreUnmapped so the decompiler
+// treats the write as scratch state instead of observable memory.
+// C++ parity: coreaction.cc ActionInternalStorage::apply (lines 4949-4978)
+// TODO known mismatch: FuncProto::internalBegin / internalEnd is not ported
+// (funcproto.go exposes no internal-storage list yet), so the per-register
+// loop is always empty. Varnode::isEventualConstant is also absent -- when
+// both land, the body of the for-loop below becomes the real sweep.
 func (a *ActionInternalStorage) Apply(data *Funcdata) int {
-	_ = data
+	if data == nil {
+		return 0
+	}
+	fp := data.GetFuncProto()
+	if fp == nil {
+		return 0
+	}
+	// C++ parity: for each VarnodeData entry between internalBegin() and
+	// internalEnd(), walk every Varnode at that (addr,size) and flag its
+	// CPUI_STORE descendants whose address input is an eventual constant.
+	// Kept as a driver skeleton until FuncProto grows internalBegin/End.
+	internalStorage := internalStorageList(fp)
+	for _, vd := range internalStorage {
+		for _, vn := range data.GetVarnodeBank().AllVarnodes() {
+			if vn == nil || vn.IsFree() {
+				continue
+			}
+			if vn.Addr() != vd.addr || vn.Size() != vd.size {
+				continue
+			}
+			for _, op := range vn.DescendIter() {
+				if op == nil || op.Code() != CPUI_STORE {
+					continue
+				}
+				// TODO known mismatch: Varnode::isEventualConstant(3,0)
+				// is not ported (varnode_ssa.go); until then we only
+				// flag the literal-constant case which is the narrow
+				// subset the C++ check accepts.
+				if op.NumInput() >= 2 && op.Input(1) != nil && op.Input(1).IsConstant() {
+					op.SetFlag(PcodeOpStoreUnmapped)
+					a.count++
+				}
+			}
+		}
+	}
 	return 0
+}
+
+// internalStorageEntry mirrors the VarnodeData entries that C++ stores on
+// FuncProto for internal-storage registers. The Go port has no such list
+// yet; this helper exists so ActionInternalStorage has a stable iteration
+// source once FuncProto.internalBegin/End lands.
+// C++ parity: fspec.hh FuncProto::internalstorage
+type internalStorageEntry struct {
+	addr address.Address
+	size int32
+}
+
+// internalStorageList returns the internal-storage register list for a
+// FuncProto. Always empty today -- see the TODO in ActionInternalStorage.
+// C++ parity: FuncProto::internalBegin / internalEnd
+func internalStorageList(_ *FuncProto) []internalStorageEntry {
+	return nil
 }

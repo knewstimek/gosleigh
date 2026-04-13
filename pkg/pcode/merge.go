@@ -552,6 +552,24 @@ func (m *Merge) markImplied(vn *Varnode) {
 	}
 }
 
+// HideShadows walks the given HighVariable looking for speculative merges
+// that shadow an earlier Varnode on the same storage. When the port of the
+// full intersection test lands this should return true once per hidden
+// shadow so ActionHideShadow can bump its count. The real C++ body is in
+// merge.cc Merge::hideShadows and depends on HighIntersectTest +
+// Cover::intersect plus HighVariable::hasShadows which are only partially
+// available in Gosleigh today.
+// C++ parity: merge.cc Merge::hideShadows
+// TODO known mismatch: HighVariable::hasShadows / remerge tracking is not
+// ported, so this stub never reports a hidden shadow.
+func (m *Merge) HideShadows(high *HighVariable) bool {
+	if m == nil || high == nil {
+		return false
+	}
+	_ = m.testCache
+	return false
+}
+
 func (m *Merge) inflateTest(a *Varnode, high *HighVariable) bool {
 	if a == nil || high == nil {
 		return false
