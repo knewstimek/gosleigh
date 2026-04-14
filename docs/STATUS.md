@@ -3,8 +3,9 @@
 ## 현재 단계: H8 MergeMarker 체인 디버그 진행 중 (2026-04-14 아침)
 
 2026-04-14 새벽~아침 세션에서 H8(TestMSVC_Gcd) 근본 원인 4단 파이프라인으로 좁혀 냄.
-다섯 개의 parity fix 커밋 추가. TestMSVC_Gcd 여전히 FAIL, 나머지 loader 테스트 PASS 유지,
-regression 0. 다음 세션 시작 포인트는 `### H8 근본 원인 맵` 참조.
+여섯 개의 parity fix 커밋 추가. TestMSVC_Gcd 여전히 FAIL, 나머지 loader 테스트 PASS 유지,
+regression 0. Gap 1 (cross-variable COPY iterateOp)은 testIterateForm 포팅으로 완료.
+남은 gap: cond-block snapshot hoist + unique-space 네이밍. `### H8 근본 원인 맵` 참조.
 
 ### 2026-04-14 H8 파이프라인 디버그 커밋
 - `e04d0ac` **merge.go mergeOpcode Cover intersection guard**. C++ parity:
@@ -25,19 +26,28 @@ regression 0. 다음 세션 시작 포인트는 `### H8 근본 원인 맵` 참�
   addrTied 저장 주소일 때 (예: `param_3 = param_4`) for-loop 변환 거부.
   `msvc_diag_test.go runPipelineGhidra`에서 ActionMergeCopy를 ActionForLoops
   앞으로 재배치해 post-merge HV 상태 기반 판정.
+- (this session) **action_forloops.go testIterateForm port**. `block.cc
+  BlockWhileDo::testIterateForm` (~3287-3314) 직역 포팅. iterator의 input tree가
+  loopVar HV에 도달하는지 DFS. C++ 원본은 explicit varnode에서 truncate하지만
+  Go의 MergeCopy/MarkExplicit 미완성 때문에 single-use non-addrTied explicit
+  varnode는 walk-through 허용 (CountedLoop/SumList의 register transient holder
+  패턴 수용). Gcd의 cross-variable COPY (register:0x4 multi-use/addrTied)는
+  truncate 유지로 reject. 결과: Gcd 출력에서 잘못된 for-loop 제거 (아래 GOT).
 
 ### H8 근본 원인 맵 (2026-04-14 아침 기준)
 
-TestMSVC_Gcd 현재 출력 (golden 불일치):
+TestMSVC_Gcd 현재 출력 (golden 불일치, testIterateForm 포팅 후):
 ```
 void processEntry entry(undefined4 param_1,undefined4 param_2,int param_3,int param_4)
 {
     int iVar2;
-    tmp_130 = param_4 == 0;
-    for (; !tmp_130; param_3 = param_4) {
-        iVar2 = param_3 % param_4;
-        tmp_130 = iVar2 == 0;
-        param_4 = iVar2;
+    tmp_131 = param_4 == 0;
+    tmp_129 = param_4;
+    while (!tmp_131) {
+        iVar2 = param_3 % tmp_129;
+        tmp_131 = iVar2 == 0;
+        tmp_129 = iVar2;
+        param_3 = tmp_129;
     }
     return;
 }
@@ -51,19 +61,11 @@ while (iVar1 = param_4, iVar1 != 0) {
 }
 ```
 
-근본 원인은 세 개의 상호 연결된 gap임:
+남은 gap은 두 개 (Gap 1 closed):
 
-1. **Cross-variable COPY를 iterateOp으로 선택** (`pkg/pcode/action_forloops.go`)
-   - 현재 iterateOp은 `COPY register:0x4 -> unique:0xae433` 형태로, addrTied
-     양쪽이 아닌 register/unique 쌍. `2f5b50e`의 addrTied 체크로 안 잡힘.
-   - C++ parity: `block.cc BlockWhileDo::testIterateForm` (라인 3287-3314)을
-     직역 포팅하면 iterator가 loopVar HV를 input tree에서 찾지 못할 때 거부.
-     직역 포팅을 시도했으나 CountedLoop/SumList까지 거부하는 regression.
-     원인: 이들 테스트의 iterateOp은 register COPY이고 stack HV 와의 merge가
-     Go side에서 완전하지 않아 HV 정체성 비교가 실패.
-   - 수정 방향: testIterateForm의 strict HV identity 매칭 대신 느슨한 기준
-     (addr 또는 symbol entry 동일성) 시도 필요. 또는 ActionMergeCopy 자체를
-     더 엄격히 돌려서 cross-space 병합을 완료시키는 쪽.
+1. ~~**Cross-variable COPY를 iterateOp으로 선택**~~ **(CLOSED this session)**.
+   testIterateForm 포팅 + single-use non-addrTied explicit walk-through.
+   Gcd의 잘못된 for-loop 제거, CountedLoop/SumList regression 없음.
 
 2. **PrintC emitWhileBlock에 comma_separate 모드 미구현 (부분)**
    (`pkg/pcode/printc.go` `emitWhileBlock`, `renderCondBlockComma`)
@@ -84,14 +86,21 @@ while (iVar1 = param_4, iVar1 != 0) {
      관계없이 명명. Go side는 의도적으로 보수화된 것으로 보이나 Gcd 시나리오
      관통에는 부족.
 
-진행 순서 제안:
-1. **Go Heritage/NodeJoin의 SSA shape을 Ghidra와 비교** -- 왜 Go는 `register:0x8`와
-   `stack:0x8`를 구분 못하는 MULTIEQUAL이 생성되는가. `testdata/sla/x86.pspec`
-   기반 리프트 출력을 C++ Ghidra의 동일 입력 출력과 나란히 덤프해 볼 것.
-2. **정말로 불가능하면 emitWhileBlock 측에서 hoist** -- cond block 머리에
-   snapshot COPY 삽입 루틴을 직접 실행(ActionBlockStructure 확장).
-3. **ActionNameVars 기준 완화** -- unique-space HV 중 loop-carried 표시가 있는
-   것만 iVar 네이밍 허용.
+진행 순서 제안 (Gap 2,3 남음):
+1. **cond block snapshot hoist** -- gcd의 entry block `COPY stack:0x8 -> unique:0xae433`
+   (param_4 snapshot)와 body의 첫 COPY는 C++ Ghidra에서 NodeJoin/merge 이후 cond
+   block에 자연스럽게 등장. Go에서는 entry와 body에 흩어짐. 확인된 구조
+   (structured dump으로 확인):
+   - entry: INT_EQUAL + 2 COPY (param_4/param_3 snapshot)
+   - cond: 7 MULTIEQUAL + CBRANCH (printable op 없음)
+   - body: COPY register:0x4 = ae416(param_4 phi) + SREM + EQUAL + 2 COPY
+   `renderCondBlockComma`가 hoist 로직을 추가하거나, ActionBlockStructure 단계에서
+   엔트리의 snapshot COPY를 cond 머리로 이동 필요.
+2. **ActionNameVars 기준 완화** -- unique-space HV 중 loop-carried 표시가 있는
+   것만 iVar 네이밍 허용. 현재 `tmp_131 = param_4 == 0`, `tmp_129 = param_4`
+   처럼 unique-only HV가 tmp_N 이름으로 유출.
+3. **(선택) Go Heritage/NodeJoin SSA shape 비교** -- 1/2가 부분 수정으로 안 되면
+   근본 원인 추적. `register:0x8`와 `stack:0x8` merge가 기대대로 되지 않는 곳.
 
 ### Keystones 완료 (real port)
 - K1a/b/c: ParamActive + FuncProto 확장 + 8 prototype action real (ActionActiveParam,

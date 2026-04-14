@@ -147,22 +147,13 @@ func tryMarkForLoop(data *Funcdata, wdo *BlockWhileDo) {
 		}
 	}
 
-	// Cross-variable COPY rejection: if the candidate iterateOp is a pure COPY
-	// between two *distinct* addrTied varnodes (e.g. gcd's
-	// `param_3 = param_4`), the COPY is a snapshot/alias assignment, not an
-	// iterator. Promoting it to the for-loop iterator slot reorders it
-	// relative to the body write of the source slot, breaking semantics.
-	// Legitimate for-loop iterators update the loop variable in place and are
-	// either non-COPY (INT_ADD/PTRADD) or single-slot COPYs between a
-	// register helper and the addrTied iterator storage (only one side
-	// addrTied). Here we only reject when BOTH sides are addrTied at
-	// distinct storage addresses.
-	if iterateOp.Code() == CPUI_COPY && iterateOp.Output() != nil && iterateOp.NumInput() > 0 {
-		out := iterateOp.Output()
-		in := iterateOp.Input(0)
-		if in != nil && out.IsAddrTied() && in.IsAddrTied() && out.Addr() != in.Addr() {
-			return
-		}
+	// testIterateForm: the loop variable must appear as an input in the
+	// iterator statement's input tree. If a pure cross-variable COPY got
+	// through as the "iterator", this check rejects it and the while-do
+	// stays a while-do. C++ parity: block.cc BlockWhileDo::testIterateForm
+	// (~3287), invoked from finalizePrinting after all merging is done.
+	if loopDef != nil && !testIterateForm(iterateOp, loopDef) {
+		return
 	}
 
 	// Mark iterateOp as NonPrinting so emitOps skips it in the body.
@@ -178,6 +169,79 @@ func tryMarkForLoop(data *Funcdata, wdo *BlockWhileDo) {
 	}
 
 	wdo.SetForLoop(iterateOp, initOp)
+}
+
+// testIterateForm verifies that the iterator statement's input tree reaches
+// the loop variable HighVariable. Starts a depth-first walk from iterateOp;
+// returns true if any reachable input varnode shares the HighVariable of
+// loopDef.Output. Stops at annotations, explicit varnodes (no further walk),
+// and unwritten inputs.
+//
+// C++ parity: block.cc BlockWhileDo::testIterateForm (~3287-3314).
+func testIterateForm(iterateOp, loopDef *PcodeOp) bool {
+	if iterateOp == nil || loopDef == nil {
+		return false
+	}
+	targetVn := loopDef.Output()
+	if targetVn == nil {
+		return false
+	}
+	high := targetVn.High()
+	if high == nil {
+		return false
+	}
+	type frame struct {
+		op   *PcodeOp
+		slot int
+	}
+	// Path-like DFS; depth here is bounded by the number of implied (non-explicit)
+	// defs in the chain. 16 is plenty and avoids pathological walks.
+	path := make([]frame, 0, 16)
+	path = append(path, frame{op: iterateOp, slot: 0})
+	for len(path) > 0 {
+		top := &path[len(path)-1]
+		if top.slot >= top.op.NumInput() {
+			path = path[:len(path)-1]
+			continue
+		}
+		vn := top.op.Input(top.slot)
+		top.slot++
+		if vn == nil || vn.IsAnnotation() {
+			continue
+		}
+		if vn.High() == high {
+			return true
+		}
+		if vn.IsExplicit() {
+			// C++ truncates at explicit. Go's ActionMergeCopy and
+			// ActionMarkExplicit do not fully merge transient register
+			// holders into the stack-storage HV the way C++ does, so a
+			// legitimate iterator's chain (e.g. CountedLoop:
+			//   unique = COPY(register) where register = INT_ADD(phi, 1))
+			// dead-ends at the single-use register even though the INT_ADD
+			// one step further has the loop variable as input. To recover
+			// parity without rerunning MergeCopy, walk through explicit
+			// varnodes only when they are single-use transient holders
+			// (NumDescend == 1 and not addrTied). Multi-use and addrTied
+			// explicit varnodes (e.g. gcd: register:0x4 used by both the
+			// body-end COPY and INT_SREM) still truncate.
+			if vn.NumDescend() > 1 || vn.IsAddrTied() {
+				continue
+			}
+		}
+		if !vn.IsWritten() {
+			continue
+		}
+		defOp := vn.Def()
+		if defOp == nil {
+			continue
+		}
+		if len(path) >= cap(path) {
+			continue // safety cap
+		}
+		path = append(path, frame{op: defOp, slot: 0})
+	}
+	return false
 }
 
 // findLoopVariable searches the tail block for an op whose output feeds back
