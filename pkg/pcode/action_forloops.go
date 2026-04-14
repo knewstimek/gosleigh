@@ -190,6 +190,35 @@ func testIterateForm(iterateOp, loopDef *PcodeOp) bool {
 	if high == nil {
 		return false
 	}
+
+	// Reject cross-variable COPY ops that are within-HV phi snapshots.
+	//
+	// In Gosleigh, when mergeAddrTied / snipReads inserts a COPY for a phi-input
+	// varnode (e.g. "tmp = COPY(param_4)" where param_4 is already in the loop HV),
+	// both the COPY input and the MULTIEQUAL output end up in the same HighVariable.
+	// testIterateForm's DFS would find vn.High() == high on the very first step and
+	// return true, incorrectly accepting this snapshot COPY as the iterator op.
+	//
+	// C++ avoids this via testTerminal (block.cc:3264): it checks finalOp->notPrinted()
+	// (i.e. the COPY is a NonPrinting same-HV copy) and, when notPrinted, looks one
+	// level deeper for the actual computation. Gosleigh's testTerminal is not yet fully
+	// ported (it only checks isExplicit on the MULTIEQUAL slot input), so we add the
+	// equivalent guard here: if iterateOp is a COPY whose input already belongs to the
+	// loop variable HV, it is a within-HV snapshot and must be rejected.
+	//
+	// Exception: CountedLoop-style chains where iterateOp is a COPY with an input
+	// from a DIFFERENT HV are still valid (the COPY bridges from a register temp to
+	// the stack-backed loop variable). Those have inVn.High() != high and fall through
+	// to the DFS walk below.
+	if iterateOp.Code() == CPUI_COPY {
+		inVn := iterateOp.Input(0)
+		if inVn != nil && inVn.High() == high {
+			// Input already in the loop HV: this is a within-HV phi snapshot COPY, not
+			// a real loop update. Reject so the while-do stays a while-do.
+			return false
+		}
+	}
+
 	type frame struct {
 		op   *PcodeOp
 		slot int
