@@ -4,7 +4,8 @@ Ghidra decompiler/Sleigh runtime을 Go로 다시 구현하는 프로젝트. stan
 
 ## 참고 문서
 
-- 현재 진행 상태: `docs/STATUS.md`
+- 현재 진행 상태: `docs/STATUS.md` (H8 진행 + 다음 미시작 항목만 유지, 간결하게)
+- 이력 (완료된 마일스톤/파동/개별 항목): `docs/CHANGELOG.md`
 - runtime 실행 경로: `docs/RUNTIME_FLOW.md`
 - parity 감사: `docs/PARITY_AUDIT.md`
 - .sla 바운더리: `docs/SLA_BOUNDARIES.md`
