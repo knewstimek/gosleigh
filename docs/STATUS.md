@@ -1,14 +1,17 @@
 # 프로젝트 상태
 
-## 현재 단계: H8 testIterateForm within-HV COPY 거부 완료 (2026-04-14 야간)
+## 현재 단계: RulePushMultiME/RulePropagateCopy 순서 수정 (2026-04-15)
 
-2026-04-14 야간 세션에서 `action_forloops.go testIterateForm` 내 within-HV phi-snapshot
-COPY 조기 거부 로직 추가 (bc99850). for-loop 오 활성화 해소. TestMSVC_Gcd 여전히 FAIL,
-나머지 loader 테스트 PASS 유지.
+2026-04-15 세션에서 `rules_copy.go batchARuleFactories` 내 `RulePushMultiME`를
+`RulePropagateCopy` 앞으로 이동. C++ parity: `coreaction.cc oppool1`에서
+`RulePushMulti`(line 5529)가 `RulePropagateCopy`(line 5577)보다 먼저 등록됨.
 
-남은 핵심 gap: joinblock 구조 차이로 인한 tmp_N 유출 + comma-while 미구현.
-근본 원인: Gosleigh NodeJoin이 만드는 joinblock (MULTIEQUAL-merged-cond + CBRANCH)이
-Ghidra loop-head (COPY(iVar1=phi) + INT_NOTEQUAL + CBRANCH) 구조와 다름.
+수정 효과: joinblock phi `unique:0xae41f #128 = MULTIEQUAL(ECX#5, ECX#54)`가
+`MULTIEQUAL(stack:0x8, register:0x8)` phi인 `#131`에 올바르게 병합됨.
+`tmp_131` 유출 해소. TestMSVC_Gcd 여전히 FAIL (다른 구조적 gap).
+
+현재 출력: for-loop + iVar2 (phi 구조 변화로 for-loop 탐지가 재활성화됨).
+남은 핵심 gap: joinblock 구조 차이 (Gap 3) + comma-while 렌더링 미구현 (Gap 4).
 `### H8 근본 원인 맵 (최신)` 참조.
 
 ### 2026-04-14 오후 세션 커밋 (mergeAddrTied 포팅)
@@ -60,21 +63,15 @@ Ghidra loop-head (COPY(iVar1=phi) + INT_NOTEQUAL + CBRANCH) 구조와 다름.
   for-loop iterator로 잘못 수락되던 버그 수정. CountedLoop path는 COPY input이
   다른 HV이므로 영향 없음. 결과: Gcd while-loop 정상 복구.
 
-### H8 근본 원인 맵 (최신 -- 2026-04-14 야간)
+### H8 근본 원인 맵 (최신 -- 2026-04-15)
 
-TestMSVC_Gcd 현재 출력 (mergeAddrTied 포팅 + within-HV COPY 거부 후):
+TestMSVC_Gcd 현재 출력 (RulePushMultiME 순서 수정 후):
 ```
 void processEntry entry(undefined4 param_1,undefined4 param_2,int param_3,int param_4)
 {
-    int iVar2;
-    tmp_124 = param_4 == 0;
-    tmp_129 = param_4;
     iVar1 = param_3;
-    while (!tmp_124) {
-        iVar2 = iVar1 % tmp_129;
-        tmp_124 = iVar2 == 0;
-        tmp_129 = iVar2;
-        iVar1 = tmp_129;
+    for (iVar2 = param_4; iVar2 != 0; iVar2 = iVar1 % iVar2) {
+        iVar1 = iVar2;
     }
     return;
 }
@@ -89,13 +86,15 @@ while (iVar1 = param_4, iVar1 != 0) {
 }
 ```
 
-이번 세션 개선 (bc99850): for-loop 오 활성화 제거.
-- testIterateForm에서 iterateOp가 COPY이고 COPY input이 loop HV에 속하면 즉시 거부.
-- CountedLoop path (COPY input이 다른 HV)는 walk-through 허용.
+이번 세션 개선 (2026-04-15): RulePushMultiME 순서 수정으로 `tmp_131` 중복 phi 제거.
+- joinblock phi #128(ECX phi)이 #131(stack/reg phi)에 정상 병합.
+- tmp_124, tmp_129도 함께 사라짐 (의존 phi들이 같이 병합).
+- phi 구조 변화로 for-loop 탐지가 재활성화됨 (iVar2 등장).
 
-남은 gap 분석 (2026-04-14 야간 완료):
+남은 gap 분석 (2026-04-15 갱신):
 
 1. ~~**Cross-variable COPY를 iterateOp으로 선택**~~ **(CLOSED -- 2f5b50e + bc99850)**.
+   (주의: PushMultiME 순서 수정 후 for-loop 탐지가 다시 활성화됨 -- Gap 3 해소 후 재평가 필요.)
 
 2. ~~**mergeAddrTied 파이프라인 미구현**~~ **(CLOSED -- 2026-04-14 오후)**.
 

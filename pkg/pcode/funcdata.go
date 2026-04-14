@@ -510,6 +510,7 @@ func (fd *Funcdata) OpSetOutput(op *PcodeOp, vn *Varnode) {
 // Then the new varnode's descend list is updated to include op.
 // C++ parity: Funcdata::opSetInput (funcdata_op.cc:104)
 func (fd *Funcdata) OpSetInput(op *PcodeOp, vn *Varnode, slot int) {
+	// Debug: trace mutations to the op that produces unique:0xae41f (joinblock phi #128).
 	// Identical to C++: unset the old input before setting the new one.
 	if old := op.Input(slot); old != nil {
 		fd.OpUnsetInput(op, slot)

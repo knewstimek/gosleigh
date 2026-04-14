@@ -195,6 +195,31 @@ func (vn *Varnode) IsReadOnly() bool      { return vn.flags&VarnodeReadOnly != 0
 func (vn *Varnode) IsVolatile() bool      { return vn.flags&VarnodeVolatile != 0 }
 func (vn *Varnode) IsSpaceBase() bool     { return vn.flags&VarnodeSpaceBase != 0 }
 func (vn *Varnode) IsTypeLock() bool      { return vn.flags&VarnodeTypeLock != 0 }
+
+// CopyShadow reports whether vn and op2 hold the same value -- that is,
+// both can be traced back to the same varnode through chains of COPY ops.
+// C++ parity: Varnode::copyShadow (varnode.cc:977)
+func (vn *Varnode) CopyShadow(op2 *Varnode) bool {
+	if vn == op2 {
+		return true
+	}
+	// Trace vn to its COPY-chain root; check op2 at each step.
+	root := vn
+	for root.IsWritten() && root.Def().Code() == CPUI_COPY {
+		root = root.Def().Input(0)
+		if root == op2 {
+			return true
+		}
+	}
+	// Trace op2 to its COPY-chain root; compare against vn's root.
+	for op2.IsWritten() && op2.Def().Code() == CPUI_COPY {
+		op2 = op2.Def().Input(0)
+		if root == op2 {
+			return true
+		}
+	}
+	return false
+}
 func (vn *Varnode) IsNameLock() bool      { return vn.flags&VarnodeNameLock != 0 }
 func (vn *Varnode) IsReturnAddress() bool { return vn.flags&VarnodeReturnAddress != 0 }
 func (vn *Varnode) IsPrecisLo() bool      { return vn.flags&VarnodePrecisLo != 0 }

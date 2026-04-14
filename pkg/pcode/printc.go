@@ -1447,7 +1447,27 @@ func (s *printCState) renderCondBlockComma(bl *FlowBlock) string {
 			continue
 		}
 		if s.inline[op] {
-			continue
+			// Exception: a COPY with unique-space output that feeds the while
+			// condition (INT_EQUAL/INT_NOTEQUAL/CBRANCH) is the trimOpOutput
+			// snapshot, e.g. "iVar1 = param_4" in "while (iVar1 = param_4, ...)".
+			// Fall through to the unique-filter / Case 2 code below.
+			isTrimCopy := false
+			if op.Code() == CPUI_COPY {
+				if out := op.Output(); out != nil && out.Space() != nil && out.Space().IsUnique() {
+					for _, desc := range out.DescendIter() {
+						if desc == nil {
+							continue
+						}
+						switch desc.Code() {
+						case CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL, CPUI_CBRANCH:
+							isTrimCopy = true
+						}
+					}
+				}
+			}
+			if !isTrimCopy {
+				continue
+			}
 		}
 		if op.HasFlag(PcodeOpNonPrinting) {
 			continue
@@ -1478,8 +1498,9 @@ func (s *printCState) renderCondBlockComma(bl *FlowBlock) string {
 			if out.Space() != nil && out.Space().IsUnique() {
 				passedUniqueFilter := false
 
-				// Case 2: TrimOpOutput COPY whose output feeds a comparison
-				// (INT_EQUAL/INT_NOTEQUAL) used as the while condition.
+				// Case 2: TrimOpOutput COPY whose output feeds the while condition,
+				// either via INT_EQUAL/INT_NOTEQUAL (1-byte bool result) or directly
+				// via CBRANCH Input(1) (4-byte value with implicit "!= 0" rendering).
 				// This COPY represents the loop-head phi snapshot, e.g.
 				//   "while (iVar1 = param_4, iVar1 != 0)".
 				// The output may have multiple consumers (the comparison AND a loop-body
@@ -1491,7 +1512,7 @@ func (s *printCState) renderCondBlockComma(bl *FlowBlock) string {
 				// name here by following the consumer COPY that writes a named variable.
 				if op.Code() == CPUI_COPY {
 					for _, desc := range out.DescendIter() {
-						if desc != nil && (desc.Code() == CPUI_INT_EQUAL || desc.Code() == CPUI_INT_NOTEQUAL) {
+						if desc != nil && (desc.Code() == CPUI_INT_EQUAL || desc.Code() == CPUI_INT_NOTEQUAL || desc.Code() == CPUI_CBRANCH) {
 							passedUniqueFilter = true
 							break
 						}

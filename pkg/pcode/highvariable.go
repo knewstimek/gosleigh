@@ -132,6 +132,20 @@ func (hv *HighVariable) IsInput() bool {
 	return false
 }
 
+// IsTypeLock returns true if any instance Varnode has the typelock flag set.
+// C++ parity: HighVariable::isTypeLock (variable.hh:222)
+func (hv *HighVariable) IsTypeLock() bool {
+	if hv == nil {
+		return false
+	}
+	for _, vn := range hv.instances {
+		if vn != nil && vn.IsTypeLock() {
+			return true
+		}
+	}
+	return false
+}
+
 // IsPersist returns true if any instance Varnode has the persist flag.
 // C++ parity: HighVariable::isPersist (variable.cc)
 func (hv *HighVariable) IsPersist() bool {

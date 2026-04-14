@@ -42,6 +42,11 @@ func getOpUIndex(op *PcodeOp) uint64 {
 	if op == blockEndSentinel {
 		return coverIndexEnd
 	}
+	if op == inputSentinel {
+		// Input varnode sentinel: same index as block-begin (0).
+		// C++ parity: case 2 in CoverBlock::getUIndex returns 0.
+		return coverIndexBegin
+	}
 	if op.IsMarker() {
 		if op.Code() == CPUI_MULTIEQUAL {
 			return coverIndexBegin
@@ -55,6 +60,13 @@ func getOpUIndex(op *PcodeOp) uint64 {
 // C++ parity: (PcodeOp *)1 sentinel in cover.hh CoverBlock::setAll / setEnd.
 var blockEndSentinel = &PcodeOp{}
 
+// inputSentinel is a package-level sentinel PcodeOp pointer used to mark the
+// defining point of a function-input (live-in) varnode.  It maps to index 0
+// (same as coverIndexBegin) but is intentionally non-nil so that
+// CoverBlock::empty() returns false and boundary() can return 2 (def boundary).
+// C++ parity: (PcodeOp *)2 sentinel used in Cover::addDefPoint for input varnodes.
+var inputSentinel = &PcodeOp{}
+
 // CoverBlock tracks the live range of a variable within a single basic block.
 // The range is from start (inclusive) to stop (inclusive).
 // nil start means "from block beginning"; blockEndSentinel stop means "to block end".
@@ -66,9 +78,11 @@ type CoverBlock struct {
 }
 
 // Empty returns true if the block has no coverage.
-// C++ parity: CoverBlock::empty
+// C++ parity: CoverBlock::empty -- only checks start, NOT stop.
+// A block that has had SetEnd called but no SetBegin is still "empty" in C++.
+// We must match this: start==nil means empty, regardless of stop.
 func (cb *CoverBlock) Empty() bool {
-	return cb.start == nil && cb.stop == nil
+	return cb.start == nil
 }
 
 // SetAll marks the entire block as covered.
@@ -310,6 +324,27 @@ func (c *Cover) IntersectByBlock(blk int32, op2 *Cover) int {
 	return cb.Intersect(cb2)
 }
 
+// IntersectList collects block indices where this Cover and op2 have an
+// intersection characterization >= level, appending each qualifying index
+// to the returned slice.
+// C++ parity: Cover::intersectList (cover.cc:307)
+func (c *Cover) IntersectList(op2 *Cover, level int) []int32 {
+	if c.blocks == nil || op2.blocks == nil {
+		return nil
+	}
+	var out []int32
+	for idx, cb := range c.blocks {
+		cb2, ok := op2.blocks[idx]
+		if !ok {
+			continue
+		}
+		if cb.Intersect(cb2) >= level {
+			out = append(out, idx)
+		}
+	}
+	return out
+}
+
 // Merge combines op2 into this Cover (union), block by block.
 // C++ parity: Cover::merge
 func (c *Cover) Merge(op2 *Cover) {
@@ -344,11 +379,13 @@ func (c *Cover) AddDefPoint(vn *Varnode) {
 		cb.SetBegin(def)
 		cb.SetEnd(def)
 	} else if vn.IsInput() {
-		// Input varnode: cover starts at the very beginning of block 0.
-		// C++ uses special pointer value 2 to mark "input"; we use nil (same index 0).
+		// Input varnode: defined at block 0 via inputSentinel (non-nil, index 0).
+		// C++ uses (PcodeOp*)2 so that empty() returns false and boundary() returns 2.
+		// Using nil here would leave start==nil → Empty()==true, making the def-point
+		// invisible to contain() / ContainVarnodeDef().
 		cb := c.getOrCreate(0)
-		cb.SetBegin(nil)
-		cb.SetEnd(nil)
+		cb.SetBegin(inputSentinel)
+		cb.SetEnd(inputSentinel)
 	}
 }
 

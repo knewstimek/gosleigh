@@ -141,14 +141,13 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 	pcode.NewActionNodeJoin("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-node-join", "analysis").Perform(result.Funcdata)
 	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	// TrimJoinblockMultiequals: before MergeMarker, insert TrimOpOutput COPYs for
-	// loop-head MULTIEQUALs whose inputs originate from stack/register parameters
-	// (possibly via snipReads unique copies). This ensures that loop phi variables
-	// get a distinct local HighVariable (e.g. iVar1) rather than merging into a
-	// parameter HV, matching Ghidra's trimOpOutput behavior in mergeOp.
-	// C++ parity: Merge::trimOpOutput fires during mergeOp when covers conflict.
-	// Gosleigh's snipReads shortens all covers, so we apply the trim proactively.
-	pcode.NewMerge(result.Funcdata).TrimJoinblockMultiequals()
+	// TrimJoinblockMultiequals removed: MergeOp.TrimOpOutput (merge.go:417) fires
+	// naturally during MergeMarker when the loop phi's cover intersects the param
+	// input's cover, matching C++ Merge::trimOpOutput behavior exactly.
+	// C++ parity: Funcdata::newUniqueOut calls assignHigh() immediately, so NodeJoin
+	// MULTIEQUAL outputs already have HighVariables when mergeMarker runs.
+	// In Go, NewUniqueOut does not call assignHigh, so we run AssignHigh first.
+	pcode.NewActionAssignHigh("analysis").Apply(result.Funcdata)
 	// Re-run MergeMarker so new MULTIEQUAL ops from NodeJoin get HighVariable assignments.
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
