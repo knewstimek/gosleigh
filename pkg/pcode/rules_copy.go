@@ -199,6 +199,13 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRuleAddUnsigned(group) },
 	func(group string) Rule { return NewRule2Comp2Sub(group) },
 	func(group string) Rule { return NewRuleSubRight(group) },
+	// RulePushMultiME must come BEFORE RulePropagateCopy: PushMultiME fires on
+	// MULTIEQUAL(COPY(x), COPY(y)) and needs both inputs still written (COPY-defined).
+	// PropagateCopy would inline the COPY sources (making inputs non-written) before
+	// PushMultiME gets a chance to find/create the substitute phi. C++ parity:
+	// oppool1 registers RulePushMulti (our RulePushMultiME) at line 5529,
+	// RulePropagateCopy at line 5577 -- PUSHME comes first.
+	func(group string) Rule { return NewRulePushMultiME(group) },
 	func(group string) Rule { return NewRulePropagateCopy(group) },
 	func(group string) Rule { return NewRuleAndCommute(group) },
 	func(group string) Rule { return NewRuleAndPiece(group) },
@@ -276,7 +283,6 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRulePopcountBoolXor(group) },
 	func(group string) Rule { return NewRuleExtensionPush(group) },
 	func(group string) Rule { return NewRulePieceStructure(group) },
-	func(group string) Rule { return NewRulePushMultiME(group) },
 	// C++ groups under floatprecision pool; tentatively in BatchA pending dedicated pool
 	func(group string) Rule { return NewRuleInt2FloatCollapse(group) },
 	func(group string) Rule { return NewRuleOrPredicate(group) },

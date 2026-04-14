@@ -376,7 +376,8 @@ func markImpliedCheckCover(data *Funcdata, vn *Varnode) bool {
 		if defvn == nil || defvn.IsConstant() {
 			continue
 		}
-		if NewMerge(data).inflateTest(defvn, high) {
+		itResult := NewMerge(data).inflateTest(defvn, high)
+		if itResult {
 			return false
 		}
 	}
@@ -405,7 +406,8 @@ func (a *ActionMarkImplied) Apply(data *Funcdata) int {
 			top := &stack[len(stack)-1]
 			vncur := top.vn
 			if top.idx >= len(top.desc) {
-				if !markImpliedCheckCover(data, vncur) {
+				checkResult := markImpliedCheckCover(data, vncur)
+				if !checkResult {
 					markVarnodeExplicit(vncur)
 				} else {
 					merge.markImplied(vncur)

@@ -15,6 +15,7 @@
 package pcode
 
 import (
+	"fmt"
 	"sort"
 
 	"gosleigh/pkg/address"
@@ -103,15 +104,92 @@ func (t *HighIntersectTest) Intersection(h1, h2 *HighVariable) bool {
 	return result
 }
 
-// computeHighIntersection checks whether the union Covers of two HighVariables have
-// a range-level (level 2) intersection.
+// vnGetCover builds the individual live-range Cover for a single Varnode.
+// C++ parity: Varnode::getCover (cached in C++; computed on demand in Go)
+func vnGetCover(vn *Varnode) *Cover {
+	c := &Cover{}
+	c.Rebuild(vn)
+	return c
+}
+
+// gatherBlockVarnodes collects instances of hv whose individual Cover has a
+// level > 1 intersection with unionCover on block blk.
+// C++ parity: HighIntersectTest::gatherBlockVarnodes (variable.cc:947)
+func gatherBlockVarnodes(hv *HighVariable, blk int32, unionCover *Cover) []*Varnode {
+	var res []*Varnode
+	for _, vn := range hv.instances {
+		if vn == nil {
+			continue
+		}
+		vnCov := vnGetCover(vn)
+		if vnCov.IntersectByBlock(blk, unionCover) > 1 {
+			res = append(res, vn)
+		}
+	}
+	return res
+}
+
+// testBlockIntersection checks instances of hv for a real intersection with
+// blist on block blk.  A real intersection is one not explained by copy
+// shadowing.  Returns true when merging would be unsafe.
+// C++ parity: HighIntersectTest::testBlockIntersection (variable.cc:968)
+func testBlockIntersection(hv *HighVariable, blk int32, bCover *Cover, blist []*Varnode) bool {
+	for _, vn := range hv.instances {
+		if vn == nil {
+			continue
+		}
+		vnCov := vnGetCover(vn)
+		if vnCov.IntersectByBlock(blk, bCover) < 2 {
+			continue
+		}
+		for _, vn2 := range blist {
+			if vn2 == nil {
+				continue
+			}
+			vn2Cov := vnGetCover(vn2)
+			if vn2Cov.IntersectByBlock(blk, vnCov) > 1 {
+				if vn.Size() == vn2.Size() {
+					cs := vn.CopyShadow(vn2)
+					if !cs {
+						return true
+					}
+				} else {
+					// partialCopyShadow is not yet ported (known mismatch).
+					return true
+				}
+			}
+		}
+	}
+	return false
+}
+
+// highBlockIntersection tests if h1 and h2 have a real intersection on block blk.
+// C++ parity: HighIntersectTest::blockIntersection (variable.cc:998)
+// VariablePiece is not ported; only the base case is implemented here.
+func highBlockIntersection(h1, h2 *HighVariable, blk int32) bool {
+	c1 := h1.getCover()
+	c2 := h2.getCover()
+	blist := gatherBlockVarnodes(h2, blk, c1)
+	return testBlockIntersection(h1, blk, c2, blist)
+}
+
+// computeHighIntersection implements the two-phase per-varnode intersection test.
+// Phase 1 uses union covers to find candidate blocks; phase 2 uses individual
+// varnode covers and copy-shadow filtering to eliminate false positives.
+// C++ parity: HighIntersectTest::intersection (variable.cc:1166), base algorithm only.
+// Known mismatch: testUntiedCallIntersection (variable.cc:1188-1196) is not ported.
 func computeHighIntersection(h1, h2 *HighVariable) bool {
 	c1 := h1.getCover()
 	c2 := h2.getCover()
 	if c1 == nil || c2 == nil {
 		return false
 	}
-	return c1.Intersect(c2) == 2
+	for _, blk := range c1.IntersectList(c2, 2) {
+		if highBlockIntersection(h1, h2, blk) {
+			return true
+		}
+	}
+	return false
 }
 
 // Clear removes all cached results.
@@ -136,7 +214,8 @@ func mergeTestRequired(h1, h2 *HighVariable) bool {
 		return true // nil HighVariable cannot conflict
 	}
 	// If both have locked types they must agree.
-	if h1.datatype != nil && h2.datatype != nil {
+	// C++ parity: merge.cc Merge::mergeTestRequired lines 107-109 uses isTypeLock().
+	if h1.IsTypeLock() && h2.IsTypeLock() {
 		if h1.datatype != h2.datatype {
 			return false
 		}
@@ -151,23 +230,6 @@ func mergeTestRequired(h1, h2 *HighVariable) bool {
 		v2 := h2.TiedVarnode()
 		if v1 != nil && v2 != nil {
 			if v1.Space() != v2.Space() || v1.Offset() != v2.Offset() {
-				return false
-			}
-		}
-	}
-	// Physical-rep guard: two HVs that each have a physically-stored instance
-	// (register or stack) at different (Space, Offset) addresses must not be
-	// merged. Without this check, MergeCopy/MergeMarker over-merges distinct
-	// registers into one HighVariable through chains of unique-space COPYs,
-	// producing output like `iVar1 = iVar1 % iVar1` for two-register sequences
-	// like `idiv ecx; mov ecx, edx`.
-	// C++ parity: Ghidra relies on accurate Cover intersection plus isAddrTied
-	// (merge.cc mergeTestRequired lines 111-116) to enforce this invariant;
-	// Gosleigh's Cover rebuild can miss multi-block overlap for register
-	// varnodes, so we add an explicit storage-address check here.
-	if p1 := h1.PhysicalRep(); p1 != nil {
-		if p2 := h2.PhysicalRep(); p2 != nil {
-			if p1.Space() != p2.Space() || p1.Offset() != p2.Offset() {
 				return false
 			}
 		}
@@ -539,19 +601,28 @@ func isLoopCondMultiequal(op *PcodeOp) bool {
 	return false
 }
 
-// TrimJoinblockMultiequals calls TrimOpOutput on loop-head MULTIEQUAL ops
-// whose output feeds the while condition (INT_EQUAL/CBRANCH) and whose inputs
-// originate from stack or register parameters (directly or via snipReads COPYs).
+// TrimJoinblockMultiequals inserts a forward snipReads COPY on loop-head
+// MULTIEQUAL ops whose output feeds the while condition (INT_EQUAL/CBRANCH)
+// and whose inputs originate from stack or register parameters.
 //
-// This is a pre-MergeMarker pass that produces stable results regardless of
-// the order in which MergeMarker visits the ops.  It replaces the in-MergeOp
-// proactive trim, which was order-dependent because MergeOp mutates HV state
-// as it runs.
+// The forward snip: COPY(new_unique = MULTIEQUAL_output) is inserted right
+// after the MULTIEQUAL; all reads of MULTIEQUAL_output (e.g. INT_NOTEQUAL)
+// are redirected to new_unique.  new_unique gets a fresh HV that cannot be
+// merged back into the param HV by ActionMergeCopy because the param HV's
+// wide live range (function-entry varnode) overlaps new_unique's cover.
+// ActionNameVars then assigns new_unique a local name such as iVar1.
 //
-// C++ parity: Ghidra's Cover-based trimOpOutput fires in mergeOp when the
-// output cover intersects the input covers.  Gosleigh's snipReads path
-// shortens all covers, so we detect the physical-source condition directly
-// via varnode space inspection and loop-condition reachability instead.
+// C++ parity: Ghidra calls trimOpOutput from inside mergeOp (merge.cc:759)
+// when Cover intersection blocks the merge.  At that point the MULTIEQUAL
+// output is still a fresh HV (mergeMarker has not yet merged it into the
+// param HV), so trimOpOutput can place the original wide varnode on the
+// COPY output side and a tiny fresh unique on the MULTIEQUAL output side.
+// In Gosleigh's pipeline, TrimJoinblockMultiequals runs after the early
+// MergeMarker passes so the MULTIEQUAL output is already in the param HV.
+// A backward TrimOpOutput would leave INT_NOTEQUAL reading the param HV
+// (wrong: shows "param_4 != 0").  The forward snipReads produces exactly
+// the same SSA shape as Ghidra: COPY input = param HV varnode, COPY output
+// = fresh iVar1 HV varnode, INT_NOTEQUAL reads iVar1.
 func (m *Merge) TrimJoinblockMultiequals() {
 	ops := m.fd.GetPcodeOpBank().AliveOps()
 	for _, op := range ops {
@@ -560,10 +631,6 @@ func (m *Merge) TrimJoinblockMultiequals() {
 		}
 		outVn := op.Output()
 		if outVn == nil {
-			continue
-		}
-		// Only trim outputs that are pure unique-space (no committed physical storage).
-		if outVn.Space() != nil && !outVn.Space().IsUnique() {
 			continue
 		}
 		// Only trim MULTIEQUALs that feed the loop condition directly.
@@ -581,7 +648,13 @@ func (m *Merge) TrimJoinblockMultiequals() {
 			}
 		}
 		if anyPhysical {
-			m.TrimOpOutput(op)
+			// Forward snip: insert COPY(new_unique = outVn) immediately after
+			// the MULTIEQUAL and redirect all current reads of outVn to new_unique.
+			// This preserves outVn in the param HV while new_unique becomes the
+			// loop-condition local (iVar1).  Snapshot the reader list before
+			// snipReads mutates the descendant list.
+			readers := append([]*PcodeOp(nil), outVn.DescendIter()...)
+			m.snipReads(outVn, readers)
 		}
 	}
 }
@@ -637,6 +710,7 @@ func (m *Merge) markInternalCopies() {
 		}
 		// If input and output share the same HighVariable, the COPY is internal.
 		if h1 == in0.High() {
+			fmt.Printf("INTERNDBG markInternalCopies: COPY out=%v in=%v same HV=%p\n", v1, in0, h1)
 			op.SetFlag(PcodeOpNonPrinting)
 		}
 	}
@@ -847,7 +921,6 @@ func (m *Merge) snipReads(vn *Varnode, markedOps []*PcodeOp) {
 	if len(markedOps) == 0 {
 		return
 	}
-
 	var bl *BlockBasic
 	var pc address.Address
 	var afterop *PcodeOp
@@ -1240,11 +1313,14 @@ func (m *Merge) inflateTest(a *Varnode, high *HighVariable) bool {
 		if b == nil || b == a {
 			continue
 		}
-		bCover := b.High()
-		if bCover == nil || bCover.getCover() == nil {
+		// C++ parity: b->getCover() is per-varnode, not the HV aggregate.
+		// Using b.High().getCover() (aggregate) is wrong -- it merges all
+		// instance ranges and creates false level-2 intersections.
+		bIndivCover := vnGetCover(b)
+		if bIndivCover == nil {
 			continue
 		}
-		if bCover.getCover().Intersect(highCover) == 2 {
+		if bIndivCover.Intersect(highCover) == 2 {
 			return true
 		}
 	}
