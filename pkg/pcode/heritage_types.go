@@ -316,14 +316,18 @@ type HeritageInfo struct {
 }
 
 // NewHeritageInfo creates HeritageInfo for a space. If spc is nil or
-// is not a heritaged space (constant/iop/fspec), Space is set to nil.
-// C++ parity: heritage.cc HeritageInfo constructor
+// is not a heritaged space, Space is set to nil.
+// C++ parity: heritage.cc HeritageInfo constructor (spc->isHeritaged() check).
+// Unique (IPTR_INTERNAL) space is never heritaged -- unique varnodes are
+// single-assignment temporaries scoped to one instruction, so they never
+// need phi nodes.  JoinSpace (IPTR_JOIN) also clears heritaged in C++.
 func NewHeritageInfo(spc *address.Space) HeritageInfo {
 	if spc == nil {
 		return HeritageInfo{}
 	}
 	switch spc.Kind {
-	case address.SpaceKindConstant, address.SpaceKindIop, address.SpaceKindFspec:
+	case address.SpaceKindConstant, address.SpaceKindIop, address.SpaceKindFspec,
+		address.SpaceKindUnique, address.SpaceKindJoin:
 		return HeritageInfo{}
 	default:
 		return HeritageInfo{
