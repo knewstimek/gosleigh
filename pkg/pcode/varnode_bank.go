@@ -266,12 +266,14 @@ func (vb *VarnodeBank) Create(size int32, loc address.Address) *Varnode {
 }
 
 // CreateDef creates a varnode with a defining op and inserts it in both trees.
+// Sets VarnodeInsert to match C++ VarnodeBank::xref which sets Varnode::insert
+// for every non-free varnode entering the loc/def trees.
 func (vb *VarnodeBank) CreateDef(size int32, loc address.Address, op *PcodeOp) *Varnode {
 	vn := NewVarnode(size, loc)
 	vn.createIndex = vb.createIndex
 	vb.createIndex++
 	vn.def = op
-	vn.flags |= VarnodeWritten
+	vn.flags |= VarnodeWritten | VarnodeInsert
 	vb.insertLoc(vn)
 	vb.insertDef(vn)
 	return vn
@@ -293,30 +295,33 @@ func (vb *VarnodeBank) CreateDefUnique(size int32, op *PcodeOp) *Varnode {
 
 // SetInput transitions a free varnode to input status.
 // The varnode must currently be free.
+// Sets VarnodeInsert -- C++ xref sets Varnode::insert for all non-free varnodes.
 func (vb *VarnodeBank) SetInput(vn *Varnode) {
 	vb.removeLoc(vn)
 	vb.removeDef(vn)
-	vn.flags |= VarnodeInput
+	vn.flags |= VarnodeInput | VarnodeInsert
 	vb.insertLoc(vn)
 	vb.insertDef(vn)
 }
 
 // SetDef transitions a free varnode to written status with the given defining op.
 // The varnode must currently be free.
+// Sets VarnodeInsert -- C++ xref sets Varnode::insert for all non-free varnodes.
 func (vb *VarnodeBank) SetDef(vn *Varnode, op *PcodeOp) {
 	vb.removeLoc(vn)
 	vb.removeDef(vn)
 	vn.def = op
-	vn.flags |= VarnodeWritten
+	vn.flags |= VarnodeWritten | VarnodeInsert
 	vb.insertLoc(vn)
 	vb.insertDef(vn)
 }
 
 // MakeFree transitions an input or written varnode back to free status.
+// Clears VarnodeInsert -- C++ makeFree clears insert|input|indirect_creation.
 func (vb *VarnodeBank) MakeFree(vn *Varnode) {
 	vb.removeLoc(vn)
 	vb.removeDef(vn)
-	vn.flags &^= (VarnodeInput | VarnodeWritten)
+	vn.flags &^= (VarnodeInput | VarnodeWritten | VarnodeInsert)
 	vn.def = nil
 	vb.insertLoc(vn)
 	vb.insertDef(vn)

@@ -1,11 +1,28 @@
 # 프로젝트 상태
 
-## 현재 단계: H8 MergeMarker 체인 디버그 진행 중 (2026-04-14 아침)
+## 현재 단계: H8 mergeAddrTied 파이프라인 포팅 완료 (2026-04-14 오후)
 
-2026-04-14 새벽~아침 세션에서 H8(TestMSVC_Gcd) 근본 원인 4단 파이프라인으로 좁혀 냄.
-여섯 개의 parity fix 커밋 추가. TestMSVC_Gcd 여전히 FAIL, 나머지 loader 테스트 PASS 유지,
-regression 0. Gap 1 (cross-variable COPY iterateOp)은 testIterateForm 포팅으로 완료.
-남은 gap: cond-block snapshot hoist + unique-space 네이밍. `### H8 근본 원인 맵` 참조.
+2026-04-14 오후 세션에서 `mergeAddrTied` 전체 파이프라인 포팅 + VarnodeInsert/VarnodeAddrTied
+flag parity fix. TestMSVC_Gcd 여전히 FAIL, 나머지 loader 테스트 PASS 유지, regression 0.
+Gap 1/mergeAddrTied 포팅 완료. 남은 gap: cond-block comma 렌더링 + unique-space 네이밍.
+`### H8 근본 원인 맵 (최신)` 참조.
+
+### 2026-04-14 오후 세션 커밋 (mergeAddrTied 포팅)
+
+- **merge.go mergeAddrTied 파이프라인 전체 포팅**:
+  `allocateCopyTrim`, `snipReads`, `eliminateIntersect`, `unifyAddress`, `mergeRangeMust`,
+  `mergeAddrTied`, `processCopyTrims`, `markInternalCopies` 구현.
+  C++ parity: `merge.cc` lines 411-648, 1415-1471.
+- **varnode_bank.go VarnodeInsert flag parity fix**:
+  C++ `VarnodeBank::xref`는 모든 non-free varnode에 `Varnode::insert` 설정.
+  Gosleigh `CreateDef`/`SetDef`/`SetInput`에 `VarnodeInsert` 추가, `MakeFree`에서 제거.
+- **scopelocal.go VarnodeAddrTied flag**: `BuildFromVarnodes`에서 스택 param/local
+  varnode에 `VarnodeMapped|VarnodeAddrTied` 설정. C++ `database.cc:1150` 대응.
+- **heritage.go 중복 input varnode 방지**: 같은 주소에 이미 input varnode가 있으면
+  새로 생성하지 않고 기존 것 재사용. C++ `xref` dedup 대응 (partial).
+- **merge.go eliminateIntersect 중복 input 스킵**: 같은 주소의 두 input varnode는
+  실제 live-range 충돌이 없음. C++는 `xref`로 dedup하므로 이 케이스가 발생하지 않음.
+  Gosleigh에서는 `ActionStackPtrFlow`가 LOAD당 독립 input varnode를 생성하므로 명시 스킵.
 
 ### 2026-04-14 H8 파이프라인 디버그 커밋
 - `e04d0ac` **merge.go mergeOpcode Cover intersection guard**. C++ parity:
@@ -34,24 +51,27 @@ regression 0. Gap 1 (cross-variable COPY iterateOp)은 testIterateForm 포팅으
   패턴 수용). Gcd의 cross-variable COPY (register:0x4 multi-use/addrTied)는
   truncate 유지로 reject. 결과: Gcd 출력에서 잘못된 for-loop 제거 (아래 GOT).
 
-### H8 근본 원인 맵 (2026-04-14 아침 기준)
+### H8 근본 원인 맵 (최신 -- 2026-04-14 오후)
 
-TestMSVC_Gcd 현재 출력 (golden 불일치, testIterateForm 포팅 후):
+TestMSVC_Gcd 현재 출력 (mergeAddrTied 포팅 + VarnodeInsert/AddrTied fix 후):
 ```
 void processEntry entry(undefined4 param_1,undefined4 param_2,int param_3,int param_4)
 {
     int iVar2;
-    tmp_131 = param_4 == 0;
-    tmp_129 = param_4;
-    while (!tmp_131) {
-        iVar2 = param_3 % tmp_129;
-        tmp_131 = iVar2 == 0;
-        tmp_129 = iVar2;
-        param_3 = tmp_129;
+    tmp_127 = param_4 == 0;
+    while (!tmp_127) {
+        iVar2 = param_3 % param_4;
+        tmp_127 = iVar2 == 0;
+        param_4 = iVar2;
+        param_3 = param_4;
     }
     return;
 }
 ```
+
+이전 baseline 대비 개선: `tmp_129 = param_4` 중간 변수 제거, `param_4` 직접 사용.
+mergeAddrTied가 stack varnode HV를 올바르게 통합해 불필요한 unique 중간 변수 감소.
+
 Ghidra golden (`testdata/ghidra_golden/ghidra_golden.json` `gcd_x86_32`):
 ```
 int iVar1;
@@ -61,46 +81,47 @@ while (iVar1 = param_4, iVar1 != 0) {
 }
 ```
 
-남은 gap은 두 개 (Gap 1 closed):
+남은 gap은 두 개 (Gap 1 + mergeAddrTied 포팅 closed):
 
-1. ~~**Cross-variable COPY를 iterateOp으로 선택**~~ **(CLOSED this session)**.
+1. ~~**Cross-variable COPY를 iterateOp으로 선택**~~ **(CLOSED)**.
    testIterateForm 포팅 + single-use non-addrTied explicit walk-through.
-   Gcd의 잘못된 for-loop 제거, CountedLoop/SumList regression 없음.
 
-2. **PrintC emitWhileBlock에 comma_separate 모드 미구현 (부분)**
+2. ~~**mergeAddrTied 파이프라인 미구현**~~ **(CLOSED -- 2026-04-14 오후)**.
+   `allocateCopyTrim`, `snipReads`, `eliminateIntersect`, `unifyAddress`, `mergeRangeMust`,
+   `mergeAddrTied`, `processCopyTrims`, `markInternalCopies` 전체 포팅.
+   VarnodeInsert/VarnodeAddrTied flag parity fix 포함.
+   mergeAddrTied가 gcd에서 실질적 효과를 내기 위해서는 Gosleigh SSA shape 수정 필요
+   (Heritage/NodeJoin이 unique space intermediate COPY 없이 stack varnode를 직접 읽음).
+
+3. **PrintC emitWhileBlock에 comma_separate 모드 미구현 (부분)**
    (`pkg/pcode/printc.go` `emitWhileBlock`, `renderCondBlockComma`)
    - `renderCondBlockComma`는 존재하고 호출도 되는데 gcd의 cond block에
      `iVar1 = param_4` 형태의 snapshot COPY가 실제로 들어오지 못함. 그 결과
-     `while (!tmp_130)` 단독 조건만 렌더. snapshot COPY를 cond block head로
+     `while (!tmp_127)` 단독 조건만 렌더. snapshot COPY를 cond block head로
      끌어올리는 경로 누락.
    - C++ parity: `printc.cc PrintC::emitBlockWhileDo` (코드 3186 부근)에서
      `setMod(comma_separate)` 모드로 condBlock 전체를 comma-separated list로
      찍음. Go는 cond block에 printable op이 있을 때만 fallback하는 구조.
 
-3. **tmp_N unique-space 유출 + ActionNameVars 누락**
+4. **tmp_N unique-space 유출 + ActionNameVars 누락**
    (`pkg/pcode/action_name_vars.go` `ActionNameVars.Apply`, 라인 135)
    - 현재 ActionNameVars는 non-unique non-input 인스턴스가 있는 HighVariable만
-     iVar1/uVar1 이름 부여. Gcd의 snapshot HV는 unique-space 인스턴스만 있을
-     때 네이밍 스킵 -> printc의 default fallback이 `tmp_<offset>` 형식으로 출력.
+     iVar1/uVar1 이름 부여. Gcd의 condition HV (`tmp_127 = param_4 == 0`)는
+     unique-space 인스턴스만 있을 때 네이밍 스킵 -> printc의 default fallback이
+     `tmp_<offset>` 형식으로 출력.
    - C++ parity: `variable.cc ScopeInternal::assignDefaultNames`는 storage class
      관계없이 명명. Go side는 의도적으로 보수화된 것으로 보이나 Gcd 시나리오
      관통에는 부족.
 
-진행 순서 제안 (Gap 2,3 남음):
-1. **cond block snapshot hoist** -- gcd의 entry block `COPY stack:0x8 -> unique:0xae433`
-   (param_4 snapshot)와 body의 첫 COPY는 C++ Ghidra에서 NodeJoin/merge 이후 cond
-   block에 자연스럽게 등장. Go에서는 entry와 body에 흩어짐. 확인된 구조
-   (structured dump으로 확인):
-   - entry: INT_EQUAL + 2 COPY (param_4/param_3 snapshot)
-   - cond: 7 MULTIEQUAL + CBRANCH (printable op 없음)
-   - body: COPY register:0x4 = ae416(param_4 phi) + SREM + EQUAL + 2 COPY
-   `renderCondBlockComma`가 hoist 로직을 추가하거나, ActionBlockStructure 단계에서
-   엔트리의 snapshot COPY를 cond 머리로 이동 필요.
-2. **ActionNameVars 기준 완화** -- unique-space HV 중 loop-carried 표시가 있는
-   것만 iVar 네이밍 허용. 현재 `tmp_131 = param_4 == 0`, `tmp_129 = param_4`
-   처럼 unique-only HV가 tmp_N 이름으로 유출.
-3. **(선택) Go Heritage/NodeJoin SSA shape 비교** -- 1/2가 부분 수정으로 안 되면
-   근본 원인 추적. `register:0x8`와 `stack:0x8` merge가 기대대로 되지 않는 곳.
+진행 순서 제안 (Gap 3,4 남음):
+1. **renderCondBlockComma + snapshot COPY hoist** -- snipReads가 삽입한 COPY가
+   cond block에 있어야 comma-separate 렌더링 가능. Gosleigh SSA에서는 mergeAddrTied가
+   unique MULTIEQUAL output에 snipReads COPY를 삽입하지 못함 (stack varnode를 직접
+   MULTIEQUAL 입력으로 쓰기 때문). 근본 원인: Heritage COPYs 없음.
+2. **ActionNameVars 기준 완화** -- unique-only HV 중 loop-carried 표시가 있는
+   것에도 iVar 네이밍 부여. `tmp_127 = param_4 == 0` 제거 목표.
+3. **(선택) Heritage SSA shape 수정** -- Ghidra처럼 block-0 COPY(stack -> unique)를
+   삽입하면 mergeAddrTied + snipReads가 자연스럽게 동작함.
 
 ## 작업 방향 (2026-04-13 확정)
 

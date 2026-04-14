@@ -247,6 +247,12 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 		for _, vn := range g.varnodes {
 			hv.AddInstance(vn)
 			sl.paramByVn[vn] = hv
+			// Set mapped+addrtied: stack-space varnodes are always address-tied because
+			// they are identified by storage address, not by SSA number.
+			// C++ parity: database.cc ScopeInternal::buildFrom sets symbol->flags |= addrtied
+			// for any entry without a usepoint limitation; vn->setFlags(entry->getAllFlags())
+			// propagates addrtied to the Varnode.
+			vn.SetFlags(VarnodeMapped | VarnodeAddrTied)
 		}
 		if fp != nil {
 			fp.AddParam(hv)
@@ -278,6 +284,9 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 		for _, vn := range g.varnodes {
 			hv.AddInstance(vn)
 			sl.localByVn[vn] = hv
+			// Locals are also address-tied (identified by frame address, not SSA number).
+			// C++ parity: same as stack params above.
+			vn.SetFlags(VarnodeMapped | VarnodeAddrTied)
 		}
 		if fp != nil {
 			fp.AddLocal(hv)

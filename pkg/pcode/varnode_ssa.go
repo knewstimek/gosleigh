@@ -272,6 +272,37 @@ func (vn *Varnode) DescendIter() []*PcodeOp {
 // C++ parity: varnode.cc Varnode::intersects, Varnode::contains, Varnode::overlap
 // ---------------------------------------------------------------------------
 
+// CharacterizeOverlap returns the storage overlap relationship between vn and op2.
+// Returns:
+//   0 - no overlap (different spaces or non-overlapping byte ranges)
+//   1 - partial overlap (byte ranges overlap but are not identical)
+//   2 - identical storage (same space, same offset, same size)
+//
+// C++ parity: varnode.cc Varnode::characterizeOverlap (lines 155-170)
+func (vn *Varnode) CharacterizeOverlap(op2 *Varnode) int {
+	if vn.loc.Space != op2.loc.Space {
+		return 0
+	}
+	if vn.loc.Offset == op2.loc.Offset {
+		if vn.size == op2.size {
+			return 2
+		}
+		return 1
+	} else if vn.loc.Offset < op2.loc.Offset {
+		thisRight := vn.loc.Offset + uint64(vn.size-1)
+		if thisRight < op2.loc.Offset {
+			return 0
+		}
+		return 1
+	} else {
+		opRight := op2.loc.Offset + uint64(op2.size-1)
+		if opRight < vn.loc.Offset {
+			return 0
+		}
+		return 1
+	}
+}
+
 // Intersects returns true if the byte ranges of two varnodes overlap in the same space.
 // Constant-space varnodes never intersect (matching C++ behavior).
 func (vn *Varnode) Intersects(other *Varnode) bool {

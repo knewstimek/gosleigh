@@ -438,3 +438,51 @@ func (c *Cover) Rebuild(vn *Varnode) {
 		c.AddRefPoint(op, vn)
 	}
 }
+
+// ContainVarnodeDef checks whether the defining point of vn falls within this Cover.
+// Returns:
+//   0 - the definition point is not in this Cover
+//   1 - the definition point is strictly inside (not on boundary)
+//   2 - the definition point is on the start boundary (same op as the start)
+//   3 - the definition point is on the tail/stop boundary
+//
+// C++ parity: cover.cc Cover::containVarnodeDef (lines 441-462)
+func (c *Cover) ContainVarnodeDef(vn *Varnode) int {
+	def := vn.Def()
+	var blk int32
+	if def == nil {
+		// Input varnode: defined at block 0 begin (C++ uses ptr==2 sentinel, index==0)
+		blk = 0
+	} else {
+		parent := def.Parent()
+		if parent == nil {
+			return 0
+		}
+		blk = parent.Index()
+	}
+	if c.blocks == nil {
+		return 0
+	}
+	cb, ok := c.blocks[blk]
+	if !ok {
+		return 0
+	}
+	// For an input varnode def==nil maps to index 0 (same as coverIndexBegin).
+	// For a written varnode we use def as the op key.
+	var op *PcodeOp
+	if def != nil {
+		op = def
+	}
+	// op==nil for input varnodes; getOpUIndex(nil)==0 which matches coverIndexBegin.
+	if cb.Contain(op) {
+		boundtype := cb.Boundary(op)
+		if boundtype == 0 {
+			return 1
+		}
+		if boundtype == 2 {
+			return 2
+		}
+		return 3
+	}
+	return 0
+}

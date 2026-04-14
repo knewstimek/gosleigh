@@ -515,10 +515,18 @@ func (h *Heritage) renameRecurse(bl *BlockBasic, graph *BlockGraph,
 				key := makeAddressKey(inp.Addr())
 				stk := varStack[key]
 				if len(stk) == 0 {
-					// No reaching definition -- create input varnode
-					newVn := h.fd.NewVarnode(inp.Size(), inp.Addr())
-					h.fd.SetInputVarnode(newVn)
-					varStack[key] = append(varStack[key], newVn)
+					// No reaching definition: reuse an existing input if one was already
+					// created by a prior HeritageRange call for an overlapping slot.
+					// C++ parity: VarnodeBank::xref deduplicates by replacing new varnodes
+					// with pre-existing ones at the same (addr, size); Gosleigh lacks that
+					// deduplication, so we check explicitly before creating a new input.
+					if existing := h.fd.FindVarnodeInput(inp.Size(), inp.Addr()); existing != nil {
+						varStack[key] = append(varStack[key], existing)
+					} else {
+						newVn := h.fd.NewVarnode(inp.Size(), inp.Addr())
+						h.fd.SetInputVarnode(newVn)
+						varStack[key] = append(varStack[key], newVn)
+					}
 					stk = varStack[key]
 				}
 				top := stk[len(stk)-1]
@@ -576,10 +584,15 @@ func (h *Heritage) renameRecurse(bl *BlockBasic, graph *BlockGraph,
 			key := makeAddressKey(out.Addr())
 			stk := varStack[key]
 			if len(stk) == 0 {
-				// No reaching definition -- create input varnode
-				newVn := h.fd.NewVarnode(out.Size(), out.Addr())
-				h.fd.SetInputVarnode(newVn)
-				varStack[key] = append(varStack[key], newVn)
+				// No reaching definition: reuse pre-existing input if present (same
+				// dedup logic as the read-slot path above).
+				if existing := h.fd.FindVarnodeInput(out.Size(), out.Addr()); existing != nil {
+					varStack[key] = append(varStack[key], existing)
+				} else {
+					newVn := h.fd.NewVarnode(out.Size(), out.Addr())
+					h.fd.SetInputVarnode(newVn)
+					varStack[key] = append(varStack[key], newVn)
+				}
 				stk = varStack[key]
 			}
 			top := stk[len(stk)-1]

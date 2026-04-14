@@ -66,7 +66,7 @@ func (a *ActionMergeRequired) Clone(groups ActionGroupList) Action {
 
 func (a *ActionMergeRequired) Apply(data *Funcdata) int {
 	// C++ parity: ActionMergeRequired::apply calls mergeAddrTied + groupPartials + mergeMarker.
-	// mergeAddrTied and groupPartials are known mismatch stubs (not yet ported).
+	// groupPartials is not yet ported (known mismatch). mergeAddrTied is now implemented.
 	merge := NewMerge(data)
 	merge.mergeRequired()
 	return 0
