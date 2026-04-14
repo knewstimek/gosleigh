@@ -970,27 +970,10 @@ func (r *RulePushMultiME) apply(op *PcodeOp, data *Funcdata) int {
 		return 0
 	}
 
-	// Guard: if res==1 the applying branch below would create a substitute
-	// MULTIEQUAL whose inputs are buf1[0] and buf2[0]. When those live in
-	// different physical storage classes (e.g., stack slot vs register) the
-	// downstream mergeMarker pass would collapse their HighVariables into a
-	// single HV and the distinction between a loop-head register snapshot and
-	// the stack slot is lost, producing semantically incorrect output. Ghidra
-	// C++ does not hit this because its Heritage/NodeJoin stages yield a
-	// different SSA shape; Gosleigh currently produces the pathological
-	// MULTIEQUAL for gcd_x86_32 and similar frameless loops. TODO: investigate
-	// Go Heritage parity so this guard can be removed.
-	if res == 1 {
-		a := buf1[0]
-		b := buf2[0]
-		if a != nil && b != nil && a.Space() != nil && b.Space() != nil {
-			sameSpace := a.Space() == b.Space()
-			if !sameSpace && !a.Space().IsUnique() && !b.Space().IsUnique() &&
-				!a.IsConstant() && !b.IsConstant() {
-				return 0
-			}
-		}
-	}
+	// Note: the cross-space guard that was here (b33f6a2) has been removed.
+	// RulePushMultiME for gcd-style loops correctly merges stack and register
+	// varnodes into a loop phi, matching Ghidra's SSA structure. The downstream
+	// mergeMarker handles the merge via TrimOpOutput / snipReads.
 
 	bl := op.Parent()
 	earliest := bl.EarliestUse(op.Output())

@@ -382,6 +382,40 @@ func (s *printCState) collectSymbols() {
 										consumer.Output().Space() != nil &&
 										!consumer.Output().Space().IsUnique() {
 										rep = consumer.Output()
+									} else {
+										// Case 2 (TrimOpOutput COPY output): unique that feeds both an
+										// INT_EQUAL/INT_NOTEQUAL (loop condition) and a COPY to a named
+										// non-unique varnode (e.g. register:0x4 iVar1). Use the named
+										// register varnode as the declaration representative so that
+										// "int iVar1;" appears in the local declarations.
+										// C++ parity: Ghidra's trimOpOutput preserves the original
+										// register varnode as the COPY output, which is then declared
+										// by the standard local-declaration path. Gosleigh inserts a
+										// new unique as the COPY output, so we must lift it here.
+										hasCondConsumer := false
+										var namedRegRep *Varnode
+										for _, desc := range vn.DescendIter() {
+											if desc == nil {
+												continue
+											}
+											if desc.Code() == CPUI_INT_EQUAL || desc.Code() == CPUI_INT_NOTEQUAL {
+												hasCondConsumer = true
+											} else if desc.Code() == CPUI_COPY {
+												dout := desc.Output()
+												if dout != nil && dout.Space() != nil && !dout.Space().IsUnique() {
+													dname := ""
+													if dhv := dout.High(); dhv != nil {
+														dname = dhv.Name()
+													}
+													if dname != "" && !s.isMachineGeneratedName(dname) {
+														namedRegRep = dout
+													}
+												}
+											}
+										}
+										if hasCondConsumer && namedRegRep != nil {
+											rep = namedRegRep
+										}
 									}
 								}
 								if hvNamed {
@@ -1442,16 +1476,62 @@ func (s *printCState) renderCondBlockComma(bl *FlowBlock) string {
 		// are pure SSA temporaries that would produce "tmp_N = ..." noise.
 		if out := op.Output(); out != nil {
 			if out.Space() != nil && out.Space().IsUnique() {
-				consumer := out.LoneDescend()
-				if consumer == nil || consumer.Code() != CPUI_MULTIEQUAL ||
-					consumer.Output() == nil ||
-					consumer.Output().Space() == nil ||
-					consumer.Output().Space().IsUnique() ||
-					s.nameOf(consumer.Output()) == "" {
-					continue
+				passedUniqueFilter := false
+
+				// Case 2: TrimOpOutput COPY whose output feeds a comparison
+				// (INT_EQUAL/INT_NOTEQUAL) used as the while condition.
+				// This COPY represents the loop-head phi snapshot, e.g.
+				//   "while (iVar1 = param_4, iVar1 != 0)".
+				// The output may have multiple consumers (the comparison AND a loop-body
+				// COPY-to-named-register), so LoneDescend() returns nil; scan all.
+				//
+				// C++ parity: Ghidra emits this COPY in comma_separate mode because
+				// the unique HV is merged with iVar1 during mergeOp (trimOpOutput names
+				// it). Gosleigh keeps it as a separate unnamed unique, so we resolve the
+				// name here by following the consumer COPY that writes a named variable.
+				if op.Code() == CPUI_COPY {
+					for _, desc := range out.DescendIter() {
+						if desc != nil && (desc.Code() == CPUI_INT_EQUAL || desc.Code() == CPUI_INT_NOTEQUAL) {
+							passedUniqueFilter = true
+							break
+						}
+					}
+					if passedUniqueFilter {
+						// Resolve the output name from the loop-body consumer COPY (-> iVar1).
+						for _, desc := range out.DescendIter() {
+							if desc == nil || desc.Code() != CPUI_COPY {
+								continue
+							}
+							dout := desc.Output()
+							if dout == nil || dout.Space() == nil || dout.Space().IsUnique() {
+								continue
+							}
+							nm := s.nameOf(dout)
+							if nm != "" && !s.isMachineGeneratedName(nm) {
+								s.names[out] = nm
+								break
+							}
+						}
+					}
 				}
-				// Remap unique output to MULTIEQUAL output's name (same as emitOps).
-				s.names[out] = s.nameOf(consumer.Output())
+
+				// Case 1: single consumer is a named non-unique MULTIEQUAL (phi-snapshot COPYs).
+				if !passedUniqueFilter {
+					consumer := out.LoneDescend()
+					if consumer == nil {
+						continue
+					}
+					if consumer.Code() == CPUI_MULTIEQUAL &&
+						consumer.Output() != nil &&
+						consumer.Output().Space() != nil &&
+						!consumer.Output().Space().IsUnique() &&
+						s.nameOf(consumer.Output()) != "" {
+						// Remap unique output to MULTIEQUAL output's name (same as emitOps).
+						s.names[out] = s.nameOf(consumer.Output())
+					} else {
+						continue
+					}
+				}
 			}
 			if out.IsFree() {
 				continue
