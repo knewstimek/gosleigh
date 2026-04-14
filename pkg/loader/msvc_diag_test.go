@@ -129,6 +129,10 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
 	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	// H8: run MergeRequired before NodeJoin so addr-tied snipReads COPYs are in
+	// place before conditional-join phi creation. This matches Ghidra's merge
+	// phase order more closely and removes the raw-stack/trim-COPY split.
+	pcode.NewActionMergeRequired("analysis").Apply(result.Funcdata)
 	// H8: NormalizeBranches + NodeJoin (ConditionalJoin) + RulePushMultiME + DeadCode
 	// before BlockStructure so the gcd while-loop condition is merged correctly.
 	// C++ parity: coreaction.cc ActionNormalizeBranches + ActionNodeJoin run before
@@ -137,6 +141,14 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 	pcode.NewActionNodeJoin("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-node-join", "analysis").Perform(result.Funcdata)
 	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
+	// TrimJoinblockMultiequals: before MergeMarker, insert TrimOpOutput COPYs for
+	// loop-head MULTIEQUALs whose inputs originate from stack/register parameters
+	// (possibly via snipReads unique copies). This ensures that loop phi variables
+	// get a distinct local HighVariable (e.g. iVar1) rather than merging into a
+	// parameter HV, matching Ghidra's trimOpOutput behavior in mergeOp.
+	// C++ parity: Merge::trimOpOutput fires during mergeOp when covers conflict.
+	// Gosleigh's snipReads shortens all covers, so we apply the trim proactively.
+	pcode.NewMerge(result.Funcdata).TrimJoinblockMultiequals()
 	// Re-run MergeMarker so new MULTIEQUAL ops from NodeJoin get HighVariable assignments.
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
@@ -154,39 +166,17 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 	// rejection in tryMarkForLoop sees post-merge HighVariables. C++ parity:
 	// BlockWhileDo::finalizePrinting runs during PrintC emit, after all merges.
 	pcode.NewActionMergeCopy("analysis").Apply(result.Funcdata)
+	// ActionDominantCopy consolidates redundant copy-trim COPYs (multiple COPYs
+	// from the same source), reducing SSA noise after mergeAddrTied.
+	// C++ parity: coreaction.cc ActionDominantCopy runs after ActionMergeCopy.
+	pcode.NewActionDominantCopy("analysis").Apply(result.Funcdata)
+	// ActionCopyMarker marks internal/redundant COPYs as NonPrinting.
+	// C++ parity: coreaction.cc ActionCopyMarker.
+	pcode.NewActionCopyMarker("analysis").Apply(result.Funcdata)
 	pcode.NewActionForLoops("analysis").Apply(result.Funcdata)
 	// H4: ActionNameVars -- assign iVar1/uVar1 names to unnamed register-space HVs.
 	// C++ parity: coreaction.cc ActionNameVars::apply() + ScopeLocal::assignDefaultNames().
 	pcode.NewActionNameVars("analysis").Apply(result.Funcdata)
-
-	// DEBUG: dump all MULTIEQUAL ops and their HV names
-	{
-		seen := make(map[*pcode.HighVariable]bool)
-		for _, op := range result.Funcdata.GetPcodeOpBank().AllOps() {
-			if op == nil || op.Code() != pcode.CPUI_MULTIEQUAL {
-				continue
-			}
-			out := op.Output()
-			if out == nil {
-				continue
-			}
-			hv := out.High()
-			name := "<nil>"
-			if hv != nil {
-				name = hv.Name()
-				if name == "" {
-					name = "<empty>"
-				}
-			}
-			t.Logf("DEBUG HV: MULTIEQUAL out=%v hvName=%q", out, name)
-			if hv != nil && !seen[hv] {
-				seen[hv] = true
-				for _, inst := range hv.Instances() {
-					t.Logf("  instance: %v IsInput=%v IsUnique=%v", inst, inst.IsInput(), inst.Space() != nil && inst.Space().IsUnique())
-				}
-			}
-		}
-	}
 
 	out, err := pcode.NewPrintC().
 		SetRegisterNames(engine.RegisterNamesByLocation()).
@@ -305,6 +295,10 @@ func runPipeline(t *testing.T, prog []byte, name string) string {
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
 	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	// H8: run MergeRequired before NodeJoin so addr-tied snipReads COPYs are in
+	// place before conditional-join phi creation. This matches Ghidra's merge
+	// phase order more closely and removes the raw-stack/trim-COPY split.
+	pcode.NewActionMergeRequired("analysis").Apply(result.Funcdata)
 	// H8: NormalizeBranches + NodeJoin (ConditionalJoin) + RulePushMultiME + DeadCode
 	// before BlockStructure so the gcd while-loop condition is merged correctly.
 	// C++ parity: coreaction.cc ActionNormalizeBranches + ActionNodeJoin run before
@@ -313,6 +307,8 @@ func runPipeline(t *testing.T, prog []byte, name string) string {
 	pcode.NewActionNodeJoin("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-node-join", "analysis").Perform(result.Funcdata)
 	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
+	// TrimJoinblockMultiequals: same rationale as runPipeline above.
+	pcode.NewMerge(result.Funcdata).TrimJoinblockMultiequals()
 	// Re-run MergeMarker so new MULTIEQUAL ops from NodeJoin get HighVariable assignments.
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
@@ -379,7 +375,9 @@ func TestMSVC_Classify2(t *testing.T) {
 // is now handled by RuleSubCommute (INT_SDIV/INT_SREM case, 2026-04-13).
 //
 // Remaining mismatch: Ghidra renders the loop condition as a comma expression:
-//   while (iVar1 = param_4, iVar1 != 0) { ... }
+//
+//	while (iVar1 = param_4, iVar1 != 0) { ... }
+//
 // This requires PrintC comma_separate mode for while-condition blocks containing
 // phi (MULTIEQUAL) assignments. Not yet implemented in Gosleigh's emitWhileBlock.
 // C++ parity: PrintC::emitBlockWhile sets setMod(comma_separate) for condBlock

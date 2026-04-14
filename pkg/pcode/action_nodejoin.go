@@ -14,7 +14,7 @@
 
 package pcode
 
-import "fmt"
+import "sort"
 
 // ---- ActionNormalizeBranches ----
 
@@ -60,15 +60,11 @@ func (a *ActionNormalizeBranches) Apply(data *Funcdata) int {
 		}
 		var fliplist []*PcodeOp
 		if opFlipInPlaceTest(cbranch, &fliplist) != 0 {
-			fmt.Printf("DEBUG NormBranch: BB[%d] %p: opFlipTest!=0, skip. cbranch.cond=%v\n", i, bb, cbranch.Input(1))
 			continue
 		}
-		fmt.Printf("DEBUG NormBranch: BB[%d] %p: normalizing. cbranch.cond=%v\n", i, bb, cbranch.Input(1))
 		opFlipInPlaceExecute(data, fliplist)
 		// flipInPlaceExecuteBlock takes *FlowBlock (from prefer_complement.go).
 		flipInPlaceExecuteBlock(&concrete.FlowBlock)
-		fmt.Printf("DEBUG NormBranch: BB[%d] %p: after normalize FalseOut=%p TrueOut=%p\n",
-			i, bb, bb.FalseOut(), bb.TrueOut())
 		changed++
 	}
 	data.ClearDeadOps()
@@ -83,21 +79,43 @@ func (a *ActionNormalizeBranches) Apply(data *Funcdata) int {
 // mergePair is an ordered pair of varnodes that need to be merged in the joinblock.
 type mergePair struct{ side1, side2 *Varnode }
 
+func mergePairLess(a, b mergePair) bool {
+	switch {
+	case a.side1 == nil:
+		return b.side1 != nil
+	case b.side1 == nil:
+		return false
+	}
+	if cmp := CompareLocDef(a.side1, b.side1); cmp != 0 {
+		return cmp < 0
+	}
+	switch {
+	case a.side2 == nil:
+		return b.side2 != nil
+	case b.side2 == nil:
+		return false
+	}
+	if cmp := CompareLocDef(a.side2, b.side2); cmp != 0 {
+		return cmp < 0
+	}
+	return a.side1.CreateIndex() < b.side1.CreateIndex()
+}
+
 // ConditionalJoin merges two identical conditional branches (block1, block2)
 // that share the same pair of exit blocks (exita, exitb) into a single joinblock.
 // C++ parity: blockaction.cc ConditionalJoin (lines 1895-2108)
 type ConditionalJoin struct {
-	data        *Funcdata
-	block1      *BlockBasic
-	block2      *BlockBasic
-	exita       *BlockBasic
-	exitb       *BlockBasic
-	joinblock   *BlockBasic
-	cbranch1    *PcodeOp
-	cbranch2    *PcodeOp
+	data         *Funcdata
+	block1       *BlockBasic
+	block2       *BlockBasic
+	exita        *BlockBasic
+	exitb        *BlockBasic
+	joinblock    *BlockBasic
+	cbranch1     *PcodeOp
+	cbranch2     *PcodeOp
 	a_in1, a_in2 int // reverse indices into exita
 	b_in1, b_in2 int // reverse indices into exitb
-	mergeneed   map[mergePair]*Varnode
+	mergeneed    map[mergePair]*Varnode
 }
 
 func newConditionalJoin(data *Funcdata) *ConditionalJoin {
@@ -120,30 +138,24 @@ func (cj *ConditionalJoin) clear() {
 func (cj *ConditionalJoin) findDups() bool {
 	cj.cbranch1 = cj.block1.LastOp()
 	if cj.cbranch1 == nil || cj.cbranch1.Code() != CPUI_CBRANCH {
-		fmt.Printf("DEBUG findDups: no cbranch1\n")
 		return false
 	}
 	cj.cbranch2 = cj.block2.LastOp()
 	if cj.cbranch2 == nil || cj.cbranch2.Code() != CPUI_CBRANCH {
-		fmt.Printf("DEBUG findDups: no cbranch2\n")
 		return false
 	}
 	if cj.cbranch1.HasFlag(PcodeOpBooleanFlip) {
-		fmt.Printf("DEBUG findDups: cbranch1 BoolFlip set\n")
 		return false
 	}
 	if cj.cbranch2.HasFlag(PcodeOpBooleanFlip) {
-		fmt.Printf("DEBUG findDups: cbranch2 BoolFlip set\n")
 		return false
 	}
 	vn1 := cj.cbranch1.Input(1)
 	vn2 := cj.cbranch2.Input(1)
-	fmt.Printf("DEBUG findDups: vn1=%v vn2=%v\n", vn1, vn2)
 	if vn1 == vn2 {
 		return true
 	}
 	if !vn1.IsWritten() || !vn2.IsWritten() {
-		fmt.Printf("DEBUG findDups: not written vn1=%v vn2=%v\n", vn1.IsWritten(), vn2.IsWritten())
 		return false
 	}
 	if vn1.IsSpacebasePlaceholder() || vn2.IsSpacebasePlaceholder() {
@@ -151,13 +163,11 @@ func (cj *ConditionalJoin) findDups() bool {
 	}
 	var buf1, buf2 [2]*Varnode
 	res := functionalEqualityLevel(vn1, vn2, buf1[:], buf2[:])
-	fmt.Printf("DEBUG findDups: functionalEqLevel res=%d buf1=%v buf2=%v\n", res, buf1[0], buf2[0])
 	if res < 0 || res > 1 {
 		return false
 	}
 	op1 := vn1.Def()
 	if op1.Code() == CPUI_SUBPIECE || op1.Code() == CPUI_COPY {
-		fmt.Printf("DEBUG findDups: op1 is SUBPIECE or COPY\n")
 		return false
 	}
 	cj.mergeneed[mergePair{vn1, vn2}] = nil
@@ -189,6 +199,9 @@ func (cj *ConditionalJoin) setupMultiequals() {
 	for k := range cj.mergeneed {
 		pairs = append(pairs, k)
 	}
+	sort.SliceStable(pairs, func(i, j int) bool {
+		return mergePairLess(pairs[i], pairs[j])
+	})
 	for _, k := range pairs {
 		if cj.mergeneed[k] != nil {
 			continue
@@ -257,27 +270,20 @@ func (cj *ConditionalJoin) match(b1, b2 *BlockBasic) bool {
 	cj.block1 = b1
 	cj.block2 = b2
 	if b1 == b2 {
-		fmt.Printf("DEBUG match: same block\n")
 		return false
 	}
 	if b1.SizeOut() != 2 || b2.SizeOut() != 2 {
-		fmt.Printf("DEBUG match: b1.sizeout=%d b2.sizeout=%d\n", b1.SizeOut(), b2.SizeOut())
 		return false
 	}
 	exitaFB := b1.FalseOut()
 	exitbFB := b1.TrueOut()
 	if exitaFB == exitbFB {
-		fmt.Printf("DEBUG match: exitaFB==exitbFB\n")
 		return false
 	}
-	fmt.Printf("DEBUG match: b1=%p b2=%p b1.FO=%p b1.TO=%p b2.FO=%p b2.TO=%p\n",
-		b1, b2, exitaFB, exitbFB, b2.FalseOut(), b2.TrueOut())
 	if b2.FalseOut() != exitaFB {
-		fmt.Printf("DEBUG match: b2.FalseOut mismatch\n")
 		return false
 	}
 	if b2.TrueOut() != exitbFB {
-		fmt.Printf("DEBUG match: b2.TrueOut mismatch\n")
 		return false
 	}
 	// exita and exitb must be BlockBasic (check concrete type).
@@ -293,9 +299,7 @@ func (cj *ConditionalJoin) match(b1, b2 *BlockBasic) bool {
 	cj.b_in1 = b1.FlowBlock.OutRevIndex(1) // position of b1's true-edge in exitb.inEdges
 	cj.a_in2 = b2.FlowBlock.OutRevIndex(0) // position of b2's false-edge in exita.inEdges
 	cj.b_in2 = b2.FlowBlock.OutRevIndex(1) // position of b2's true-edge in exitb.inEdges
-	fmt.Printf("DEBUG match: Concrete ok1=%v ok2=%v exita=%p exitb=%p\n", ok1, ok2, exitaConc, exitbConc)
 	if !cj.findDups() {
-		fmt.Printf("DEBUG match: findDups failed\n")
 		cj.clear()
 		return false
 	}
@@ -307,22 +311,13 @@ func (cj *ConditionalJoin) match(b1, b2 *BlockBasic) bool {
 // execute performs the actual join after match() succeeded.
 // C++ parity: blockaction.cc ConditionalJoin::execute (lines 2094-2101)
 func (cj *ConditionalJoin) execute() {
-	fmt.Printf("DEBUG NodeJoin execute: block1=%p block2=%p exita=%p exitb=%p\n",
-		cj.block1, cj.block2, cj.exita, cj.exitb)
-	fmt.Printf("DEBUG block1 cbranch1 cond: %v  BoolFlip=%v FallthruTrue=%v\n",
-		cj.cbranch1.Code(), cj.cbranch1.HasFlag(PcodeOpBooleanFlip), cj.cbranch1.HasFlag(PcodeOpFallthruTrue))
-	fmt.Printf("DEBUG block2 cbranch2 cond: %v  BoolFlip=%v FallthruTrue=%v\n",
-		cj.cbranch2.Code(), cj.cbranch2.HasFlag(PcodeOpBooleanFlip), cj.cbranch2.HasFlag(PcodeOpFallthruTrue))
-	fmt.Printf("DEBUG block1.outEdges: (FalseOut=%p TrueOut=%p)\n",
-		cj.block1.FlowBlock.FalseOut(), cj.block1.FlowBlock.TrueOut())
-	fmt.Printf("DEBUG exita=%p exitb=%p loop_body=exita?=%v\n",
-		cj.exita, cj.exitb, cj.block1.FlowBlock.FalseOut() == &cj.exita.FlowBlock)
-	fmt.Printf("DEBUG a_in1=%d a_in2=%d b_in1=%d b_in2=%d fora=%v forb=%v\n",
-		cj.a_in1, cj.a_in2, cj.b_in1, cj.b_in2, cj.a_in1 > cj.a_in2, cj.b_in1 > cj.b_in2)
-	fmt.Printf("DEBUG mergeneed count=%d\n", len(cj.mergeneed))
+	pairs := make([]mergePair, 0, len(cj.mergeneed))
 	for k := range cj.mergeneed {
-		fmt.Printf("  pair: in1=%p(%v) in2=%p(%v)\n", k.side1, k.side1, k.side2, k.side2)
+		pairs = append(pairs, k)
 	}
+	sort.SliceStable(pairs, func(i, j int) bool {
+		return mergePairLess(pairs[i], pairs[j])
+	})
 
 	cj.joinblock = cj.data.NodeJoinCreateBlock(
 		cj.block1, cj.block2, cj.exita, cj.exitb,
@@ -333,32 +328,6 @@ func (cj *ConditionalJoin) execute() {
 	cj.moveCbranch()
 	cj.cutDownMultiequals(cj.exita, cj.a_in1, cj.a_in2)
 	cj.cutDownMultiequals(cj.exitb, cj.b_in1, cj.b_in2)
-
-	fmt.Printf("DEBUG joinblock outEdges: FalseOut=%p TrueOut=%p exita=%p exitb=%p\n",
-		cj.joinblock.FlowBlock.FalseOut(), cj.joinblock.FlowBlock.TrueOut(),
-		&cj.exita.FlowBlock, &cj.exitb.FlowBlock)
-	fmt.Printf("DEBUG joinblock ops:\n")
-	for _, op := range cj.joinblock.Ops() {
-		fmt.Printf("  op: %v inputs=%d output=%v\n", op.Code(), op.NumInput(), op.Output())
-	}
-	// Dump basic blocks after join
-	bg := cj.data.GetBasicBlocks()
-	if bg != nil {
-		fmt.Printf("DEBUG basic block graph (size=%d):\n", bg.GetSize())
-		for i := 0; i < bg.GetSize(); i++ {
-			bl := bg.GetBlock(i)
-			if bl == nil {
-				continue
-			}
-			fmt.Printf("  BB[%d] %p: sizeIn=%d sizeOut=%d\n", i, bl, bl.SizeIn(), bl.SizeOut())
-			for j := 0; j < bl.SizeOut(); j++ {
-				if j < len(bl.outEdges) {
-					out := bl.outEdges[j].Point
-					fmt.Printf("    out[%d]->%p\n", j, out)
-				}
-			}
-		}
-	}
 }
 
 // ---- ActionNodeJoin ----
@@ -418,9 +387,6 @@ func (a *ActionNodeJoin) Apply(data *Funcdata) int {
 		if leastout.SizeIn() <= 1 {
 			continue
 		}
-
-		fmt.Printf("DEBUG NodeJoin.Apply: BB[%d] %p: leastout=%p sizeIn=%d inslot=%d\n",
-			i, bb, leastout, leastout.SizeIn(), inslot)
 		for j := 0; j < leastout.SizeIn(); j++ {
 			if j == inslot {
 				continue
@@ -428,12 +394,9 @@ func (a *ActionNodeJoin) Apply(data *Funcdata) int {
 			bb2 := leastout.InEdge(j).Point
 			bb2Conc, ok := bb2.Concrete().(*BlockBasic)
 			if !ok {
-				fmt.Printf("DEBUG NodeJoin.Apply: BB2 %p is not BlockBasic\n", bb2)
 				continue
 			}
 			matchResult := condjoin.match(bbConc, bb2Conc)
-			fmt.Printf("DEBUG NodeJoin.Apply: match(BB[%d]=%p, BB2=%p) = %v\n",
-				i, bb, bb2, matchResult)
 			if matchResult {
 				changed++
 				condjoin.execute()

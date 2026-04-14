@@ -318,9 +318,47 @@ func (m *Merge) TrimOpInput(op *PcodeOp, slot int) {
 	}
 }
 
+// TrimOpOutput inserts a COPY immediately after op to separate the long-lived output
+// Varnode from the op itself.  The op's output is replaced with a new tiny unique
+// Varnode, and the original output Varnode becomes the COPY output.  This shrinks
+// the Cover of the op's output so that subsequent merge tests pass.
+//
+// C++ parity: Merge::trimOpOutput (lines 656-682)
+func (m *Merge) TrimOpOutput(op *PcodeOp) {
+	vn := op.Output()
+	if vn == nil {
+		return
+	}
+	// For INDIRECT: C++ inserts after the op causing the effect via getOpFromConst.
+	// Gosleigh falls back to inserting after op itself (same block, correct ordering).
+	afterop := op
+
+	// Allocate a new free unique varnode; it will become the tiny MULTIEQUAL output.
+	uniq := m.fd.GetVarnodeBank().CreateUnique(vn.Size())
+
+	// Create the COPY op that carries the original output forward.
+	copyOp := m.fd.NewOp(1, op.Addr())
+	m.fd.OpSetOpcode(copyOp, CPUI_COPY)
+
+	// Reassign outputs:
+	//   op    -> uniq (tiny cover, immediately consumed by copyOp)
+	//   copyOp -> vn  (original long-lived varnode, bumped forward)
+	// OpSetOutput calls vbank.SetDef which moves varnodes from free to written state.
+	m.fd.OpSetOutput(op, uniq)
+	m.fd.OpSetOutput(copyOp, vn)
+	m.fd.OpSetInput(copyOp, uniq, 0)
+
+	// Give uniq a HighVariable so MergeOp Phase 3 can find it during merging.
+	uniqHigh := NewHighVariable("")
+	uniqHigh.AddInstance(uniq)
+
+	m.fd.OpInsertAfter(copyOp, afterop)
+}
+
 // MergeOp forces the merge of all input and output Varnodes of op into a single
 // HighVariable.  If Cover intersections prevent a direct merge, TrimOpInput is
-// called to insert COPY ops that shorten the conflicting live ranges.
+// called to insert COPY ops that shorten the conflicting live ranges.  If all
+// TrimOpInput attempts fail, TrimOpOutput is called as a last resort.
 // C++ parity: Merge::mergeOp (lines 719-772)
 func (m *Merge) MergeOp(op *PcodeOp) {
 	outVn := op.Output()
@@ -381,6 +419,7 @@ func (m *Merge) MergeOp(op *PcodeOp) {
 	}
 
 	if !allOK {
+		trimmed := false
 		for nexttrim := 0; nexttrim < max; nexttrim++ {
 			m.TrimOpInput(op, nexttrim)
 			testlist = testlist[:0]
@@ -399,10 +438,28 @@ func (m *Merge) MergeOp(op *PcodeOp) {
 				testlist = append(testlist, inVn.High())
 			}
 			if ok {
+				trimmed = true
 				break
 			}
 		}
+		if !trimmed {
+			// All TrimOpInput attempts failed: trim the output instead.
+			// This inserts COPY(original_out = uniq) after op so that op's
+			// output becomes a tiny-cover unique, allowing the merge.
+			// C++ parity: merge.cc MergeOp lines 759-760.
+			m.TrimOpOutput(op)
+			// Refresh outVn: op.Output() is now the new tiny unique.
+			outVn = op.Output()
+			if outVn != nil {
+				highOut = outVn.High()
+			}
+		}
 	}
+
+	// Note: proactive TrimOpOutput for loop-head MULTIEQUALs is now handled by
+	// TrimJoinblockMultiequals, which runs before MergeMarker.  That pass is
+	// order-independent; the HV-instance-scan approach that was here was removed
+	// because it produced nondeterministic results depending on MergeOp visit order.
 
 	// Phase 3: perform the actual merges.
 	for i := 0; i < max; i++ {
@@ -430,6 +487,102 @@ func (m *Merge) MergeOp(op *PcodeOp) {
 			continue // still blocked after trimming; skip rather than crash
 		}
 		mergeHighVariables(highOut, highIn, m.testCache)
+	}
+}
+
+// hasPhysicalSource returns true if vn originates from a stack or register
+// space varnode (non-unique, non-constant).  It follows one level of COPY
+// chains so that snipReads-inserted unique copies that feed a MULTIEQUAL are
+// correctly identified as having a physical source.
+func hasPhysicalSource(vn *Varnode) bool {
+	if vn == nil {
+		return false
+	}
+	sp := vn.Space()
+	if sp != nil && !sp.IsUnique() && !vn.IsConstant() && !vn.IsAnnotation() {
+		return true
+	}
+	// Follow a single COPY to find the original non-unique source.
+	def := vn.Def()
+	if def == nil || def.Code() != CPUI_COPY {
+		return false
+	}
+	src := def.Input(0)
+	if src == nil {
+		return false
+	}
+	srcSp := src.Space()
+	return srcSp != nil && !srcSp.IsUnique() && !src.IsConstant() && !src.IsAnnotation()
+}
+
+// isLoopCondMultiequal returns true if the MULTIEQUAL's output is used (directly
+// or via a COPY chain ending at INT_EQUAL/INT_NOTEQUAL) as the condition for a
+// CBRANCH.  This identifies loop-head phi ops that feed the while condition and
+// need TrimOpOutput to produce a distinct local variable (e.g. iVar1).
+func isLoopCondMultiequal(op *PcodeOp) bool {
+	out := op.Output()
+	if out == nil {
+		return false
+	}
+	// Direct: output consumed by INT_EQUAL/INT_NOTEQUAL.
+	for _, desc := range out.DescendIter() {
+		if desc == nil {
+			continue
+		}
+		switch desc.Code() {
+		case CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL:
+			return true
+		case CPUI_CBRANCH:
+			return true
+		}
+	}
+	return false
+}
+
+// TrimJoinblockMultiequals calls TrimOpOutput on loop-head MULTIEQUAL ops
+// whose output feeds the while condition (INT_EQUAL/CBRANCH) and whose inputs
+// originate from stack or register parameters (directly or via snipReads COPYs).
+//
+// This is a pre-MergeMarker pass that produces stable results regardless of
+// the order in which MergeMarker visits the ops.  It replaces the in-MergeOp
+// proactive trim, which was order-dependent because MergeOp mutates HV state
+// as it runs.
+//
+// C++ parity: Ghidra's Cover-based trimOpOutput fires in mergeOp when the
+// output cover intersects the input covers.  Gosleigh's snipReads path
+// shortens all covers, so we detect the physical-source condition directly
+// via varnode space inspection and loop-condition reachability instead.
+func (m *Merge) TrimJoinblockMultiequals() {
+	ops := m.fd.GetPcodeOpBank().AliveOps()
+	for _, op := range ops {
+		if op.Code() != CPUI_MULTIEQUAL {
+			continue
+		}
+		outVn := op.Output()
+		if outVn == nil {
+			continue
+		}
+		// Only trim outputs that are pure unique-space (no committed physical storage).
+		if outVn.Space() != nil && !outVn.Space().IsUnique() {
+			continue
+		}
+		// Only trim MULTIEQUALs that feed the loop condition directly.
+		// Other MULTIEQUALs (for non-condition loop variables) don't need the trim
+		// because they will be correctly merged into their parameter HVs by MergeMarker.
+		if !isLoopCondMultiequal(op) {
+			continue
+		}
+		// Check whether any input has a physical (stack or register) source.
+		anyPhysical := false
+		for i := 0; i < op.NumInput(); i++ {
+			if hasPhysicalSource(op.Input(i)) {
+				anyPhysical = true
+				break
+			}
+		}
+		if anyPhysical {
+			m.TrimOpOutput(op)
+		}
 	}
 }
 
@@ -805,8 +958,14 @@ func (m *Merge) eliminateIntersect(vn *Varnode, blocksort []blockVarnodeEntry) {
 		single.AddDefPoint(vn)
 		single.AddRefPoint(op, vn)
 
-		// Iterate over all (block, CoverBlock) pairs in 'single'.
+		// Iterate over all (block, CoverBlock) pairs in 'single' in a stable
+		// order so the chosen trim reads are deterministic across runs.
+		blkKeys := make([]int32, 0, len(single.blocks))
 		for blkIdx := range single.blocks {
+			blkKeys = append(blkKeys, blkIdx)
+		}
+		sort.Slice(blkKeys, func(i, j int) bool { return blkKeys[i] < blkKeys[j] })
+		for _, blkIdx := range blkKeys {
 			slot := blockVarnodeFindFront(blkIdx, blocksort)
 			if slot < 0 {
 				continue
@@ -900,6 +1059,9 @@ func (m *Merge) eliminateIntersect(vn *Varnode, blocksort []blockVarnodeEntry) {
 		}
 	}
 
+	sort.SliceStable(markedOps, func(i, j int) bool {
+		return SeqNumLess(markedOps[i].Seq(), markedOps[j].Seq())
+	})
 	m.snipReads(vn, markedOps)
 }
 
