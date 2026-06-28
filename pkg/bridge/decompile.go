@@ -137,6 +137,16 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 	// C++ parity: coreaction.cc ActionNameVars::apply() + ScopeLocal::assignDefaultNames().
 	pcode.NewActionNameVars("analysis").Apply(fd)
 
+	// NOTE: ActionSetCasts (analysis-time CPUI_CAST insertion) is implemented
+	// (action_deadcode.go) but intentionally NOT wired here yet. Wiring it
+	// regresses pointer-arithmetic goldens (sum_list, counted_loop): Gosleigh
+	// keeps pointer arithmetic as INT_ADD and synthesizes `ptr[index]` at render
+	// time (printc.tryRenderSubscript), whereas Ghidra forms a PTRADD. The base
+	// getInputCast for INT_ADD then casts the pointer operand to `(int)`, breaking
+	// the subscript pattern. Parity requires PTRADD formation (RulePtrArith after
+	// the final InferTypes) before ActionSetCasts can be enabled. Until then the
+	// render-time assignCastStr / isSubpieceCast paths remain the cast source.
+
 	p := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation())
 	if cfg.ProcessEntryName != "" {
 		p = p.SetProcessEntry(cfg.ProcessEntryName, cfg.GhostParams)
