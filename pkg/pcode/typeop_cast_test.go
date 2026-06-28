@@ -117,6 +117,48 @@ func TestGetInputCastSubpiece(t *testing.T) {
 	}
 }
 
+// TestActionSetCastsInsertsCopyCast verifies the ActionSetCasts driver inserts a
+// CPUI_CAST feeding a COPY whose output is a pointer but whose input is a plain
+// integer of the same size. C++ parity: ActionSetCasts::castInput via
+// TypeOpCopy::getInputCast.
+func TestActionSetCastsInsertsCopyCast(t *testing.T) {
+	fd := makeInferTestFuncdata(t)
+	tf := sharedTypeFactory
+
+	i4 := tf.GetBase(4, TYPE_INT, "int")
+	ptrInt := Datatype(tf.GetPointer(4, i4, 1))
+
+	op := fd.NewOp(1, fd.BaseAddr())
+	fd.OpSetOpcode(op, CPUI_COPY)
+	out := fd.NewVarnodeOut(4, makeInferRamAddr(fd, 0x5000), op)
+	in := fd.NewVarnode(4, makeInferRamAddr(fd, 0x5008))
+	fd.SetInputVarnode(in)
+	fd.OpSetInput(op, in, 0)
+	fd.OpMarkAlive(op)
+	out.UpdateType(ptrInt)
+	in.UpdateType(i4)
+
+	NewActionSetCasts("test").Apply(fd)
+
+	newIn := op.Input(0)
+	if newIn == in {
+		t.Fatalf("expected COPY input to be replaced by a CAST output, still original")
+	}
+	def := newIn.Def()
+	if def == nil || def.Code() != CPUI_CAST {
+		t.Fatalf("expected COPY input def to be CPUI_CAST, got %v", def)
+	}
+	if newIn.Type() != ptrInt {
+		t.Errorf("CAST output type = %v, want %v", newIn.Type(), ptrInt)
+	}
+	if def.Input(0) != in {
+		t.Errorf("CAST should take the original input varnode, got %v", def.Input(0))
+	}
+	if !newIn.IsImplied() {
+		t.Errorf("CAST output should be implied")
+	}
+}
+
 // TestIntPromotionConstants exercises localExtensionType / intPromotionType on
 // constant varnodes, the cases that do not require a defining op.
 // C++ parity: cast.cc CastStrategyC::localExtensionType / intPromotionType.

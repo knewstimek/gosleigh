@@ -435,6 +435,12 @@ func (fd *Funcdata) NewConstant(size int32, val uint64) *Varnode {
 	return fd.vbank.Create(size, loc)
 }
 
+// NewUnique creates a free temp Varnode in unique space, not attached as any
+// op's output. C++ parity: Funcdata::newUnique.
+func (fd *Funcdata) NewUnique(size int32) *Varnode {
+	return fd.vbank.CreateUnique(size)
+}
+
 // SetInputVarnode promotes a free Varnode to SSA function input.
 // C++ parity: Funcdata::setInputVarnode
 func (fd *Funcdata) SetInputVarnode(vn *Varnode) *Varnode {

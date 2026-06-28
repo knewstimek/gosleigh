@@ -33,6 +33,15 @@ type TypeOp interface {
 	// the op consumes it, or nil when the actual input Varnode needs no cast.
 	// C++ parity: TypeOp::getInputCast (typeop.cc) and per-opcode overrides.
 	GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype
+
+	// OutputTypeLocal returns the data-type the op naturally produces.
+	// C++ parity: PcodeOp::outputTypeLocal -> TypeOp::getOutputLocal.
+	OutputTypeLocal(op *PcodeOp, tf *TypeFactory) Datatype
+
+	// GetOutputToken returns the data-type a C compiler assigns to the op's output
+	// expression, used to decide whether an output cast is needed.
+	// C++ parity: TypeOp::getOutputToken and per-opcode overrides.
+	GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype
 }
 
 // typeOpBase is the default concrete TypeOp for all opcodes.
