@@ -100,8 +100,22 @@ func opHasSideEffects(code OpCode) bool {
 	return false
 }
 
-// ActionSetCasts is a stub for future cast insertion.
-// C++ parity: action.hh ActionSetCasts (stub)
+// ActionSetCasts inserts explicit CPUI_CAST ops wherever the data-type a
+// PcodeOp expects differs from the data-type its actual Varnode carries, so the
+// C output renders the casts a compiler would require.
+// C++ parity: coreaction.cc ActionSetCasts.
+//
+// Ported subset (documented gaps vs C++):
+//   - Union/resolution machinery (resolveUnion, inheritResolution,
+//     forceFacingType, needsResolution, tryResolutionAdjustment) is omitted:
+//     Gosleigh does not model union field resolution.
+//   - testStructOffset0 / insertPtrsubZero (PTRSUB-as-cast for struct field 0)
+//     is omitted: struct-field pointer adjustment is not modeled here.
+//   - markExplicitUnsigned / markExplicitLongSize are not ported, so castInput
+//     returns 0 (no change) when no cast type is required.
+//   - PTRADD/PTRSUB refit checks (opUndoPtradd, PTRSUB->INT_ADD) are omitted.
+//   - Block order uses allOpsOrdered rather than dominance order; the per-op
+//     cast decision is local, so this does not affect the inserted casts.
 type ActionSetCasts struct {
 	ActionBase
 }
@@ -119,6 +133,122 @@ func (a *ActionSetCasts) Clone(groups ActionGroupList) Action {
 	return NewActionSetCasts(a.GetGroup())
 }
 
+// Apply walks the ops and inserts input/output casts. C++ parity:
+// ActionSetCasts::apply (coreaction.cc 2724-2776).
 func (a *ActionSetCasts) Apply(data *Funcdata) int {
-	return 0 // stub -- no-op for now
+	cs := sharedCastStrategyC
+	for _, op := range data.allOpsOrdered() {
+		if op.IsDead() || op.HasFlag(PcodeOpNonPrinting) {
+			continue
+		}
+		if op.Code() == CPUI_CAST {
+			continue
+		}
+		// Do input casts first, as the output token may depend on the inputs.
+		for i := 0; i < op.NumInput(); i++ {
+			a.castInput(op, i, data, cs)
+		}
+		if op.Output() == nil {
+			continue
+		}
+		a.castOutput(op, data, cs)
+	}
+	return 0
+}
+
+// castInput inserts a CAST producing the input Varnode at slot if the op expects
+// a different type than the Varnode carries. C++ parity: ActionSetCasts::castInput
+// (coreaction.cc 2657-2722).
+func (a *ActionSetCasts) castInput(op *PcodeOp, slot int, data *Funcdata, cs *CastStrategyC) int {
+	ct := op.GetOpcode().GetInputCast(op, slot, cs)
+	if ct == nil {
+		// markExplicitUnsigned / markExplicitLongSize not ported -> no change.
+		return 0
+	}
+	vn := op.Input(slot)
+	if vn == nil {
+		return 0
+	}
+	vnin := vn
+	// Guard against chains of casts.
+	if vn.IsWritten() && vn.Def() != nil && vn.Def().Code() == CPUI_CAST {
+		if vn.IsImplied() {
+			if vn.LoneDescend() == op {
+				vn.UpdateType(ct)
+				if vn.Type() == ct {
+					return 1
+				}
+			}
+			vnin = vn.Def().Input(0) // cast directly from input of previous cast
+			if vnin != nil && ct == vnin.Type() {
+				data.OpSetInput(op, vnin, slot)
+				return 1
+			}
+		}
+	} else if vn.IsConstant() {
+		vn.UpdateType(ct)
+		if vn.Type() == ct {
+			return 1
+		}
+	}
+	// resolveUnion / testStructOffset0 / tryResolutionAdjustment omitted.
+	if vnin == nil {
+		return 0
+	}
+	newop := data.NewOp(1, op.Addr())
+	vnout := data.NewUniqueOut(vnin.Size(), newop)
+	vnout.UpdateType(ct)
+	vnout.SetImplied()
+	data.OpSetOpcode(newop, CPUI_CAST)
+	data.OpSetInput(newop, vnin, 0)
+	data.OpSetInput(op, vnout, slot)
+	data.OpInsertBefore(newop, op) // cast comes BEFORE the operation
+	return 1
+}
+
+// castOutput inserts a CAST after op when the type a C compiler assigns to the
+// op's output expression differs from the output Varnode's type. C++ parity:
+// ActionSetCasts::castOutput (coreaction.cc 2534-2618).
+func (a *ActionSetCasts) castOutput(op *PcodeOp, data *Funcdata, cs *CastStrategyC) int {
+	tokenct := op.GetOpcode().GetOutputToken(op, cs)
+	outvn := op.Output()
+	outHighType := outvn.Type()
+	if tokenct == outHighType {
+		return 0 // same type, no cast
+	}
+	outHighResolve := outHighType
+	if outvn.IsImplied() {
+		// Implied varnode must take on the parse (token) type for atomic types,
+		// or for pointers that do not point to a composite.
+		if outHighResolve == nil || outHighResolve.Metatype() != TYPE_PTR {
+			outvn.UpdateType(tokenct)
+			outHighResolve = outvn.Type()
+		} else if tokenct != nil && tokenct.Metatype() == TYPE_PTR {
+			if ptr, ok := outHighResolve.(*Pointer); ok && ptr.Pointee() != nil {
+				meta := ptr.Pointee().Metatype()
+				if meta != TYPE_ARRAY && meta != TYPE_STRUCT && meta != TYPE_UNION {
+					outvn.UpdateType(tokenct)
+					outHighResolve = outvn.Type()
+				}
+			}
+		}
+		// Type-lock force branch omitted (no implied type locks modeled here).
+	}
+	// testStructOffset0 (PTRSUB-as-cast) omitted; always use a plain CAST.
+	ct := cs.CastStandard(outHighResolve, tokenct, false, true)
+	if ct == nil {
+		return 0
+	}
+	// Generate the cast op: op now writes a fresh implied unique, and the CAST
+	// produces the original output Varnode from it.
+	vn := data.NewUnique(outvn.Size())
+	vn.UpdateType(tokenct)
+	vn.SetImplied()
+	newop := data.NewOp(1, op.Addr())
+	data.OpSetOpcode(newop, CPUI_CAST)
+	data.OpSetOutput(newop, outvn)
+	data.OpSetInput(newop, vn, 0)
+	data.OpSetOutput(op, vn)
+	data.OpInsertAfter(newop, op) // cast comes AFTER the operation
+	return 1
 }

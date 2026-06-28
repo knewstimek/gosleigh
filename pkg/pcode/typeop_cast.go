@@ -116,6 +116,90 @@ func buildOpInputMeta() []metatype {
 	return m
 }
 
+// opOutputMeta holds the metaout (output metatype) for each opcode. Mirrors
+// opInputMeta but for the output side. C++ parity: the metaout argument of the
+// TypeOpBinary/Unary/Func constructors, plus PTRADD/PTRSUB getOutputLocal
+// (TYPE_INT). Opcodes deriving directly from TypeOp keep TYPE_UNKNOWN.
+var opOutputMeta = buildOpOutputMeta()
+
+func buildOpOutputMeta() []metatype {
+	m := make([]metatype, CPUI_MAX+1)
+	for i := range m {
+		m[i] = TYPE_UNKNOWN
+	}
+	set := func(op OpCode, meta metatype) { m[op] = meta }
+
+	// Comparisons produce bool.
+	set(CPUI_INT_EQUAL, TYPE_BOOL)
+	set(CPUI_INT_NOTEQUAL, TYPE_BOOL)
+	set(CPUI_INT_SLESS, TYPE_BOOL)
+	set(CPUI_INT_SLESSEQUAL, TYPE_BOOL)
+	set(CPUI_INT_LESS, TYPE_BOOL)
+	set(CPUI_INT_LESSEQUAL, TYPE_BOOL)
+	set(CPUI_INT_CARRY, TYPE_BOOL)
+	set(CPUI_INT_SCARRY, TYPE_BOOL)
+	set(CPUI_INT_SBORROW, TYPE_BOOL)
+
+	// Extension
+	set(CPUI_INT_ZEXT, TYPE_UINT)
+	set(CPUI_INT_SEXT, TYPE_INT)
+
+	// Integer arithmetic / logical
+	set(CPUI_INT_ADD, TYPE_INT)
+	set(CPUI_INT_SUB, TYPE_INT)
+	set(CPUI_INT_2COMP, TYPE_INT)
+	set(CPUI_INT_NEGATE, TYPE_UINT)
+	set(CPUI_INT_XOR, TYPE_UINT)
+	set(CPUI_INT_AND, TYPE_UINT)
+	set(CPUI_INT_OR, TYPE_UINT)
+	set(CPUI_INT_LEFT, TYPE_INT)
+	set(CPUI_INT_RIGHT, TYPE_UINT)
+	set(CPUI_INT_SRIGHT, TYPE_INT)
+	set(CPUI_INT_MULT, TYPE_INT)
+	set(CPUI_INT_DIV, TYPE_UINT)
+	set(CPUI_INT_SDIV, TYPE_INT)
+	set(CPUI_INT_REM, TYPE_UINT)
+	set(CPUI_INT_SREM, TYPE_INT)
+
+	// Boolean
+	set(CPUI_BOOL_NEGATE, TYPE_BOOL)
+	set(CPUI_BOOL_XOR, TYPE_BOOL)
+	set(CPUI_BOOL_AND, TYPE_BOOL)
+	set(CPUI_BOOL_OR, TYPE_BOOL)
+
+	// Float
+	set(CPUI_FLOAT_EQUAL, TYPE_BOOL)
+	set(CPUI_FLOAT_NOTEQUAL, TYPE_BOOL)
+	set(CPUI_FLOAT_LESS, TYPE_BOOL)
+	set(CPUI_FLOAT_LESSEQUAL, TYPE_BOOL)
+	set(CPUI_FLOAT_NAN, TYPE_BOOL)
+	set(CPUI_FLOAT_ADD, TYPE_FLOAT)
+	set(CPUI_FLOAT_DIV, TYPE_FLOAT)
+	set(CPUI_FLOAT_MULT, TYPE_FLOAT)
+	set(CPUI_FLOAT_SUB, TYPE_FLOAT)
+	set(CPUI_FLOAT_NEG, TYPE_FLOAT)
+	set(CPUI_FLOAT_ABS, TYPE_FLOAT)
+	set(CPUI_FLOAT_SQRT, TYPE_FLOAT)
+	set(CPUI_FLOAT_INT2FLOAT, TYPE_FLOAT)
+	set(CPUI_FLOAT_FLOAT2FLOAT, TYPE_FLOAT)
+	set(CPUI_FLOAT_TRUNC, TYPE_INT)
+	set(CPUI_FLOAT_CEIL, TYPE_FLOAT)
+	set(CPUI_FLOAT_FLOOR, TYPE_FLOAT)
+	set(CPUI_FLOAT_ROUND, TYPE_FLOAT)
+
+	// Bit manipulation
+	set(CPUI_ZPULL, TYPE_UINT)
+	set(CPUI_SPULL, TYPE_INT)
+	set(CPUI_POPCOUNT, TYPE_INT)
+	set(CPUI_LZCOUNT, TYPE_INT)
+
+	// PTRADD/PTRSUB getOutputLocal treat as INT_ADD.
+	set(CPUI_PTRADD, TYPE_INT)
+	set(CPUI_PTRSUB, TYPE_INT)
+
+	return m
+}
+
 // baseForMeta returns the interned Base data-type of the given size and metatype.
 // C++ parity: TypeFactory::getBase(size, meta).
 func baseForMeta(tf *TypeFactory, size int32, meta metatype) Datatype {
@@ -170,6 +254,72 @@ func baseGetInputCast(t TypeOp, op *PcodeOp, slot int, cs *CastStrategyC) Dataty
 	curtype := vn.TypeReadFacing(op)
 	return cs.CastStandard(reqtype, curtype, false, true)
 }
+
+// OutputTypeLocal returns the data-type the op naturally produces, as a C
+// compiler parsing the grammar would assign. C++ parity: PcodeOp::outputTypeLocal
+// -> TypeOp::getOutputLocal (default TYPE_UNKNOWN; binary/unary/func override to
+// getBase(outsize, metaout)).
+func (t *typeOpBase) OutputTypeLocal(op *PcodeOp, tf *TypeFactory) Datatype {
+	if op == nil || op.Output() == nil {
+		return nil
+	}
+	return baseForMeta(tf, op.Output().Size(), opOutputMeta[t.opcode])
+}
+
+// GetOutputToken returns the data-type a C compiler would assign to the op's
+// output expression, used to decide whether an output cast is needed.
+// C++ parity: TypeOp::getOutputToken (default = outputTypeLocal).
+func (t *typeOpBase) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	return t.OutputTypeLocal(op, cs.tlst)
+}
+
+// COPY output token is the type read from input 0. C++: TypeOpCopy::getOutputToken.
+func (t *typeOpCopy) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	if op == nil || op.NumInput() == 0 || op.Input(0) == nil {
+		return nil
+	}
+	return op.Input(0).TypeReadFacing(op)
+}
+
+// LOAD output token: the pointee of the address pointer if it matches the output
+// size, otherwise the output's own type (a cast is then assumed).
+// C++ parity: TypeOpLoad::getOutputToken (typeop.cc 473-486).
+func (t *typeOpLoad) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	if op == nil || op.NumInput() < 2 || op.Output() == nil || op.Input(1) == nil {
+		return nil
+	}
+	ct := op.Input(1).TypeReadFacing(op)
+	if ptr, ok := ct.(*Pointer); ok && ptr.Pointee() != nil && ptr.Pointee().Size() == op.Output().Size() {
+		return ptr.Pointee()
+	}
+	return op.Output().TypeDefFacing()
+}
+
+// INT_ADD output token uses the arithmetic typing rules. C++ parity:
+// TypeOpIntAdd::getOutputToken -> arithmeticOutputStandard.
+func (t *typeOpIntAdd) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	return cs.arithmeticOutputStandard(op)
+}
+
+// PTRADD output token is the input-0 pointer type (the op casts to it).
+// C++ parity: TypeOpPtradd::getOutputToken (typeop.cc 2246-2250).
+func (t *typeOpPtradd) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	if op == nil || op.NumInput() == 0 || op.Input(0) == nil {
+		return nil
+	}
+	return op.Input(0).TypeReadFacing(op)
+}
+
+// PTRSUB output token in C++ walks the pointed-to structure (TypePointer::downChain)
+// to find the sub-field type. downChain is not yet ported, so we fall back to the
+// base output-local type. TODO: port downChain for struct-field PTRSUB output casts.
+// C++ parity: TypeOpPtrsub::getOutputToken (typeop.cc 2351-2366).
+
+// SUBPIECE output token in C++ uses findTruncation for composite fields, else the
+// output's own type (or int when unknown). It is registered as a plain typeOpBase
+// in Gosleigh, so it currently uses the base UNKNOWN token. TODO: give SUBPIECE a
+// dedicated TypeOp with the (int)-truncation token once findTruncation lands; until
+// then the render-time isSubpieceCast path produces the (int) cast.
 
 // ---------------------------------------------------------------------------
 // Per-opcode getInputCast overrides.

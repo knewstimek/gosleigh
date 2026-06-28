@@ -230,6 +230,25 @@ func (cs *CastStrategyC) checkIntPromotionForExtension(op *PcodeOp) bool {
 	return true
 }
 
+// arithmeticOutputStandard returns the data-type an arithmetic op (INT_ADD etc.)
+// produces, following the C arithmetic typing rules: the most specific of the
+// input read-facing types, treating bool as int.
+// C++ parity: cast.cc CastStrategyC::arithmeticOutputStandard (394-409).
+//
+// Simplification vs C++: Datatype::typeOrder is not ported, so the "most
+// specific" selection keeps input[0]'s type rather than scanning for a strictly
+// more specified operand. The bool->int promotion of input[0] is preserved.
+func (cs *CastStrategyC) arithmeticOutputStandard(op *PcodeOp) Datatype {
+	if op == nil || op.NumInput() == 0 || op.Input(0) == nil {
+		return nil
+	}
+	res1 := op.Input(0).TypeReadFacing(op)
+	if res1 != nil && res1.Metatype() == TYPE_BOOL {
+		res1 = baseForMeta(cs.tlst, res1.Size(), TYPE_INT)
+	}
+	return res1
+}
+
 // CastStandard returns the data-type to cast to when an expression of type
 // curtype is used where reqtype is required, or nil when no cast is needed.
 //
