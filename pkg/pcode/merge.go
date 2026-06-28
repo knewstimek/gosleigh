@@ -638,6 +638,16 @@ func (m *Merge) TrimJoinblockMultiequals() {
 		if !isLoopCondMultiequal(op) {
 			continue
 		}
+		// Only snip when the phi output lives in a unique (non addr-tied) Varnode.
+		// A loop variable whose phi output is already its addr-tied storage (e.g.
+		// SumList's pointer param_3, CountedLoop's stack local) renders correctly as
+		// a plain for-loop and must not get a snapshot. A unique phi output (gcd's
+		// swapped register loop variable) is the case that needs the loop-head
+		// snapshot (iVar1) to break the lost-copy cycle. Heuristic pending the full
+		// lost-copy / for-loop-validity analysis tracked in docs/STATUS.md.
+		if osp := outVn.Space(); osp == nil || !osp.IsUnique() || outVn.IsAddrTied() {
+			continue
+		}
 		// Check whether any input has a physical (stack or register) source.
 		anyPhysical := false
 		for i := 0; i < op.NumInput(); i++ {
