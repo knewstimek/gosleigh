@@ -23,6 +23,10 @@ package pcode
 // (markExplicitUnsigned, arithmeticOutputStandard, isSubpieceCast, ...) and the
 // ActionSetCasts apply/castInput/castOutput driver remain future work.
 
+// sharedCastStrategyC is the process-wide C cast strategy used by render-time
+// cast decisions (printc.go assignCastStr). It is backed by sharedTypeFactory.
+var sharedCastStrategyC = NewCastStrategyC(sharedTypeFactory)
+
 // CastStrategyC implements the C-language casting rules.
 // C++ parity: cast.hh CastStrategyC.
 type CastStrategyC struct {
