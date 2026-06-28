@@ -1,9 +1,10 @@
 # 프로젝트 상태
 
-## 현재 상태 (2026-06-29 세션 종료, master `432b30e`)
+## 현재 상태 (2026-06-29 세션 종료, master `483d3f9`)
 
-**전 패키지 그린** (loader/pcode/sla/bridge). 직전 세션 H8 + H9 프리미티브에 더해
-이번 세션은 H9 입력타입 인프라(getInputCast/inputTypeLocal) 포팅(`432b30e`). 이전 성과:
+**전 패키지 그린** (loader/pcode/sla/bridge). 이번 세션: H9 ActionSetCasts driver
+인프라(입력/출력 타입 + int-promotion) + 본체(Apply/castInput/castOutput) 포팅 완료,
+배선은 PTRADD 형성 블로커로 보류(경험적 입증). 상세는 위 "다음 작업 1" + CHANGELOG. 이전 성과:
 
 1. **H8 gcd_x86_32 golden parity 완료** -- TestMSVC_Gcd PASS. gcd가 Ghidra golden과
    완전 일치: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; }`.
@@ -18,16 +19,21 @@
 
 ### 다음 작업 (우선순위)
 
-1. **[대형, 전용 세션] H9 ActionSetCasts driver** -- 분석-time에 `CPUI_CAST` op을 SSA에
-   삽입하는 본체. 현재는 render-time `assignCastStr` 근사. CastStrategy 프리미티브 + **입력타입
-   인프라(getInputCast/inputTypeLocal) 완료 (`432b30e`)**. 남은 것:
-   - 출력측 `getOutputToken`/`outputTypeLocal` 포팅 (castOutput이 소비).
-   - `ActionSetCasts.Apply`/`castInput`/`castOutput` 본체 (action_deadcode.go:122 stub) +
-     PTRADD/PTRSUB 재검사 + insertPtrsubZero.
-   - 파이프라인 배선(InferTypes 후) + render-time `assignCastStr`/SUBPIECE-SEXT-ZEXT
-     render-as-cast/nullPtrCastStr 제거 + renderCast 동일 출력 검증.
-   - **주의**: Apply가 전 op 순회 -> base getInputCast가 전 opcode 충실해야 spurious cast
-     회귀 방지. 부분 배선 불가, 일괄 전환 필요. (아래 미시작 H9 상세)
+1. **[대형, 전용 세션] H9 ActionSetCasts driver** -- 분석-time `CPUI_CAST` 삽입.
+   **인프라+본체 완료, 배선 블록됨 (`432b30e`/`705d5eb`/`483d3f9`)**:
+   - 입력/출력 타입 인프라(getInputCast/inputTypeLocal/getOutputToken/outputTypeLocal) +
+     int-promotion + arithmeticOutputStandard 포팅. ActionSetCasts.Apply/castInput/
+     castOutput 본체 구현. 격리 테스트 PASS.
+   - **배선 블로커 (경험적 입증, `483d3f9`)**: bridge.Decompile에 배선 시 sum_list/
+     counted_loop 회귀. Gosleigh는 포인터 산술을 INT_ADD로 유지+render-time
+     tryRenderSubscript로 `ptr[index]` 합성하는데, base getInputCast(INT_ADD)가 포인터
+     피연산자를 `(int)`로 캐스트해 subscript 파괴. Ghidra는 PTRADD라 no-cast.
+   - **선행 필요**: 최종 InferTypes 후 PTRADD 형성(RulePtrArith 재발화) -> PrintC가
+     PTRADD를 subscript로 렌더 -> 그 위에 ActionSetCasts 배선 + render-time assignCastStr/
+     isSubpieceCast/nullPtrCastStr 제거 + renderCast 동일 출력 검증. parity상 INT_ADD
+     포인터 캐스트 억제 hack 금지.
+   - 미포팅 잔여: SUBPIECE getOutputToken(findTruncation)/PTRSUB getOutputToken(downChain)/
+     union resolution/testStructOffset0/markExplicit*.
 2. **[대안] H8-debt-2 reconcile** -- `bridge.Decompile` 손정렬 subset을 프로덕션
    `BuildUniversalAction`과 통합 (universalAction 내 미완 action 완성 필요).
 3. **[대안] H8-debt-1** 스냅샷 판별자 원리화, **H7** ActionPrototypeTypes 배선.
