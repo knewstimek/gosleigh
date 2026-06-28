@@ -31,22 +31,42 @@ while (param_4 != 0) { param_4 = param_3 % param_4; param_3 = param_4; }
 ```
 golden: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; }`
 
-남은 단일 gap -- **loop-carried cover 교차 trim (iVar1 스냅샷)**:
+### 2026-06-29 추가 진전 2 (CoverBlock.Empty cover 버그)
+
+- `CoverBlock.Empty`가 `start==nil`만 검사 -> C++ `cover.hh CoverBlock::empty`는
+  `start==0 && stop==0` (둘 다). `SetAll`(start=nil, stop=sentinel)/SetEnd-only
+  블록이 empty로 오인되어 cover가 덮어써지고 loop-carried 교차를 놓침. 수정.
+- 효과: gcd b_phi vs new_b 교차가 정상 감지되어 mergeOp가 trim -> new_b(register:0x8)가
+  더 이상 param_4에 잘못 병합되지 않음 (별도 iVar1). 회귀 0건 (pcode/sla/bridge 통과).
+
+현재 gcd 출력 (golden 경로): `for (param_4 = param_4; param_4 != 0; param_4 = param_3 % param_4) { param_3 = param_4; }`
+golden: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; }`
+
+남은 단일 gap -- **trim 방향 (addr-tied phi 출력 vs unique phi 출력)**:
 현재 SSA (pre-PrintC, golden 경로):
 ```
-block1: a_phi#param_1 = MULTIEQUAL(a_init, new_a);  b_phi#param_2 = MULTIEQUAL(b_init, new_b)
+block1: a_phi#param_1 = MULTIEQUAL(a_init, new_a);  b_phi#param_2 = MULTIEQUAL(b_init, 0xae427)
         INT_EQUAL(b_phi, 0)
-block3: new_b(register:0x8)#param_2 = INT_SREM(a_phi, b_phi);  new_a#param_1 = COPY(b_phi)
+block3: new_b(register:0x8)#iVar1 = INT_SREM(a_phi, b_phi);  new_a#param_1 = COPY(b_phi)
+        0xae427#param_2 = COPY(new_b)   <- TrimOpInput가 back-edge에 삽입한 COPY
 ```
-param_4(param_2) HV에 `b_phi`와 `new_b`가 함께 있는데, body에서 `new_b = a % b_phi`
-이후 `new_a = COPY(b_phi)`가 b_phi를 다시 읽음 -> b_phi와 new_b cover 교차. 같은 HV라
-PrintC가 둘 다 param_4로 출력해 `param_3 = param_4`가 틀린 값을 읽음. Ghidra는 이
-교차를 감지해 loop-head에 `iVar1 = COPY(b_phi)` 스냅샷을 넣고 모든 b_phi read를
-iVar1로 redirect (snipReads). 즉 **mergeMarker MergeOp의 cover 교차 감지/trimOpOutput
-또는 Cover 계산이 이 loop-carried 교차를 못 잡는 것**이 마지막 갭.
-- C++ 참조: `merge.cc Merge::mergeOp` (cover test -> trimOpOutput), `Merge::snipReads`.
-- 수정 대상: `pkg/pcode/merge.go` MergeOp / Cover intersection 경로.
-- comma-while 렌더링(구 Gap 4)은 이미 동작하므로 블로커 아님.
+교차는 감지됐으나 trim 방향이 Ghidra와 다름:
+- **Gosleigh**: phi back-edge 입력(new_b)을 TrimOpInput -> `0xae427 = COPY(new_b)` 삽입
+  -> ActionForLoops가 이를 iterator로 잡아 for-loop화 -> body/increment read-order 위반
+  으로 의미상 틀린 C (`param_4 = param_3 % param_4`가 새 param_3를 읽음).
+- **Ghidra**: phi 출력(addr-tied stack param_4)의 reads를 snipReads -> loop-head에
+  `iVar1 = COPY(param_4)` 스냅샷, 모든 read를 iVar1로 redirect -> 깔끔한 while-loop.
+
+근본 원인 (아키텍처): **Ghidra는 addr-tied param의 loop phi 출력이 addr-tied 스택
+varnode라서 mergeAddrTied의 eliminateIntersect(snipReads)가 head 스냅샷을 생성**.
+Gosleigh는 NodeJoin이 phi 출력을 unique로 만들어 mergeAddrTied가 처리 못 하고
+mergeOp가 back-edge를 trim. 레지스터 값이 스택 슬롯으로 완전히 propagate되어 phi
+출력이 stack:0x8이 되거나, NodeJoin/heritage가 addr-tied phi 출력을 내야 함.
+- C++ 참조: `merge.cc Merge::mergeAddrTied`/`eliminateIntersect`/`snipReads`,
+  NodeJoin(ConditionalJoin) 출력 varnode 선택.
+- 수정 대상: `pkg/pcode/action_nodejoin.go` 또는 heritage phi 출력 공간 선택,
+  또는 mergeOp가 unique loop-phi 출력도 snipReads하도록 확장.
+- ActionForLoops가 trim COPY를 iterator로 오인하는 것도 부차 이슈.
 
 진단용 SSA 덤프: `pkg/loader/msvc_diag_test.go` `dumpSSA`/`vnStr` (GCD_DUMP=1 가드).
 
