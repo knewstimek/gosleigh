@@ -28,10 +28,16 @@
      counted_loop 회귀. Gosleigh는 포인터 산술을 INT_ADD로 유지+render-time
      tryRenderSubscript로 `ptr[index]` 합성하는데, base getInputCast(INT_ADD)가 포인터
      피연산자를 `(int)`로 캐스트해 subscript 파괴. Ghidra는 PTRADD라 no-cast.
-   - **선행 필요**: 최종 InferTypes 후 PTRADD 형성(RulePtrArith 재발화) -> PrintC가
-     PTRADD를 subscript로 렌더 -> 그 위에 ActionSetCasts 배선 + render-time assignCastStr/
-     isSubpieceCast/nullPtrCastStr 제거 + renderCast 동일 출력 검증. parity상 INT_ADD
-     포인터 캐스트 억제 hack 금지.
+   - **선행 필요**: 최종 InferTypes 후 PTRADD 형성. **이번 세션 실험**: 최종 InferTypes
+     뒤 RulePtrArith 단독 재발화(NewActionPool+NewRulePtrArith)를 시험했으나 sum_list의
+     LOAD-주소 INT_ADD에 PTRADD가 형성되지 않음(골든 무변화 + ActionSetCasts 배선 시
+     여전히 회귀). precondition(ptrInputSlot=0/evaluatePointerExpression=2 via LOAD
+     descend/verifyPreferredPointer=true)은 통과 추정이므로, 블로커는 **AddTreeState.Apply()
+     /initAlternateForm()가 이 INT_ADD를 변환 실패**(rules_pointer.go:402-408). 다음 조사:
+     AddTreeState가 왜 이 케이스(phi 출력 param_3 + const 4 -> LOAD)에서 PTRADD를 못 만드는지
+     디버그. 그 후 ActionSetCasts 배선 + render-time assignCastStr/isSubpieceCast/
+     nullPtrCastStr 제거 + renderCast 동일 출력 검증. parity상 INT_ADD 포인터 캐스트 억제
+     hack 금지. (현 render-time 경로는 이미 골든 정확 -> H9는 메커니즘 parity 목적, 출력 개선 아님.)
    - 미포팅 잔여: SUBPIECE getOutputToken(findTruncation)/PTRSUB getOutputToken(downChain)/
      union resolution/testStructOffset0/markExplicit*.
 2. **[대안] H8-debt-2 reconcile** -- `bridge.Decompile` 손정렬 subset을 프로덕션
