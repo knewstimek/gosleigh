@@ -259,10 +259,11 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
        이제 C++ 충실. 단, 아래 2~4(분석-time CPUI_CAST 삽입)는 미구현.
     2. 전 opcode의 `getInputCast`/`getOutputCast` (TypeOp별) -- 현재 전무.
     3. CastStrategy 나머지:
-       - `IsSubpieceCast`/`IsSextCast`/`IsZextCast` -- **완료 `7c350d3`** (cast.go,
-         단위 테스트). IsSubpieceCast는 PrintC SUBPIECE 렌더링에 배선됨(offset 0 정수
-         truncation -> `(int)x`, 검증 테스트 `TestPrintCSubpieceCast`). 단 endian-aware
-         (isSubpieceCastEndian)는 미구현(little-endian 가정).
+       - `IsSubpieceCast`/`IsSextCast`/`IsZextCast` -- **완료 `7c350d3`+`3b64207`**
+         (cast.go, 단위 테스트). 셋 다 PrintC 렌더링에 배선+검증됨:
+         SUBPIECE offset0 정수 truncation -> `(int)x` (`TestPrintCSubpieceCast`);
+         SEXT/ZEXT는 natural일 때만 cast, 아니면 SEXT()/ZEXT() (`TestPrintCZextNotCast`).
+         SUBPIECE는 little-endian 가정(isSubpieceCastEndian 미구현).
        - 미구현: markExplicitUnsigned/LongSize, arithmeticOutputStandard.
     4. ActionSetCasts apply/castInput/castOutput/resolveUnion/checkPointerIssues/
        insertPtrsubZero + PTRSUB/PTRADD 재작성 + updateType/getHighTypeReadFacing/
