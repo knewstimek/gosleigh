@@ -253,8 +253,10 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
   - 역할: 타입 불일치 지점에 명시적 CPUI_CAST op 삽입 (현재는 render-time
     `assignCastStr` 근사 + ActionSetCasts no-op stub).
   - **스코프 정정**: "contained" 아님. 다음을 모두 포팅해야 함:
-    1. `CastStrategy::castStandard` (C 전략) -- **완료 `f545917`** (`pkg/pcode/cast.go`
-       `CastStrategyC.CastStandard` + 단위 테스트, 미배선).
+    1. `CastStrategy::castStandard` (C 전략) -- **완료 `f545917` + 배선 `64e8c90`**
+       (`pkg/pcode/cast.go` `CastStrategyC.CastStandard` + 단위 테스트). printc
+       `assignCastStr`의 COPY/LOAD 캐스트 판정에 배선됨(실사용). render-time 판정은
+       이제 C++ 충실. 단, 아래 2~4(분석-time CPUI_CAST 삽입)는 미구현.
     2. 전 opcode의 `getInputCast`/`getOutputCast` (TypeOp별) -- 현재 전무.
     3. CastStrategy 나머지 (markExplicitUnsigned/LongSize, arithmeticOutputStandard,
        isSubpieceCast/isSextCast/isZextCast 등).
