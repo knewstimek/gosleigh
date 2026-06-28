@@ -104,8 +104,9 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 	// 1. Walk all varnodes; for each HV track the "best" (non-unique, non-input) instance.
 	// 2. HVs with a valid best instance and no existing name get assigned iVar/uVar names.
 	type hvCandidate struct {
-		hv        *HighVariable
-		bestVn    *Varnode // best representative (non-unique, non-input)
+		hv     *HighVariable
+		bestVn *Varnode // best representative (non-unique, non-input)
+		uniqVn *Varnode // explicit unique-space fallback (e.g. loop-head snapshot iVar1)
 	}
 	hvMap := make(map[*HighVariable]*hvCandidate)
 
@@ -139,21 +140,34 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 				// Prefer earlier-created varnode for stable sort key.
 				c.bestVn = vn
 			}
+		} else if vn.Space() != nil && vn.Space().IsUnique() && vn.IsExplicit() {
+			// Explicit unique-space varnodes are printed as standalone temporaries
+			// (e.g. the loop-head snapshot iVar1 = COPY(param)). They need a name
+			// when the HV has no register/stack representative. C++ parity:
+			// ScopeInternal::assignDefaultNames names explicit temporaries too.
+			if c.uniqVn == nil || vn.CreateIndex() < c.uniqVn.CreateIndex() {
+				c.uniqVn = vn
+			}
 		}
 	}
 
 	var toName []hvEntry
 	for _, c := range hvMap {
-		if c.bestVn == nil {
-			// No non-unique non-input instance -- skip (params, unique-only HVs).
+		rep := c.bestVn
+		if rep == nil {
+			// Fall back to an explicit unique-space instance (e.g. snapshot iVar1).
+			rep = c.uniqVn
+		}
+		if rep == nil {
+			// No nameable representative -- skip (params, implied unique-only HVs).
 			continue
 		}
 		prefix := hvTypePrefix(c.hv)
 		toName = append(toName, hvEntry{
 			hv:        c.hv,
 			prefix:    prefix,
-			offset:    c.bestVn.Offset(),
-			createIdx: uint32(c.bestVn.CreateIndex()),
+			offset:    rep.Offset(),
+			createIdx: uint32(rep.CreateIndex()),
 		})
 	}
 
