@@ -689,31 +689,32 @@ func dedupVarnodes(in []*Varnode) []*Varnode {
 //
 // Remaining mismatch (follow-up work after A16):
 //
-//   Gosleigh output:
-//     while (param_4 != 0) {
-//       param_4 = param_3 % param_4;
-//       param_3 = param_4;
-//     }
+//	Gosleigh output:
+//	  while (param_4 != 0) {
+//	    param_4 = param_3 % param_4;
+//	    param_3 = param_4;
+//	  }
 //
-//   Ghidra golden:
-//     while (iVar1 = param_4, iVar1 != 0) {
-//       param_4 = param_3 % iVar1;
-//       param_3 = iVar1;
-//     }
+//	Ghidra golden:
+//	  while (iVar1 = param_4, iVar1 != 0) {
+//	    param_4 = param_3 % iVar1;
+//	    param_3 = iVar1;
+//	  }
 //
 // The remaining differences are:
-//   (a) iVar1 variable does not appear as a distinct HighVariable. Gosleigh's
-//       MergeMarker over-merges the register:0x4 (ECX) HV INTO the stack:0x8
-//       (param_4) HV via the MULTIEQUAL phi output that gets named "param_4".
-//       Ghidra keeps them as two separate phi nodes (one for ECX -> iVar1, one
-//       for stack -> param_4). Likely root: Gosleigh's joinblock collapse/NodeJoin
-//       produces fewer phis than Ghidra and then merges too aggressively.
-//       Investigate: RulePushMultiME, NodeJoin, ActionNameVars interactions.
-//   (b) No comma expression in the while header. In Ghidra, the entry-slot trim
-//       COPY lands in a block that gets emitted together with the cond block in
-//       setMod(comma_separate) mode. Either Ghidra absorbs the entry block into
-//       cond via BlockList, or it collapses degenerate predecessors. Investigate:
-//       ActionBlockStructure block merging for single-op predecessors.
+//
+//	(a) iVar1 variable does not appear as a distinct HighVariable. Gosleigh's
+//	    MergeMarker over-merges the register:0x4 (ECX) HV INTO the stack:0x8
+//	    (param_4) HV via the MULTIEQUAL phi output that gets named "param_4".
+//	    Ghidra keeps them as two separate phi nodes (one for ECX -> iVar1, one
+//	    for stack -> param_4). Likely root: Gosleigh's joinblock collapse/NodeJoin
+//	    produces fewer phis than Ghidra and then merges too aggressively.
+//	    Investigate: RulePushMultiME, NodeJoin, ActionNameVars interactions.
+//	(b) No comma expression in the while header. In Ghidra, the entry-slot trim
+//	    COPY lands in a block that gets emitted together with the cond block in
+//	    setMod(comma_separate) mode. Either Ghidra absorbs the entry block into
+//	    cond via BlockList, or it collapses degenerate predecessors. Investigate:
+//	    ActionBlockStructure block merging for single-op predecessors.
 //
 // C++ parity: ActionMarkExplicit::baseExplicit in coreaction.cc:3083.
 func (s *printCState) shouldInline(op *PcodeOp) bool {
@@ -2750,9 +2751,19 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	case CPUI_INT_LESSEQUAL:
 		return s.renderBinary(op, "<=", cPrecRelational, ExprAssocLeft)
 	case CPUI_INT_ZEXT:
-		return s.renderCast(op)
+		// A zero-extension reads as a plain cast only when the input is unsigned;
+		// otherwise it stays an explicit ZEXT(). C++ parity: CastStrategyC::isZextCast.
+		if s.extensionIsCast(op, false) {
+			return s.renderCast(op)
+		}
+		return s.renderPseudoCall("ZEXT", op, 0)
 	case CPUI_INT_SEXT:
-		return s.renderCast(op)
+		// A sign-extension reads as a plain cast only when the input is signed.
+		// C++ parity: CastStrategyC::isSextCast.
+		if s.extensionIsCast(op, true) {
+			return s.renderCast(op)
+		}
+		return s.renderPseudoCall("SEXT", op, 0)
 	case CPUI_INT_ADD:
 		// C++ parity: cleanup-phase Rule2Comp2Sub converts INT_ADD(x, INT_2COMP(y))
 		// to INT_SUB(x, y) before rendering. Mirror this at render time: when the
@@ -2949,6 +2960,26 @@ func (s *printCState) renderUnary(op *PcodeOp, token string, prec ExprPrecedence
 		return ExprFragment{}, err
 	}
 	return s.lang.UnaryExpr(token, prec, inner), nil
+}
+
+// extensionIsCast reports whether an INT_SEXT (signed=true) or INT_ZEXT
+// (signed=false) op should render as a plain cast rather than an explicit
+// SEXT()/ZEXT(). C++ parity: CastStrategyC::isSextCast / isZextCast.
+func (s *printCState) extensionIsCast(op *PcodeOp, signed bool) bool {
+	if op.NumInput() < 1 {
+		return false
+	}
+	out := op.Output()
+	in0 := op.Input(0)
+	if out == nil || in0 == nil {
+		return false
+	}
+	outType := out.TypeReadFacing(nil)
+	inType := in0.TypeReadFacing(nil)
+	if signed {
+		return sharedCastStrategyC.IsSextCast(outType, inType)
+	}
+	return sharedCastStrategyC.IsZextCast(outType, inType)
 }
 
 // subpieceIsCast reports whether a SUBPIECE op should render as a plain cast
