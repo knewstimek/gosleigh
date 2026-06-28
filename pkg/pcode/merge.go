@@ -906,8 +906,14 @@ func (m *Merge) allocateCopyTrim(inVn *Varnode, addr address.Address) *PcodeOp {
 	outVn := m.fd.NewUniqueOut(inVn.Size(), copyOp)
 	m.fd.OpSetInput(copyOp, inVn, 0)
 	// Assign a fresh HighVariable to the new output so later merge phases find it.
+	// Inherit the input's type so a trim COPY created after type inference (e.g.
+	// the loop-head snapshot) still gets the right name prefix (iVar vs uVar).
+	// C++ parity: Merge::allocateCopyTrim uses inVn->getType() for the new unique.
 	outHigh := NewHighVariable("")
 	outHigh.AddInstance(outVn)
+	if inHigh := inVn.High(); inHigh != nil {
+		outHigh.SetType(inHigh.Type())
+	}
 	m.copyTrims = append(m.copyTrims, copyOp)
 	return copyOp
 }
