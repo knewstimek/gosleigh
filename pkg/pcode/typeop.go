@@ -23,6 +23,16 @@ type TypeOp interface {
 	// Returns nil when no type information can be derived.
 	// C++ parity: typeop.hh TypeOp::propagateType (partial -- E5 subset)
 	PropagateType(op *PcodeOp, slot int, inType Datatype, tf *TypeFactory) Datatype
+
+	// InputTypeLocal returns the data-type the opcode expects at input slot, as a
+	// C compiler parsing the op's grammar would assign.
+	// C++ parity: PcodeOp::inputTypeLocal -> TypeOp::getInputLocal.
+	InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) Datatype
+
+	// GetInputCast returns the data-type the input at slot must be cast to before
+	// the op consumes it, or nil when the actual input Varnode needs no cast.
+	// C++ parity: TypeOp::getInputCast (typeop.cc) and per-opcode overrides.
+	GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype
 }
 
 // typeOpBase is the default concrete TypeOp for all opcodes.

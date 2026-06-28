@@ -27,15 +27,207 @@ package pcode
 // cast decisions (printc.go assignCastStr). It is backed by sharedTypeFactory.
 var sharedCastStrategyC = NewCastStrategyC(sharedTypeFactory)
 
+// Integer-promotion codes returned by intPromotionType / localExtensionType.
+// C++ parity: cast.hh CastStrategyC IntPromotionCode enum.
+const (
+	noPromotion       = -1 // there is no integer promotion
+	unknownPromotion  = 0  // the type of integer promotion cannot be determined
+	unsignedExtension = 1  // the value is promoted using unsigned extension
+	signedExtension   = 2  // the value is promoted using signed extension
+	eitherExtension   = 3  // promoted using either signed or unsigned extension
+)
+
 // CastStrategyC implements the C-language casting rules.
 // C++ parity: cast.hh CastStrategyC.
 type CastStrategyC struct {
 	tlst *TypeFactory
+	// promoteSize is the size of the C "int" type: the width integers get
+	// promoted to. C++ parity: CastStrategy::promoteSize (set by setTypeFactory).
+	promoteSize int32
 }
 
 // NewCastStrategyC creates a C cast strategy backed by the given type factory.
 func NewCastStrategyC(tf *TypeFactory) *CastStrategyC {
-	return &CastStrategyC{tlst: tf}
+	return &CastStrategyC{tlst: tf, promoteSize: 4}
+}
+
+// signbitNegative reports whether the high (sign) bit of an unsigned value of
+// the given byte size is set. C++ parity: signbit_negative (in address.hh).
+func signbitNegative(val uint64, size int32) bool {
+	if size <= 0 || size > 8 {
+		return false
+	}
+	mask := uint64(1) << (uint(size)*8 - 1)
+	return val&mask != 0
+}
+
+// localExtensionType determines how the value in vn is naturally extended when
+// promoted to int, for the purpose of deciding whether an explicit
+// extension/comparison needs a cast.
+// C++ parity: cast.cc CastStrategyC::localExtensionType (140-176).
+//
+// Simplification vs C++: Gosleigh has no HighVariable, so getHighTypeReadFacing
+// collapses to vn.TypeReadFacing(op).
+func (cs *CastStrategyC) localExtensionType(vn *Varnode, op *PcodeOp) int {
+	if vn == nil {
+		return unknownPromotion
+	}
+	rt := vn.TypeReadFacing(op)
+	if rt == nil {
+		return unknownPromotion
+	}
+	meta := rt.Metatype()
+	var natural int
+	switch meta {
+	case TYPE_UINT, TYPE_BOOL, TYPE_UNKNOWN, TYPE_PARTIALSTRUCT, TYPE_PARTIALUNION:
+		natural = unsignedExtension
+	case TYPE_INT:
+		natural = signedExtension
+	default:
+		return unknownPromotion
+	}
+	if vn.IsConstant() {
+		if !signbitNegative(vn.Offset(), vn.Size()) { // high-bit zero -> either extension
+			return eitherExtension
+		}
+		return natural
+	}
+	if vn.IsExplicit() {
+		return natural
+	}
+	if !vn.IsWritten() {
+		return unknownPromotion
+	}
+	defOp := vn.Def()
+	if defOp == nil {
+		return unknownPromotion
+	}
+	if defOp.IsBoolOutput() {
+		return eitherExtension
+	}
+	opc := defOp.Code()
+	if opc == CPUI_CAST || opc == CPUI_LOAD || defOp.IsCall() {
+		return natural
+	}
+	if opc == CPUI_INT_AND {
+		tmpvn := defOp.Input(1)
+		if tmpvn != nil && tmpvn.IsConstant() {
+			if !signbitNegative(tmpvn.Offset(), tmpvn.Size()) {
+				return eitherExtension
+			}
+			return natural
+		}
+	}
+	return unknownPromotion
+}
+
+// intPromotionType classifies the integer promotion that the value held by vn
+// undergoes. C++ parity: cast.cc CastStrategyC::intPromotionType (178-247).
+func (cs *CastStrategyC) intPromotionType(vn *Varnode) int {
+	if vn == nil {
+		return unknownPromotion
+	}
+	if vn.Size() >= cs.promoteSize {
+		return noPromotion
+	}
+	if vn.IsConstant() {
+		return cs.localExtensionType(vn, vn.LoneDescend())
+	}
+	if vn.IsExplicit() {
+		return noPromotion
+	}
+	if !vn.IsWritten() {
+		return unknownPromotion
+	}
+	op := vn.Def()
+	if op == nil {
+		return unknownPromotion
+	}
+	switch op.Code() {
+	case CPUI_INT_AND:
+		if (cs.localExtensionType(op.Input(1), op) & unsignedExtension) != 0 {
+			return unsignedExtension
+		}
+		if (cs.localExtensionType(op.Input(0), op) & unsignedExtension) != 0 {
+			return unsignedExtension
+		}
+	case CPUI_INT_RIGHT:
+		val := cs.localExtensionType(op.Input(0), op)
+		if (val & unsignedExtension) != 0 {
+			return val
+		}
+	case CPUI_INT_SRIGHT:
+		val := cs.localExtensionType(op.Input(0), op)
+		if (val & signedExtension) != 0 {
+			return val
+		}
+	case CPUI_INT_XOR, CPUI_INT_OR, CPUI_INT_DIV, CPUI_INT_REM:
+		if (cs.localExtensionType(op.Input(0), op) & unsignedExtension) == 0 {
+			return unknownPromotion
+		}
+		if (cs.localExtensionType(op.Input(1), op) & unsignedExtension) == 0 {
+			return unknownPromotion
+		}
+		return unsignedExtension
+	case CPUI_INT_SDIV, CPUI_INT_SREM:
+		if (cs.localExtensionType(op.Input(0), op) & signedExtension) == 0 {
+			return unknownPromotion
+		}
+		if (cs.localExtensionType(op.Input(1), op) & signedExtension) == 0 {
+			return unknownPromotion
+		}
+		return signedExtension
+	case CPUI_INT_NEGATE, CPUI_INT_2COMP:
+		if (cs.localExtensionType(op.Input(0), op) & signedExtension) != 0 {
+			return signedExtension
+		}
+	case CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_LEFT, CPUI_INT_MULT:
+		// fallthrough to unknownPromotion below
+	default:
+		return noPromotion
+	}
+	return unknownPromotion
+}
+
+// checkIntPromotionForCompare reports whether the input at slot needs a cast
+// because of mismatched integer promotion across a comparison operator.
+// C++ parity: cast.cc CastStrategyC::checkIntPromotionForCompare (107-124).
+func (cs *CastStrategyC) checkIntPromotionForCompare(op *PcodeOp, slot int) bool {
+	exttype1 := cs.intPromotionType(op.Input(slot))
+	if exttype1 == noPromotion {
+		return false
+	}
+	if exttype1 == unknownPromotion {
+		return true
+	}
+	exttype2 := cs.intPromotionType(op.Input(1 - slot))
+	if (exttype1 & exttype2) != 0 {
+		return false
+	}
+	if exttype2 == noPromotion {
+		return false
+	}
+	return true
+}
+
+// checkIntPromotionForExtension reports whether the input to an INT_ZEXT/INT_SEXT
+// needs a cast because the natural integer promotion differs from the explicit
+// extension. C++ parity: cast.cc CastStrategyC::checkIntPromotionForExtension (126-138).
+func (cs *CastStrategyC) checkIntPromotionForExtension(op *PcodeOp) bool {
+	exttype := cs.intPromotionType(op.Input(0))
+	if exttype == noPromotion {
+		return false
+	}
+	if exttype == unknownPromotion {
+		return true
+	}
+	if (exttype&unsignedExtension) != 0 && op.Code() == CPUI_INT_ZEXT {
+		return false
+	}
+	if (exttype&signedExtension) != 0 && op.Code() == CPUI_INT_SEXT {
+		return false
+	}
+	return true
 }
 
 // CastStandard returns the data-type to cast to when an expression of type
