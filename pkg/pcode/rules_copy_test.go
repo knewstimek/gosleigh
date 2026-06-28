@@ -25,12 +25,19 @@ func TestRulesCopy_RewriteAndRegistration(t *testing.T) {
 		t.Fatalf("expected COPY of low piece, got %v", sub.Code())
 	}
 
+	// C++ parity: RuleMultiCollapse on absolute equality calls totalReplace +
+	// opDestroy, so the MULTIEQUAL is destroyed (readers redirected to the
+	// surviving value) rather than rewritten in place to a COPY.
 	multi := newRuleOp(data, CPUI_MULTIEQUAL, 4, x, x, x)
+	adduse := newRuleOp(data, CPUI_INT_ADD, 4, multi.Output(), y)
 	if got := NewRuleMultiCollapse("copy").ApplyOp(multi, data); got != 1 {
 		t.Fatalf("multicollapse ApplyOp=%d, want 1", got)
 	}
-	if multi.Code() != CPUI_COPY || multi.Input(0) != x {
-		t.Fatalf("expected collapsed COPY, got %v", multi.Code())
+	if !multi.IsDead() {
+		t.Fatalf("expected collapsed MULTIEQUAL to be destroyed, got %v", multi.Code())
+	}
+	if adduse.Input(0) != x {
+		t.Fatalf("expected MULTIEQUAL reader redirected to x, got %v", adduse.Input(0))
 	}
 
 	pool := NewActionPool(0, "batch-a")
