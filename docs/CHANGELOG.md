@@ -5,6 +5,20 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-29: H8 gcd_x86_32 golden parity 완료 (TestMSVC_Gcd PASS)
+오랜 gcd 갭 종료. 전 패키지(loader/pcode/sla/bridge) 그린. 근본 원인 5개 순차 수정:
+- `7975188` RulePropagateCopy addr-tied guard -> 실제 IsAddrTied (ruleaction.cc:3969).
+  `isEffectivelyAddrTied`(register/stack 전부 addrtied 오인) 제거 -> 스택파람<->레지스터 SSA 통합.
+- `e114152` RuleMultiCollapse mark-based self-ref skip 포팅 (ruleaction.cc:3254) +
+  OpDestroy dead-flag latent 버그 (PcodeOpDead 미설정으로 action IsDead 가드 무력화).
+- `06260bd` CoverBlock.Empty: `start==nil`만 -> `start==0 && stop==0` (cover.hh). 근본
+  cover 버그, loop-carried 교차 감지 복원 (다수 cover 의존 분석 영향).
+- `dac34ef` ActionNameVars explicit-unique 명명 + allocateCopyTrim 타입 상속.
+- `6d9ff29` TrimJoinblockMultiequals unique-output 게이트(스냅샷 발화) + printc
+  explicit-unique 선언/blank line + golden 파이프라인 snapshot+InferTypes.
+교훈: cover 교차(level 2)는 gcd/SumList 동일 -> 스냅샷 판별자 아님; unique-vs-addrtied
+출력이 (휴리스틱) 판별자. 잔여 부채는 STATUS H8-debt-1/2.
+
 ### Keystones 완료 (real port)
 - K1a/b/c: ParamActive + FuncProto 확장 + 8 prototype action real (ActionActiveParam,
   ActiveReturn, InputPrototype, OutputPrototype, PrototypeTypes, DefaultParams,
@@ -25,8 +39,7 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
   /PhiForm/CopyForceForm/LessConstForm) + RuleDouble* 실제 collapse 작동 (+1392줄)
 
 ### 여전히 스캐폴드/스텁 (3차 파동 target)
-- H8 (TestMSVC_Gcd) 여전히 FAIL -- printc comma_separate + MergeMarker 2차 패스
-  버그, actmainloop fix 후에도 잔존
+- ~~H8 (TestMSVC_Gcd)~~ **완료 2026-06-29** (위 엔트리 참조).
 - ActionConditionalConst/ConditionalExe 는 still TODO (condexe.cc 인프라 미포팅)
 - SplitVarnode Form 중 Equal1/2/3, LessThreeWay, MultForm, IndirectForm 는 stub
 - RuleDoubleStore reassignIndirects 는 stub (newVarnodeIop 의존)
