@@ -5,6 +5,22 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-29: H9 입력타입 인프라 (getInputCast/inputTypeLocal) 포팅
+ActionSetCasts driver의 documented core blocker(컴포넌트 2) 해소. `432b30e`:
+- TypeOp 인터페이스에 `InputTypeLocal`/`GetInputCast` 추가 (typeop_cast.go).
+  `opInputMeta` per-opcode metain 테이블은 typeop.cc TypeOpBinary/Unary/Func 생성자
+  metain + PTRADD/PTRSUB getInputLocal(TYPE_INT) 대응. base getInputCast =
+  CastStandard(inputTypeLocal, vn.readFacing, false, true) (typeop.cc:296). 충실
+  오버라이드: Copy/Load/Store/Zext/Sext/comparison(Equal-NotEqual-Sless-Less)/Ptradd/Ptrsub.
+- cast.go: int-promotion 머신리 포팅 (cast.cc:107-247) -- intPromotionType/
+  localExtensionType/checkIntPromotionForCompare/checkIntPromotionForExtension +
+  promoteSize(=4) + signbitNegative. 비교/확장 getInputCast의 정수승격 게이트 충족.
+- Gosleigh 단순화(문서화): HighVariable 부재로 read-facing vs def/own-type가
+  vn.TypeReadFacing(op)로 collapse -> PTRADD/PTRSUB slot0 캐스트 테스트 항상 no-cast;
+  Equal/NotEqual은 typeOrder 미포팅으로 in0 타입을 reqtype으로 사용(TODO).
+- 미배선: Apply/castInput/castOutput 본체 + 파이프라인 배선 + render-time assignCastStr
+  제거는 다음 체크포인트(Apply 전 op 순회라 부분 배선 불가). 단위 테스트 typeop_cast_test.go.
+
 ### 2026-06-29: H8 gcd_x86_32 golden parity 완료 (TestMSVC_Gcd PASS)
 오랜 gcd 갭 종료. 전 패키지(loader/pcode/sla/bridge) 그린. 근본 원인 5개 순차 수정:
 - `7975188` RulePropagateCopy addr-tied guard -> 실제 IsAddrTied (ruleaction.cc:3969).
