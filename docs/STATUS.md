@@ -1,8 +1,27 @@
 # 프로젝트 상태
 
-## 현재 단계: RulePropagateCopy addr-tied guard parity 수정 (2026-06-29)
+## 현재 단계: H8 gcd_x86_32 golden parity 완료 (2026-06-29)
 
-2026-06-29 세션. SSA 덤프 실측으로 H8 gcd 근본 원인을 재특정.
+**TestMSVC_Gcd PASS. 전 패키지(loader/pcode/sla/bridge) 그린.** gcd가 Ghidra golden과
+완전 일치: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; }`
+
+2026-06-29 세션 커밋 (master):
+- `7975188` RulePropagateCopy addr-tied guard -> 실제 IsAddrTied (ruleaction.cc:3969).
+- `e114152` RuleMultiCollapse self-ref skip (ruleaction.cc:3254) + OpDestroy dead-flag 버그.
+- `06260bd` CoverBlock.Empty: start만 -> start&&stop (cover.hh). loop-carried 교차 감지 복원.
+- `dac34ef` ActionNameVars explicit-unique 명명 + allocateCopyTrim 타입 상속.
+- `6d9ff29` H8 완료: TrimJoinblockMultiequals unique-output 게이트 + printc explicit-unique 선언.
+
+**기술 부채 (후속 정리 권장, 아래 미시작 참조)**:
+- TrimJoinblockMultiequals unique-output 게이트는 휴리스틱. 진짜 판별은 loop phi 간
+  cyclic/swap 의존성(lost-copy) -- cover 교차로는 gcd/SumList 구분 불가(둘 다 level 2).
+- golden 파이프라인(runPipelineGhidra)이 테스트에 손으로 조립됨 -> 프로덕션 ActionGroup 승격 필요.
+
+아래는 이 마일스톤에 이른 세션 상세 (이력, CHANGELOG 이전 후보).
+
+---
+
+### 근본 원인 재특정 (SSA 덤프 실측)
 - **버그**: `rules_copy.go`의 `isEffectivelyAddrTied`가 register/stack 공간 varnode를
   전부 addr-tied로 취급 -> RulePropagateCopy가 `stack param -> register-space phi`
   propagation을 잘못 차단. C++ `RulePropagateCopy::applyOp` (ruleaction.cc:3969)는
@@ -53,32 +72,18 @@ while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1
 ```
 golden과의 차이가 **단 한 줄** (`int iVar1;` 지역 선언)까지 좁혀짐.
 
-그러나 이 조합은 **커밋 안 함** -- TrimJoinblockMultiequals가 **SumList를 깨뜨림**
-(과발화). gcd와 SumList 모두 phi 출력 vs back-edge 입력 cover 교차가 **동일하게
-level 2** (TJM_DBG로 실측). 즉 **cover 교차는 판별자가 아님**.
+**해결 (커밋 `6d9ff29`)**: TrimJoinblockMultiequals를 **unique 출력 phi에만** 발화하도록
+게이트. gcd의 swap된 레지스터 loop 변수는 unique 출력 -> 발화(스냅샷), SumList/CountedLoop의
+addr-tied 스토리지 loop 변수는 비발화(for-loop 유지). 실측: gcd/SumList 모두 cover 교차
+level 2 동일 -> **cover 교차는 판별자가 아님**, unique-vs-addrtied 출력이 판별자.
+printc는 explicit unique(iVar1)를 선언+blank line에 포함하도록 수정.
 
-**진짜 판별자 (다음 세션 핵심)**: 스냅샷(temp)이 필요한 건 loop phi들 간 **cyclic/swap
-의존성**일 때만.
-- gcd: `new_a = b_phi; new_b = a_phi % b_phi` -- a와 b가 서로의 현재값을 읽음 (swap)
-  -> lost-copy, temp 필수 -> while-loop + iVar1 스냅샷.
-- SumList: `new_param_3 = param_3[1]` -- param_3 self-update (다른 loop var 안 읽음)
-  -> 유효한 for-loop, temp 불필요 -> for-loop, 스냅샷 없음.
-이는 lost-copy 문제 / for-loop 유효성 (body 내 phi 변수에 대한 RAW hazard) 분석 필요.
-cover 교차만으로는 구분 불가.
-
-남은 작업 (둘):
-1. **스냅샷 발화 판별자**: loop body에서 phi 변수에 대한 within-body RAW hazard
-   (또는 phi들 간 cyclic 의존) 감지 시에만 snipReads. 커밋된 unique 명명/타입 상속이
-   이미 받쳐줌. C++ 참조: `block.cc BlockWhileDo::finalizePrinting`/for-loop 판정,
-   `merge.cc eliminateIntersect`의 copyShadow/boundtype 필터.
-2. **PrintC 지역 선언**: 스냅샷 unique(iVar1)의 `int iVar1;` 선언이 출력 안 됨.
-   explicit unique-space 지역 변수를 선언 섹션에 포함시켜야 함. 수정 대상 `printc.go`
-   선언 emission.
-
-아키텍처 배경: Ghidra는 addr-tied param의 loop phi 출력이 addr-tied 스택 varnode라
-mergeAddrTied/eliminateIntersect가 처리. Gosleigh는 phi 출력이 unique라 mergeOp가
-back-edge를 TrimOpInput -> for-loop화. TrimJoinblockMultiequals는 이를 우회하는 Go-only
-헬퍼지만 발화 조건이 너무 넓음.
+**남은 기술 부채**: unique-output 게이트는 휴리스틱. 진짜 판별은 loop phi 간 cyclic/swap
+의존성(lost-copy):
+- gcd: `new_a = b_phi; new_b = a_phi % b_phi` -- a/b가 서로 현재값을 읽음(swap) -> temp 필수.
+- SumList: `new_param_3 = param_3[1]` -- self-update -> for-loop, temp 불필요.
+C++ `block.cc BlockWhileDo::finalizePrinting` / `merge.cc eliminateIntersect`
+(copyShadow/boundtype 필터) 참조해 원리적 판별로 교체 권장. (미시작 항목 참조)
 
 진단용 SSA 덤프: `pkg/loader/msvc_diag_test.go` `dumpSSA`/`vnStr` (GCD_DUMP=1 가드).
 
@@ -131,9 +136,14 @@ back-edge를 TrimOpInput -> for-loop화. TrimJoinblockMultiequals는 이를 우�
   for-loop iterator로 잘못 수락되던 버그 수정. CountedLoop path는 COPY input이
   다른 HV이므로 영향 없음. 결과: Gcd while-loop 정상 복구.
 
-### H8 근본 원인 맵 (최신 -- 2026-04-15)
+### H8 근본 원인 맵 (2026-04-15, **SUPERSEDED -- gcd 완료됨 2026-06-29**)
 
-TestMSVC_Gcd 현재 출력 (RulePushMultiME 순서 수정 후):
+> 이 절의 "joinblock != loop-head" 이론은 2026-06-29 세션의 SSA 덤프 실측으로
+> 반증/해결됨. 실제 근본은 RulePropagateCopy addr-tied guard + CoverBlock.Empty +
+> RuleMultiCollapse self-ref + 스냅샷 unique-output 게이트였음 (상단 완료 요약 참조).
+> 아래는 이력으로만 보존.
+
+TestMSVC_Gcd 당시 출력 (RulePushMultiME 순서 수정 후):
 ```
 void processEntry entry(undefined4 param_1,undefined4 param_2,int param_3,int param_4)
 {
@@ -218,14 +228,23 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
     `pkg/pcode/funcproto.go` ApplyCallingConvention 이동
   - 성공 기준: gcd 반환형 `void`로 정확히 결정. anchorReturnReg 휴리스틱 제거 가능해짐.
 
-- [ ] H8: while-condition comma_separate 렌더링 (gcd 완성)
-  - 역할: while 조건 블록에 MULTIEQUAL 할당이 있을 때
-    `while (iVar1 = param_4, iVar1 != 0)` 형식으로 렌더링.
-    현재 emitWhileBlock이 이 패턴 미지원.
-  - C++ 참조: `ghidra-ref/.../printc.cc` PrintC::emitBlockWhile() (setMod(comma_separate)),
-    `ghidra-ref/.../blockbasic.cc` BlockWhileDo::emit()
-  - 수정 대상: `pkg/pcode/printc.go` emitWhileBlock()
-  - 성공 기준: TestMSVC_Gcd PASS (t.Skip 제거), gcd_x86_32 golden 일치.
+- [x] H8: gcd_x86_32 golden parity **완료 (2026-06-29)**. TestMSVC_Gcd PASS.
+  comma-while 스냅샷 포함 전체 일치. 상단 완료 요약 참조.
+
+- [ ] H8-debt-1: 스냅샷 발화 판별자를 원리적으로 교체
+  - 현상: `Merge.TrimJoinblockMultiequals`가 unique-output phi에만 발화하는 휴리스틱.
+    cover 교차로는 gcd(swap, temp 필요) vs SumList(self-update, for-loop)를 구분 못 함
+    (둘 다 level 2). 현재는 출력 varnode의 unique-vs-addrtied로 우회.
+  - C++ 참조: `block.cc BlockWhileDo::finalizePrinting` (for-loop 유효성),
+    `merge.cc Merge::eliminateIntersect` (copyShadow/boundtype 필터)
+  - 수정 대상: `pkg/pcode/merge.go` TrimJoinblockMultiequals 발화 조건
+  - 성공 기준: loop phi 간 cyclic/swap (lost-copy) 의존성 기반 판정; gcd/SumList/
+    CountedLoop 전부 PASS 유지하며 휴리스틱 주석 제거.
+
+- [ ] H8-debt-2: golden 파이프라인을 프로덕션 ActionGroup으로 승격
+  - 현상: `msvc_diag_test.go runPipelineGhidra`가 actmainloop를 테스트에서 손으로 조립.
+  - 수정 대상: 프로덕션 ActionGroup/decompile 진입점으로 이동, 테스트는 호출만.
+  - 성공 기준: 기존 MSVC 골든 테스트 전부 PASS 유지.
 
 - [ ] H9: ActionSetCasts -- 타입 캐스트 삽입
   - 역할: 타입 불일치 지점에 명시적 캐스트 삽입.
