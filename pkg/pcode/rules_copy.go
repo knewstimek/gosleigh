@@ -122,17 +122,126 @@ func NewRuleMultiCollapse(group string) *RuleMultiCollapse {
 	return r
 }
 
+// heritageKnownVn mirrors C++ Varnode::isHeritageKnown(): a varnode has a
+// stable identity once it is constant, written, or a function input.
+func heritageKnownVn(v *Varnode) bool {
+	return v != nil && (v.IsConstant() || v.IsWritten() || v.IsInput())
+}
+
+// apply collapses a MULTIEQUAL whose branches all carry the same value.
+// C++ parity: ruleaction.cc RuleMultiCollapse::applyOp (3254-3363). The
+// mark-based walk skips branches that recur unchanged around a loop (a branch
+// that is the MULTIEQUAL output itself, or another already-visited MULTIEQUAL),
+// which is what collapses a self-referential phi MULTIEQUAL(V, self) -> COPY(V).
+// Without this, dead addr-tied self-phis keep a param HighVariable's Cover alive
+// across the loop and block merging the param with its loop-carried register.
+//
+// Deviation: C++ reuses an existing copy via cseFindInBlock on the functional-
+// equality path; Gosleigh always creates a fresh copy (no CSE) -- a safe
+// inefficiency, not a correctness change.
 func (r *RuleMultiCollapse) apply(op *PcodeOp, data *Funcdata) int {
 	if op.NumInput() == 0 {
 		return 0
 	}
-	base := op.Input(0)
-	for i := 1; i < op.NumInput(); i++ {
-		if !sameValue(base, op.Input(i)) {
-			return 0
+	for i := 0; i < op.NumInput(); i++ {
+		if !heritageKnownVn(op.Input(i)) {
+			return 0 // everything must be heritaged before collapse
 		}
 	}
-	return rewriteToCopy(data, op, base)
+
+	funcEq := false // matching by functional equality
+	nofunc := false // functional equality initially allowed
+	var defcopyr *Varnode
+	matchlist := make([]*Varnode, 0, op.NumInput())
+	for i := 0; i < op.NumInput(); i++ {
+		matchlist = append(matchlist, op.Input(i))
+	}
+	// Find base branch to match: first input not defined by a MULTIEQUAL.
+	for i := 0; i < op.NumInput(); i++ {
+		copyr := matchlist[i]
+		if !copyr.IsWritten() || copyr.Def().Code() != CPUI_MULTIEQUAL {
+			defcopyr = copyr
+			break
+		}
+	}
+
+	success := true
+	skiplist := []*Varnode{op.Output()}
+	op.Output().SetMark()
+	for j := 0; j < len(matchlist); j++ {
+		copyr := matchlist[j]
+		if copyr.IsMark() {
+			continue // recurring value in a loop -- treat as equal, skip
+		}
+		if defcopyr == nil {
+			defcopyr = copyr
+			if !copyr.IsWritten() || copyr.Def().Code() == CPUI_MULTIEQUAL {
+				nofunc = true // MULTIEQUAL/unwritten cannot match by functional equality
+			}
+		} else if defcopyr == copyr {
+			continue // a matching branch
+		} else if !nofunc && functionalEquality(defcopyr, copyr) {
+			// Functional-equality collapse path not yet ported; bail rather than
+			// risk a malformed op. Absolute-equality (incl. self-ref skip) below
+			// is what the gcd loop-phi collapse needs.
+			// TODO known mismatch: port the func_eq copy/CSE path (ruleaction.cc 3324-3351).
+			_ = funcEq
+			for _, v := range skiplist {
+				v.ClearMark()
+			}
+			return 0
+		} else if copyr.IsWritten() && copyr.Def().Code() == CPUI_MULTIEQUAL {
+			// Give the branch one last chance: add its inputs to the match list.
+			newop := copyr.Def()
+			skiplist = append(skiplist, copyr)
+			copyr.SetMark()
+			for i := 0; i < newop.NumInput(); i++ {
+				matchlist = append(matchlist, newop.Input(i))
+			}
+		} else {
+			success = false
+			break
+		}
+	}
+
+	if !success {
+		for _, v := range skiplist {
+			v.ClearMark()
+		}
+		return 0
+	}
+
+	for _, copyr := range skiplist {
+		copyr.ClearMark()
+		cur := copyr.Def()
+		if cur == nil {
+			continue
+		}
+		if funcEq {
+			// Only functional equality: rebuild cur as a copy of defcopyr's op.
+			newop := defcopyr.Def()
+			if newop == nil {
+				continue
+			}
+			needsReinsert := cur.Code() == CPUI_MULTIEQUAL
+			parms := make([]*Varnode, 0, newop.NumInput())
+			for i := 0; i < newop.NumInput(); i++ {
+				parms = append(parms, newop.Input(i))
+			}
+			data.OpSetAllInput(cur, parms)
+			data.OpSetOpcode(cur, newop.Code())
+			if needsReinsert {
+				bl := cur.Parent()
+				data.OpUninsert(cur)
+				data.OpInsertBegin(cur, bl) // insert AFTER any other MULTIEQUAL
+			}
+		} else {
+			// Absolute equality: replace all refs to copyr with defcopyr.
+			data.TotalReplace(copyr, defcopyr)
+			data.OpDestroy(cur)
+		}
+	}
+	return 1
 }
 
 type RuleHumptyOr struct{ batchRule }

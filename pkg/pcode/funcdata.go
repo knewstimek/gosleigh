@@ -587,7 +587,13 @@ func (fd *Funcdata) OpDestroy(op *PcodeOp) {
 	for i := 0; i < op.NumInput(); i++ {
 		fd.OpUnsetInput(op, i)
 	}
+	// obank.Destroy picks the alive/dead list by op.IsDead(), so remove from the
+	// bank first, then mark the op dead. Without the flag, callers relying on the
+	// action framework's op.IsDead() guard (e.g. after a rule destroys the op it
+	// is processing and returns 1) would keep running rules on a freed op whose
+	// inputs are now nil. C++ parity: Funcdata::opDestroy leaves the op dead.
 	fd.obank.Destroy(op)
+	op.SetFlag(PcodeOpDead)
 }
 
 // OpDestroyRecursive is the Go port of Funcdata::opDestroyRecursive in funcdata_op.cc.
