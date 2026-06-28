@@ -145,3 +145,73 @@ func (cs *CastStrategyC) CastStandard(reqtype, curtype Datatype, careUintInt, ca
 
 	return reqtype
 }
+
+// IsSubpieceCast reports whether a SUBPIECE of intype into outtype at the given
+// byte offset can be rendered as a plain cast rather than an explicit SUBPIECE().
+// C++ parity: cast.cc CastStrategyC::isSubpieceCast (411-432).
+func (cs *CastStrategyC) IsSubpieceCast(outtype, intype Datatype, offset uint32) bool {
+	if outtype == nil || intype == nil {
+		return false
+	}
+	if offset != 0 {
+		return false
+	}
+	inmeta := intype.Metatype()
+	if inmeta != TYPE_INT && inmeta != TYPE_UINT && inmeta != TYPE_UNKNOWN && inmeta != TYPE_PTR &&
+		inmeta != TYPE_PARTIALSTRUCT && inmeta != TYPE_PARTIALUNION {
+		return false
+	}
+	outmeta := outtype.Metatype()
+	if outmeta != TYPE_INT && outmeta != TYPE_UINT && outmeta != TYPE_UNKNOWN &&
+		outmeta != TYPE_PTR && outmeta != TYPE_FLOAT {
+		return false
+	}
+	if inmeta == TYPE_PTR {
+		if outmeta == TYPE_PTR {
+			if outtype.Size() < intype.Size() {
+				return true // cast from a far pointer to a near pointer
+			}
+		}
+		if outmeta != TYPE_INT && outmeta != TYPE_UINT {
+			return false // other casts don't make sense for pointers
+		}
+	}
+	return true
+}
+
+// IsSextCast reports whether an INT_SEXT from intype to outtype can be rendered
+// as a plain cast. C++ parity: cast.cc CastStrategyC::isSextCast (443-455).
+func (cs *CastStrategyC) IsSextCast(outtype, intype Datatype) bool {
+	if outtype == nil || intype == nil {
+		return false
+	}
+	metaout := outtype.Metatype()
+	if metaout != TYPE_UINT && metaout != TYPE_INT {
+		return false
+	}
+	// Extension to larger storage follows the input's signedness, so the input
+	// must be SIGNED for SEXT to read as a cast.
+	metain := intype.Metatype()
+	if metain != TYPE_INT && metain != TYPE_BOOL {
+		return false
+	}
+	return true
+}
+
+// IsZextCast reports whether an INT_ZEXT from intype to outtype can be rendered
+// as a plain cast. C++ parity: cast.cc CastStrategyC::isZextCast (457-469).
+func (cs *CastStrategyC) IsZextCast(outtype, intype Datatype) bool {
+	if outtype == nil || intype == nil {
+		return false
+	}
+	metaout := outtype.Metatype()
+	if metaout != TYPE_UINT && metaout != TYPE_INT {
+		return false
+	}
+	// The input must be UNSIGNED for ZEXT to read as a cast.
+	metain := intype.Metatype()
+	if metain != TYPE_UINT && metain != TYPE_BOOL {
+		return false
+	}
+	return true
+}
