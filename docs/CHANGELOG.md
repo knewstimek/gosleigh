@@ -5,6 +5,23 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-29: H9 ActionSetCasts 본체 + 출력타입 인프라 + 배선 블로커 진단
+`705d5eb`+`483d3f9`:
+- 출력측 인프라(typeop_cast.go): opOutputMeta + OutputTypeLocal/GetOutputToken.
+  오버라이드 Copy/Load/IntAdd(arithmeticOutputStandard)/Ptradd. Ptrsub(downChain)/
+  Subpiece(findTruncation, 전용 struct 부재)는 TODO.
+- cast.go: arithmeticOutputStandard(cast.cc:394, typeOrder 단순화).
+- funcdata.go: NewUnique(castOutput용).
+- action_deadcode.go: ActionSetCasts.Apply/castInput/castOutput 본체
+  (coreaction.cc 2534-2776). union/testStructOffset0/markExplicit*/PTRADD-PTRSUB
+  refit 생략(문서화). 격리 테스트 TestActionSetCastsInsertsCopyCast PASS.
+- **배선 블로커 경험적 입증(`483d3f9`)**: bridge.Decompile 시험 배선 -> sum_list/
+  counted_loop 회귀(`(int *)param_3[1]` -> `(int *)*((int *)((int)param_3+4))`).
+  근본: Gosleigh는 포인터 산술을 INT_ADD 유지+tryRenderSubscript로 `ptr[index]`
+  합성하나 base getInputCast(INT_ADD)가 포인터를 `(int)` 캐스트해 subscript 파괴.
+  Ghidra는 PTRADD라 no-cast. 선행: 최종 InferTypes 후 PTRADD 형성(RulePtrArith
+  재발화). parity상 hack 억제 금지 -> 배선 되돌리고 본체는 unwired 유지.
+
 ### 2026-06-29: H9 입력타입 인프라 (getInputCast/inputTypeLocal) 포팅
 ActionSetCasts driver의 documented core blocker(컴포넌트 2) 해소. `432b30e`:
 - TypeOp 인터페이스에 `InputTypeLocal`/`GetInputCast` 추가 (typeop_cast.go).
