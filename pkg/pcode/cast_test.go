@@ -59,3 +59,62 @@ func TestCastStandardC(t *testing.T) {
 		}
 	}
 }
+
+// TestCastPredicates checks the SUBPIECE/SEXT/ZEXT cast predicates against the
+// rules ported from cast.cc CastStrategyC.
+func TestCastPredicates(t *testing.T) {
+	tf := NewTypeFactory()
+	cs := NewCastStrategyC(tf)
+
+	i4 := tf.GetBase(4, TYPE_INT, "int")
+	u4 := tf.GetBase(4, TYPE_UINT, "uint")
+	b1 := tf.GetBase(1, TYPE_BOOL, "bool")
+	f4 := tf.GetBase(4, TYPE_FLOAT, "float")
+	pfar := tf.GetPointer(4, i4, 1)
+	pnear := tf.GetPointer(2, i4, 1)
+
+	// IsSubpieceCast
+	subCases := []struct {
+		name    string
+		out, in Datatype
+		off     uint32
+		want    bool
+	}{
+		{"nonzero offset", i4, i4, 1, false},
+		{"int<-int off0", i4, i4, 0, true},
+		{"float<-int", f4, i4, 0, true},
+		{"int<-ptr", i4, pfar, 0, true},
+		{"near<-far ptr", pnear, pfar, 0, true},
+		{"ptr<-ptr same size", pfar, pfar, 0, false},
+		{"float<-ptr", f4, pfar, 0, false},
+		{"int<-float", i4, f4, 0, false},
+	}
+	for _, c := range subCases {
+		if got := cs.IsSubpieceCast(c.out, c.in, c.off); got != c.want {
+			t.Errorf("IsSubpieceCast %s = %v, want %v", c.name, got, c.want)
+		}
+	}
+
+	// IsSextCast / IsZextCast
+	if !cs.IsSextCast(i4, i4) {
+		t.Error("IsSextCast int<-int should be true")
+	}
+	if cs.IsSextCast(i4, u4) {
+		t.Error("IsSextCast int<-uint should be false")
+	}
+	if cs.IsSextCast(f4, i4) {
+		t.Error("IsSextCast float<-int should be false")
+	}
+	if !cs.IsSextCast(i4, b1) {
+		t.Error("IsSextCast int<-bool should be true")
+	}
+	if !cs.IsZextCast(i4, u4) {
+		t.Error("IsZextCast int<-uint should be true")
+	}
+	if cs.IsZextCast(i4, i4) {
+		t.Error("IsZextCast int<-int should be false")
+	}
+	if !cs.IsZextCast(i4, b1) {
+		t.Error("IsZextCast int<-bool should be true")
+	}
+}

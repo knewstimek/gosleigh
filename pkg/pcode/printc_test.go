@@ -41,6 +41,37 @@ func newRawBuildEnv() rawBuildEnv {
 	}
 }
 
+// TestPrintCSubpieceCast verifies that a truncating SUBPIECE at offset 0 of an
+// integer renders as a plain cast (via CastStrategyC.IsSubpieceCast) rather than
+// an explicit SUBPIECE() pseudo-call.
+func TestPrintCSubpieceCast(t *testing.T) {
+	env := newRawBuildEnv()
+	fd := NewFuncdata("subcast", env.fnAddr, env.uniq, 0x1000, env.cnst)
+	state := newPrintCState(NewPrintC(), fd)
+	longType := sharedTypeFactory.GetBase(8, TYPE_INT, "long")
+	intType := sharedTypeFactory.GetBase(4, TYPE_INT, "int")
+
+	in := fd.SetInputVarnode(fd.NewVarnode(8, address.Address{Space: env.reg, Offset: 0x10}))
+	SetVarnodeType(in, longType)
+
+	sub := fd.NewOp(2, env.fnAddr)
+	fd.OpSetOpcode(sub, CPUI_SUBPIECE)
+	fd.OpSetInput(sub, in, 0)
+	fd.OpSetInput(sub, fd.NewConstant(4, 0), 1)
+	fd.NewVarnodeOut(4, address.Address{Space: env.uniq, Offset: 0x100}, sub)
+	SetVarnodeType(sub.Output(), intType)
+	fd.OpMarkAlive(sub)
+
+	state.collectSymbols()
+	got, err := state.renderOpExpr(sub, cPrecLowest)
+	if err != nil {
+		t.Fatalf("renderOpExpr(subpiece): %v", err)
+	}
+	if got != "(int)param_1" {
+		t.Fatalf("SUBPIECE-as-cast: got %q, want \"(int)param_1\"", got)
+	}
+}
+
 func TestPrintCExpressionPrecedence(t *testing.T) {
 	t.Run("binary and boolean", func(t *testing.T) {
 		env := newRawBuildEnv()

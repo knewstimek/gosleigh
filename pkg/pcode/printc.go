@@ -146,24 +146,24 @@ func newPrintCState(printer *PrintC, fd *Funcdata) *printCState {
 		decls.noCommaSpace = true
 	}
 	return &printCState{
-		printer:          printer,
-		fd:               fd,
-		emitter:          emitter,
-		lang:             NewPrintLanguage(emitter),
-		decls:            decls,
-		names:            make(map[*Varnode]string),
-		inline:           make(map[*PcodeOp]bool),
-		emittedTypes:     make(map[uint64]bool),
-		activeExpr:       make(map[*PcodeOp]bool),
-		blockLabels:      make(map[*FlowBlock]string),
-		prologueOps:      make(map[*PcodeOp]bool),
-		prologueVarnodes: make(map[*Varnode]bool),
-		returnOnlyLocs:   make(map[locationKey]bool),
+		printer:             printer,
+		fd:                  fd,
+		emitter:             emitter,
+		lang:                NewPrintLanguage(emitter),
+		decls:               decls,
+		names:               make(map[*Varnode]string),
+		inline:              make(map[*PcodeOp]bool),
+		emittedTypes:        make(map[uint64]bool),
+		activeExpr:          make(map[*PcodeOp]bool),
+		blockLabels:         make(map[*FlowBlock]string),
+		prologueOps:         make(map[*PcodeOp]bool),
+		prologueVarnodes:    make(map[*Varnode]bool),
+		returnOnlyLocs:      make(map[locationKey]bool),
 		identityOps:         make(map[*PcodeOp]bool),
 		returnCarrierParams: make(map[locationKey]*Varnode),
-		entryAnnotation:  printer.entryAnnotation,
-		ghostParamCount:  printer.ghostParamCount,
-		ghidraFormat:     printer.ghidraFormat,
+		entryAnnotation:     printer.entryAnnotation,
+		ghostParamCount:     printer.ghostParamCount,
+		ghidraFormat:        printer.ghidraFormat,
 	}
 }
 
@@ -2857,6 +2857,14 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	case CPUI_PIECE:
 		return s.renderPseudoCall("CONCAT", op, 0)
 	case CPUI_SUBPIECE:
+		// A truncating SUBPIECE that drops high bytes (offset 0) of an integer/
+		// pointer renders as a plain cast, not SUBPIECE(). C++ parity:
+		// CastStrategyC::isSubpieceCast via PrintC SUBPIECE emission.
+		// Offset is treated little-endian (offset 0 = low bytes); endian-aware
+		// adjustment (isSubpieceCastEndian) is a future generalization.
+		if s.subpieceIsCast(op) {
+			return s.renderCast(op)
+		}
 		return s.renderPseudoCall("SUBPIECE", op, 0)
 	case CPUI_CAST:
 		return s.renderCast(op)
@@ -2941,6 +2949,25 @@ func (s *printCState) renderUnary(op *PcodeOp, token string, prec ExprPrecedence
 		return ExprFragment{}, err
 	}
 	return s.lang.UnaryExpr(token, prec, inner), nil
+}
+
+// subpieceIsCast reports whether a SUBPIECE op should render as a plain cast
+// (offset 0, integer/pointer truncation) rather than an explicit SUBPIECE().
+// C++ parity: CastStrategyC::isSubpieceCast (cast.cc:411).
+func (s *printCState) subpieceIsCast(op *PcodeOp) bool {
+	if op.NumInput() < 2 {
+		return false
+	}
+	off, ok := constantValue(op.Input(1))
+	if !ok {
+		return false
+	}
+	out := op.Output()
+	in0 := op.Input(0)
+	if out == nil || in0 == nil {
+		return false
+	}
+	return sharedCastStrategyC.IsSubpieceCast(out.TypeReadFacing(nil), in0.TypeReadFacing(nil), uint32(off))
 }
 
 func (s *printCState) renderCast(op *PcodeOp) (ExprFragment, error) {
