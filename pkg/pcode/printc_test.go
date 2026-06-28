@@ -72,6 +72,36 @@ func TestPrintCSubpieceCast(t *testing.T) {
 	}
 }
 
+// TestPrintCZextNotCast verifies that a zero-extension of a SIGNED input renders
+// as an explicit ZEXT() pseudo-call (not a cast), since IsZextCast is false when
+// the input is not unsigned.
+func TestPrintCZextNotCast(t *testing.T) {
+	env := newRawBuildEnv()
+	fd := NewFuncdata("zext", env.fnAddr, env.uniq, 0x1000, env.cnst)
+	state := newPrintCState(NewPrintC(), fd)
+	intType := sharedTypeFactory.GetBase(4, TYPE_INT, "int")
+	ulongType := sharedTypeFactory.GetBase(8, TYPE_UINT, "ulong")
+
+	in := fd.SetInputVarnode(fd.NewVarnode(4, address.Address{Space: env.reg, Offset: 0x10}))
+	SetVarnodeType(in, intType)
+
+	zext := fd.NewOp(1, env.fnAddr)
+	fd.OpSetOpcode(zext, CPUI_INT_ZEXT)
+	fd.OpSetInput(zext, in, 0)
+	fd.NewVarnodeOut(8, address.Address{Space: env.uniq, Offset: 0x100}, zext)
+	SetVarnodeType(zext.Output(), ulongType)
+	fd.OpMarkAlive(zext)
+
+	state.collectSymbols()
+	got, err := state.renderOpExpr(zext, cPrecLowest)
+	if err != nil {
+		t.Fatalf("renderOpExpr(zext): %v", err)
+	}
+	if got != "ZEXT(param_1)" {
+		t.Fatalf("ZEXT of signed input: got %q, want \"ZEXT(param_1)\"", got)
+	}
+}
+
 func TestPrintCExpressionPrecedence(t *testing.T) {
 	t.Run("binary and boolean", func(t *testing.T) {
 		env := newRawBuildEnv()
