@@ -258,8 +258,12 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
        `assignCastStr`의 COPY/LOAD 캐스트 판정에 배선됨(실사용). render-time 판정은
        이제 C++ 충실. 단, 아래 2~4(분석-time CPUI_CAST 삽입)는 미구현.
     2. 전 opcode의 `getInputCast`/`getOutputCast` (TypeOp별) -- 현재 전무.
-    3. CastStrategy 나머지 (markExplicitUnsigned/LongSize, arithmeticOutputStandard,
-       isSubpieceCast/isSextCast/isZextCast 등).
+    3. CastStrategy 나머지:
+       - `IsSubpieceCast`/`IsSextCast`/`IsZextCast` -- **완료 `7c350d3`** (cast.go,
+         단위 테스트). IsSubpieceCast는 PrintC SUBPIECE 렌더링에 배선됨(offset 0 정수
+         truncation -> `(int)x`, 검증 테스트 `TestPrintCSubpieceCast`). 단 endian-aware
+         (isSubpieceCastEndian)는 미구현(little-endian 가정).
+       - 미구현: markExplicitUnsigned/LongSize, arithmeticOutputStandard.
     4. ActionSetCasts apply/castInput/castOutput/resolveUnion/checkPointerIssues/
        insertPtrsubZero + PTRSUB/PTRADD 재작성 + updateType/getHighTypeReadFacing/
        inheritResolution(resolution 머신리).
