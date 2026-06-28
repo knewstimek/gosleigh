@@ -2,6 +2,7 @@ package loader_test
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -49,6 +50,62 @@ func loadGhidraGolden(t *testing.T, key string) string {
 		t.Fatalf("loadGhidraGolden: key %q has no functions", key)
 	}
 	return entry.Functions[0].C
+}
+
+// vnStr formats a Varnode as space:0xoff[size]#hv<flags> for SSA diagnosis.
+// flags: I=input, T=addrtied. Used only by dumpSSA.
+func vnStr(vn *pcode.Varnode) string {
+	if vn == nil {
+		return "<nil>"
+	}
+	name := ""
+	if hv := vn.High(); hv != nil {
+		name = hv.Name()
+	}
+	flags := ""
+	if vn.IsInput() {
+		flags += "I"
+	}
+	if vn.IsAddrTied() {
+		flags += "T"
+	}
+	sp := "?"
+	if vn.Space() != nil {
+		sp = vn.Space().Name
+	}
+	return fmt.Sprintf("%s:0x%x[%d]#%s%s", sp, vn.Offset(), vn.Size(), name, flags)
+}
+
+// dumpSSA prints the SSA op stream block-by-block for diagnosis. Guarded by the
+// GCD_DUMP env var so it stays silent in normal runs. Lets us correlate the
+// loop-head COPY / addr-tied phi shape against the Ghidra-intended structure.
+func dumpSSA(t *testing.T, fd *pcode.Funcdata, label string) {
+	if os.Getenv("GCD_DUMP") == "" {
+		return
+	}
+	t.Helper()
+	var sb strings.Builder
+	sb.WriteString("=== SSA DUMP: " + label + " ===\n")
+	bg := fd.GetBasicBlocks()
+	for i := 0; i < bg.GetSize(); i++ {
+		bb, ok := bg.GetBlock(i).Concrete().(*pcode.BlockBasic)
+		if !ok || bb == nil {
+			continue
+		}
+		sb.WriteString(fmt.Sprintf("-- block %d --\n", i))
+		for _, op := range bb.Ops() {
+			sb.WriteString("  ")
+			if out := op.Output(); out != nil {
+				sb.WriteString(vnStr(out) + " = ")
+			}
+			sb.WriteString(op.Code().String())
+			for s := 0; s < op.NumInput(); s++ {
+				sb.WriteString(" " + vnStr(op.Input(s)))
+			}
+			sb.WriteString("\n")
+		}
+	}
+	t.Logf("%s", sb.String())
 }
 
 // runPipelineGhidra runs the full decompiler pipeline with Ghidra-compatible
@@ -133,6 +190,7 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 	// place before conditional-join phi creation. This matches Ghidra's merge
 	// phase order more closely and removes the raw-stack/trim-COPY split.
 	pcode.NewActionMergeRequired("analysis").Apply(result.Funcdata)
+	dumpSSA(t, result.Funcdata, name+" after MergeRequired (pre-NodeJoin)")
 	// H8: NormalizeBranches + NodeJoin (ConditionalJoin) + RulePushMultiME + DeadCode
 	// before BlockStructure so the gcd while-loop condition is merged correctly.
 	// C++ parity: coreaction.cc ActionNormalizeBranches + ActionNodeJoin run before
@@ -150,6 +208,7 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 	pcode.NewActionAssignHigh("analysis").Apply(result.Funcdata)
 	// Re-run MergeMarker so new MULTIEQUAL ops from NodeJoin get HighVariable assignments.
 	pcode.NewMerge(result.Funcdata).MergeMarker()
+	dumpSSA(t, result.Funcdata, name+" after NodeJoin+MergeMarker (pre-BlockStructure)")
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionPreferComplement("analysis").Apply(result.Funcdata)
@@ -176,6 +235,7 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 	// H4: ActionNameVars -- assign iVar1/uVar1 names to unnamed register-space HVs.
 	// C++ parity: coreaction.cc ActionNameVars::apply() + ScopeLocal::assignDefaultNames().
 	pcode.NewActionNameVars("analysis").Apply(result.Funcdata)
+	dumpSSA(t, result.Funcdata, name+" final (pre-PrintC)")
 
 	out, err := pcode.NewPrintC().
 		SetRegisterNames(engine.RegisterNamesByLocation()).
@@ -298,6 +358,7 @@ func runPipeline(t *testing.T, prog []byte, name string) string {
 	// place before conditional-join phi creation. This matches Ghidra's merge
 	// phase order more closely and removes the raw-stack/trim-COPY split.
 	pcode.NewActionMergeRequired("analysis").Apply(result.Funcdata)
+	dumpSSA(t, result.Funcdata, name+" after MergeRequired (pre-NodeJoin)")
 	// H8: NormalizeBranches + NodeJoin (ConditionalJoin) + RulePushMultiME + DeadCode
 	// before BlockStructure so the gcd while-loop condition is merged correctly.
 	// C++ parity: coreaction.cc ActionNormalizeBranches + ActionNodeJoin run before
@@ -310,6 +371,7 @@ func runPipeline(t *testing.T, prog []byte, name string) string {
 	pcode.NewMerge(result.Funcdata).TrimJoinblockMultiequals()
 	// Re-run MergeMarker so new MULTIEQUAL ops from NodeJoin get HighVariable assignments.
 	pcode.NewMerge(result.Funcdata).MergeMarker()
+	dumpSSA(t, result.Funcdata, name+" after NodeJoin+MergeMarker (pre-BlockStructure)")
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionPreferComplement("analysis").Apply(result.Funcdata)

@@ -15,7 +15,6 @@
 package pcode
 
 import (
-	"fmt"
 	"sort"
 
 	"gosleigh/pkg/address"
@@ -710,7 +709,6 @@ func (m *Merge) markInternalCopies() {
 		}
 		// If input and output share the same HighVariable, the COPY is internal.
 		if h1 == in0.High() {
-			fmt.Printf("INTERNDBG markInternalCopies: COPY out=%v in=%v same HV=%p\n", v1, in0, h1)
 			op.SetFlag(PcodeOpNonPrinting)
 		}
 	}

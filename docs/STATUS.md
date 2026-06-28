@@ -1,18 +1,37 @@
 # 프로젝트 상태
 
-## 현재 단계: RulePushMultiME/RulePropagateCopy 순서 수정 (2026-04-15)
+## 현재 단계: RulePropagateCopy addr-tied guard parity 수정 (2026-06-29)
 
-2026-04-15 세션에서 `rules_copy.go batchARuleFactories` 내 `RulePushMultiME`를
-`RulePropagateCopy` 앞으로 이동. C++ parity: `coreaction.cc oppool1`에서
-`RulePushMulti`(line 5529)가 `RulePropagateCopy`(line 5577)보다 먼저 등록됨.
+2026-06-29 세션. SSA 덤프 실측으로 H8 gcd 근본 원인을 재특정.
+- **버그**: `rules_copy.go`의 `isEffectivelyAddrTied`가 register/stack 공간 varnode를
+  전부 addr-tied로 취급 -> RulePropagateCopy가 `stack param -> register-space phi`
+  propagation을 잘못 차단. C++ `RulePropagateCopy::applyOp` (ruleaction.cc:3969)는
+  실제 `Varnode::isAddrTied()` 플래그만 검사하며 register는 addr-tied가 아님.
+- **수정**: guard를 실제 `vn.IsAddrTied()`로 교체, `isEffectivelyAddrTied` 제거.
+  Gosleigh의 IsAddrTied()는 이미 정확 (스택파람=T, 레지스터=무플래그, 덤프로 확인).
+- **부수 정리**: `merge.go markInternalCopies`의 잔존 `INTERNDBG` fmt.Printf 제거 + fmt import 정리.
+- **효과**: 이제 propagation이 entry 값을 통합 -- pre-NodeJoin phi가
+  `register:0x0 = MULTIEQUAL(stack#param_1, register:0x4)` 형태로 스택파람을 직접 입력.
+  gcd 출력이 논리적으로 올바른 gcd로 수렴 (이전: 잘못된 for-loop). 회귀 0건
+  (loader/pcode/sla 전 패키지 통과, gcd만 FAIL).
 
-수정 효과: joinblock phi `unique:0xae41f #128 = MULTIEQUAL(ECX#5, ECX#54)`가
-`MULTIEQUAL(stack:0x8, register:0x8)` phi인 `#131`에 올바르게 병합됨.
-`tmp_131` 유출 해소. TestMSVC_Gcd 여전히 FAIL (다른 구조적 gap).
+현재 gcd 출력 (golden 대조 경로):
+```
+tmp_125 = param_3;
+iVar1 = param_4;
+while (iVar1 != 0) { iVar1 = tmp_125 % iVar1; tmp_125 = iVar1; }
+```
+golden: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; }`
 
-현재 출력: for-loop + iVar2 (phi 구조 변화로 for-loop 탐지가 재활성화됨).
-남은 핵심 gap: joinblock 구조 차이 (Gap 3) + comma-while 렌더링 미구현 (Gap 4).
-`### H8 근본 원인 맵 (최신)` 참조.
+남은 gap (둘 다 같은 근본): live loop-var unique가 소스 스택파람과 병합되지 않아
+param_3/param_4가 아닌 tmp/iVar로 명명되고, init COPY가 loop-head 스냅샷이 아닌
+hoist된 대입으로 출력됨. 근본은 **merge/trim 머신리** -- block-0 트림 COPY
+(`unique = COPY stack#param`)는 MergeMarker의 snipReads/mergeAddrTied가 마지막
+propagation 패스 이후에 생성하므로 propagation 대상이 아님. snipReads/TrimOpOutput가
+addr-tied 정체성을 어느 varnode에 남기는지가 관건. comma-while 렌더링(Gap 4)은
+기본 포맷에서 이미 동작하므로 블로커 아님.
+
+진단용 SSA 덤프: `pkg/loader/msvc_diag_test.go` `dumpSSA`/`vnStr` (GCD_DUMP=1 가드).
 
 ### 2026-04-14 오후 세션 커밋 (mergeAddrTied 포팅)
 
