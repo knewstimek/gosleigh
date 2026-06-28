@@ -42,31 +42,43 @@ golden: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_
 현재 gcd 출력 (golden 경로): `for (param_4 = param_4; param_4 != 0; param_4 = param_3 % param_4) { param_3 = param_4; }`
 golden: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; }`
 
-남은 단일 gap -- **trim 방향 (addr-tied phi 출력 vs unique phi 출력)**:
-현재 SSA (pre-PrintC, golden 경로):
-```
-block1: a_phi#param_1 = MULTIEQUAL(a_init, new_a);  b_phi#param_2 = MULTIEQUAL(b_init, 0xae427)
-        INT_EQUAL(b_phi, 0)
-block3: new_b(register:0x8)#iVar1 = INT_SREM(a_phi, b_phi);  new_a#param_1 = COPY(b_phi)
-        0xae427#param_2 = COPY(new_b)   <- TrimOpInput가 back-edge에 삽입한 COPY
-```
-교차는 감지됐으나 trim 방향이 Ghidra와 다름:
-- **Gosleigh**: phi back-edge 입력(new_b)을 TrimOpInput -> `0xae427 = COPY(new_b)` 삽입
-  -> ActionForLoops가 이를 iterator로 잡아 for-loop화 -> body/increment read-order 위반
-  으로 의미상 틀린 C (`param_4 = param_3 % param_4`가 새 param_3를 읽음).
-- **Ghidra**: phi 출력(addr-tied stack param_4)의 reads를 snipReads -> loop-head에
-  `iVar1 = COPY(param_4)` 스냅샷, 모든 read를 iVar1로 redirect -> 깔끔한 while-loop.
+### 2026-06-29 추가 진전 3 (스냅샷 메커니즘 검증 + 판별자 문제 확정)
 
-근본 원인 (아키텍처): **Ghidra는 addr-tied param의 loop phi 출력이 addr-tied 스택
-varnode라서 mergeAddrTied의 eliminateIntersect(snipReads)가 head 스냅샷을 생성**.
-Gosleigh는 NodeJoin이 phi 출력을 unique로 만들어 mergeAddrTied가 처리 못 하고
-mergeOp가 back-edge를 trim. 레지스터 값이 스택 슬롯으로 완전히 propagate되어 phi
-출력이 stack:0x8이 되거나, NodeJoin/heritage가 addr-tied phi 출력을 내야 함.
-- C++ 참조: `merge.cc Merge::mergeAddrTied`/`eliminateIntersect`/`snipReads`,
-  NodeJoin(ConditionalJoin) 출력 varnode 선택.
-- 수정 대상: `pkg/pcode/action_nodejoin.go` 또는 heritage phi 출력 공간 선택,
-  또는 mergeOp가 unique loop-phi 출력도 snipReads하도록 확장.
-- ActionForLoops가 trim COPY를 iterator로 오인하는 것도 부차 이슈.
+스냅샷 메커니즘이 **동작함을 검증**: golden 경로(runPipelineGhidra)에
+`Merge.TrimJoinblockMultiequals()`를 AssignHigh 직전에 추가 + ForLoops 뒤
+`ActionInferTypes` 재실행 + (커밋된) ActionNameVars unique 명명 + allocateCopyTrim
+타입 상속을 조합하면 gcd 출력이 **golden body와 정확히 일치**:
+```
+while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; }
+```
+golden과의 차이가 **단 한 줄** (`int iVar1;` 지역 선언)까지 좁혀짐.
+
+그러나 이 조합은 **커밋 안 함** -- TrimJoinblockMultiequals가 **SumList를 깨뜨림**
+(과발화). gcd와 SumList 모두 phi 출력 vs back-edge 입력 cover 교차가 **동일하게
+level 2** (TJM_DBG로 실측). 즉 **cover 교차는 판별자가 아님**.
+
+**진짜 판별자 (다음 세션 핵심)**: 스냅샷(temp)이 필요한 건 loop phi들 간 **cyclic/swap
+의존성**일 때만.
+- gcd: `new_a = b_phi; new_b = a_phi % b_phi` -- a와 b가 서로의 현재값을 읽음 (swap)
+  -> lost-copy, temp 필수 -> while-loop + iVar1 스냅샷.
+- SumList: `new_param_3 = param_3[1]` -- param_3 self-update (다른 loop var 안 읽음)
+  -> 유효한 for-loop, temp 불필요 -> for-loop, 스냅샷 없음.
+이는 lost-copy 문제 / for-loop 유효성 (body 내 phi 변수에 대한 RAW hazard) 분석 필요.
+cover 교차만으로는 구분 불가.
+
+남은 작업 (둘):
+1. **스냅샷 발화 판별자**: loop body에서 phi 변수에 대한 within-body RAW hazard
+   (또는 phi들 간 cyclic 의존) 감지 시에만 snipReads. 커밋된 unique 명명/타입 상속이
+   이미 받쳐줌. C++ 참조: `block.cc BlockWhileDo::finalizePrinting`/for-loop 판정,
+   `merge.cc eliminateIntersect`의 copyShadow/boundtype 필터.
+2. **PrintC 지역 선언**: 스냅샷 unique(iVar1)의 `int iVar1;` 선언이 출력 안 됨.
+   explicit unique-space 지역 변수를 선언 섹션에 포함시켜야 함. 수정 대상 `printc.go`
+   선언 emission.
+
+아키텍처 배경: Ghidra는 addr-tied param의 loop phi 출력이 addr-tied 스택 varnode라
+mergeAddrTied/eliminateIntersect가 처리. Gosleigh는 phi 출력이 unique라 mergeOp가
+back-edge를 TrimOpInput -> for-loop화. TrimJoinblockMultiequals는 이를 우회하는 Go-only
+헬퍼지만 발화 조건이 너무 넓음.
 
 진단용 SSA 덤프: `pkg/loader/msvc_diag_test.go` `dumpSSA`/`vnStr` (GCD_DUMP=1 가드).
 
