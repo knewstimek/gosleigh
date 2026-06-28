@@ -249,10 +249,20 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
     actmainloop 트리로 통합. universalAction 내 미완 action들이 완성돼야 가능.
   - 참고: 진단용 `runPipeline`(비골든 변형)은 아직 손조립 + dumpSSA 유지.
 
-- [ ] H9: ActionSetCasts -- 타입 캐스트 삽입
-  - 역할: 타입 불일치 지점에 명시적 캐스트 삽입.
-    현재 수동 캐스트 로직(assignCastStr 등)이 근사로 처리.
-  - C++ 참조: `ghidra-ref/.../coreaction.cc` ActionSetCasts::apply(),
-    `ghidra-ref/.../printc.cc` EmitXml::tagOp() 캐스트 처리
-  - 수정 대상: `pkg/pcode/printc.go`, `pkg/pcode/action_infertypes.go`
-  - 성공 기준: 기존 캐스트 golden (sum_list의 `(int *)`, complex_max의 `(int)`) 유지.
+- [~] H9: ActionSetCasts -- 타입 캐스트 삽입 (**대형 다중 세션 포팅**, keystone 착수)
+  - 역할: 타입 불일치 지점에 명시적 CPUI_CAST op 삽입 (현재는 render-time
+    `assignCastStr` 근사 + ActionSetCasts no-op stub).
+  - **스코프 정정**: "contained" 아님. 다음을 모두 포팅해야 함:
+    1. `CastStrategy::castStandard` (C 전략) -- **완료 `f545917`** (`pkg/pcode/cast.go`
+       `CastStrategyC.CastStandard` + 단위 테스트, 미배선).
+    2. 전 opcode의 `getInputCast`/`getOutputCast` (TypeOp별) -- 현재 전무.
+    3. CastStrategy 나머지 (markExplicitUnsigned/LongSize, arithmeticOutputStandard,
+       isSubpieceCast/isSextCast/isZextCast 등).
+    4. ActionSetCasts apply/castInput/castOutput/resolveUnion/checkPointerIssues/
+       insertPtrsubZero + PTRSUB/PTRADD 재작성 + updateType/getHighTypeReadFacing/
+       inheritResolution(resolution 머신리).
+  - C++ 참조: `cast.cc`, `coreaction.cc ActionSetCasts::apply` (2724+), `typeop.cc`
+    각 TypeOp::getInputCast.
+  - 렌더링: PrintC는 이미 CPUI_CAST 처리(renderCast) -> 삽입만 하면 됨.
+  - 성공 기준: 기존 캐스트 golden (sum_list `(int *)`, complex_max `(int)`) 유지하며
+    assignCastStr 의존 제거.
