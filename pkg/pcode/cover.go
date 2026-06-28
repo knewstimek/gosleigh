@@ -78,11 +78,14 @@ type CoverBlock struct {
 }
 
 // Empty returns true if the block has no coverage.
-// C++ parity: CoverBlock::empty -- only checks start, NOT stop.
-// A block that has had SetEnd called but no SetBegin is still "empty" in C++.
-// We must match this: start==nil means empty, regardless of stop.
+// C++ parity: CoverBlock::empty -- a block is empty only when BOTH start and
+// stop are null (cover.hh: `return ((start==0)&&(stop==0))`). A SetAll block
+// (start=nil, stop=blockEndSentinel) or a SetEnd-only block (start=nil,
+// stop=ref) is NOT empty. The earlier start-only check made a fully covered
+// block read as empty, so addRefRecurse/AddRefPoint overwrote it and the
+// intersection test missed loop-carried overlaps (gcd b_phi vs new_b).
 func (cb *CoverBlock) Empty() bool {
-	return cb.start == nil
+	return cb.start == nil && cb.stop == nil
 }
 
 // SetAll marks the entire block as covered.
