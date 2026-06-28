@@ -1,18 +1,5 @@
 package pcode
 
-import "gosleigh/pkg/address"
-
-func isEffectivelyAddrTied(vn *Varnode) bool {
-	if vn == nil || vn.Space() == nil {
-		return false
-	}
-	sp := vn.Space()
-	// Register space and stack space hold concrete CPU state -- treat as addr-tied.
-	// C++ parity: Varnode::addrtied is set for these by syncVarnodesWithSymbols.
-	return (sp.Kind == address.SpaceKindProcessor && sp.Name == "register") ||
-		sp.Kind == address.SpaceKindStack
-}
-
 type RulePropagateCopy struct{ batchRule }
 
 func NewRulePropagateCopy(group string) *RulePropagateCopy {
@@ -41,8 +28,13 @@ func (r *RulePropagateCopy) apply(op *PcodeOp, data *Funcdata) int {
 				continue
 			}
 			out := op.Output()
-			if out != nil && isEffectivelyAddrTied(invn) && isEffectivelyAddrTied(out) {
-				if invn.Space() != out.Space() || invn.Offset() != out.Offset() || invn.Size() != out.Size() {
+			// C++ parity: ruleaction.cc:3969 -- block only when both the COPY
+			// source and the marker output carry the real addrtied flag and map
+			// to different addresses. Registers used as transient computation are
+			// not addrtied, so propagating a stack param into a register-space phi
+			// is allowed (this is what unifies the param and register SSA chains).
+			if out != nil && invn.IsAddrTied() && out.IsAddrTied() {
+				if invn.Space() != out.Space() || invn.Offset() != out.Offset() {
 					continue
 				}
 			}
