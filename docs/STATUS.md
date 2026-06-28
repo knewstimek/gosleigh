@@ -1,8 +1,9 @@
 # 프로젝트 상태
 
-## 현재 상태 (2026-06-29 세션 종료, master `324b090`)
+## 현재 상태 (2026-06-29 세션 종료, master `432b30e`)
 
-**전 패키지 그린** (loader/pcode/sla/bridge). 이번 세션 성과:
+**전 패키지 그린** (loader/pcode/sla/bridge). 직전 세션 H8 + H9 프리미티브에 더해
+이번 세션은 H9 입력타입 인프라(getInputCast/inputTypeLocal) 포팅(`432b30e`). 이전 성과:
 
 1. **H8 gcd_x86_32 golden parity 완료** -- TestMSVC_Gcd PASS. gcd가 Ghidra golden과
    완전 일치: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; }`.
@@ -18,10 +19,15 @@
 ### 다음 작업 (우선순위)
 
 1. **[대형, 전용 세션] H9 ActionSetCasts driver** -- 분석-time에 `CPUI_CAST` op을 SSA에
-   삽입하는 본체. 현재는 render-time `assignCastStr` 근사. CastStrategy 프리미티브는 완성됨.
-   막힌 곳: Gosleigh TypeOp가 `PropagateType`만 있고 `inputTypeLocal`/`getInputCast`가 전무 ->
-   전 opcode 입력타입 인프라부터 구축. 그 위에 `apply`/`castInput`/`castOutput` -> 기존
-   assignCastStr 안전 제거 + 골든 회귀 검증. (아래 미시작 H9 상세)
+   삽입하는 본체. 현재는 render-time `assignCastStr` 근사. CastStrategy 프리미티브 + **입력타입
+   인프라(getInputCast/inputTypeLocal) 완료 (`432b30e`)**. 남은 것:
+   - 출력측 `getOutputToken`/`outputTypeLocal` 포팅 (castOutput이 소비).
+   - `ActionSetCasts.Apply`/`castInput`/`castOutput` 본체 (action_deadcode.go:122 stub) +
+     PTRADD/PTRSUB 재검사 + insertPtrsubZero.
+   - 파이프라인 배선(InferTypes 후) + render-time `assignCastStr`/SUBPIECE-SEXT-ZEXT
+     render-as-cast/nullPtrCastStr 제거 + renderCast 동일 출력 검증.
+   - **주의**: Apply가 전 op 순회 -> base getInputCast가 전 opcode 충실해야 spurious cast
+     회귀 방지. 부분 배선 불가, 일괄 전환 필요. (아래 미시작 H9 상세)
 2. **[대안] H8-debt-2 reconcile** -- `bridge.Decompile` 손정렬 subset을 프로덕션
    `BuildUniversalAction`과 통합 (universalAction 내 미완 action 완성 필요).
 3. **[대안] H8-debt-1** 스냅샷 판별자 원리화, **H7** ActionPrototypeTypes 배선.
@@ -74,10 +80,12 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
     1. `CastStrategy::castStandard` (C 전략) -- **완료 `f545917` + 배선 `64e8c90`**
        (`pkg/pcode/cast.go` `CastStrategyC.CastStandard` + 단위 테스트). printc
        `assignCastStr`의 COPY/LOAD 캐스트 판정에 배선됨(실사용).
-    2. 전 opcode의 `getInputCast`/`getOutputCast` (TypeOp별) -- **현재 전무. driver의 핵심 막힘.**
-       Gosleigh TypeOp는 `PropagateType`만 있음. `inputTypeLocal`(opcode별 기대 입력타입)부터
-       구축해야 함. base: `op.inputTypeLocal(slot)` vs `vn.getHighTypeReadFacing(op)` ->
-       `CastStandard(false,true)` (typeop.cc:296).
+    2. 전 opcode의 `getInputCast`/`inputTypeLocal` (TypeOp별) -- **완료 `432b30e`**
+       (typeop_cast.go + cast.go int-promotion). TypeOp 인터페이스에 `InputTypeLocal`/
+       `GetInputCast` 추가, opInputMeta 테이블(per-opcode metain), 충실 오버라이드
+       (Copy/Load/Store/Zext/Sext/comparison/Ptradd/Ptrsub). int-promotion 머신리
+       (intPromotionType/localExtensionType/checkIntPromotionFor*) 포팅. 단위 테스트.
+       남은 출력측 `getOutputToken`/`outputTypeLocal`는 castOutput과 함께 다음 체크포인트.
     3. CastStrategy 나머지:
        - `IsSubpieceCast`/`IsSextCast`/`IsZextCast` -- **완료 `7c350d3`+`3b64207`**
          (cast.go, 단위 테스트). 셋 다 PrintC 렌더링에 배선+검증됨:
