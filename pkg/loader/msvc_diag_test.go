@@ -130,128 +130,16 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 		t.Fatalf("bridge.Build: %v", err)
 	}
 
-	// Build ProtoModel before Heritage so guardCalls can insert INDIRECT ops at
-	// CALL sites to model caller-saved/callee-saved register effects.
-	// StackSpace is nil here; updated after ActionStackPtrFlow resolves it.
-	// C++ parity: ActionPrototypeTypes runs before Heritage in Ghidra's pipeline.
-	cdecl := pcode.NewProtoModelFromCspec(result.CspecData, nil, nil)
-	xr := engine.XRefs()
-	cdecl.WithEffectOffsets(func(name string) (uint64, int32, bool) {
-		_, off, sz, ok := xr.RegisterByName(name)
-		return off, int32(sz), ok
+	// The full decompile pipeline now lives in production: bridge.Decompile.
+	// This test only loads bytes, runs the bridge, and renders Ghidra-format C.
+	_ = name
+	out, err := bridge.Decompile(engine, result, bridge.DecompileConfig{
+		GhidraFormat:     true,
+		ProcessEntryName: "processEntry",
+		GhostParams:      2,
 	})
-
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).
-		WithProtoModel(cdecl).
-		Heritage(result.Graph)
-	spf := pcode.NewActionStackPtrFlow("analysis")
-	spf.Apply(result.Funcdata)
-
-	if ss := spf.StackSpace(); ss != nil {
-		stackHeritage := pcode.NewHeritage(result.Funcdata, []*address.Space{ss})
-		stackHeritage.BuildADT(result.Graph)
-		slots := spf.StackSlots()
-		sizes := spf.StackSlotSizes()
-		for i, addr := range slots {
-			stackHeritage.HeritageRange(result.Graph, addr, sizes[i])
-		}
-	}
-
-	// Resolve stack space and return register now that Heritage and StackPtrFlow are done.
-	var regSpaceIdx int = -1
-	cdecl.StackSpace = spf.StackSpace()
-	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		sp := vn.Space()
-		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && cdecl.StackSpace == nil {
-			cdecl.StackSpace = sp
-		}
-		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdx < 0 {
-			regSpaceIdx = int(sp.Index)
-		}
-	}
-	if regSpaceIdx >= 0 {
-		cdecl.WithReturnReg(regSpaceIdx, 0, 4)
-	}
-	pcode.ApplyCallingConvention(result.Funcdata, cdecl)
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
-	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
-	// H8: run MergeRequired before NodeJoin so addr-tied snipReads COPYs are in
-	// place before conditional-join phi creation. This matches Ghidra's merge
-	// phase order more closely and removes the raw-stack/trim-COPY split.
-	pcode.NewActionMergeRequired("analysis").Apply(result.Funcdata)
-	dumpSSA(t, result.Funcdata, name+" after MergeRequired (pre-NodeJoin)")
-	// H8: NormalizeBranches + NodeJoin (ConditionalJoin) + RulePushMultiME + DeadCode
-	// before BlockStructure so the gcd while-loop condition is merged correctly.
-	// C++ parity: coreaction.cc ActionNormalizeBranches + ActionNodeJoin run before
-	// ActionBlockStructure in the main decompile loop.
-	pcode.NewActionNormalizeBranches("analysis").Apply(result.Funcdata)
-	pcode.NewActionNodeJoin("analysis").Apply(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-node-join", "analysis").Perform(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	// Create the loop-head snapshot (iVar1 = COPY(param)) for a unique-output
-	// loop-cond MULTIEQUAL whose value is read after its back-edge value is
-	// defined (gcd's swapped loop variable). Gated to unique phi outputs so it
-	// does not disturb for-loops whose loop variable is already addr-tied
-	// (SumList, CountedLoop). C++ parity intent: merge.cc eliminateIntersect/
-	// snipReads on the addr-tied loop phi output.
-	pcode.NewMerge(result.Funcdata).TrimJoinblockMultiequals()
-	// C++ parity: Funcdata::newUniqueOut calls assignHigh() immediately, so NodeJoin
-	// MULTIEQUAL outputs already have HighVariables when mergeMarker runs.
-	// In Go, NewUniqueOut does not call assignHigh, so we run AssignHigh first.
-	pcode.NewActionAssignHigh("analysis").Apply(result.Funcdata)
-	// Re-run MergeMarker so new MULTIEQUAL ops from NodeJoin get HighVariable assignments.
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-	dumpSSA(t, result.Funcdata, name+" after NodeJoin+MergeMarker (pre-BlockStructure)")
-	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionPreferComplement("analysis").Apply(result.Funcdata)
-	// H3/H5/H6: AssignHigh -> MergeRequired -> MarkExplicit -> MarkImplied -> MergeCopy
-	// C++ parity: coreaction.cc ~5734-5739; runs before ActionFinalStructure in C++,
-	// here placed after FinalStructure but before ForLoops so that testTerminal's
-	// IsExplicit check in ActionForLoops has valid explicit/implied state.
-	pcode.NewActionAssignHigh("analysis").Apply(result.Funcdata)
-	pcode.NewActionMergeRequired("analysis").Apply(result.Funcdata)
-	pcode.NewActionMarkExplicit("analysis").Apply(result.Funcdata)
-	pcode.NewActionMarkImplied("analysis").Apply(result.Funcdata)
-	// ActionMergeCopy must run before ActionForLoops so the cross-variable COPY
-	// rejection in tryMarkForLoop sees post-merge HighVariables. C++ parity:
-	// BlockWhileDo::finalizePrinting runs during PrintC emit, after all merges.
-	pcode.NewActionMergeCopy("analysis").Apply(result.Funcdata)
-	// ActionDominantCopy consolidates redundant copy-trim COPYs (multiple COPYs
-	// from the same source), reducing SSA noise after mergeAddrTied.
-	// C++ parity: coreaction.cc ActionDominantCopy runs after ActionMergeCopy.
-	pcode.NewActionDominantCopy("analysis").Apply(result.Funcdata)
-	// ActionCopyMarker marks internal/redundant COPYs as NonPrinting.
-	// C++ parity: coreaction.cc ActionCopyMarker.
-	pcode.NewActionCopyMarker("analysis").Apply(result.Funcdata)
-	pcode.NewActionForLoops("analysis").Apply(result.Funcdata)
-	// Re-infer types so the loop-head snapshot COPY (born after the first
-	// InferTypes pass in TrimJoinblockMultiequals) propagates its source type and
-	// names as iVar (int) rather than uVar. C++ runs InferTypes repeatedly.
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
-	// H4: ActionNameVars -- assign iVar1/uVar1 names to unnamed register-space HVs.
-	// C++ parity: coreaction.cc ActionNameVars::apply() + ScopeLocal::assignDefaultNames().
-	pcode.NewActionNameVars("analysis").Apply(result.Funcdata)
-	dumpSSA(t, result.Funcdata, name+" final (pre-PrintC)")
-
-	out, err := pcode.NewPrintC().
-		SetRegisterNames(engine.RegisterNamesByLocation()).
-		SetProcessEntry("processEntry", 2).
-		SetGhidraFormat().
-		Emit(result.Funcdata)
 	if err != nil {
-		t.Fatalf("PrintC.Emit: %v", err)
+		t.Fatalf("bridge.Decompile: %v", err)
 	}
 	return out
 }
