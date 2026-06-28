@@ -241,10 +241,13 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
   - 성공 기준: loop phi 간 cyclic/swap (lost-copy) 의존성 기반 판정; gcd/SumList/
     CountedLoop 전부 PASS 유지하며 휴리스틱 주석 제거.
 
-- [ ] H8-debt-2: golden 파이프라인을 프로덕션 ActionGroup으로 승격
-  - 현상: `msvc_diag_test.go runPipelineGhidra`가 actmainloop를 테스트에서 손으로 조립.
-  - 수정 대상: 프로덕션 ActionGroup/decompile 진입점으로 이동, 테스트는 호출만.
-  - 성공 기준: 기존 MSVC 골든 테스트 전부 PASS 유지.
+- [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **부분 완료 (2026-06-29, `5a39f6c`)**
+  - 완료: 골든 파이프라인을 `bridge.Decompile(engine, result, DecompileConfig)` 프로덕션
+    함수로 추출. `runPipelineGhidra`는 bridge.Build + bridge.Decompile 호출만. 전 골든 PASS.
+  - 남은 것: `bridge.Decompile`의 손정렬 action subset을 프로덕션 `BuildUniversalAction`
+    (coreaction.cc ActionDatabase::universalAction 충실 포팅)과 reconcile -> 단일 정식
+    actmainloop 트리로 통합. universalAction 내 미완 action들이 완성돼야 가능.
+  - 참고: 진단용 `runPipeline`(비골든 변형)은 아직 손조립 + dumpSSA 유지.
 
 - [ ] H9: ActionSetCasts -- 타입 캐스트 삽입
   - 역할: 타입 불일치 지점에 명시적 캐스트 삽입.
