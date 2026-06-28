@@ -15,21 +15,38 @@
   gcd 출력이 논리적으로 올바른 gcd로 수렴 (이전: 잘못된 for-loop). 회귀 0건
   (loader/pcode/sla 전 패키지 통과, gcd만 FAIL).
 
+### 2026-06-29 추가 진전 (RuleMultiCollapse + OpDestroy)
+
+- `RuleMultiCollapse`를 C++ mark-based walk로 정식 포팅 (self-ref/back-edge skip).
+  죽은 addr-tied self-phi `MULTIEQUAL(param, self)`가 collapse되어, param HV의
+  cover가 루프 전체로 부풀던 문제 해소 -> live loop-var가 스택파람과 정상 병합.
+- `Funcdata.OpDestroy` latent 버그 수정: dead 플래그 미설정으로 action 프레임워크
+  `op.IsDead()` 가드가 무력화되던 것. 이제 bank 제거 후 PcodeOpDead 설정.
+- **효과**: gcd 변수 정체성이 golden과 일치 (param_3/param_4). SSA가 논리적으로
+  완전히 올바른 gcd로 수렴. 회귀 0건.
+
 현재 gcd 출력 (golden 대조 경로):
 ```
-tmp_125 = param_3;
-iVar1 = param_4;
-while (iVar1 != 0) { iVar1 = tmp_125 % iVar1; tmp_125 = iVar1; }
+while (param_4 != 0) { param_4 = param_3 % param_4; param_3 = param_4; }
 ```
 golden: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; }`
 
-남은 gap (둘 다 같은 근본): live loop-var unique가 소스 스택파람과 병합되지 않아
-param_3/param_4가 아닌 tmp/iVar로 명명되고, init COPY가 loop-head 스냅샷이 아닌
-hoist된 대입으로 출력됨. 근본은 **merge/trim 머신리** -- block-0 트림 COPY
-(`unique = COPY stack#param`)는 MergeMarker의 snipReads/mergeAddrTied가 마지막
-propagation 패스 이후에 생성하므로 propagation 대상이 아님. snipReads/TrimOpOutput가
-addr-tied 정체성을 어느 varnode에 남기는지가 관건. comma-while 렌더링(Gap 4)은
-기본 포맷에서 이미 동작하므로 블로커 아님.
+남은 단일 gap -- **loop-carried cover 교차 trim (iVar1 스냅샷)**:
+현재 SSA (pre-PrintC, golden 경로):
+```
+block1: a_phi#param_1 = MULTIEQUAL(a_init, new_a);  b_phi#param_2 = MULTIEQUAL(b_init, new_b)
+        INT_EQUAL(b_phi, 0)
+block3: new_b(register:0x8)#param_2 = INT_SREM(a_phi, b_phi);  new_a#param_1 = COPY(b_phi)
+```
+param_4(param_2) HV에 `b_phi`와 `new_b`가 함께 있는데, body에서 `new_b = a % b_phi`
+이후 `new_a = COPY(b_phi)`가 b_phi를 다시 읽음 -> b_phi와 new_b cover 교차. 같은 HV라
+PrintC가 둘 다 param_4로 출력해 `param_3 = param_4`가 틀린 값을 읽음. Ghidra는 이
+교차를 감지해 loop-head에 `iVar1 = COPY(b_phi)` 스냅샷을 넣고 모든 b_phi read를
+iVar1로 redirect (snipReads). 즉 **mergeMarker MergeOp의 cover 교차 감지/trimOpOutput
+또는 Cover 계산이 이 loop-carried 교차를 못 잡는 것**이 마지막 갭.
+- C++ 참조: `merge.cc Merge::mergeOp` (cover test -> trimOpOutput), `Merge::snipReads`.
+- 수정 대상: `pkg/pcode/merge.go` MergeOp / Cover intersection 경로.
+- comma-while 렌더링(구 Gap 4)은 이미 동작하므로 블로커 아님.
 
 진단용 SSA 덤프: `pkg/loader/msvc_diag_test.go` `dumpSSA`/`vnStr` (GCD_DUMP=1 가드).
 
