@@ -2118,7 +2118,9 @@ func (s *printCState) assignCastStr(op *PcodeOp) string {
 		if srcType == nil {
 			return ""
 		}
-		if _, isPtr := srcType.(*Pointer); isPtr {
+		// C++ parity: a cast is needed iff CastStrategyC::castStandard says so
+		// (cast.cc:300). Replaces the ad-hoc "src is a pointer -> no cast" check.
+		if sharedCastStrategyC.CastStandard(outPtr, srcType, false, true) == nil {
 			return ""
 		}
 		return "(" + CTypeString(outPtr) + ")"
@@ -2133,9 +2135,10 @@ func (s *printCState) assignCastStr(op *PcodeOp) string {
 			addr := op.Input(op.NumInput() - 1)
 			if addr != nil {
 				if addrPtr, addrIsPtr := addr.TypeReadFacing(nil).(*Pointer); addrIsPtr {
-					// Natural result is addrPtr.Pointee(); if that is not itself a pointer
-					// but the output is, a cast is required.
-					if _, pointeeIsPtr := addrPtr.Pointee().(*Pointer); !pointeeIsPtr {
+					// Natural LOAD result is addrPtr.Pointee(); a cast is needed iff
+					// castStandard says the output pointer type differs from it.
+					// C++ parity: CastStrategyC::castStandard (cast.cc:300).
+					if sharedCastStrategyC.CastStandard(outPtr, addrPtr.Pointee(), false, true) != nil {
 						return "(" + CTypeString(outPtr) + ")"
 					}
 				}
