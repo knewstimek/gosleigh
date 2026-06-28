@@ -19,6 +19,20 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 교훈: cover 교차(level 2)는 gcd/SumList 동일 -> 스냅샷 판별자 아님; unique-vs-addrtied
 출력이 (휴리스틱) 판별자. 잔여 부채는 STATUS H8-debt-1/2.
 
+### 2026-06-29: 프로덕션 디컴파일 진입점 + H9 cast 프리미티브
+- `5a39f6c` **bridge.Decompile** 프로덕션 진입점 추출 (H8-debt-2 부분). 골든 디컴파일
+  파이프라인(proto 셋업 + Heritage + ActionStackPtrFlow + actmainloop 순서 action subset
+  + PrintC)이 테스트 헬퍼 `runPipelineGhidra`에만 있던 것을 프로덕션 `bridge.Decompile`로
+  추출, 테스트는 호출만. universalAction 전체 reconcile은 미완(STATUS H8-debt-2).
+- `f545917`+`64e8c90` **CastStrategyC.CastStandard** 포팅 (cast.cc:300-392) + 단위 테스트.
+  printc `assignCastStr`의 COPY/LOAD 캐스트 판정에 배선 -> render-time 판정 C++ 충실화.
+- `7c350d3`+`3b64207` **IsSubpieceCast/IsSextCast/IsZextCast** 포팅 (cast.cc:411-469) +
+  단위 테스트. PrintC 배선+검증: SUBPIECE offset0 정수 truncation -> `(int)x`;
+  SEXT/ZEXT는 natural일 때만 cast, 아니면 SEXT()/ZEXT(). (render 테스트
+  TestPrintCSubpieceCast/TestPrintCZextNotCast)
+- 남은 H9: ActionSetCasts driver(분석-time CPUI_CAST 삽입) -- getInputCast/inputTypeLocal
+  인프라(전무)부터. STATUS H9 참조.
+
 ### Keystones 완료 (real port)
 - K1a/b/c: ParamActive + FuncProto 확장 + 8 prototype action real (ActionActiveParam,
   ActiveReturn, InputPrototype, OutputPrototype, PrototypeTypes, DefaultParams,
