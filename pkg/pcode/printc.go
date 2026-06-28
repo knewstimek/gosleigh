@@ -227,7 +227,10 @@ func (s *printCState) emit() (string, error) {
 		if s.prologueVarnodes[vn] {
 			continue
 		}
-		if vn.Space() != nil && vn.Space().IsUnique() {
+		// Mirror emitLocalDeclarations: implied unique temps are not declared, but
+		// an explicit unique (the loop-head snapshot iVar1) is, so it counts as a
+		// visible local and earns the blank line before the body.
+		if vn.Space() != nil && vn.Space().IsUnique() && !vn.IsExplicit() {
 			continue
 		}
 		// Skip locals that were remapped to a param name (G5: no separate declaration).
@@ -999,14 +1002,14 @@ func (s *printCState) emitLocalDeclarations() {
 		if s.prologueVarnodes[vn] {
 			continue
 		}
-		// Skip unique-space varnodes: their defining ops are always suppressed
-		// by emitOps (unique-space ops are SSA intermediates, not C variables).
-		// A unique varnode with ndesc>1 ends up in locals only because shouldInline
-		// rejected it (ndesc!=1), but its tmp_N name is never used in any emitted
-		// statement since the op is suppressed. Declaring it produces a spurious
-		// "unsigned long long tmp_0;" with no corresponding assignment.
+		// Skip implied unique-space varnodes: their defining ops are suppressed by
+		// emitOps (unique-space ops are SSA intermediates, not C variables), so a
+		// tmp_N name is never used in any emitted statement. Declaring them produces
+		// a spurious "undefined tmp_0;" with no corresponding assignment.
 		// C++ parity: Ghidra suppresses unique temps via ActionMarkImplied.
-		if vn.Space() != nil && vn.Space().IsUnique() {
+		// An EXPLICIT unique (e.g. the loop-head snapshot iVar1 = COPY(param)) is a
+		// real printed variable and must be declared like any other local.
+		if vn.Space() != nil && vn.Space().IsUnique() && !vn.IsExplicit() {
 			continue
 		}
 		name := s.nameOf(vn)

@@ -199,9 +199,13 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 	pcode.NewActionNodeJoin("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-node-join", "analysis").Perform(result.Funcdata)
 	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	// TrimJoinblockMultiequals removed: MergeOp.TrimOpOutput (merge.go:417) fires
-	// naturally during MergeMarker when the loop phi's cover intersects the param
-	// input's cover, matching C++ Merge::trimOpOutput behavior exactly.
+	// Create the loop-head snapshot (iVar1 = COPY(param)) for a unique-output
+	// loop-cond MULTIEQUAL whose value is read after its back-edge value is
+	// defined (gcd's swapped loop variable). Gated to unique phi outputs so it
+	// does not disturb for-loops whose loop variable is already addr-tied
+	// (SumList, CountedLoop). C++ parity intent: merge.cc eliminateIntersect/
+	// snipReads on the addr-tied loop phi output.
+	pcode.NewMerge(result.Funcdata).TrimJoinblockMultiequals()
 	// C++ parity: Funcdata::newUniqueOut calls assignHigh() immediately, so NodeJoin
 	// MULTIEQUAL outputs already have HighVariables when mergeMarker runs.
 	// In Go, NewUniqueOut does not call assignHigh, so we run AssignHigh first.
@@ -232,6 +236,10 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 	// C++ parity: coreaction.cc ActionCopyMarker.
 	pcode.NewActionCopyMarker("analysis").Apply(result.Funcdata)
 	pcode.NewActionForLoops("analysis").Apply(result.Funcdata)
+	// Re-infer types so the loop-head snapshot COPY (born after the first
+	// InferTypes pass in TrimJoinblockMultiequals) propagates its source type and
+	// names as iVar (int) rather than uVar. C++ runs InferTypes repeatedly.
+	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
 	// H4: ActionNameVars -- assign iVar1/uVar1 names to unnamed register-space HVs.
 	// C++ parity: coreaction.cc ActionNameVars::apply() + ScopeLocal::assignDefaultNames().
 	pcode.NewActionNameVars("analysis").Apply(result.Funcdata)
