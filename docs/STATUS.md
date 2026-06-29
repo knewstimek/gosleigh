@@ -1,6 +1,16 @@
 # 프로젝트 상태
 
-## 현재 상태 (2026-06-30 세션 종료, master `4581cf5`)
+## 현재 상태 (2026-06-30 세션 종료, step3b 루프회전 부분진전)
+
+**전 패키지 그린**. 이번 세션(step3b): do-while -> while 회전을 막던 **2개 진짜 C++ parity 버그** 규명/수정
+(상세 CHANGELOG 2026-06-30 step3b): (1) `RuleCondNegate`가 C++와 무관한 임포스터였음 -> 충실 포팅
+(CBRANCH+boolean_flip -> BOOL_NEGATE+clear). (2) `ActionNodeJoin`/`ActionNormalizeBranches`가
+`ActionRuleOncePerFunc` 오등록 -> C++는 flags=0(매 pass 재실행) -> 수정. 결과: 트리 NodeJoin이 매 pass
+재실행 + RuleCondNegate가 flip을 풀어 entry/loop 조건이 일치(둘 다 INT_NOTEQUAL noflip)까지 도달. **남은
+블로커는 edge-order mismatch**(아래 "다음 작업" 1번). 트리 출력은 아직 do-while(production은 NormalizeBranches가
+NodeJoin 전이라 무사, C++는 post-mainloop이라 모순). 아래 옛 현황 블록은 직전 세션 기준.
+
+## 이전 상태 (2026-06-30, master `4581cf5`)
 
 **전 패키지 그린** (loader/pcode/sla/bridge). 최종 목표 = Ghidra C++ 디컴파일러를 Go로 동일동작
 포팅(실제 .sla x86/x64/ARM -> C). #1 게이트 = 손정렬 41-call `bridge.Decompile`을 충실한
@@ -25,42 +35,37 @@
 
 ### 다음 작업 (우선순위) -- #1 게이트: 트리 출력을 골든 byte-identical로
 
-1. **[대형, 최우선] H8-debt-2 step3b -- 트리 루프 회전(do-while -> while)**. step3a+3b-1까지 트리는
-   수렴 + 시그니처/param_3/param_4 모두 골든 일치 + 단일 return(의미적으로 정확한 gcd). 남은 건 루프
-   회전(cosmetic, 의미 동일):
-   - 트리: `if (param_4) { do { iVar1 = param_3 % param_4; param_3 = param_4; param_4 = iVar1; } while (param_4); } return;`
-   - 골든: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; } return;`
-   - **근본 완전 규명 (단계별 bisect, `TestProductionStagesDiag`)**: 회전을 일으키는 패스 = **NodeJoin
-     (ConditionalJoin)**. production stage 추적: `after NormalizeBranches: blocks=3 selfLoop=true` ->
-     `after NodeJoin: blocks=4 selfLoop=false`. NodeJoin이 self-loop 블록을 while head+body로 분리.
-   - **NodeJoin 분리의 2개 전제조건**:
-     1. **조건 일치**: ConditionalJoin.findDups는 entry CBRANCH와 loop CBRANCH가 functionally-equal해야
-        매칭. gcd entry=INT_EQUAL, loop=INT_NOTEQUAL(negation) -> NormalizeBranches가 loop를 flip해야
-        매칭. 즉 **NormalizeBranches가 NodeJoin 전에** 실행돼야 함(실측: SKIP_NORMBRANCH 시 분리 안 함).
-     2. **BlockStructure가 NodeJoin 전에 실행되면 안 됨**: 실측(BS_BEFORE_NJ)으로 BlockStructure를 먼저
-        돌리면 NodeJoin 분리 실패. **근본**: BlockStructure의 collapse가 `negateCondition`(collapse.go:
-        961 ruleBlockDoWhile)으로 루프 CBRANCH에 `PcodeOpBooleanFlip` 설정(block_basic.go:182, 공유 op
-        이라 basic block에도 적용) -> ConditionalJoin.findDups가 BooleanFlip 있으면 **reject**
-        (action_nodejoin.go:147). collapse는 clone 그래프에 작동하나 op은 공유.
-   - **트리가 막히는 이유**: 트리 mainloop은 BlockStructure(action.go:1349) -> NodeJoin(1364) 순서.
-     BlockStructure가 먼저 collapse해 BooleanFlip 설정 + 구조 그래프를 build-once(block_actions.go:142
-     guard, C++도 동일)로 고정 -> NodeJoin이 영원히 reject -> do-while 고정. production decompile.go는
-     NodeJoin -> BlockStructure 순서라 무사.
-   - **열린 모순 (C++ 검증 필요, 가설 단정 금지)**: C++ universalAction도 mainloop에서 BlockStructure
-     (5670) -> NodeJoin(5685) 순서 + ActionBlockStructure build-once guard 동일 + collapse가 boolean_flip
-     설정. 정적 분석만으로는 C++도 막혀야 하는데 golden은 while -> 정적으로 안 풀리는 지점. 후보 가설
-     (어느 것이 맞는지 C++ 코드/실행으로 확정 후 진행):
-     (가) C++가 boolean_flip을 physically 적용+clear하는 rule/패스가 있어 후속 mainloop iteration에서
-          NodeJoin 매칭 -> 그 rule이 Gosleigh oppool에 없거나 미발화. (나) C++가 basic block 변경(NodeJoin
-          split) 시 구조 그래프를 무효화/재빌드(Gosleigh build-once는 안 함). (다) C++ collapse가 이 gcd
-          루프엔 negateCondition을 안 함(orientation 차이) -> boolean_flip 미설정. (라) golden이
-          universalAction 외 경로/버전에서 생성.
-   - **다음 작업 (위 가설 확정 후)**: 우선 C++ blockaction.cc(ConditionalJoin::execute의 구조 무효화 여부),
-     boolean_flip을 소비/clear하는 곳(C++ `flowblock.cc`/`coreaction.cc`), collapse의 negateCondition 발화
-     조건을 읽어 (가)~(다) 중 무엇인지 확정. 그 다음 해당 메커니즘을 Gosleigh에 포팅. 주의:
-     ConditionalJoin/BlockStructure/collapse는 production(decompile.go)도 사용 -> 전 골든 회귀 테스트 필수.
-   - 진단 도구: `TestProductionStagesDiag`(TREE_DIAG=1) -- production 파이프라인 단계별 blockShape 추적
-     (NodeJoin이 3->4 분리 확인). `TestTreeOutputDiag`(TREE_DIAG=1 GCD_DUMP=1) -- 트리/production SSA 대조.
+1. **[대형, 최우선] H8-debt-2 step3b -- 트리 루프 회전(do-while -> while)**. step3b에서 2개 parity 버그
+   해소 후 남은 단일 블로커 = **edge-order mismatch**. (트리: `if (param_4) { do {...} while (param_4); }`
+   vs 골든: `while (iVar1 = param_4, iVar1 != 0) {...}`)
+   - **이번 세션 해소(2개 진짜 C++ parity 버그, 둘 다 production-safe)**:
+     1. `RuleCondNegate` 임포스터 교체 -> 충실 포팅. C++(ruleaction.cc:5492)는 CBRANCH+isBooleanFlip ->
+        BOOL_NEGATE 삽입 + opFlipCondition clear. Gosleigh엔 동명의 무관한 rule이 있었음. (findDups:1920
+        "flip hasn't propagated through yet"가 기대하는 전파 주체.)
+     2. `ActionNodeJoin`/`ActionNormalizeBranches` flags `ActionRuleOncePerFunc` -> **0** 수정. C++
+        `Action(0,...)`(blockaction.hh:352)는 매 mainloop pass 재실행. once-per-func면 1회 후 status_end로
+        고정돼 RuleCondNegate가 flip을 풀어도 NodeJoin이 재시도 안 함. (가설 나 structureReset는 이미
+        구현됨: NodeJoinCreateBlock:1125.)
+     => 트리에서 NodeJoin 매 pass 재실행 + RuleCondNegate FIRED로 flip clear + loop 조건 폴드
+        (INT_EQUAL+flip -> INT_NOTEQUAL noflip) -> entry/loop **조건 일치**. (계측 트레이스로 확정.)
+   - **남은 블로커 = edge-order mismatch (정밀화됨)**: match()가 findDups(조건)보다 **먼저** 실패 --
+     ConditionalJoin::match의 `block2->getOut(0) != exita`(blockaction.cc:2077, Gosleigh action_nodejoin.go
+     `b2.FalseOut() != exita`). entry guard와 loop self-block의 out-edge가 **mirror**(entry out0=loop/
+     out1=end, loop out0=end/out1=self). production은 ActionNormalizeBranches(opFlipInPlaceExecute가 loop
+     INT_NOTEQUAL을 normalize -> 물리 opcode flip + **edge swap**)가 NodeJoin 전에 돌아 정렬하나, C++
+     universalAction은 NormalizeBranches가 **post-mainloop**(coreaction.cc:5733)이라 faithful mainloop
+     NodeJoin엔 edge-정렬 패스가 없음. collapse negateCondition은 기본 블록으로 forward(faithful)하나
+     do-while i==0만 swap -- gcd self-edge는 jnz 분기타겟이라 out1(i==1) -> negate 안 함.
+   - **샤프해진 C++ 모순 (다음 세션 진입점)**: golden=while(production이 byte-identical 재현 = Ghidra가
+     universalAction으로 while 생성 확정, "다른 경로" 가설 배제). 그런데 faithful C++ 순서 mainloop엔 gcd
+     loop edge를 정렬하는 패스가 없음. **미해결 = Ghidra mainloop이 edge를 어떻게 정렬하는가**. 후보:
+     (A) Ghidra CFG 구성 시 entry/loop out-edge가 자연 정렬(Gosleigh buildGcd는 mirror) -- CFG 구성/edge
+     ordering divergence. (C) 미식별 mainloop 액션(ActionConditionalExe=condexe.cc 등)이 basic-block edge를
+     swap. **다음 작업**: 실제 Ghidra 런타임(C:\ghidra12)으로 gcd 디컴파일 시 basic-block edge ordering을
+     덤프하거나 universalAction mainloop trace -> (A)/(C) 확정 후 충실 포팅. 주의: ConditionalJoin/
+     BlockStructure/NormalizeBranches는 production(decompile.go)도 사용 -> 전 골든 회귀 테스트 필수.
+   - 진단 도구: `TestProductionStagesDiag`(TREE_DIAG=1, production blockShape 단계 추적),
+     `TestTreeOutputDiag`(TREE_DIAG=1 GCD_DUMP=1, 트리/production SSA + C 출력 대조).
    - 정렬되면 나머지 10 골든 -> decompile.go 41-call subset을 트리로 대체.
    - 성공 기준: universal 트리(SetCurrent("decompile"))가 gcd 등 전 골든을 byte-identical 출력.
 

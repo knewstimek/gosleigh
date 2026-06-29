@@ -5,6 +5,47 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-2 step3b -- 충실 RuleCondNegate + NodeJoin flags 수정 (루프 회전 2개 parity 버그 해소, edge-정렬 블로커로 정밀화)
+do-while -> while 루프 회전을 막던 2개 진짜 C++ parity 버그를 C++ 코드 근거로 규명/수정. 전 패키지 그린.
+production 무영향(production은 이 rule/flags를 .Apply 직접 호출 경로 밖에서 안 씀). 트리 출력은 아직 do-while
+(남은 블로커는 edge-정렬, 아래). 계측 트레이스로 단계별 확정 후 디버그 전량 제거.
+- **버그1 -- RuleCondNegate 임포스터**: Gosleigh `RuleCondNegate`(rules_bool.go)는 C++와 **완전히 다른**
+  변환(`(!a)==(!b) => a==b`, INT_EQUAL/INT_NOTEQUAL 트리거)을 이름만 빌려 씀. 진짜 C++ RuleCondNegate
+  (ruleaction.cc:5492)는 **CPUI_CBRANCH** 트리거 + `isBooleanFlip()`이면 BOOL_NEGATE 삽입 + opFlipCondition
+  으로 flip clear ("Flip conditions to match structuring cues"). 이게 ConditionalJoin.findDups의
+  "flip hasn't propagated through yet"(blockaction.cc:1920) 주석이 기대하는 flip 전파 주체. 충실 포팅
+  (CBRANCH+flip -> BOOL_NEGATE+clear, RuleBoolNegate가 후속 폴드). 트리 전용 등록이라 production/골든 무영향.
+- **버그2 -- NodeJoin/NormalizeBranches가 once-per-func 오등록**: C++ `ActionNodeJoin`/
+  `ActionNormalizeBranches`는 `Action(0,...)`(blockaction.hh:352/286), 즉 flags=0 -> 매 mainloop pass
+  재실행(status가 status_start로 복귀). Gosleigh는 `ActionRuleOncePerFunc`로 등록 -> 1회 실행 후 status_end
+  고정 -> mainloop이 BlockStructure(do-while collapse가 flip 설정) -> NodeJoin(flip때문에 reject) 후
+  RuleCondNegate가 flip을 풀어도 **NodeJoin이 다시 안 돔**. flags=0으로 수정 -> NodeJoin 매 pass 재실행.
+  C++ ActionGroup::apply는 repeat 시 state만 리셋하고 자식 status는 reset 안 함(action.cc 확인) -> flags=0
+  자식만 재실행되는 게 정상 메커니즘.
+- **계측으로 확정한 진행**: 두 수정 후 트리에서 (a) NodeJoin이 매 pass ENTER, (b) RuleCondNegate FIRED
+  (flip clear), (c) loop CBRANCH 조건이 `INT_EQUAL+flip` -> 폴드 `INT_NOTEQUAL+noflip`, (d) entry/loop 둘 다
+  `INT_NOTEQUAL flip=false`로 **조건은 일치**. (참고: NodeJoinCreateBlock->StructureReset->BlockStructure
+  재빌드 경로(가설 나)는 이미 구현돼 있어, NodeJoin만 fire하면 BlockStructure가 while로 재빌드함을 production
+  경로에서 확인.)
+- **남은 블로커 = edge-order mismatch (정밀화)**: match()가 findDups(조건)보다 **먼저** 실패 --
+  `b2.FalseOut != exita`(ConditionalJoin::match, blockaction.cc:2077의 `block2->getOut(0)!=exita`).
+  entry guard와 loop self-block의 out-edge가 **mirror**(entry out0=loop/out1=end vs loop out0=end/out1=self).
+  production은 ActionNormalizeBranches(opFlipInPlaceExecute가 loop의 INT_NOTEQUAL을 normalize -> 물리 flip +
+  **edge swap**)가 NodeJoin 전에 돌아 정렬. 그러나 C++ universalAction은 NormalizeBranches가 **post-mainloop**
+  (coreaction.cc:5733)이라 faithful mainloop NodeJoin엔 edge-정렬 패스가 없음. collapse의 negateCondition은
+  기본 블록으로 forward(faithful, collapse.go:227->block_basic.go:175 SwapEdges)하나 do-while i==0 케이스만
+  swap -- gcd self-edge는 jnz 분기타겟이라 out1(i==1) -> negate 안 함.
+- **샤프해진 C++ 모순**: golden은 while(production이 byte-identical 재현 = Ghidra가 universalAction으로 while
+  생성 확정, 가설 라 배제). 그런데 faithful C++ 순서의 mainloop엔 gcd loop edge를 정렬하는 패스가 없음. 미해결
+  = Ghidra mainloop이 edge를 **어떻게** 정렬하는가. 후보: (A) Ghidra CFG 구성 시 entry/loop edge가 자연
+  정렬(Gosleigh buildGcd는 mirror), (C) 미식별 mainloop 액션(condexe 등)이 edge swap. 다음 세션: 실제 Ghidra
+  런타임 trace 또는 Ghidra CFG edge-ordering을 Gosleigh와 대조해 (A)/(C) 확정.
+- C++ 참조: ruleaction.cc RuleCondNegate(5479-5510)/RuleBoolNegate(5512-5555), blockaction.cc
+  ConditionalJoin::findDups(1912)/match(2065)/ActionNodeJoin::apply(2326), funcdata_op.cc opFlipInPlace*(1223/
+  1282), block.cc BlockBasic::negateCondition(2351)/flipInPlaceExecute(2378), coreaction.cc universalAction
+  순서(5670 BlockStructure / 5685 NodeJoin / 5733 NormalizeBranches), funcdata_block.cc nodeJoinCreateBlock
+  ->structureReset(779/704), action.cc Action::perform/ActionGroup::apply/reset.
+
 ### 2026-06-30: H8-debt-2 step1~3b-1 -- 트리 proto 배선 + incremental heritage + 충실 ReturnSplit (의미적으로 정확한 gcd)
 universal 트리의 출력을 골든에 근접시킴. 미션 #1 게이트 핵심 전진. production 무영향(전 패키지 그린).
 - **step1 (proto/param/ScopeLocal 배선)**: 트리는 FuncProto/ScopeLocal을 전혀 안 만들었음(트리 실행 후에도

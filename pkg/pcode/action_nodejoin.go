@@ -28,7 +28,8 @@ type ActionNormalizeBranches struct {
 
 func NewActionNormalizeBranches(group string) *ActionNormalizeBranches {
 	a := &ActionNormalizeBranches{}
-	a.ActionBase = NewActionBase(a, ActionRuleOncePerFunc, "normalizebranches", group)
+	// C++ parity: ActionNormalizeBranches uses flags=0 (blockaction.hh:286).
+	a.ActionBase = NewActionBase(a, 0, "normalizebranches", group)
 	return a
 }
 
@@ -342,7 +343,12 @@ type ActionNodeJoin struct {
 
 func NewActionNodeJoin(group string) *ActionNodeJoin {
 	a := &ActionNodeJoin{}
-	a.ActionBase = NewActionBase(a, ActionRuleOncePerFunc, "nodejoin", group)
+	// C++ parity: ActionNodeJoin uses flags=0 (blockaction.hh:352), NOT once-per-func.
+	// It must re-run every mainloop pass: ActionBlockStructure's collapse can set
+	// PcodeOpBooleanFlip on a loop CBRANCH (making findDups reject), and only a later
+	// pass -- after RuleCondNegate clears the flip -- can the join succeed. A once-per-
+	// func NodeJoin would reject in pass 1 and never retry, freezing a do-while loop.
+	a.ActionBase = NewActionBase(a, 0, "nodejoin", group)
 	return a
 }
 

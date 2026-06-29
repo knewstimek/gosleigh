@@ -198,21 +198,35 @@ func (r *RuleLogic2Bool) apply(op *PcodeOp, data *Funcdata) int {
 	return 1
 }
 
+// RuleCondNegate propagates a deferred condition flip into the data-flow.
+// Structuring (ActionBlockStructure, via ruleBlockDoWhile->negateCondition) sets
+// the boolean_flip flag on a CBRANCH to record a preferred branch orientation
+// without rewriting the boolean calculation. This rule realizes that flip by
+// inserting a BOOL_NEGATE on the condition and clearing the flag, so downstream
+// passes (RuleBoolNegate fold, ConditionalJoin.findDups) see a normalized, flag-
+// free CBRANCH. Without this, findDups keeps rejecting the loop CBRANCH
+// ("flip hasn't propagated through yet") and a do-while never rotates to a while.
+// C++ parity: ruleaction.cc RuleCondNegate::applyOp (5492-5510).
 type RuleCondNegate struct{ batchRule }
 
 func NewRuleCondNegate(group string) *RuleCondNegate {
 	r := &RuleCondNegate{}
-	r.batchRule = newBatchRule(group, "condnegate", []OpCode{CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL}, r.apply, func(g string) Rule { return NewRuleCondNegate(g) })
+	r.batchRule = newBatchRule(group, "condnegate", []OpCode{CPUI_CBRANCH}, r.apply, func(g string) Rule { return NewRuleCondNegate(g) })
 	return r
 }
 
 func (r *RuleCondNegate) apply(op *PcodeOp, data *Funcdata) int {
-	left := definedBy(op.Input(0), CPUI_BOOL_NEGATE)
-	right := definedBy(op.Input(1), CPUI_BOOL_NEGATE)
-	if left == nil || right == nil {
+	if !op.HasFlag(PcodeOpBooleanFlip) {
 		return 0
 	}
-	rewriteOp(data, op, op.Code(), left.Input(0), right.Input(0))
+	vn := op.Input(1)
+	newop := data.NewOp(1, op.Addr())
+	data.OpSetOpcode(newop, CPUI_BOOL_NEGATE)
+	outvn := data.NewUniqueOut(1, newop) // flipped version of the condition
+	data.OpSetInput(newop, vn, 0)
+	data.OpSetInput(op, outvn, 1)
+	data.OpInsertBefore(newop, op)
+	op.FlipFlag(PcodeOpBooleanFlip) // flip meaning; fallthru block status unchanged
 	return 1
 }
 
