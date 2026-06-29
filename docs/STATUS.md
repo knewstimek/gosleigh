@@ -98,9 +98,14 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
     ReturnRecovery/OutputPrototype/PrototypeTypes 본체는 이미 구현(K1)되어 배선만 남았고, 이제
     (1) 위에서 step3로 배선 가능(anchorReturnReg의 SeqNum selection만 정식 ParamActive trial로 교체).
   - **남은 로드맵**: ~~step2 = consume-DeadCode 통합~~ **완료(LIVE)**. heritage-pass 추적(subsystem 2)은
-    post-heritage DeadCode에선 불필요로 판명 -> 보류. step3 = ReturnRecovery/OutputPrototype/
-    PrototypeTypes 배선해 anchorReturnReg(SeqNum 휴리스틱)를 정식 선택으로 교체 + stripReturnIndirectRef
-    제거 -> 골든 검증. anchorReturnReg ~= C++ Heritage::guardReturns라 selection만 교체 대상.
+    post-heritage DeadCode에선 불필요. **step3 = anchorReturnReg 제거 -> multi-pass heritage 선행
+    필요(2026-06-29 재진단)**: C++ `Heritage::guardReturns`(heritage.cc:1652)는 return-reg를 RETURN에
+    fresh varnode로 append하나 **`getActiveOutput()!=null`(ActionActiveReturn 선행) 조건**이고, SSA
+    renaming이 dominating def에 연결. 이는 multi-pass heritage(ActiveReturn -> 후속 heritage가
+    guardReturns)에 의존하는데 Gosleigh는 single-pass라 부재. anchorReturnReg(SeqNum selection +
+    early wiring)가 이 전체를 근사. 충실 제거 = guardReturns + multi-pass heritage + ActiveReturn
+    interplay 포팅(사이즈 큼). 현 상태: consume-DeadCode(faithful) + anchorReturnReg(guardReturns
+    근사) + applyReturnRecovery(clobber prune)로 전 골든 정확. step4(저우선) = 실제 CalcNZMask.
     step4 = printc RETURN 렌더 정리. step5(저우선) = 실제 CalcNZMask로 비트정밀도.
   - C++ 참조: `coreaction.cc ActionDeadCode::apply`(3936)/`gatherConsumedReturn`(3882)/
     `propagateConsumed`(3580)/`markConsumedParameters`(3851) + `ActionPrototypeTypes::apply` +
