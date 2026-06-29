@@ -82,21 +82,26 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
   - **진짜 블로커 = 3개 부재 서브시스템(bedrock 진단)**: Gosleigh ActionDeadCode는 descendant-count
     기반이고, C++의 충실 경로는 다음 3개를 모두 요구함:
     1. **consume-bit DeadCode** (pushConsumed/propagateConsumed ~40 opcode + gatherConsumedReturn +
-       markConsumedParameters). -- **step 1 착수: `pkg/pcode/deadcode_consume.go` 충실 포팅 +
-       단위테스트(`TestConsumeAnalysisReturnReachable`). 현재 DORMANT(computeConsumed가 consume만
-       계산, 삭제 미배선). RETURN 도달 체인=consumed, 죽은 varnode=0 검증됨.**
+       markConsumedParameters). -- **LIVE (step 2 완료)**: `pkg/pcode/deadcode_consume.go` 충실
+       포팅 + `ActionDeadCode.applyConsume`가 **프로덕션 기본 DeadCode 경로**
+       (action_deadcode.go). 전 골든 + 전 패키지 그린. 모든 omission(pre-live/neverConsumed/
+       >8byte/call-param)이 보수적(과보존, 절대 오삭제 X)이고 Gosleigh DeadCode는 전부
+       post-heritage라 pre-live 미발화 -> 안전. descendant 경로는 GOSL_DESCENDANT_DC fallback.
+       단위테스트 `TestConsumeAnalysisReturnReachable` + 골든 e2e 검증.
     2. **heritage-pass / deadcode-delay 추적** (numHeritagePasses/deadRemovalAllowed/doesDeadcode).
        pre-live register 보존(C++ 3960)에 필요. Gosleigh 부재(condexe.go/rules_ghidra_port.go에
        known mismatch 명시). **미착수**.
     3. **실제 CalcNZMask** (현재 stub, nzm 비상수 기본 ~0). consume 비트정밀도 + 많은 rule이 의존.
        구현 시 rule들이 공격적으로 바뀌어 회귀 위험 -> 보수적 ~0 유지 중. **미착수(저우선,
        consume는 ~0로 보수적 동작)**.
-    early-wiring(anchorReturnReg)이 (2) pre-live register 부재를 메우는 구조라 작은 슬라이스로
-    분리 불가. ReturnRecovery/OutputPrototype/PrototypeTypes 본체는 이미 구현(K1)되어 배선만
-    남았으나, (1)+(2) 없이는 선행 DeadCode가 return값을 못 살려 무의미.
-  - **남은 로드맵**: step2 = consume-DeadCode를 ActionDeadCode에 통합(삭제 배선) + heritage-pass
-    추적 추가 -> 골든 검증. step3 = ReturnRecovery/OutputPrototype/PrototypeTypes 배선 +
-    anchorReturnReg/stripReturnIndirectRef 제거 -> 골든 검증. step4 = printc RETURN 렌더 정리.
+    (1)이 LIVE가 되며 return값 보존이 consume-DeadCode + anchorReturnReg(RETURN 배선)로 충실해짐.
+    ReturnRecovery/OutputPrototype/PrototypeTypes 본체는 이미 구현(K1)되어 배선만 남았고, 이제
+    (1) 위에서 step3로 배선 가능(anchorReturnReg의 SeqNum selection만 정식 ParamActive trial로 교체).
+  - **남은 로드맵**: ~~step2 = consume-DeadCode 통합~~ **완료(LIVE)**. heritage-pass 추적(subsystem 2)은
+    post-heritage DeadCode에선 불필요로 판명 -> 보류. step3 = ReturnRecovery/OutputPrototype/
+    PrototypeTypes 배선해 anchorReturnReg(SeqNum 휴리스틱)를 정식 선택으로 교체 + stripReturnIndirectRef
+    제거 -> 골든 검증. anchorReturnReg ~= C++ Heritage::guardReturns라 selection만 교체 대상.
+    step4 = printc RETURN 렌더 정리. step5(저우선) = 실제 CalcNZMask로 비트정밀도.
   - C++ 참조: `coreaction.cc ActionDeadCode::apply`(3936)/`gatherConsumedReturn`(3882)/
     `propagateConsumed`(3580)/`markConsumedParameters`(3851) + `ActionPrototypeTypes::apply` +
     `ActionReturnRecovery`/`ActionActiveReturn`. printc.go anchorReturnReg 의존(12+ 참조)도 동반 제거.
