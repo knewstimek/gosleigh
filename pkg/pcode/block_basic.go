@@ -185,4 +185,15 @@ func (bb *BlockBasic) NegateCondition(top bool) {
 	if bb.FlowBlock.SizeOut() == 2 {
 		bb.FlowBlock.SwapEdges()
 	}
+	// C++ BlockCopy::negateCondition (block.hh:534) forwards copy->negateCondition()
+	// to the WRAPPED basic block, which swaps the source block's out-edges too (a real
+	// data-flow change), in addition to swapping the copy's edges. When this BlockBasic
+	// is a structure-graph clone (srcDelegate != nil), the loop above only swapped the
+	// clone's edges; mirror C++ by swapping the source's edges as well. Without this,
+	// the source basic block keeps its original branch order, so later basic-block
+	// passes (ActionNodeJoin/ConditionalJoin.match) see a stale, unaligned edge order
+	// and a do-while loop never rotates to the canonical while head+body form.
+	if bb.srcDelegate != nil && bb.srcDelegate.FlowBlock.SizeOut() == 2 {
+		bb.srcDelegate.FlowBlock.SwapEdges()
+	}
 }

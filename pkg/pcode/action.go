@@ -1205,7 +1205,12 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	actprop.AddRule(NewRuleCollectTerms("analysis"))
 	actprop.AddRule(NewRulePullsubMulti("analysis"))
 	actprop.AddRule(NewRulePullsubIndirect("analysis"))
-	actprop.AddRule(NewRulePushMulti("nodejoin"))
+	// C++ RulePushMulti (coreaction.cc:5529, oplist=CPUI_MULTIEQUAL) is faithfully
+	// ported as RulePushMultiME, not the misc NewRulePushMulti (which triggers on
+	// arithmetic ops). This pushes a 2-branch MULTIEQUAL of functionally-equal ops
+	// (e.g. MULTIEQUAL(a!=0, b!=0)) into the merge block as MULTIEQUAL(a,b)!=0, so a
+	// joined loop condition inlines (iVar1 != 0) instead of materializing a boolean.
+	actprop.AddRule(NewRulePushMultiME("nodejoin"))
 	actprop.AddRule(NewRuleSborrow("analysis"))
 	actprop.AddRule(NewRuleScarry("analysis"))
 	actprop.AddRule(NewRuleIntLessEqual("analysis"))
