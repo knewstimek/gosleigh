@@ -2,10 +2,218 @@ package pcode
 
 import (
 	"fmt"
+	"math/bits"
 	"strings"
 
 	"gosleigh/pkg/address"
 )
+
+// mostSigBitSet returns the index of the most significant set bit, or -1 if val
+// is 0. C++ parity: globals mostsigbit_set.
+func mostSigBitSet(val uint64) int { return bits.Len64(val) - 1 }
+
+// getNZMaskLocal computes the non-zero mask of this op's output purely from its
+// input Varnodes' current nzmasks (no transitive recomputation). cliploop drops
+// MULTIEQUAL inputs arriving on loop back-edges so the initial DFS does not
+// depend on not-yet-computed cyclic values.
+//
+// Sizes larger than 8 bytes fall back to the full mask (conservative); the C++
+// extended-precision arithmetic is not ported (Gosleigh nzmask is a single
+// uint64). This is safe: a wider mask never enables an unsound simplification.
+//
+// C++ parity: op.cc PcodeOp::getNZMaskLocal (lines 548-778).
+func (op *PcodeOp) getNZMaskLocal(cliploop bool) uint64 {
+	out := op.Output()
+	if out == nil {
+		return 0
+	}
+	size := out.Size()
+	fullmask := maskForSize(size)
+	wide := size > 8
+
+	in := func(i int) uint64 {
+		v := op.Input(i)
+		if v == nil {
+			return fullmask
+		}
+		return v.NZMask()
+	}
+
+	var resmask uint64
+	switch op.Code() {
+	case CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL, CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL,
+		CPUI_INT_LESS, CPUI_INT_LESSEQUAL, CPUI_INT_CARRY, CPUI_INT_SCARRY,
+		CPUI_INT_SBORROW, CPUI_BOOL_NEGATE, CPUI_BOOL_XOR, CPUI_BOOL_AND,
+		CPUI_BOOL_OR, CPUI_FLOAT_EQUAL, CPUI_FLOAT_NOTEQUAL, CPUI_FLOAT_LESS,
+		CPUI_FLOAT_LESSEQUAL, CPUI_FLOAT_NAN:
+		resmask = 1
+	case CPUI_COPY, CPUI_INT_ZEXT:
+		resmask = in(0)
+	case CPUI_INT_SEXT:
+		iv := op.Input(0)
+		if iv == nil {
+			resmask = fullmask
+		} else {
+			resmask = uint64(signExtendToInt64(iv.NZMask(), iv.Size())) & fullmask
+		}
+	case CPUI_INT_XOR, CPUI_INT_OR:
+		resmask = in(0)
+		if resmask != fullmask {
+			resmask |= in(1)
+		}
+	case CPUI_INT_AND:
+		resmask = in(0)
+		if resmask != 0 {
+			resmask &= in(1)
+		}
+	case CPUI_INT_LEFT:
+		s := op.Input(1)
+		if s == nil || !s.IsConstant() || wide {
+			resmask = fullmask
+		} else {
+			resmask = (in(0) << s.Offset()) & fullmask
+		}
+	case CPUI_INT_RIGHT:
+		s := op.Input(1)
+		if s == nil || !s.IsConstant() || wide {
+			resmask = fullmask
+		} else {
+			resmask = in(0) >> s.Offset()
+		}
+	case CPUI_INT_SRIGHT:
+		s := op.Input(1)
+		if s == nil || !s.IsConstant() || wide {
+			resmask = fullmask
+		} else {
+			sa := s.Offset()
+			m := in(0)
+			signBit := fullmask ^ (fullmask >> 1)
+			if m&signBit == 0 {
+				resmask = m >> sa
+			} else {
+				resmask = (m >> sa) | ((fullmask >> sa) ^ fullmask)
+			}
+		}
+	case CPUI_INT_DIV:
+		resmask = coveringMask(in(0))
+		if s := op.Input(1); s != nil && s.IsConstant() {
+			if sa := mostSigBitSet(in(1)); sa != -1 {
+				resmask >>= uint(sa)
+			}
+		}
+	case CPUI_INT_REM:
+		resmask = coveringMask(in(1) - 1)
+	case CPUI_POPCOUNT:
+		resmask = coveringMask(uint64(bits.OnesCount64(in(0)))) & fullmask
+	case CPUI_LZCOUNT:
+		if iv := op.Input(0); iv != nil {
+			resmask = coveringMask(uint64(iv.Size())*8) & fullmask
+		} else {
+			resmask = fullmask
+		}
+	case CPUI_SUBPIECE:
+		resmask = in(0)
+		sz1 := uint64(0)
+		if s := op.Input(1); s != nil {
+			sz1 = s.Offset()
+		}
+		iv := op.Input(0)
+		if iv != nil && iv.Size() <= 8 {
+			if sz1 < 8 {
+				resmask >>= 8 * sz1
+			} else {
+				resmask = 0
+			}
+		} else {
+			if sz1 < 8 {
+				resmask >>= 8 * sz1
+				if sz1 > 0 {
+					resmask |= fullmask << (8 * (8 - sz1))
+				}
+			} else {
+				resmask = fullmask
+			}
+		}
+		resmask &= fullmask
+	case CPUI_PIECE:
+		lo := op.Input(1)
+		var sa int32
+		if lo != nil {
+			sa = lo.Size()
+		}
+		hi := in(0)
+		if sa < 8 {
+			resmask = hi << (8 * uint(sa))
+		} else {
+			resmask = 0
+		}
+		resmask |= in(1)
+	case CPUI_INT_MULT:
+		if wide {
+			resmask = fullmask
+			break
+		}
+		val := in(0)
+		other := in(1)
+		sz1 := mostSigBitSet(val)
+		sz2 := mostSigBitSet(other)
+		if sz1 == -1 || sz2 == -1 {
+			resmask = 0
+			break
+		}
+		l1 := leastSigBitSet(val)
+		l2 := leastSigBitSet(other)
+		sa := l1 + l2
+		if sa >= int(8*size) {
+			resmask = 0
+			break
+		}
+		sz1 = sz1 - l1 + 1
+		sz2 = sz2 - l2 + 1
+		total := sz1 + sz2
+		if sz1 == 1 || sz2 == 1 {
+			total--
+		}
+		resmask = fullmask
+		if total < int(8*size) {
+			resmask >>= uint(int(8*size) - total)
+		}
+		resmask = (resmask << uint(sa)) & fullmask
+	case CPUI_INT_ADD:
+		resmask = in(0)
+		if resmask != fullmask {
+			other := in(1)
+			if other&resmask == 0 {
+				resmask |= other
+			} else {
+				resmask |= other
+				resmask |= resmask << 1 // possible carries
+			}
+			resmask &= fullmask
+		}
+	case CPUI_MULTIEQUAL:
+		if op.NumInput() == 0 {
+			resmask = fullmask
+		} else {
+			resmask = 0
+			for i := 0; i < op.NumInput(); i++ {
+				if cliploop && op.Parent() != nil && op.Parent().isLoopIn(i) {
+					continue
+				}
+				resmask |= in(i)
+			}
+		}
+	case CPUI_CALL, CPUI_CALLIND, CPUI_CPOOLREF:
+		if op.HasFlag(PcodeOpCalculatedBool) {
+			resmask = 1
+		} else {
+			resmask = fullmask
+		}
+	default:
+		resmask = fullmask
+	}
+	return resmask
+}
 
 // PcodeOp primary flags -- uint32 bitmask.
 // C++ parity: op.hh PcodeOp::Flags

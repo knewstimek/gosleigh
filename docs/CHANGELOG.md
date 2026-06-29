@@ -5,6 +5,18 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H7 step4 -- 실제 CalcNZMask 포팅 (production-safe, validated)
+nzmask 전파를 stub(~0)에서 충실 구현으로 교체. 미래 universal-tree 수렴의 필요 조건.
+- **추가**: `Funcdata.CalcNZMask`(funcdata.cc Funcdata::calcNZMask 충실 -- DFS post-order로 input부터
+  계산 후 getNZMaskLocal, 이후 MULTIEQUAL loop edge worklist 전파) + `PcodeOp.getNZMaskLocal`(op.cc:548
+  전 opcode switch: COPY/ZEXT/SEXT/AND/OR/XOR/shift/DIV/REM/SUBPIECE/PIECE/MULT/ADD/MULTIEQUAL/비교=1bit 등).
+  size>8은 보수적 fullmask(extended-precision 미포팅, 넓은 마스크는 항상 sound).
+- **검증**: 단위테스트 `TestCalcNZMaskPropagation`(AND 0x0f->0x0f, ZEXT byte->0xff, LEFT 8, COPY).
+  **production-safe**: decompile.go가 CalcNZMask 미호출 -> 골든 무영향, 전 패키지 그린.
+- **한계(실측)**: 실제 CalcNZMask 단독으론 universal 트리 hang 미해결(scratch 30s timeout). Consumed 기본
+  ~0이라 VarnodeProps 초기 skip이고, 비수렴 근본은 후기 oscillation(VarnodeProps/conditionalconst/multicse/
+  oppool1)으로 미확정. CalcNZMask는 필요조건이자 foundational, 트리 수렴은 추가 조사 필요.
+
 ### 2026-06-30: H8-debt-2 재정의 + 첫 fill -- universal 트리는 hollow, Funcdata self-contain 시작
 미션 #1 게이트(universalAction 단일화)를 측정으로 재정의하고 첫 action 본체를 채움. 무회귀.
 - **측정 발견**: `BuildUniversalAction`(250 action/rule)은 구조 스켈레톤 + **대부분 decompile.go와 동일한

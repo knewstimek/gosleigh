@@ -256,7 +256,90 @@ func (fd *Funcdata) OpHeritage() {
 // CalcNZMask computes non-zero masks for all varnodes.
 // C++ parity: funcdata.hh Funcdata::calcNZMask
 func (fd *Funcdata) CalcNZMask() {
-	_ = fd
+	type opNode struct {
+		op   *PcodeOp
+		slot int
+	}
+	alive := func() []*PcodeOp {
+		out := make([]*PcodeOp, 0)
+		for _, op := range fd.obank.AllOps() {
+			if op != nil && !op.IsDead() {
+				out = append(out, op)
+			}
+		}
+		return out
+	}()
+
+	// Phase 1: DFS post-order. Compute each output's local nzmask from its inputs,
+	// seeding leaf (unwritten) Varnodes. Loop back-edges of MULTIEQUALs are clipped
+	// so the DFS terminates without depending on not-yet-computed cyclic values.
+	for _, root := range alive {
+		if root.HasFlag(PcodeOpMark) {
+			continue
+		}
+		stack := []opNode{{root, 0}}
+		root.SetFlag(PcodeOpMark)
+		for len(stack) > 0 {
+			node := &stack[len(stack)-1]
+			if node.slot >= node.op.NumInput() {
+				if outvn := node.op.Output(); outvn != nil {
+					outvn.SetNZMask(node.op.getNZMaskLocal(true))
+				}
+				stack = stack[:len(stack)-1]
+				continue
+			}
+			oldslot := node.slot
+			node.slot++
+			if node.op.Code() == CPUI_MULTIEQUAL && node.op.Parent() != nil &&
+				node.op.Parent().isLoopIn(oldslot) {
+				continue
+			}
+			vn := node.op.Input(oldslot)
+			if vn == nil {
+				continue
+			}
+			if !vn.IsWritten() {
+				if vn.IsConstant() {
+					vn.SetNZMask(vn.Offset())
+				} else {
+					// Leaf: full size mask (conservative). C++ additionally narrows
+					// bool-type-locked inputs to 1 and aligns spacebase inputs; both
+					// omitted here (a wider mask is always sound).
+					vn.SetNZMask(maskForSize(vn.Size()))
+				}
+			} else if def := vn.Def(); def != nil && !def.HasFlag(PcodeOpMark) {
+				stack = append(stack, opNode{def, 0})
+				def.SetFlag(PcodeOpMark)
+			}
+		}
+	}
+
+	// Phase 2: clear marks, seed worklist with MULTIEQUALs (the only ops whose
+	// inputs may have been clipped), and propagate changes to fixpoint.
+	worklist := make([]*PcodeOp, 0)
+	for _, op := range alive {
+		op.ClearFlag(PcodeOpMark)
+		if op.Code() == CPUI_MULTIEQUAL {
+			worklist = append(worklist, op)
+		}
+	}
+	for len(worklist) > 0 {
+		op := worklist[len(worklist)-1]
+		worklist = worklist[:len(worklist)-1]
+		vn := op.Output()
+		if vn == nil {
+			continue
+		}
+		nzmask := op.getNZMaskLocal(false)
+		if nzmask != vn.NZMask() {
+			vn.SetNZMask(nzmask)
+			for _, desc := range vn.DescendIter() {
+				if desc != nil && !desc.IsDead() {
+					worklist = append(worklist, desc)
+				}
+			}
+		}
+	}
 }
 
 // MapGlobals walks every persistent Varnode in the function and makes sure
