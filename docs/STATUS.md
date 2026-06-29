@@ -1,38 +1,37 @@
 # 프로젝트 상태
 
-## 현재 상태 (2026-06-30 세션 종료, master `fdaa54c`)
+## 현재 상태 (2026-06-30 세션 종료, master `1ae5f3f`)
 
 **전 패키지 그린** (loader/pcode/sla/bridge). 최종 목표 = Ghidra C++ 디컴파일러를 Go로 동일동작
 포팅(실제 .sla x86/x64/ARM -> C). #1 게이트 = 손정렬 41-call `bridge.Decompile`을 충실한
-`ActionDatabase.BuildUniversalAction`(250 action/rule) 트리로 대체(= H8-debt-2). 이번 세션 성과:
+`ActionDatabase.BuildUniversalAction`(250 action/rule) 트리로 대체(= H8-debt-2). 이번 세션 성과
+(H8-debt-2 step1+2 -- 트리 출력이 골든에 근접, 상세 CHANGELOG 2026-06-30):
 
-1. **H7 완료** -- anchorReturnReg(SeqNum 휴리스틱) 물리 제거(-161줄). return 값은 충실한
-   `ApplyGuardReturnsLive`(Heritage::guardReturns + dominance rename)가 유일 경로.
-2. **H8-debt-1 완료** -- TrimJoinblockMultiequals(forward-snip 휴리스틱) 제거, 충실 mergeOp
-   trimOpOutput(merge.cc:759-760)으로 대체. loop-cond phi 게이트는 isLoopCond(cyclic 실험으로 검증).
-3. **H7 step4 완료** -- 실제 CalcNZMask(funcdata.go/pcodeop.go, op.cc:548 충실). stub(~0) 대체.
-   production-safe(decompile.go 미호출).
-4. **H8-debt-2 핵심 전진 -- universal 트리가 수렴 + end-to-end 실행**. 트리는 대부분 decompile.go와
-   같은 real impl 공유(껍데기 아님). hang 근본 = OpHeritage가 매 iteration full(비-incremental)
-   heritage 재실행 -> oscillation. heritage-once 가드(interim)로 수정. Funcdata self-contained
-   (graph/spaces 보유) + ActionHeritage 실화. 회귀 가드 `TestUniversalActionTreeConverges`.
-상세는 CHANGELOG 2026-06-30.
+1. **step1 -- 트리 proto/param/ScopeLocal 배선**. 트리는 FuncProto/ScopeLocal을 안 만들어
+   (실행 후에도 nil) 파라미터/로컬 미명명 + 쓰레기 return이었음. `Funcdata.defaultModel`
+   (Architecture::defaultfp 등가, bridge.Build이 부착) + ActionPrototypeTypes 충실화
+   (setModel+ScopeLocal 생성+initActiveOutput, coreaction.cc:4626-4662). -> 시그니처 byte-match.
+2. **step2 -- incremental heritage + activeparam 멱등**. heritage-once 대체(H7 step3 multi-pass도 해결):
+   Heritage()가 heritage-known varnode skip(IsHeritageKnown, heritage.cc:2704-2719), OpHeritage가
+   persistent Heritage 재사용 + 스택 슬롯 HeritageRange 슬롯별 1회. ApplyActiveParamModel은 input-lock 시
+   early-return(oscillation 제거). -> 트리 수렴 + param_3가 루프 본체에 fold.
 
-### 다음 작업 (우선순위) -- #1 게이트: universal 트리를 golden-correct로
+### 다음 작업 (우선순위) -- #1 게이트: 트리 출력을 골든 byte-identical로
 
-1. **[대형, 최우선] H8-debt-2 -- 트리 출력을 골든 일치로**. 트리는 수렴하나 출력 부정확:
-   `int entry(param_1,param_2){...return *local_91;}` (param_3/4 미복구, undefined tmp, stack
-   heritage 누락, return 쓰레기). 작업:
-   - (a) **트리 경로 proto/param/ScopeLocal 셋업 배선**. decompile.go는 `ApplyCallingConvention`
-     (NewProtoModelFromCspec + WithReturnReg + ScopeLocal)로 수동 셋업하나 트리 경로엔 부재. 단
-     stack space는 StackPtrFlow(트리 중 실행)가 풀어서 chicken-and-egg -- C++는
-     ActionDefaultParams/PrototypeTypes/RestructureVarnode가 단계적으로 처리. 트리에 cspec proto를
-     초기 부착(bridge.Build 또는 pre-tree)하고 param-recovery 액션들이 동작하게.
-   - (b) **incremental heritage 포팅** (heritage-once 대체). C++ Heritage는 pass-tracking으로 새
-     free varnode만 처리. 같은 작업이 H7 step3 multi-pass도 해결. 현 heritage-once는 stack-var
-     2차 heritage 누락.
-   - (c) gcd부터 골든 일치까지 단계 검증(트리 출력 vs `testdata/ghidra_golden/ghidra_golden.json`) ->
-     나머지 10 골든 -> 검증되면 decompile.go 41-call subset을 트리로 대체.
+1. **[대형, 최우선] H8-debt-2 step3 -- 트리 출력의 남은 갭 제거**. 트리는 수렴하고 시그니처/param_3는
+   골든 일치하나 본체 일부가 다름. 현재 트리 gcd 출력 vs 골든:
+   - 트리: `if (iVar1) { do { iVar2 = param_3 % iVar1; param_3 = iVar1; iVar1 = iVar2; } while (iVar1); return; } return;`
+   - 골든: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; } return;`
+   - 갭 (a): **param_4가 temp(iVar)로 coalesce** -- 골든은 param_4를 loop-carried로 유지. 스택 슬롯
+     [esp+8](param_4)의 loop phi가 production처럼 스택 심볼로 안 묶임. Merge/MergeRequired 순서 또는
+     스택 slot 2차 heritage 타이밍 의심.
+   - 갭 (b): **while-comma 구조** -- 골든은 `while (iVar1 = param_4, iVar1 != 0)` 단일 while,
+     트리는 if-guard + do-while + double-return. production(decompile.go)은 골든을 정확히 출력하므로
+     production의 NormalizeBranches/NodeJoin/BlockStructure/Merge 순서를 트리와 대조해 차이 식별.
+   - 진단 도구: `TestTreeOutputDiag`(TREE_DIAG=1, pkg/loader/tree_output_diag_test.go) -- 트리를 돌려
+     processEntry/ghidra 포맷으로 출력. production 비교는 `runPipelineGhidra`(msvc_diag_test.go).
+   - 접근: 트리 출력을 production 출력과 단계적으로 대조(트리는 decompile.go와 같은 action impl 공유하나
+     순서/선택이 다름). 정렬되면 나머지 10 골든 -> decompile.go 41-call subset을 트리로 대체.
    - 성공 기준: universal 트리(SetCurrent("decompile"))가 gcd 등 전 골든을 byte-identical 출력.
 
 2. **[대형] #2 breadth + #4 x64/ARM**: 골든 11개(거의 x86-32 + 사소한 x64/aarch64 add_ret)뿐.
@@ -131,8 +130,9 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
     forward-snip 워크어라운드보다 충실.
   - C++ 참조: `merge.cc Merge::mergeOp`(719-772, 759-760 trimOpOutput), `condexe.cc getNewMulti`(206).
 
-- [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **재정의 (2026-06-30): "순서 reconcile"가 아니라
-  "hollow action 본체 채우기 + Funcdata self-contain"이 본질**. 미션(#1 게이트)의 핵심 잔여.
+- [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **step1+2 완료 (2026-06-30): 트리 proto 배선 +
+  incremental heritage로 트리가 수렴하고 시그니처/param_3가 골든 일치. 남은 갭 = param_4 coalesce +
+  while-comma 구조(step3, 위 "다음 작업" 참조)**. 아래는 이전 진단 이력(참고).
   - **2026-06-30 측정 발견(정정)**: `BuildUniversalAction`(action.go:1159)은 C++ universalAction의
     구조적 스켈레톤(250 action/rule, 올바른 순서 + group 필터)을 갖췄고 **대부분의 action은 decompile.go가
     쓰는 것과 동일한 real impl을 공유**(InferTypes/BlockStructure/StackPtrFlow/Merge* 등 실제 Apply 보유).
