@@ -22,6 +22,20 @@ anchorReturnReg(SeqNum 휴리스틱)을 대체할 C++ 메커니즘을 dormant로
   ActiveHeritage 재마킹 후 placeMultiequals 생략, Rename만 실행(기존 SSA 변형 위험). (1)이 정공법.
 - 결과: anchorReturnReg(live) 유지, 전 골든 + 전 패키지 그린. master `34e5d6b`.
 
+### 2026-06-29: H8-debt-1 측정 진단 정정 (lost-copy는 상류 phi-storage 문제, MergeMarker 순서 아님)
+TrimJoinblockMultiequals 제거 가능성을 MERGE_PROBE 계측 + 조기 MergeMarker 제거 실험으로 측정.
+이전 "MergeMarker 순서" 가설을 실측으로 반증/정정(코드 변경 없음, 진단만).
+- **의존 범위**: TrimJoinblockMultiequals off 시 **gcd 하나만** 회귀(나머지 전 골든 PASS).
+  gcd: `for(param_4=param_4;...)` (잘못) vs golden `while(iVar1=param_4,...)` lost-copy snapshot.
+- **MergeMarker 순서 반증**: 조기 MergeMarker(decompile.go:84,91) 제거 실험에도 gcd 출력 불변.
+- **실측 divergence**: MERGE_PROBE 계측 결과 loop-cond phi(isLoopCond=true)가 MergeOp에서 cover
+  충돌(allOK=false)을 감지하나 TrimOpInput으로 해소(trimmed=true) -> trimOpOutput 미발화. 원인:
+  Gosleigh는 phi 출력이 unique+fresh HV(충돌=input-vs-output-unique, input trim으로 해소),
+  C++는 phi 출력이 param-storage varnode(충돌=output-vs-param, input trim 불가 -> trimOpOutput ->
+  iVar1). 근본은 상류 phi 출력 storage/HV 배정(NodeJoin/Heritage + AssignHigh) 차이.
+- 결론: TrimJoinblockMultiequals는 필수 워크어라운드(제거 시 gcd 회귀). 원리적 제거는 상류 수정
+  선행(대형). STATUS H8-debt-1에 측정 진단 반영. 전 패키지 그린 유지.
+
 ### 2026-06-29: H7 step 1+2 -- consume-bit DeadCode를 충실 프로덕션 기본값으로 LIVE
 anchorReturnReg 휴리스틱을 둘러싼 핵심 서브시스템(consume-bit DeadCode)을 충실 포팅하고
 프로덕션 DeadCode 경로로 배선. 전 골든 + 전 패키지 byte-identical 통과.

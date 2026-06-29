@@ -130,21 +130,28 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
 - [ ] H8-debt-1: 스냅샷 발화 판별자를 원리적으로 교체 -- **H8-debt-2와 entangled(2026-06-29 진단)**
   - 현상: `Merge.TrimJoinblockMultiequals`가 unique-output phi에만 발화하는 휴리스틱.
     출력 varnode의 unique-vs-addrtied로 우회.
-  - **2026-06-29 root-cause**: Gosleigh `Merge.MergeOp`(merge.go:424)는 이미 C++ mergeOp의
-    cover-trim cascade + 최후 `TrimOpOutput`(merge.go:482-518)을 충실 포팅함. 즉 스냅샷
-    메커니즘(TrimOpOutput) 자체는 원리적으로 존재. **문제는 순서**: Gosleigh는 MergeMarker를
-    일찍 여러 번 돌려(decompile.go) loop phi 출력을 param HV에 이미 병합 -> MergeOp가 loop
-    phi에 도달할 때 cover 충돌이 이미 사라져 자연 TrimOpOutput 미발화. C++는 mergeOp가 fresh-HV
-    상태의 phi에서 cover 충돌 시 trimOpOutput 호출(merge.cc:719-760). TrimJoinblockMultiequals는
-    이 순서 divergence의 workaround.
-  - **원리적 해법 두 갈래**: (A) MergeMarker 실행 시점을 C++ universalAction 순서로 맞춰
-    MergeOp의 자연 TrimOpOutput이 loop phi에서 발화하게 함(= H8-debt-2 reconcile에 포함). (B)
-    순서 유지하되 TrimJoinblockMultiequals에서 pre-merge fresh-HV cover 충돌을 재구성해 판정
-    (last session이 "둘 다 level 2"로 못 깬 lost-copy 미세 검출). (A)가 정공법, H8-debt-2와 통합 권장.
-  - C++ 참조: `merge.cc Merge::mergeOp`(719-772, 특히 759-760 trimOpOutput 최후 수단),
-    `block.cc BlockWhileDo::finalizePrinting`(for-loop 유효성).
-  - 수정 대상: `pkg/bridge/decompile.go`(MergeMarker 순서) + `pkg/pcode/merge.go`
-    TrimJoinblockMultiequals 제거.
+  - **2026-06-29 측정 진단 (이전 "MergeMarker 순서" 가설 정정)**: MERGE_PROBE 계측 + 조기
+    MergeMarker 제거 실험으로 확정. 의존 골든은 **gcd 하나뿐**(나머지 전 골든은 TrimJoin off에도
+    PASS). gcd 실패 모드: `for(param_4=param_4;...){param_3=param_4;}` (잘못) vs golden
+    `while(iVar1=param_4,...){param_4=param_3%iVar1;param_3=iVar1;}` (lost-copy swap snapshot).
+  - **MergeMarker 순서는 lever 아님(실험 반증)**: 조기 MergeMarker(:84,:91) 제거해도 gcd 출력
+    불변. 즉 조기 병합이 자연 TrimOpOutput을 막는 게 아님.
+  - **진짜 divergence (상류 SSA/HV 배정)**: TrimJoin off에서 loop-cond phi(seq36, isLoopCond=true)는
+    cover 충돌(allOK=false)을 감지하나 **TrimOpInput으로 해소(trimmed=true)** -> trimOpOutput
+    미발화. 원인: Gosleigh는 이 phi 출력이 **unique varnode + 별도 fresh HV**라 충돌이
+    "input vs output-unique"여서 input trim으로 해소됨. C++는 같은 phi 출력이 **param_4-storage
+    varnode(HV=param_4)**라 충돌이 "output vs param"이어서 input trim으로 해소 불가 -> trimOpOutput
+    -> iVar1 snapshot 자연 생성. 즉 phi 출력 varnode가 unique냐 addr-tied(param storage)냐의
+    상류 차이(Heritage/NodeJoin placement + AssignHigh)가 근본. TrimJoinblockMultiequals는 unique
+    phi 출력을 forward-snip해 보정하는 필수 워크어라운드(제거 시 gcd 회귀).
+  - **원리적 해법(대형, 상류)**: loop-cond phi 출력을 param-storage varnode로 배치(또는 그 HV를
+    param HV로) 하여 MergeOp 충돌이 output-vs-param이 되게 함 -> 자연 trimOpOutput 발화. NodeJoin/
+    ConditionalJoin의 phi 출력 storage 결정 + AssignHigh 검토 필요. last session "lost-copy 못 깸"이
+    이 지점.
+  - C++ 참조: `merge.cc Merge::mergeOp`(719-772, 759-760 trimOpOutput 최후 수단)/`trimOpInput`(692-712),
+    phi 출력 storage는 NodeJoin/Heritage placeMultiequals + ActionAssignHigh.
+  - 수정 대상: `pkg/pcode/coreaction.go`(NodeJoin phi 출력 storage)/`pkg/pcode/merge.go`(AssignHigh,
+    TrimJoinblockMultiequals 제거는 상류 수정 후).
   - 성공 기준: gcd/SumList/CountedLoop 전부 PASS 유지하며 TrimJoinblockMultiequals 휴리스틱 제거.
 
 - [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **부분 완료 (2026-06-29, `5a39f6c`)**
