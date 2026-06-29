@@ -1,188 +1,108 @@
 # 프로젝트 상태
 
-## 현재 상태 (2026-06-30 세션 종료, step3b COMPLETE: 트리 gcd byte-identical)
+## 최종 목표 (THE mission)
 
-**전 패키지 그린**. 이번 세션: **H8-debt-2 step3b 완료 -- universal-action 트리가 gcd를 golden과 완전히
-동일(byte-identical)하게 출력**. do-while -> while 루프 회전을 막던 5개 C++ parity 버그를 모두 잡음(상세
-CHANGELOG 2026-06-30 step3b COMPLETE):
+Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)** 포팅. 실제 .sla(x86/x64/ARM)를
+로드해 **임의 실제 함수**를 Ghidra와 같은 C 출력으로 디컴파일하는 실사용 수준. (project CLAUDE.md 프로젝트
+목표 + memory `project_e2e_goal` 참조.) x64 실함수(register param RCX/RDX) 성공도 명시 목표.
+
+### 두 경로의 현재 위치
+- **Production (`bridge.Decompile`, 41-call 손정렬 subset)**: x86-32 골든 11개 전부 그린. 단 작은 튜닝
+  함수 코퍼스일 뿐 -- 실제 임의 함수(struct/union/switch/jumptable/미포팅 opcode)는 미완.
+- **Tree (`ActionDatabase.BuildUniversalAction`, 250 action/rule = 진짜 Ghidra 파이프라인)**: 이게 미션의
+  본체. #1 게이트 = 트리를 프로덕션 경로로 만들어 41-call subset을 대체(= H8-debt-2). **현재 트리 x86-32
+  골든 1/5 byte-identical(gcd만).**
+
+## 현재 상태 (2026-06-30 세션 종료, master `da76e07`, 전 패키지 그린)
+
+**H8-debt-2 step3b 완료 -- universal 트리가 gcd를 golden과 byte-identical 출력.** do-while->while 루프
+회전을 막던 5개 C++ parity 버그를 잡음(상세 CHANGELOG 2026-06-30 step3b COMPLETE). 근본 패턴 = "C++
+flags=0 액션을 once-per-func로 오등록 + 동명 임포스터 rule + BlockCopy edge-forward 누락" 클러스터. 전부
+production-safe(트리 전용; production은 .Apply 직접 호출로 액션 프레임워크 밖).
 1. `RuleCondNegate` 임포스터 -> 충실 포팅(CBRANCH+boolean_flip -> BOOL_NEGATE+clear).
-2. `ActionNodeJoin`/`ActionNormalizeBranches` once-per-func 오등록 -> flags=0(매 pass 재실행).
-3. **`BlockBasic.NegateCondition`이 소스 기본블록 edge 미swap** (핵심 블로커) -> C++ BlockCopy처럼
-   srcDelegate edge도 swap. collapse가 entry를 loop와 정렬 -> NodeJoin join -> while.
-4. 트리 풀이 잘못된 `RulePushMulti` 등록 -> 충실 `RulePushMultiME`(MULTIEQUAL 트리거). 조건 인라인.
-5. `ActionInferTypes` once-per-func -> flags=0. 스냅샷 타입(undefined4 -> int).
+2. `ActionNodeJoin`/`ActionNormalizeBranches` once-per-func -> flags=0(매 mainloop pass 재실행).
+3. **`BlockBasic.NegateCondition`이 소스 기본블록 edge 미swap** (핵심) -> C++ BlockCopy::negateCondition
+   (block.hh:534)처럼 srcDelegate edge도 swap. collapse가 entry를 loop와 정렬 -> NodeJoin join -> while.
+4. 트리 풀이 잘못된 `RulePushMulti`(arithmetic 트리거) -> 충실 `RulePushMultiME`(MULTIEQUAL). 조건 인라인.
+5. `ActionInferTypes` once-per-func -> flags=0. 스냅샷 타입(undefined4 uVar1 -> int iVar1).
 
-근본 패턴 = "C++ flags=0 액션을 once-per-func 오등록 + 동명 임포스터 rule + BlockCopy edge-forward 누락"
-클러스터. **production 무영향**(이 액션/rule을 .Apply 직접 호출, 액션 프레임워크 밖). 회귀 가드
-`TestUniversalActionTreeGcdGolden`. 진단 `TestTreeGoldensDiag`(TREE_DIAG=1).
-
-**다음 단계 = #1 게이트 나머지(아래 "다음 작업" 1번)**: 트리 x86-32 골든 **1/5 byte-identical**(gcd만).
-나머지 4개는 EBP-프레임 + 스택 로컬 함수라 갭 큼(return-value/for-fold/스택 로컬 경로 미완). 아래 옛 현황
-블록은 직전 세션 기준.
-
-## 이전 상태 (2026-06-30, master `4581cf5`)
-
-**전 패키지 그린** (loader/pcode/sla/bridge). 최종 목표 = Ghidra C++ 디컴파일러를 Go로 동일동작
-포팅(실제 .sla x86/x64/ARM -> C). #1 게이트 = 손정렬 41-call `bridge.Decompile`을 충실한
-`ActionDatabase.BuildUniversalAction`(250 action/rule) 트리로 대체(= H8-debt-2). 이번 세션 성과
-(H8-debt-2 step1~3b-1 -- 트리가 gcd를 **의미적으로 정확하게** 출력, 남은 갭은 cosmetic 루프 회전 1개.
-상세 CHANGELOG 2026-06-30):
-
-1. **step1 -- 트리 proto/param/ScopeLocal 배선**. 트리는 FuncProto/ScopeLocal을 안 만들어
-   (실행 후에도 nil) 파라미터/로컬 미명명 + 쓰레기 return이었음. `Funcdata.defaultModel`
-   (Architecture::defaultfp 등가, bridge.Build이 부착) + ActionPrototypeTypes 충실화
-   (setModel+ScopeLocal 생성+initActiveOutput, coreaction.cc:4626-4662). -> 시그니처 byte-match.
-2. **step2 -- incremental heritage + activeparam 멱등**. heritage-once 대체(H7 step3 multi-pass도 해결):
-   Heritage()가 heritage-known varnode skip(IsHeritageKnown, heritage.cc:2704-2719), OpHeritage가
-   persistent Heritage 재사용 + 스택 슬롯 HeritageRange 슬롯별 1회. ApplyActiveParamModel은 input-lock 시
-   early-return(oscillation 제거). -> 트리 수렴 + param_3가 루프 본체에 fold.
-3. **step3a -- early stack heritage**. SSA 대조로 param_4 미fold 근본 규명(트리 ECX phi가 stack:0x8 대신
-   COPY const:0 추적). OpHeritage가 첫 register heritage 직후 ActionStackPtrFlow 실행(GetPass()==1)으로
-   stack을 rule pool 전에 heritage. -> param_3/param_4 모두 fold(의미적으로 정확한 gcd).
-4. **step3b-1 -- 충실 ActionReturnSplit**. CFG 대조로 트리가 return을 과분리(2개)함을 규명 -- C++는
-   goto-to-return 엣지만 분리(gatherReturnGotos)나 Gosleigh는 모든 in-edge 분리. goto in-edge만 분리
-   (IsGotoIn)로 수정 -> 단일 return 복원. 남은 갭 = do-while -> while 루프 회전(step3b, 아래).
-
-### 다음 작업 (우선순위) -- #1 게이트: 트리 출력을 골든 byte-identical로
-
-1. **[대형, 최우선] H8-debt-2 -- 트리를 전 골든에 byte-identical로 (41-call subset 대체)**. step3b(gcd
-   루프 회전) **완료**. 트리가 gcd를 golden과 byte-identical 출력(`TestUniversalActionTreeGcdGolden`).
-   남은 = 나머지 x86-32 골든(현재 1/5). 진단 `TestTreeGoldensDiag`(TREE_DIAG=1).
-   - **step3b 완료 요약(5개 parity 버그, 전부 production-safe)**: (1) RuleCondNegate 임포스터->충실 포팅,
-     (2) NodeJoin/NormalizeBranches once-per-func->flags=0, (3) **NegateCondition 소스-edge swap 누락**
-     (C++ BlockCopy::negateCondition, block.hh:534 -- 핵심 블로커), (4) RulePushMulti->RulePushMultiME
-     (충실, MULTIEQUAL 트리거), (5) InferTypes once-per-func->flags=0. 상세 CHANGELOG step3b COMPLETE.
-   - **남은 갭 (TestTreeGoldensDiag 실측)**: 트리 x86-32 골든 1/5 byte-identical(gcd만). 나머지 4개
-     (counted_loop/sum_list/abs_val/classify2)는 모두 EBP-프레임(push ebp; mov ebp,esp) + 스택 로컬
-     함수라 갭 큼. 예) counted_loop 트리 출력:
-     `void entry(void){ local_8=0; while(local_8<5){ uVar1=local_8+1; } return; }` vs golden
-     `int entry(void){ for(local_8=0; local_8<5; local_8=local_8+1){ local_c=local_c+local_8; } return local_c; }`.
-     -> 트리의 (a) return-value 복구(void), (b) 스택 로컬 누락(local_c, 누산기), (c) for-loop fold 미인식
-     (while), (d) 루프 본체 dead(uVar1 미사용) 경로 미완. gcd는 frameless라 통과.
-   - **다음 작업**: TestTreeGoldensDiag로 한 골든씩 트리 출력 vs golden 대조 -> 차이별 근본을 production
-     경로(작동)와 비교(step3b처럼 flags/임포스터/edge-forward 류 의심 우선) -> 충실 포팅. EBP-프레임 스택
-     로컬 + return-value + for-fold가 핵심. 전 골든 정렬되면 decompile.go 41-call subset을 트리로 교체.
-   - **return-value 갭 (조사됨, 큰 작업)**: abs_val 트리 = `void entry(){ if(param_3<0){} return; }`
-     (값 계산 dead-code 제거 + void) vs golden `int entry(){ if(param_3<0){param_3=-param_3;} return param_3; }`.
-     근본: 트리 Heritage.Heritage(heritage.go:728~)가 guardCalls만 호출하고 **guardReturns 미호출**(C++
-     Heritage::heritage -> guard()는 guardCalls+guardReturns 둘 다). 단, **naive하게 guardReturns만 추가하면
-     실패**(실측): gcd 등 void 함수도 activeoutput이 설정돼(ActionPrototypeTypes coreaction.go:844) EAX가
-     RETURN에 붙어 비-void로 깨지고, sum_list는 ActionConditionalConst.propagateConstant에서 nil deref.
-     **정밀 규명(이번 세션 추가 조사)**: 함수 자기 반환은 ActionActiveReturn(=CALL 출력 복구, coreaction.cc
-     :1774)이 아니라 **ActionReturnRecovery**(coreaction.cc:1909, mainloop 5511) + ActionOutputPrototype
-     (5747)이 담당. 트리는 ActionReturnRecovery를 가지나(coreaction.go:1183) void/실제 판정을 간이
-     `ancestorOpUseReturn`(funcproto.go:591, onlyReturnUse 기반)으로 함 -- C++ **AncestorRealistic**
-     (funcdata_varnode.cc, ~200줄 백워드 dataflow)의 충실 포팅이 아님. gcd EAX(`mov eax,ecx` 후 return만
-     읽힘)를 onlyReturnUse=true로 **오판정** -> naive guardReturns 시 gcd가 비-void로 깨짐(실측). Ghidra
-     AncestorRealistic은 "현실적 반환"인지(입력 레지스터 passthrough/undefined 거부 등)를 정교 판정해 gcd를
-     void로 정리. **따라서 트리 return 복구의 크럭스 = AncestorRealistic 충실 포팅**(대형) + heritage에
-     guardReturns 통합. production은 ApplyGuardReturnsLive(2-pass 워크어라운드)로 우회하나 트리 통합 경로엔
-     AncestorRealistic 필수. 별도 세션(C++ funcdata_varnode.cc AncestorRealistic::execute/enterNode 먼저 읽기).
-   - 성공 기준: TestTreeGoldensDiag가 5/5(나아가 전 골든) byte-identical.
-
-2. **[대형] #2 breadth + #4 x64/ARM**: 골든 11개(거의 x86-32 + 사소한 x64/aarch64 add_ret)뿐.
-   x64 실함수(register params RCX/RDX..) 성공 필요(사용자 요구). struct/union/switch/jumptable/
-   미포팅 opcode(PARITY_AUDIT). 새 Ghidra 골든 생성 필요(Ghidra 12 `C:\ghidra12`,
-   `testdata/ghidra_decompile.py`).
-
-3. **정리(저우선)**: consume-DeadCode broader corpus 검증 후 `GOSL_DESCENDANT_DC` fallback +
-   레거시 descendant-count 루프 제거. H9 미포팅 잔여(SUBPIECE/PTRSUB getOutputToken / union
-   resolution / markExplicitUnsigned·LongSize). 트리 6개 stub delegate 중 비-CalcNZMask 채우기.
-
-세션 상세 이력: `docs/CHANGELOG.md` (2026-06-30 항목).
-
-## 작업 방향 (2026-04-13 확정)
-
-golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 각 패스를 알고리즘 레벨에서 충실히 구현**. golden test는 검증 수단이지 목표가 아님. 각 패스 구현 시 C++ 코드 먼저 읽고 이해 후 Go로 포팅.
+회귀 가드 `TestUniversalActionTreeGcdGolden`(일반 스위트). 진단 `TestTreeGoldensDiag`(TREE_DIAG=1).
 
 ---
 
-### 미시작 -- actmainloop 순서 기반 foundational 패스
+## 다음 작업 (우선순위)
 
-**NOTE**: 아래 항목들은 golden match가 아니라 C++ 알고리즘 충실 구현이 성공 기준. 각 항목 완료 후 `go test ./...` 기존 테스트 통과 여부로 regression 확인.
+### 1. [최우선, 대형] 트리 return-value 복구 -- 나머지 골든의 공통 블로커
 
-- [x] H7: return-value 복구 -- **완료 (2026-06-30)**. anchorReturnReg(SeqNum 휴리스틱)를 물리 제거하고
-  return 값을 충실한 Heritage::guardReturns + dominance rename(`ApplyGuardReturnsLive`)으로만 복구.
-  consume-bit DeadCode(`deadcode_consume.go`, 프로덕션 기본 경로) + 실제 CalcNZMask(op.cc:548) 포팅 완료.
-  step3가 의존하던 multi-pass heritage는 이번 세션 step2의 incremental heritage로 해결됨. 상세는 CHANGELOG
-  2026-06-30. (잔여: ActionActiveReturn의 call-output trial 본체는 미포팅 -- 함수 자기 return은 guardReturns로
-  충실, 전 골든 정확.)
+트리 x86-32 골든 4/5 실패의 **공통 근본**. 값 반환 함수(abs_val/counted_loop/sum_list/classify2,
+전부 EBP-프레임 + 스택 로컬)가 트리에서 `void` + 값 계산 dead-code 제거로 렌더.
 
-- [x] H8: gcd_x86_32 golden parity **완료 (2026-06-29)**. TestMSVC_Gcd PASS.
+**규명된 메커니즘 (이번 세션 실측 확정)**:
+- 트리 `Heritage.Heritage`(heritage.go:728~)가 guardCalls만 호출하고 **guardReturns 미호출**(C++
+  Heritage::heritage -> guard()는 guardCalls+guardReturns 둘 다, heritage.cc).
+- **naive하게 guardReturns만 추가하면 실패**(실험으로 확인 후 되돌림): (a) gcd가 `int ... return param_3;`로
+  깨짐(void여야 함) + iVar1 스냅샷도 깨짐, (b) sum_list가 ActionConditionalConst.propagateConstant에서 nil
+  deref. 이유 둘:
+  1. **void/실제 판정이 틀림**: 트리는 ActionReturnRecovery(coreaction.go:1183)를 가지나 void/실제 판정을
+     간이 `ancestorOpUseReturn`(funcproto.go:591, onlyReturnUse 기반)으로 함. C++는 **AncestorRealistic**
+     (funcdata_varnode.cc, ~200줄 stack-DFS 백워드 dataflow + "solid movement" 휴리스틱). gcd의 param_3는
+     루프 통과 파라미터(solid movement 없음)라 Ghidra가 void로 판정하나, 간이 판정은 "사용된 반환"으로 오판.
+     **선행 의존 플래그 미구현**: `isUnaffected`/`isDirectWrite`/`isKilledByCall`/`isIncidentalCopy`/
+     `isIndirectCreation`/`isReturnAddress` (Mark/Persist는 있음).
+  2. **격리 필요**: guardReturns를 main heritage 루프에 넣으면 루프 스냅샷(trimOpOutput)까지 망가짐.
+     production은 별도 heritage 패스 `ApplyGuardReturnsLive`(paramactive.go:826, BuildADT + 재마킹 + Rename,
+     return 범위만)로 격리해 우회.
+- 함수 자기 반환 담당 액션: **ActionReturnRecovery**(C++ coreaction.cc:1909, mainloop) +
+  **ActionOutputPrototype**(5747, post-mainloop). ActionActiveReturn(1774)은 CALL 출력(다른 함수 반환)이라
+  무관.
 
-- [x] H8-debt-1: TrimJoinblockMultiequals 제거 -- **완료 (2026-06-30)**. forward-snip 워크어라운드를
-  충실한 C++ mergeOp trimOpOutput 메커니즘으로 대체. 전 골든 + 전 패키지 그린.
-  - **해결**: `Merge.MergeOp`에서 cover 충돌(!allOK)인 loop-cond MULTIEQUAL(isLoopCondMultiequal)은
-    input-trim을 건너뛰고 곧장 `TrimOpOutput` 호출(merge.cc:759-760의 실제 메커니즘) -> 긴 cover의 출력을
-    COPY로 분리해 loop-head snapshot(iVar1) 생성. `TrimJoinblockMultiequals`(별도 pass + forward-snip +
-    unique-output/anyPhysical/IsAddrTied 게이트)와 `hasPhysicalSource` 헬퍼 삭제, decompile.go/diag-test의
-    호출 제거. FORCE_TRIMOUT 실험으로 전 corpus 검증 후 정식화.
-  - **진단 이력(2개 가설 실측 반증)**: (1)"MergeMarker 순서" -- 조기 MergeMarker 제거해도 gcd 불변(반증).
-    (2)"phi 출력 storage(unique vs param)" -- C++ `ConditionalExecution::getNewMulti`(condexe.cc:206)도
-    `newUniqueOut` 사용, GCD_DUMP로 양쪽 다 unique 확인(반증). 확정 divergence: Gosleigh mergeOp가 cyclic
-    loop-cond phi 충돌을 TrimOpInput으로 해소(trimmed=true)해 trimOpOutput 미발화 -- C++는 input-trim 소진 후
-    trimOpOutput으로 떨어짐.
-  - **잔여(저우선)**: `isLoopCondMultiequal` 게이트는 "input-trim이 spurious하게 해소되는 cyclic phi"의
-    stand-in. 완전 원리화 = mergeOp가 게이트 없이 자연 trimOpOutput에 도달하도록 Cover/mergeTest fidelity
-    수정(back-edge를 지나는 phi 출력 cover가 trim 지점과 겹치게) -- residual loop-carried Cover gap. broad
-    cover 변경이라 위험, 별도 세션. 현재 게이트는 cover-충돌(!allOK) 신호 + 실제 trimOpOutput 메커니즘이라
-    forward-snip 워크어라운드보다 충실.
-  - C++ 참조: `merge.cc Merge::mergeOp`(719-772, 759-760 trimOpOutput), `condexe.cc getNewMulti`(206).
+**진입점(다음 세션)**: C++ `funcdata_varnode.cc AncestorRealistic::execute/enterNode/uponPop`(2016-2260) +
+`funcdata.hh:656` State 정의 먼저 읽기 -> 선행 Varnode 플래그 구현(+이를 설정하는 ActionDirectWrite 등
+확인) -> `ancestorOpUseReturn`을 AncestorRealistic 충실 포팅으로 교체(production도 사용 = 회귀 위험 큼,
+전 골든 회귀 필수) -> 트리에 격리 guardReturns 통합 -> `TestTreeGoldensDiag`로 한 골든씩 검증.
+**성공 기준**: `TestTreeGoldensDiag` 5/5 byte-identical.
 
-- [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **step1+2+3a+3b-1 완료 (2026-06-30): 트리 proto 배선 +
-  incremental/early heritage + 충실 ReturnSplit로 트리가 수렴하고 시그니처/param_3/param_4/단일 return
-  모두 골든 일치(의미적으로 정확한 gcd). 남은 갭 = do-while->while 루프 회전뿐(step3b, 위 "다음 작업"
-  참조)**.
-  - 구조: `BuildUniversalAction`(action.go:1159)은 C++ universalAction의 충실 스켈레톤(250 action/rule,
-    올바른 순서 + group 필터)이고 대부분의 action은 decompile.go와 동일한 real impl 공유. 트리는
-    self-contained 실행(Funcdata가 graph/spaces/defaultModel 보유) + 수렴 + 의미적으로 정확한 gcd 출력.
-  - 잔여(루프 회전 외): 6개 stub delegate 중 `CalcNZMask`는 실제 포팅 완료(op.cc:548), 나머지 5개
-    (`Spacebase`/`ApplyForceGoto`/`MarkIndirectOnly`/`RemoveDoNothingBlock`/`RemoveBranch`)는 no-op skip
-    (decompile.go도 별도로 안 돌림, 당장 acceptable). repeat-apply 안전 cap 미설치(현재 수렴하므로 비차단).
-  - 상세 이력(hollow 재정의 -> 첫 fill -> 수렴 -> proto 배선 -> incremental/early heritage -> ReturnSplit ->
-    루프회전 root-cause)은 CHANGELOG 2026-06-30 참조.
+전략 메모: return-value 외 잔여 트리 갭(실측) = for-loop fold 미인식(counted_loop while->for), 스택
+로컬 누산기. 한 골든씩 production 경로(작동)와 대조해 step3b처럼 flags/임포스터/edge-forward 류 우선 의심.
+정렬되면 decompile.go 41-call subset을 트리로 교체(미션 #1 게이트 완료).
 
-- [x] H9: ActionSetCasts -- 타입 캐스트 삽입 **완료 (2026-06-29)**. 분석-time CPUI_CAST
-  삽입이 bridge.Decompile에서 라이브, render-time assignCastStr 완전 제거. 아래는 포팅 이력.
-  - 역할: 타입 불일치 지점에 명시적 `CPUI_CAST` op 삽입.
-  - 컴포넌트:
-    1. `CastStrategy::castStandard` (C 전략) -- **완료 `f545917` + 배선 `64e8c90`**
-       (`pkg/pcode/cast.go` `CastStrategyC.CastStandard` + 단위 테스트). printc
-       `assignCastStr`의 COPY/LOAD 캐스트 판정에 배선됨(실사용).
-    2. 전 opcode의 `getInputCast`/`inputTypeLocal` (TypeOp별) -- **완료 `432b30e`**
-       (typeop_cast.go + cast.go int-promotion). TypeOp 인터페이스에 `InputTypeLocal`/
-       `GetInputCast` 추가, opInputMeta 테이블(per-opcode metain), 충실 오버라이드
-       (Copy/Load/Store/Zext/Sext/comparison/Ptradd/Ptrsub). int-promotion 머신리
-       (intPromotionType/localExtensionType/checkIntPromotionFor*) 포팅. 단위 테스트.
-       남은 출력측 `getOutputToken`/`outputTypeLocal`는 castOutput과 함께 다음 체크포인트.
-    3. CastStrategy 나머지:
-       - `IsSubpieceCast`/`IsSextCast`/`IsZextCast` -- **완료 `7c350d3`+`3b64207`**
-         (cast.go, 단위 테스트). 셋 다 PrintC 렌더링에 배선+검증됨:
-         SUBPIECE offset0 정수 truncation -> `(int)x` (`TestPrintCSubpieceCast`);
-         SEXT/ZEXT는 natural일 때만 cast, 아니면 SEXT()/ZEXT() (`TestPrintCZextNotCast`).
-         SUBPIECE는 little-endian 가정(isSubpieceCastEndian 미구현).
-       - 미구현: markExplicitUnsigned/LongSize, arithmeticOutputStandard.
-    4. ActionSetCasts apply/castInput/castOutput/resolveUnion/checkPointerIssues/
-       insertPtrsubZero + PTRSUB/PTRADD 재작성 + updateType/getHighTypeReadFacing/
-       inheritResolution(resolution 머신리).
-  - C++ 참조: `cast.cc`, `coreaction.cc ActionSetCasts::apply` (2724+), `typeop.cc`
-    각 TypeOp::getInputCast.
-  - 렌더링: PrintC는 이미 CPUI_CAST 처리(renderCast) -> 삽입만 하면 됨.
-  5. **for-fold 재배치 + assignCastStr 제거 -- 완료(2026-06-29)**: ActionForLoops를
-     ActionSetCasts 뒤로 이동(C++ print-time for-fold 순서), castOutput marker-skip으로
-     loop phi split 방지, printc.go assignCastStr/effectiveLoadResultType 삭제. 상세 CHANGELOG.
-  - 성공 기준: 기존 캐스트 golden (sum_list `(int *)`, complex_max `(int)`) 유지하며
-    assignCastStr 의존 제거. **충족(전 골든 그린)**.
+### 2. [대형] breadth + x64/ARM 실함수
 
-### 기타 미시작 (참고)
-- H9 외: struct/union 타입 복구, switch statement, 6502 NOP/LDA/BNE 등 대부분 opcode
-  resolution (PARITY_AUDIT.md 참조), BatchC rules 품질.
+골든 11개(거의 x86-32 + 사소한 x64/aarch64 add_ret)뿐. x64 실함수(register params RCX/RDX..) 성공 필요
+(사용자 명시 요구). struct/union/switch/jumptable/미포팅 opcode(`docs/PARITY_AUDIT.md`). 새 Ghidra 골든
+생성(Ghidra 12 `C:\ghidra12`, `testdata/ghidra_decompile.py`). **전략 옵션**: #1(트리 perfection)이 골든마다
+깊은 rabbit hole이면, 실제 임의 함수에 production을 돌려 real-world 갭을 먼저 넓게 발굴하는 것이 미션
+딜리버리에 더 가까울 수 있음 -- 다음 세션에서 판단.
 
-### 진단 도구 (전부 env 가드, 평상시 무음/skip)
-- `pkg/loader/msvc_diag_test.go` `dumpSSA`/`vnStr` (GCD_DUMP=1) -- SSA op 스트림 블록별 덤프.
-- `pkg/loader/tree_output_diag_test.go` (TREE_DIAG=1):
-  - `TestTreeOutputDiag` -- universal 트리를 gcd에 돌려 processEntry/ghidra 포맷 C 출력 + proto/scopelocal
-    상태 + (GCD_DUMP=1 시) 트리/production SSA 나란히 덤프. production 기준 = bridge.Decompile 후
-    result.Funcdata(in-place).
-  - `TestProductionStagesDiag` -- production 파이프라인을 단계별로 재현하며 각 패스 후 basic-block shape
-    (blocks 수 + self-loop 여부) 로그. step3b 루프회전 bisect용(NodeJoin이 3->4 분리 지점 확인).
+### 3. [저우선] 정리
+- consume-DeadCode broader corpus 검증 후 `GOSL_DESCENDANT_DC` fallback + 레거시 descendant-count 루프 제거.
+- H9 미포팅 잔여: SUBPIECE/PTRSUB `getOutputToken` / union resolution / markExplicitUnsigned·LongSize.
+- 트리 5개 stub delegate(`Spacebase`/`ApplyForceGoto`/`MarkIndirectOnly`/`RemoveDoNothingBlock`/
+  `RemoveBranch`) 중 비-CalcNZMask 채우기(현재 no-op skip, 당장 비차단).
+- H8-debt-1 잔여: `isLoopCondMultiequal` 게이트 원리화(Cover/mergeTest fidelity, broad/위험, 별도 세션).
+
+---
+
+## 완료 마일스톤 (상세는 CHANGELOG)
+- **H7** return-value 복구(production): anchorReturnReg 물리 제거, guardReturns + dominance rename
+  (`ApplyGuardReturnsLive`)가 유일 경로. consume-bit DeadCode + 실제 CalcNZMask 포팅. (완료 2026-06-30)
+- **H8** gcd_x86_32 golden parity(production). (완료 2026-06-29)
+- **H8-debt-1** TrimJoinblockMultiequals 제거 -> 충실 mergeOp trimOpOutput(merge.cc:759-760). (완료 2026-06-30)
+- **H8-debt-2** 트리 프로덕션화: step1(proto 배선)+step2(incremental heritage)+step3a(early stack heritage)+
+  step3b-1(충실 ReturnSplit)+**step3b(루프 회전, gcd byte-identical)**. 다음 = 위 "다음 작업 1". (진행 중)
+- **H9** ActionSetCasts: 분석-time CPUI_CAST 삽입 라이브, render-time assignCastStr 제거. (완료 2026-06-29)
+- 기타 미시작: struct/union 타입 복구, switch statement, 대부분 opcode resolution(PARITY_AUDIT), BatchC 품질.
+
+## 작업 방향 (2026-04-13 확정)
+golden diff 맞추기 자체를 목표로 삼지 않음. **C++ actmainloop 순서대로 각 패스를 알고리즘 레벨에서 충실히
+구현**하고 golden test는 검증 수단으로 사용. 각 패스 구현 전 C++ 코드 먼저 읽고 이해 후 Go 포팅. 트리/
+production 모두 같은 action impl을 공유하므로 트리 수정 시 production 회귀(전 골든) 필수 확인.
+
+## 진단 도구 (전부 env 가드, 평상시 skip)
+- `msvc_diag_test.go` `dumpSSA`/`vnStr` (GCD_DUMP=1) -- SSA op 스트림 블록별 덤프.
+- `tree_output_diag_test.go` (TREE_DIAG=1): `TestTreeOutputDiag`(트리 gcd C 출력 + proto/scopelocal,
+  GCD_DUMP=1 시 트리/production SSA 대조), `TestProductionStagesDiag`(production 단계별 blockShape).
+- `tree_goldens_diag_test.go` (TREE_DIAG=1): `TestTreeGoldensDiag` -- 트리를 5개 x86-32 골든에 돌려
+  match/mismatch + diff 보고(현재 1/5).
+- 회귀 가드(일반 스위트): `TestUniversalActionTreeGcdGolden`(트리 gcd byte-identical),
+  `TestUniversalActionTreeConverges`(트리 수렴), `TestMSVC*`(production 골든).
