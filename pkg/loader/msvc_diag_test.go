@@ -263,8 +263,7 @@ func runPipeline(t *testing.T, prog []byte, name string) string {
 	pcode.NewActionNodeJoin("analysis").Apply(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-node-join", "analysis").Perform(result.Funcdata)
 	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	// TrimJoinblockMultiequals: same rationale as runPipeline above.
-	pcode.NewMerge(result.Funcdata).TrimJoinblockMultiequals()
+	// Loop-head snapshot (iVar1) now produced by MergeOp's trimOpOutput; no separate pass.
 	// Re-run MergeMarker so new MULTIEQUAL ops from NodeJoin get HighVariable assignments.
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	dumpSSA(t, result.Funcdata, name+" after NodeJoin+MergeMarker (pre-BlockStructure)")

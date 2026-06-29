@@ -105,12 +105,10 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 	pcode.NewActionNodeJoin("analysis").Apply(fd)
 	pcode.NewBatchAActionPool("batch-node-join", "analysis").Perform(fd)
 	pcode.NewActionDeadCode("analysis").Apply(fd)
-	// Create the loop-head snapshot (iVar1 = COPY(param)) for a unique-output
-	// loop-cond MULTIEQUAL whose value is read after its back-edge value is defined
-	// (a swapped loop variable). Gated to unique phi outputs so for-loops whose
-	// loop variable is already addr-tied storage are left alone. C++ parity intent:
-	// merge.cc eliminateIntersect/snipReads on the addr-tied loop phi output.
-	pcode.NewMerge(fd).TrimJoinblockMultiequals()
+	// The loop-head snapshot (iVar1) for a swapped loop variable is now produced by
+	// Merge.MergeOp's trimOpOutput when it processes the loop-condition MULTIEQUAL
+	// (the faithful C++ merge.cc:759-760 mechanism), so no separate snapshot pass is
+	// needed here. (Formerly: TrimJoinblockMultiequals forward-snip workaround.)
 	// NewUniqueOut does not call assignHigh in Go, so AssignHigh runs before the
 	// MergeMarker that gives NodeJoin's new MULTIEQUAL outputs their HighVariables.
 	pcode.NewActionAssignHigh("analysis").Apply(fd)

@@ -126,37 +126,24 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
 
 - [x] H8: gcd_x86_32 golden parity **완료 (2026-06-29)**. TestMSVC_Gcd PASS.
 
-- [ ] H8-debt-1: 스냅샷 발화 판별자를 원리적으로 교체 -- **H8-debt-2와 entangled(2026-06-29 진단)**
-  - 현상: `Merge.TrimJoinblockMultiequals`가 unique-output phi에만 발화하는 휴리스틱.
-    출력 varnode의 unique-vs-addrtied로 우회.
-  - **2026-06-29 측정 진단 (이전 "MergeMarker 순서" 가설 정정)**: MERGE_PROBE 계측 + 조기
-    MergeMarker 제거 실험으로 확정. 의존 골든은 **gcd 하나뿐**(나머지 전 골든은 TrimJoin off에도
-    PASS). gcd 실패 모드: `for(param_4=param_4;...){param_3=param_4;}` (잘못) vs golden
-    `while(iVar1=param_4,...){param_4=param_3%iVar1;param_3=iVar1;}` (lost-copy swap snapshot).
-  - **MergeMarker 순서는 lever 아님(실험 반증)**: 조기 MergeMarker(:84,:91) 제거해도 gcd 출력
-    불변. 즉 조기 병합이 자연 TrimOpOutput을 막는 게 아님.
-  - **divergence는 mergeOp trim 선택 (2026-06-30 측정, phi-storage 가설 반증)**: TrimJoin off에서
-    loop-cond phi(seq36, isLoopCond=true)는 cover 충돌(allOK=false)을 감지하나 **TrimOpInput으로
-    해소(trimmed=true)** -> trimOpOutput 미발화. C++ mergeOp(merge.cc:747-761)는 동일 구조지만 같은
-    phi에서 input trim으로 해소 안 돼 trimOpOutput(iVar1 snapshot)으로 떨어짐.
-  - **phi-storage 가설 반증(condexe.cc:206)**: "C++ phi 출력은 param-storage라 충돌이 output-vs-param"
-    가설은 틀림. C++ `ConditionalExecution::getNewMulti`(condexe.cc:206)는 join MULTIEQUAL 출력에
-    **`newUniqueOut` 사용**(addr-tied newVarnodeOut은 "merge conflicts" 우려로 주석처리, 205행). 즉
-    join phi 출력은 **양쪽 다 unique**. GCD_DUMP로 확인: Gosleigh NodeJoin도 register-tied loop phi를
-    unique-output phi로 변환(`register:0x4 = MULTIEQUAL` -> `unique:0xae416 = MULTIEQUAL`), C++와 동일.
-  - **for-fold는 lost-copy라 semantically 틀림**: TrimJoin off의 `for(param_4=param_4;...){param_3=
-    param_4;}`는 iterate가 body 뒤에 실행돼 swap이 깨짐(param_3=새 param_4). 즉 snapshot(iVar1)은 필수.
-    단순 for-fold 거부만으론 부족 -- C++는 snapshot을 mergeOp trimOpOutput으로 생성. TrimJoinblockMultiequals가
-    이 snapshot을 forward-snip으로 대체(필수 워크어라운드, 제거 시 gcd 회귀).
-  - **원리적 해법(다음 세션, 깊은 런타임 조사 필요)**: Gosleigh mergeOp의 TrimOpInput이 이 phi 충돌을
-    "해소"하는데 C++는 안 됨 -- 왜 input trim 후 mergeTest가 통과하는지(Cover/mergeTest fidelity) 또는
-    trimOpInput이 cover에 미치는 영향을 런타임으로 규명. merge.go TrimOpInput/mergeTest vs merge.cc
-    trimOpInput(692-712)/mergeTest. last session "lost-copy 못 깸"이 이 지점.
-  - C++ 참조: `merge.cc Merge::mergeOp`(719-772, 759-760 trimOpOutput 최후 수단)/`trimOpInput`(692-712)/
-    `mergeTest`, `condexe.cc ConditionalExecution::getNewMulti`(206 newUniqueOut).
-  - 수정 대상: `pkg/pcode/merge.go` TrimOpInput/mergeTest/Cover fidelity (TrimJoinblockMultiequals
-    제거는 mergeOp가 자연 trimOpOutput을 발화하게 된 후).
-  - 성공 기준: gcd/SumList/CountedLoop 전부 PASS 유지하며 TrimJoinblockMultiequals 휴리스틱 제거.
+- [x] H8-debt-1: TrimJoinblockMultiequals 제거 -- **완료 (2026-06-30)**. forward-snip 워크어라운드를
+  충실한 C++ mergeOp trimOpOutput 메커니즘으로 대체. 전 골든 + 전 패키지 그린.
+  - **해결**: `Merge.MergeOp`에서 cover 충돌(!allOK)인 loop-cond MULTIEQUAL(isLoopCondMultiequal)은
+    input-trim을 건너뛰고 곧장 `TrimOpOutput` 호출(merge.cc:759-760의 실제 메커니즘) -> 긴 cover의 출력을
+    COPY로 분리해 loop-head snapshot(iVar1) 생성. `TrimJoinblockMultiequals`(별도 pass + forward-snip +
+    unique-output/anyPhysical/IsAddrTied 게이트)와 `hasPhysicalSource` 헬퍼 삭제, decompile.go/diag-test의
+    호출 제거. FORCE_TRIMOUT 실험으로 전 corpus 검증 후 정식화.
+  - **진단 이력(2개 가설 실측 반증)**: (1)"MergeMarker 순서" -- 조기 MergeMarker 제거해도 gcd 불변(반증).
+    (2)"phi 출력 storage(unique vs param)" -- C++ `ConditionalExecution::getNewMulti`(condexe.cc:206)도
+    `newUniqueOut` 사용, GCD_DUMP로 양쪽 다 unique 확인(반증). 확정 divergence: Gosleigh mergeOp가 cyclic
+    loop-cond phi 충돌을 TrimOpInput으로 해소(trimmed=true)해 trimOpOutput 미발화 -- C++는 input-trim 소진 후
+    trimOpOutput으로 떨어짐.
+  - **잔여(저우선)**: `isLoopCondMultiequal` 게이트는 "input-trim이 spurious하게 해소되는 cyclic phi"의
+    stand-in. 완전 원리화 = mergeOp가 게이트 없이 자연 trimOpOutput에 도달하도록 Cover/mergeTest fidelity
+    수정(back-edge를 지나는 phi 출력 cover가 trim 지점과 겹치게) -- residual loop-carried Cover gap. broad
+    cover 변경이라 위험, 별도 세션. 현재 게이트는 cover-충돌(!allOK) 신호 + 실제 trimOpOutput 메커니즘이라
+    forward-snip 워크어라운드보다 충실.
+  - C++ 참조: `merge.cc Merge::mergeOp`(719-772, 759-760 trimOpOutput), `condexe.cc getNewMulti`(206).
 
 - [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **부분 완료 (2026-06-29, `5a39f6c`)**
   - 완료: 골든 파이프라인을 `bridge.Decompile(engine, result, DecompileConfig)` 프로덕션
