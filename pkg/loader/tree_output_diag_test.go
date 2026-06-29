@@ -4,6 +4,7 @@ import (
 	"os"
 	"testing"
 
+	"gosleigh/pkg/bridge"
 	"gosleigh/pkg/pcode"
 )
 
@@ -33,6 +34,8 @@ func TestTreeOutputDiag(t *testing.T) {
 	t.Logf("post-tree: FuncProto=%v ScopeLocal=%v numParams=%d stackSpace=%v",
 		fp != nil, fd.GetScopeLocal() != nil, protoNumParams(fp), ss)
 
+	dumpSSA(t, fd, "tree-final")
+
 	out, err := pcode.NewPrintC().
 		SetRegisterNames(engine.RegisterNamesByLocation()).
 		SetProcessEntry("processEntry", 2).
@@ -42,6 +45,18 @@ func TestTreeOutputDiag(t *testing.T) {
 		t.Fatalf("PrintC: %v", err)
 	}
 	t.Logf("TREE OUTPUT (ghidra/processEntry):\n%s", out)
+
+	// Production reference: run the hand-ordered decompile driver on a fresh build
+	// (mutates result.Funcdata in place) and dump its SSA for comparison.
+	engine2, result2 := buildGcd(t)
+	pout, perr := bridge.Decompile(engine2, result2, bridge.DecompileConfig{
+		GhidraFormat: true, ProcessEntryName: "processEntry", GhostParams: 2,
+	})
+	if perr != nil {
+		t.Fatalf("production Decompile: %v", perr)
+	}
+	dumpSSA(t, result2.Funcdata, "production-final")
+	t.Logf("PRODUCTION OUTPUT:\n%s", pout)
 }
 
 func protoNumParams(fp *pcode.FuncProto) int {
