@@ -5,6 +5,20 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-1 진단 재정정 -- phi-storage 가설도 반증, divergence는 mergeOp trim 선택
+GCD_DUMP + C++ 대조로 이전(같은 날) "phi 출력 storage(unique vs param)" 가설을 반증. 코드 변경 없음.
+- **phi-storage 가설 반증**: C++ `ConditionalExecution::getNewMulti`(condexe.cc:206)는 join MULTIEQUAL
+  출력에 `newUniqueOut`을 씀(addr-tied는 "merge conflicts" 우려로 주석처리). GCD_DUMP: Gosleigh NodeJoin도
+  register-tied loop phi를 unique-output phi로 변환(C++와 동일). 즉 join phi 출력은 양쪽 다 unique --
+  "Gosleigh만 unique, C++는 param-storage"는 틀림.
+- **확정된 divergence**: MERGE_PROBE -- Gosleigh mergeOp는 loop-cond phi 충돌을 TrimOpInput으로 해소
+  (trimmed=true)해 trimOpOutput 미발화. C++ mergeOp(merge.cc:747-761)는 동일 구조지만 input trim으로
+  해소 안 돼 trimOpOutput(iVar1 snapshot)으로 떨어짐. 즉 Cover/mergeTest 또는 trimOpInput의 cover 영향
+  fidelity 차이. 다음 세션 런타임 조사 대상.
+- **for-fold 부적합 확인**: TrimJoin off의 for-loop는 iterate가 body 뒤 실행이라 swap이 깨짐(lost-copy).
+  snapshot 필수 -- 단순 for-fold 거부론 부족. TrimJoinblockMultiequals는 mergeOp trimOpOutput을 대체하는
+  필수 워크어라운드(제거 시 gcd 회귀). STATUS H8-debt-1에 반영.
+
 ### 2026-06-30: H7 step 3c -- guardReturns를 프로덕션 기본 return 경로로 전환
 충실 Heritage::guardReturns + dominance rename을 anchorReturnReg SeqNum 휴리스틱 대신 **기본값**으로
 승격. 전 테스트 corpus(골든 + ~14개 레거시 파이프라인) byte-identical 검증 후 전환. 전 패키지 그린.
