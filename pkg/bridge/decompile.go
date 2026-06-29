@@ -129,7 +129,6 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 	// then ActionCopyMarker after ActionMergeCopy.
 	pcode.NewActionDominantCopy("analysis").Apply(fd)
 	pcode.NewActionCopyMarker("analysis").Apply(fd)
-	pcode.NewActionForLoops("analysis").Apply(fd)
 	// Re-infer types so trim COPYs created after the first InferTypes pass (the
 	// loop-head snapshot) propagate their source type and name as iVar, not uVar.
 	pcode.NewActionInferTypes("analysis").Apply(fd)
@@ -150,12 +149,18 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 	// getInputCast leaves the pointer operand uncast) rather than INT_ADD (whose
 	// base getInputCast would cast the pointer to (int), breaking subscripts).
 	// C++ parity: coreaction.cc ActionSetCasts, late in the type-recovery phase.
-	// NOTE: a full assignCastStr removal would require running ActionSetCasts before
-	// ActionForLoops, but inserting CAST ops ahead of ForLoops disrupts for-loop
-	// detection (tryMarkForLoop does not see through the CAST, falling back to a
-	// while+comma form). So ActionForLoops stays before ActionSetCasts and the
-	// for-loop iterate ops keep the render-time assignCastStr fallback.
 	pcode.NewActionSetCasts("analysis").Apply(fd)
+
+	// ActionForLoops folds while-do blocks into for-loops AFTER ActionSetCasts so
+	// the inserted CPUI_CAST ops are already present when the for-loop iterate op is
+	// detected and rendered. This matches Ghidra's order: ActionSetCasts runs in the
+	// analysis loop, and the for-loop fold happens later at print time
+	// (BlockWhileDo::finalTransform / finalizePrinting in block.cc), which is
+	// cast-transparent (findLoopVariable/testIterateForm walk through CAST ops since
+	// they are neither calls nor markers). Running it here lets a for-iterate op that
+	// needed an output cast (e.g. sum_list: param_3 = (int *)param_3[1]) carry a real
+	// inserted CAST, so PrintC renders it without the render-time assignCastStr hack.
+	pcode.NewActionForLoops("analysis").Apply(fd)
 
 	p := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation())
 	if cfg.ProcessEntryName != "" {
