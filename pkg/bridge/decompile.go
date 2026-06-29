@@ -45,9 +45,9 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 		return off, int32(sz), ok
 	})
 
-	pcode.NewHeritage(fd, result.HeritageSpaces).
-		WithProtoModel(cdecl).
-		Heritage(result.Graph)
+	regHeritage := pcode.NewHeritage(fd, result.HeritageSpaces).
+		WithProtoModel(cdecl)
+	regHeritage.Heritage(result.Graph)
 	spf := pcode.NewActionStackPtrFlow("analysis")
 	spf.Apply(fd)
 
@@ -80,6 +80,11 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 		cdecl.WithReturnReg(regSpaceIdx, 0, 4)
 	}
 	pcode.ApplyCallingConvention(fd, cdecl)
+	// H7 step3b (gated GOSL_GUARD_RETURNS): faithful Heritage::guardReturns wiring
+	// of the return value, replacing the anchorReturnReg SeqNum heuristic. Runs here
+	// because it needs the register heritage object (for guardReturns + rename) and
+	// the block graph. Default path keeps anchorReturnReg (set inside ApplyCallingConvention).
+	pcode.ApplyGuardReturnsLive(fd, cdecl, regHeritage, result.Graph)
 
 	pcode.NewMerge(fd).MergeMarker()
 	pcode.NewActionFoldFlagConditions("analysis").Apply(fd)

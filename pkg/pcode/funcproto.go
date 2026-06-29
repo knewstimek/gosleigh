@@ -371,6 +371,12 @@ func ApplyCallingConvention(fd *Funcdata, model *ProtoModel) {
 	// load (e.g. EIP = *ESP on x86 RET) so ActionDeadCode can remove those ops.
 	// C++ parity: ActionPrototypeTypes::apply() in coreaction.cc lines 4636-4646.
 	stripReturnIndirectRef(fd)
+	// H7 step3b: when GOSL_GUARD_RETURNS is set, the faithful Heritage::guardReturns
+	// wiring (ApplyGuardReturnsLive, called from the decompile driver where the
+	// heritage object and block graph are available) replaces anchorReturnReg.
+	if guardReturnsLiveEnabled() {
+		return
+	}
 	anchorReturnReg(fd, model)
 }
 

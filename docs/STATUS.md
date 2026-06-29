@@ -41,16 +41,17 @@
      타입을 전파하지 않도록(Ghidra는 unknown 유지) 하는 편이나, broad type-prop 변경이라
      보류. 현재 marker-skip은 전 골든에서 출력 정확.
 
-2. **[진행중] H7 -- step1+2 LIVE, step3a 포팅 완료(dormant), step3b = live 배선**.
-   step1+2(`42069c4`+`ef53e39`): consume-bit DeadCode 충실 포팅 + 프로덕션 기본 경로. step3a
-   (`34e5d6b`): `Heritage::guardReturns`/`guardReturnsOverlapping`/`characterizeReturnOutput`를
-   heritage.go에 충실 포팅, callerless `Guard()`에 dormant 배선, 단위테스트 4종. 무회귀.
-   **step3b(다음)**: guardReturns를 live화 -> fresh RETURN varnode를 dominating def에 renaming 연결.
-   블로커: `placeMultiequals` non-idempotent(2nd-pass 재-heritage=중복 phi). 정공법 = guardReturns를
-   Heritage() 루프 Collect 전에 호출(1st-pass 통합, 단일 rename). 단 activeoutput+return-reg 위치를
-   heritage 전 셋업하는 파이프라인 재정렬 필요(현 WithReturnReg/ApplyCallingConvention이 heritage 후).
-   step3c = anchorReturnReg/stripReturnIndirectRef 제거 + printc RETURN 렌더 정리(12+ 참조).
-   현재 anchorReturnReg(live)가 guardReturns 근사로 전 골든 정확. CHANGELOG 2026-06-29 step3a 상세.
+2. **[진행중] H7 -- step1+2 LIVE, step3a/3b 완료, step3c = anchorReturnReg 제거(테스트 마이그레이션 선행)**.
+   step1+2(`42069c4`+`ef53e39`): consume-bit DeadCode 충실 포팅 + 프로덕션 기본 경로. step3a(`34e5d6b`):
+   `guardReturns`/`guardReturnsOverlapping`/`characterizeReturnOutput` 충실 포팅(dormant, 단위테스트 4종).
+   **step3b(2026-06-30): guardReturns live 검증 완료** -- `ApplyGuardReturnsLive`(activeoutput 설치 ->
+   guardReturns로 RETURN에 fresh varnode append -> def 재마킹 -> Rename으로 dominating def 연결,
+   placeMultiequals 미재실행으로 중복 phi 회피)를 `GOSL_GUARD_RETURNS` 플래그 뒤 배선. 플래그 ON에서
+   프로덕션 경로(bridge.Decompile) 전 MSVC 골든이 anchorReturnReg와 byte-identical(**gcd void 포함**).
+   default OFF라 무회귀. **step3c(다음)**: default 전환 + anchorReturnReg/stripReturnIndirectRef 제거 +
+   printc RETURN 렌더 정리(12+ 참조). 블로커: ~14개 레거시 손조립 테스트(loader_test.go,
+   ApplyCallingConvention 직접 호출 + bridge.Decompile 미경유)를 bridge.Decompile로 마이그레이션 선행
+   필요(= H8-debt-2 production화와 동일 작업). CHANGELOG 2026-06-30 step3b 상세.
 
 3. **[대형, 대안] H8-debt-2 reconcile** -- bridge.Decompile 손정렬 subset을 프로덕션
    `BuildUniversalAction`(universalAction 충실 포팅)과 통합. consume-DeadCode가 LIVE가 되며
