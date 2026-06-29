@@ -150,6 +150,11 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 	// getInputCast leaves the pointer operand uncast) rather than INT_ADD (whose
 	// base getInputCast would cast the pointer to (int), breaking subscripts).
 	// C++ parity: coreaction.cc ActionSetCasts, late in the type-recovery phase.
+	// NOTE: a full assignCastStr removal would require running ActionSetCasts before
+	// ActionForLoops, but inserting CAST ops ahead of ForLoops disrupts for-loop
+	// detection (tryMarkForLoop does not see through the CAST, falling back to a
+	// while+comma form). So ActionForLoops stays before ActionSetCasts and the
+	// for-loop iterate ops keep the render-time assignCastStr fallback.
 	pcode.NewActionSetCasts("analysis").Apply(fd)
 
 	p := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation())
