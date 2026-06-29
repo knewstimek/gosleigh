@@ -816,11 +816,15 @@ func ApplyActiveParamModel(fd *Funcdata) bool {
 //
 // C++ parity: Funcdata::initActiveOutput + Heritage::guardReturns (on a guarding
 // heritage pass) + the rename that follows. Returns true when wiring ran.
-func ApplyGuardReturnsLive(fd *Funcdata, model *ProtoModel, h *Heritage, graph *BlockGraph) bool {
+//
+// spaces is the heritaged space set (result.HeritageSpaces); a fresh Heritage is
+// built internally for guardReturns/Rename so callers need not retain the original
+// heritage object. graph is the (already RPO+idom-resolved) block graph.
+func ApplyGuardReturnsLive(fd *Funcdata, model *ProtoModel, spaces []*address.Space, graph *BlockGraph) bool {
 	if !guardReturnsLiveEnabled() {
 		return false // anchorReturnReg remains the active wiring (default path)
 	}
-	if fd == nil || model == nil || h == nil || graph == nil {
+	if fd == nil || model == nil || graph == nil {
 		return false
 	}
 	if model.ReturnRegSpaceIndex < 0 || model.ReturnRegSize == 0 {
@@ -832,7 +836,7 @@ func ApplyGuardReturnsLive(fd *Funcdata, model *ProtoModel, h *Heritage, graph *
 	}
 	// Resolve the return-register space from the heritage space set.
 	var regSp *address.Space
-	for _, sp := range h.spaces {
+	for _, sp := range spaces {
 		if sp != nil && int(sp.Index) == model.ReturnRegSpaceIndex {
 			regSp = sp
 			break
@@ -843,6 +847,12 @@ func ApplyGuardReturnsLive(fd *Funcdata, model *ProtoModel, h *Heritage, graph *
 	}
 	retAddr := address.Address{Space: regSp, Offset: model.ReturnRegOffset}
 	retSize := model.ReturnRegSize
+
+	// Build a fresh Heritage for the guard + rename. BuildADT re-derives the
+	// dominator-child tree (read-only on the graph) that Rename needs; the first
+	// heritage pass already populated the graph's RPO/idom data.
+	h := NewHeritage(fd, spaces).WithProtoModel(model)
+	h.BuildADT(graph)
 
 	// Install the active output so guardReturns takes the registerTrial/append path.
 	active := NewParamActive(false)
