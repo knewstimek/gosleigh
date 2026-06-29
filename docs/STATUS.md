@@ -148,13 +148,25 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
     forward-snip 워크어라운드보다 충실.
   - C++ 참조: `merge.cc Merge::mergeOp`(719-772, 759-760 trimOpOutput), `condexe.cc getNewMulti`(206).
 
-- [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **부분 완료 (2026-06-29, `5a39f6c`)**
-  - 완료: 골든 파이프라인을 `bridge.Decompile(engine, result, DecompileConfig)` 프로덕션
-    함수로 추출. `runPipelineGhidra`는 bridge.Build + bridge.Decompile 호출만. 전 골든 PASS.
-  - 남은 것: `bridge.Decompile`의 손정렬 action subset을 프로덕션 `BuildUniversalAction`
-    (coreaction.cc ActionDatabase::universalAction 충실 포팅)과 reconcile -> 단일 정식
-    actmainloop 트리로 통합. universalAction 내 미완 action들이 완성돼야 가능.
-  - 참고: 진단용 `runPipeline`(비골든 변형)은 아직 손조립 + dumpSSA 유지.
+- [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **재정의 (2026-06-30): "순서 reconcile"가 아니라
+  "hollow action 본체 채우기 + Funcdata self-contain"이 본질**. 미션(#1 게이트)의 핵심 잔여.
+  - **2026-06-30 측정 발견**: `BuildUniversalAction`(action.go:1159)은 C++ universalAction의 구조적
+    스켈레톤(250 action/rule, 올바른 순서 + group 필터)을 이미 갖췄으나 **action 본체 다수가 hollow**.
+    예: `ActionHeritage.Apply` -> `Funcdata.OpHeritage()`가 빈 스텁(`_ = fd`)이었음. 진짜 구현은
+    decompile.go가 외부 graph/spaces로 `NewHeritage(...).Heritage(graph)`를 직접 호출. 즉 41-call
+    subset이 실제 일을 하고, 250-트리는 껍데기.
+  - **추가 발견**: (a) Funcdata가 graph/heritage-spaces/arch를 보유하지 않아 action들이 self-contained
+    실행 불가. (b) `ActionBase.Perform`의 repeat-apply 루프(action.go ~279)에 **max-iteration cap 부재**
+    -> non-converging action 시 무한루프(전체 트리 실행이 gcd에서 hang 확인).
+  - **첫 fill 완료(HEAD)**: Funcdata에 graph/heritageSpaces 주입(`SetAnalysisContext`, bridge.Build이
+    채움, additive 무회귀) + `OpHeritage` 실화(fd.graph/spaces로 register heritage) -> ActionHeritage가
+    실제 SSA 빌드. 단위테스트 `TestUniversalActionHeritageBuildsSSA`(pre=phi 0, post>0). 프로덕션
+    (decompile.go)은 여전히 외부 NewHeritage 사용 -> 무영향, 전 패키지 그린.
+  - **남은 fill 로드맵**: 나머지 hollow action 본체를 실제 구현으로 채우기(ActionStackPtrFlow/InferTypes/
+    BlockStructure/Merge*/SetCasts/NodeJoin 등 -> 각 Funcdata self-contained 메서드 또는 graph 접근) +
+    repeat-apply iteration cap 추가 + 트리가 gcd부터 골든 통과하도록 단계적 reconcile. 각 fill은
+    decompile.go(현 프로덕션)와 출력 대조로 검증. 완성 시 decompile.go subset을 트리로 대체.
+  - 참고: 완료(`5a39f6c`)는 골든 파이프라인을 `bridge.Decompile`로 추출(runPipelineGhidra=Build+Decompile).
 
 - [x] H9: ActionSetCasts -- 타입 캐스트 삽입 **완료 (2026-06-29)**. 분석-time CPUI_CAST
   삽입이 bridge.Decompile에서 라이브, render-time assignCastStr 완전 제거. 아래는 포팅 이력.

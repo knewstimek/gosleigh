@@ -5,6 +5,19 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-2 재정의 + 첫 fill -- universal 트리는 hollow, Funcdata self-contain 시작
+미션 #1 게이트(universalAction 단일화)를 측정으로 재정의하고 첫 action 본체를 채움. 무회귀.
+- **측정 발견**: `BuildUniversalAction`(250 action/rule)은 구조적 스켈레톤은 충실하나 본체가 hollow.
+  `ActionHeritage.Apply -> Funcdata.OpHeritage()`가 빈 스텁이었음(`_ = fd`); 진짜 heritage는 decompile.go가
+  외부 graph로 직접 호출. 즉 H8-debt-2는 "패스 순서 reconcile"가 아니라 "hollow 본체 채우기 + Funcdata를
+  graph/spaces 보유하는 self-contained로 만들기".
+- **추가**: Funcdata에 `SetAnalysisContext(graph, heritageSpaces)`/`Graph()`/`HeritageSpaces()` +
+  bridge.Build이 채움(additive). `OpHeritage`를 fd.graph/spaces 기반 register heritage로 실화.
+  단위테스트 `TestUniversalActionHeritageBuildsSSA`(ActionHeritage 후 MULTIEQUAL>0)로 검증.
+- **부수 발견**: `ActionBase.Perform` repeat-apply 루프에 max-iteration cap 부재 -> 전체 트리 실행이
+  non-convergence로 hang(gcd). 향후 fill 시 cap 추가 필요. (진단 테스트는 hang하므로 미커밋, 주석으로 기록.)
+- 프로덕션(decompile.go)은 외부 NewHeritage 유지 -> 무영향, 전 패키지 그린.
+
 ### 2026-06-30: H7 step3 완결 -- anchorReturnReg 물리 제거 (guardReturns가 유일 return 경로)
 guardReturns가 기본값으로 검증된 뒤, 레거시 anchorReturnReg 경로를 완전 삭제(-161줄). 전 패키지 그린.
 - **삭제**: `anchorReturnReg`(funcproto.go, SeqNum 휴리스틱), `ApplyActiveReturnModel`(paramactive.go,

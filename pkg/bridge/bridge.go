@@ -149,6 +149,11 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		Warnings:       warnings,
 	}
 
+	// Attach the analysis context to the Funcdata so the universal-action tree
+	// (ActionHeritage etc.) can run self-contained. The hand-ordered decompile
+	// driver still passes graph/spaces explicitly; this is additive.
+	fd.SetAnalysisContext(graph, summary.heritageSpaces)
+
 	// Wire recovered symbol name onto Funcdata when provided.
 	// This sets the display name used by PrintC for the function declaration.
 	if cfg.SymbolName != "" {
