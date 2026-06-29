@@ -38,11 +38,12 @@ printc.go assignCastStr/effectiveLoadResultType 삭제(-116줄). 전 MSVC 골든
      타입을 전파하지 않도록(Ghidra는 unknown 유지) 하는 편이나, broad type-prop 변경이라
      보류. 현재 marker-skip은 전 골든에서 출력 정확.
 
-2. **[대형] H7 ActionPrototypeTypes 배선** -- **단순 배선 아님(이번 세션 재분류)**.
-   ActionPrototypeTypes.Apply는 `fp.IsOutputLocked()`에서만 RETURN 반환 배선(coreaction.go:802).
-   anchorReturnReg는 lock 없이 EAX->RETURN 휴리스틱. 선행: ActionOutputPrototype/ReturnRecovery
-   (K1에서 구현됨)로 output 타입+lock 설정 -> ActionPrototypeTypes 배선 -> anchorReturnReg
-   (paramactive.go/printc.go 12+참조) 제거. 미시작 H7 상세 참조.
+2. **[대형] H7 ActionPrototypeTypes 배선** -- **consume-bit DeadCode 선행(2026-06-29 진단 확정)**.
+   anchorReturnReg의 본질은 return-reg 쓰기를 DeadCode prune로부터 보존하는 것(끄면 전 non-void
+   골든이 void 붕괴, 실험 측정). C++는 consume-bit 전파(gatherConsumedReturn + getActiveOutput
+   + pre-live register)로 보존하나, Gosleigh DeadCode는 descendant-count 기반이라 그 분석 부재.
+   선행 = consume-based ActionDeadCode 전체 포팅(다세션, 고위험). ReturnRecovery/OutputPrototype/
+   PrototypeTypes 본체는 이미 구현, 배선만 남았으나 선행 없이는 무의미. 미시작 H7 상세 참조.
 
 3. **[대형, 대안] H8-debt-2 reconcile** -- bridge.Decompile 손정렬 subset을 프로덕션
    `BuildUniversalAction`(universalAction 충실 포팅)과 통합. **H8-debt-1** 스냅샷 판별자 원리화.
@@ -67,19 +68,32 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
   - 역할: 함수 프로토타입(반환형, 인자 타입)을 Heritage 전에 확정. `ActionPrototypeTypes`는
     이미 구현됨(coreaction.go:778, stub 아님)이나 골든 파이프라인(`bridge.Decompile`)이 이를
     호출하지 않고 `anchorReturnReg` 휴리스틱(paramactive.go)을 씀. gcd는 이미 `void`로 통과.
-  - **2026-06-29 조사**: ActionPrototypeTypes.Apply는 `fp.IsOutputLocked()`일 때만 RETURN에
-    반환 레지스터 varnode를 input으로 배선(coreaction.go:802-821). anchorReturnReg는 lock
-    없이 EAX->RETURN을 휴리스틱으로 배선. 따라서 **단순 배선 불가**: ActionPrototypeTypes를
-    그냥 추가하면 (a) output unlocked인 함수(대부분)는 반환 미배선 -> 회귀, (b) anchorReturnReg와
-    동시 적용 시 RETURN input[1] 이중 배선. **선행 필요**: prototype-recovery 체인
-    (ActionOutputPrototype/ActionReturnRecovery)이 output 타입+lock을 설정해야 ActionPrototypeTypes가
-    배선 가능. 그 후 anchorReturnReg 제거. = 대형 작업(단순 배선 아님).
-  - C++ 참조: `coreaction.cc ActionPrototypeTypes::apply()` + `ActionOutputPrototype` +
-    `funcdata.cc Funcdata::startProcessing()`. printc.go의 anchorReturnReg 의존(RETURN
-    input[1] 렌더, 12+ 참조)도 함께 제거 필요.
-  - 수정 대상: `pkg/bridge/decompile.go`(프로토타입 복구 체인 + ActionPrototypeTypes 배선),
-    `pkg/pcode/funcproto.go`/`paramactive.go`/`printc.go`의 anchorReturnReg 의존 제거.
-  - 성공 기준: 전 골든 PASS 유지하며 anchorReturnReg 휴리스틱 제거.
+  - **2026-06-29 진단 (실험 측정)**: anchorReturnReg를 끄면(GOSL_NO_ANCHOR 실험) 전 non-void
+    골든이 void로 붕괴 -- DeadCode가 return-reg(EAX) 쓰기를 prune해 계산 본체까지 소멸
+    (abs_val -> `if (param_3 < 0) {}` 빈 몸체). 즉 anchorReturnReg의 본질은 **return-reg 쓰기를
+    DeadCode로부터 보존**하는 것.
+  - **C++ 보존 메커니즘**(coreaction.cc ActionDeadCode::apply 3936 + gatherConsumedReturn 3882):
+    (1) "pre-live registers"(3960) -- register space가 아직 heritage 안된(deadRemovalAllowed
+    false) 동안 register varnode 전체를 consumed로 마킹해 보존. (2) `gatherConsumedReturn`이
+    `isOutputLocked() || getActiveOutput()!=NULL`이면 RETURN input을 `~0`(전체 consumed)로
+    seed -> 보존. getActiveOutput()은 ActionReturnRecovery가 일찍 SetActiveOutput으로 설정
+    (Gosleigh coreaction.go:1158에 이미 존재). 즉 C++는 consume-bit 전파 분석으로 return값을
+    살린다.
+  - **진짜 블로커 = consume-bit DeadCode 부재**: Gosleigh ActionDeadCode(action_deadcode.go)는
+    descendant-count(NumDescend==0) 기반 단순 제거이지 C++의 consume-bit 분석(pushConsumed/
+    propagateConsumed ~40 opcode + gatherConsumedReturn + pre-live register + markConsumedParameters
+    + deadRemovalAllowed/heritage-pass 게이트 + autoLive)이 아님. **선행 = consume-based
+    ActionDeadCode 서브시스템 전체 포팅** (그 자체로 다세션, 전 함수 dead-code 동작 변경 -> 고위험).
+    이게 되기 전엔 anchorReturnReg가 그 역할을 대신하므로 유지. ActionReturnRecovery/
+    OutputPrototype/PrototypeTypes 본체는 이미 구현(K1)되어 배선만 남았으나, 배선해도 선행
+    DeadCode가 return값을 못 살려 무의미.
+  - C++ 참조: `coreaction.cc ActionDeadCode::apply`(3936)/`gatherConsumedReturn`(3882)/
+    `propagateConsumed`(3580)/`markConsumedParameters`(3851) + `ActionPrototypeTypes::apply` +
+    `ActionReturnRecovery`/`ActionActiveReturn`. printc.go anchorReturnReg 의존(12+ 참조)도 동반 제거.
+  - 수정 대상(순서): (1) `pkg/pcode/action_deadcode.go` consume-bit 포팅, (2) `decompile.go`
+    ActiveReturn/ReturnRecovery/OutputPrototype/PrototypeTypes 배선, (3) anchorReturnReg/
+    stripReturnIndirectRef 제거, (4) printc.go RETURN 렌더 정리.
+  - 성공 기준: 전 골든 PASS 유지하며 anchorReturnReg 휴리스틱 + consume-bit DeadCode 라이브.
 
 - [x] H8: gcd_x86_32 golden parity **완료 (2026-06-29)**. TestMSVC_Gcd PASS.
 
