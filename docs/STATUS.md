@@ -97,15 +97,25 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
 
 - [x] H8: gcd_x86_32 golden parity **완료 (2026-06-29)**. TestMSVC_Gcd PASS.
 
-- [ ] H8-debt-1: 스냅샷 발화 판별자를 원리적으로 교체
+- [ ] H8-debt-1: 스냅샷 발화 판별자를 원리적으로 교체 -- **H8-debt-2와 entangled(2026-06-29 진단)**
   - 현상: `Merge.TrimJoinblockMultiequals`가 unique-output phi에만 발화하는 휴리스틱.
-    cover 교차로는 gcd(swap, temp 필요) vs SumList(self-update, for-loop)를 구분 못 함
-    (둘 다 level 2). 현재는 출력 varnode의 unique-vs-addrtied로 우회.
-  - C++ 참조: `block.cc BlockWhileDo::finalizePrinting` (for-loop 유효성),
-    `merge.cc Merge::eliminateIntersect` (copyShadow/boundtype 필터)
-  - 수정 대상: `pkg/pcode/merge.go` TrimJoinblockMultiequals 발화 조건
-  - 성공 기준: loop phi 간 cyclic/swap (lost-copy) 의존성 기반 판정; gcd/SumList/
-    CountedLoop 전부 PASS 유지하며 휴리스틱 주석 제거.
+    출력 varnode의 unique-vs-addrtied로 우회.
+  - **2026-06-29 root-cause**: Gosleigh `Merge.MergeOp`(merge.go:424)는 이미 C++ mergeOp의
+    cover-trim cascade + 최후 `TrimOpOutput`(merge.go:482-518)을 충실 포팅함. 즉 스냅샷
+    메커니즘(TrimOpOutput) 자체는 원리적으로 존재. **문제는 순서**: Gosleigh는 MergeMarker를
+    일찍 여러 번 돌려(decompile.go) loop phi 출력을 param HV에 이미 병합 -> MergeOp가 loop
+    phi에 도달할 때 cover 충돌이 이미 사라져 자연 TrimOpOutput 미발화. C++는 mergeOp가 fresh-HV
+    상태의 phi에서 cover 충돌 시 trimOpOutput 호출(merge.cc:719-760). TrimJoinblockMultiequals는
+    이 순서 divergence의 workaround.
+  - **원리적 해법 두 갈래**: (A) MergeMarker 실행 시점을 C++ universalAction 순서로 맞춰
+    MergeOp의 자연 TrimOpOutput이 loop phi에서 발화하게 함(= H8-debt-2 reconcile에 포함). (B)
+    순서 유지하되 TrimJoinblockMultiequals에서 pre-merge fresh-HV cover 충돌을 재구성해 판정
+    (last session이 "둘 다 level 2"로 못 깬 lost-copy 미세 검출). (A)가 정공법, H8-debt-2와 통합 권장.
+  - C++ 참조: `merge.cc Merge::mergeOp`(719-772, 특히 759-760 trimOpOutput 최후 수단),
+    `block.cc BlockWhileDo::finalizePrinting`(for-loop 유효성).
+  - 수정 대상: `pkg/bridge/decompile.go`(MergeMarker 순서) + `pkg/pcode/merge.go`
+    TrimJoinblockMultiequals 제거.
+  - 성공 기준: gcd/SumList/CountedLoop 전부 PASS 유지하며 TrimJoinblockMultiequals 휴리스틱 제거.
 
 - [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **부분 완료 (2026-06-29, `5a39f6c`)**
   - 완료: 골든 파이프라인을 `bridge.Decompile(engine, result, DecompileConfig)` 프로덕션
