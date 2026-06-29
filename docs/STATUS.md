@@ -150,22 +150,31 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
 
 - [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **재정의 (2026-06-30): "순서 reconcile"가 아니라
   "hollow action 본체 채우기 + Funcdata self-contain"이 본질**. 미션(#1 게이트)의 핵심 잔여.
-  - **2026-06-30 측정 발견**: `BuildUniversalAction`(action.go:1159)은 C++ universalAction의 구조적
-    스켈레톤(250 action/rule, 올바른 순서 + group 필터)을 이미 갖췄으나 **action 본체 다수가 hollow**.
-    예: `ActionHeritage.Apply` -> `Funcdata.OpHeritage()`가 빈 스텁(`_ = fd`)이었음. 진짜 구현은
-    decompile.go가 외부 graph/spaces로 `NewHeritage(...).Heritage(graph)`를 직접 호출. 즉 41-call
-    subset이 실제 일을 하고, 250-트리는 껍데기.
-  - **추가 발견**: (a) Funcdata가 graph/heritage-spaces/arch를 보유하지 않아 action들이 self-contained
-    실행 불가. (b) `ActionBase.Perform`의 repeat-apply 루프(action.go ~279)에 **max-iteration cap 부재**
-    -> non-converging action 시 무한루프(전체 트리 실행이 gcd에서 hang 확인).
+  - **2026-06-30 측정 발견(정정)**: `BuildUniversalAction`(action.go:1159)은 C++ universalAction의
+    구조적 스켈레톤(250 action/rule, 올바른 순서 + group 필터)을 갖췄고 **대부분의 action은 decompile.go가
+    쓰는 것과 동일한 real impl을 공유**(InferTypes/BlockStructure/StackPtrFlow/Merge* 등 실제 Apply 보유).
+    hollow은 한정적: (1) `Funcdata`가 graph/heritage-spaces를 보유 안 해 self-contained 실행 불가했음
+    (-> 첫 fill로 해결), (2) 6개 stub delegate 메서드 -- `CalcNZMask`(=NonzeroMask, ~0 보수적), `Spacebase`,
+    `ApplyForceGoto`, `MarkIndirectOnly`, `RemoveDoNothingBlock`, `RemoveBranch` (대부분 no-op=skip로
+    당장은 acceptable, decompile.go도 이들을 별도 단계로 안 돌림).
+  - **진짜 블로커 = mainloop non-convergence, root = ActionVarnodeProps + stub CalcNZMask (2026-06-30 계측)**:
+    전체 트리가 gcd에서 hang. CONV_PROBE 계측으로 매 iteration progress 보고하는 action 식별:
+    varnodeprops/conditionalconst/multicse/oppool1. **근본**: `ActionVarnodeProps`(coreaction)는
+    `NZMask & Consumed == 0`인 varnode를 const 0으로 교체하는데, 트리 경로엔 (1) `CalcNZMask`가 stub(~0),
+    (2) consume 분석 미계산 -> 모든 varnode가 Consumed==0으로 보여 매 iteration마다 live varnode를 0으로
+    교체 -> 수렴 불가 + SSA 손상. decompile.go는 ActionVarnodeProps를 안 돌려서 무사했음.
+  - **결론: 트리 수렴 = H7 step4(실제 CalcNZMask) + consume 분석 트리 배선에 의존**. 즉 H8-debt-2와
+    H7 step4가 직결. 실제 CalcNZMask 없이는 ActionVarnodeProps/Nonzeromask 의존 액션들이 misfire.
+    repeat-apply max-iteration cap도 없음(부차적). => 다음: 실제 CalcNZMask 포팅(많은 rule이 nzm 읽어
+    공격적 변경=회귀 위험, 작은 단위 필수) -> 트리 재실행으로 수렴 확인.
   - **첫 fill 완료(HEAD)**: Funcdata에 graph/heritageSpaces 주입(`SetAnalysisContext`, bridge.Build이
     채움, additive 무회귀) + `OpHeritage` 실화(fd.graph/spaces로 register heritage) -> ActionHeritage가
     실제 SSA 빌드. 단위테스트 `TestUniversalActionHeritageBuildsSSA`(pre=phi 0, post>0). 프로덕션
     (decompile.go)은 여전히 외부 NewHeritage 사용 -> 무영향, 전 패키지 그린.
-  - **남은 fill 로드맵**: 나머지 hollow action 본체를 실제 구현으로 채우기(ActionStackPtrFlow/InferTypes/
-    BlockStructure/Merge*/SetCasts/NodeJoin 등 -> 각 Funcdata self-contained 메서드 또는 graph 접근) +
-    repeat-apply iteration cap 추가 + 트리가 gcd부터 골든 통과하도록 단계적 reconcile. 각 fill은
-    decompile.go(현 프로덕션)와 출력 대조로 검증. 완성 시 decompile.go subset을 트리로 대체.
+  - **남은 로드맵**: (1) full-pool non-convergence rule 식별/수정(oppool1을 instrument해 어느 rule이
+    매 iteration progress 보고하는지) + repeat-apply 안전 cap 검토. (2) 6개 stub delegate 채우기(CalcNZMask는
+    H7 step4=위험, 나머지는 작음). (3) 트리를 gcd부터 골든 통과하도록 단계적 검증(decompile.go 출력 대조).
+    완성 시 decompile.go subset을 트리로 대체. 트리가 대부분 real이라 (1)이 풀리면 빠르게 진전 가능.
   - 참고: 완료(`5a39f6c`)는 골든 파이프라인을 `bridge.Decompile`로 추출(runPipelineGhidra=Build+Decompile).
 
 - [x] H9: ActionSetCasts -- 타입 캐스트 삽입 **완료 (2026-06-29)**. 분석-time CPUI_CAST
