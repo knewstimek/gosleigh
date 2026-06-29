@@ -41,11 +41,18 @@ universal 트리의 출력을 골든에 근접시킴. 미션 #1 게이트 핵심
   in-edge를 분리하지 않으나 Gosleigh는 index>=1 모든 in-edge를 무조건 분리. 수정: goto in-edge만 분리
   (parent.IsGotoIn, "can't split all" 가드). Gosleigh는 getCopyMap 부재라 블록 자체 goto in-edge 플래그로
   근사. -> 단일 return 복원, double-return 제거. production은 ReturnSplit 미실행이라 무영향(전 골든 그린).
-- **남은 갭(step3b)**: do-while -> while 루프 회전만 남음. CFG/구조화 대조: 트리는 test가 tail인 self-loop
-  블록 -> ruleBlockDoWhile로 BlockDoWhile + entry guard = `if(do-while)`. production은 test가 별도 phi-head
-  블록으로 분리 -> ruleBlockWhileDo로 BlockWhileDo = `while`. ruleBlockWhileDo/ruleBlockDoWhile은 둘 다
-  구현됨 -- 입력 CFG 모양이 관건(production은 loop test를 phi-head로 회전). condexe.cc(NodeJoin)/
-  blockaction.cc 영역. 다음 세션.
+- **남은 갭(step3b) -- BooleanFlip 수준까지 완전 root-cause**: do-while -> while 루프 회전만 남음. 단계별
+  bisect(`TestProductionStagesDiag`)로 회전 패스 = **NodeJoin(ConditionalJoin)** 규명(production:
+  NormalizeBranches 후 blocks=3 -> NodeJoin 후 blocks=4, self-loop 블록을 while head+body로 분리).
+  NodeJoin 분리의 2개 전제: (1) entry/loop CBRANCH 조건 일치(NormalizeBranches가 loop INT_NOTEQUAL을 flip
+  해 entry INT_EQUAL과 functionalEquality 매칭), (2) BlockStructure가 먼저 돌면 안 됨 -- collapse의
+  negateCondition(ruleBlockDoWhile)이 루프 CBRANCH에 `PcodeOpBooleanFlip` 설정(공유 op) -> findDups가
+  BooleanFlip 있으면 reject(action_nodejoin.go:147). 트리 mainloop은 BlockStructure(1349)->NodeJoin(1364)
+  순서 + 구조 build-once라 NodeJoin 영원히 reject -> do-while 고정. production decompile.go는
+  NodeJoin->BlockStructure 순서라 무사. **C++ 모순**: C++ universalAction도 BlockStructure->NodeJoin인데
+  golden은 while -> C++는 BooleanFlip을 propagate(실제 flip+플래그 clear)하는 rule이 있어 후속 iteration에서
+  NodeJoin 매칭 + execute가 구조 무효화로 추정. Gosleigh의 propagation 불완전. 다음 세션: BooleanFlip
+  propagation rule 포팅 + ConditionalJoin.execute의 구조 무효화 확인. 상세 STATUS step3b.
 - 회귀 가드 `TestUniversalActionTreeConverges`(수렴 단언). production-safe: Heritage() incremental gating은
   single-pass(production)에선 inert, OpHeritage/ApplyActiveParamModel/early-stack은 트리 전용. 진단
   `TestTreeOutputDiag`(TREE_DIAG=1; GCD_DUMP=1로 tree/production SSA 대조).

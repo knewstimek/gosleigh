@@ -29,20 +29,33 @@
    회전(cosmetic, 의미 동일):
    - 트리: `if (param_4) { do { iVar1 = param_3 % param_4; param_3 = param_4; param_4 = iVar1; } while (param_4); } return;`
    - 골든: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; } return;`
-   - **근본 (CFG/구조화 대조 확정)**: 트리는 **test가 tail에 있는 self-loop 블록**(body+test 결합) ->
-     `ruleBlockDoWhile`(collapse.go:961)로 BlockDoWhile 형성 + entry guard = `if(do-while)`. production은
-     **test가 별도 head 블록으로 분리**(block 1 = phi + `iVar1=COPY param_4` + INT_EQUAL + CBRANCH,
-     block 3 = body) -> `ruleBlockWhileDo`(collapse.go:928)로 BlockWhileDo = `while`. 즉 production CFG는
-     loop test가 phi 기반 head 블록으로 회전돼 있고, 트리 CFG는 entry test(block 0) + tail test가 결합.
-   - **다음 조사**: production이 어떻게 test를 별도 phi-head 블록으로 분리(loop pre-header/rotation)하는지.
-     production SSA block 1이 phi+test만 갖는 head라는 점이 단서 -- entry test와 loop test가 단일 head로
-     통합됨. NodeJoin(ConditionalJoin, condexe.cc)/NormalizeBranches/BlockStructure가 트리에선 이 회전을
-     안 일으킴. 트리가 production과 다른 SSA/block 상태로 BlockStructure에 진입하는 지점을 bisect.
-   - C++ 참조: `blockaction.cc`(BlockStructure 루프 형성, while-do vs do-while), `condexe.cc`(NodeJoin),
-     `collapse.go ruleBlockWhileDo/ruleBlockDoWhile`(이미 둘 다 구현됨 -- 입력 CFG 모양이 관건).
-   - 진단 도구: `TestTreeOutputDiag`(TREE_DIAG=1 GCD_DUMP=1) -- 트리/production SSA 나란히 덤프
-     (pkg/loader/tree_output_diag_test.go). production 비교 기준 = bridge.Decompile(result.Funcdata
-     in-place mutate 후 dumpSSA).
+   - **근본 완전 규명 (단계별 bisect, `TestProductionStagesDiag`)**: 회전을 일으키는 패스 = **NodeJoin
+     (ConditionalJoin)**. production stage 추적: `after NormalizeBranches: blocks=3 selfLoop=true` ->
+     `after NodeJoin: blocks=4 selfLoop=false`. NodeJoin이 self-loop 블록을 while head+body로 분리.
+   - **NodeJoin 분리의 2개 전제조건**:
+     1. **조건 일치**: ConditionalJoin.findDups는 entry CBRANCH와 loop CBRANCH가 functionally-equal해야
+        매칭. gcd entry=INT_EQUAL, loop=INT_NOTEQUAL(negation) -> NormalizeBranches가 loop를 flip해야
+        매칭. 즉 **NormalizeBranches가 NodeJoin 전에** 실행돼야 함(실측: SKIP_NORMBRANCH 시 분리 안 함).
+     2. **BlockStructure가 NodeJoin 전에 실행되면 안 됨**: 실측(BS_BEFORE_NJ)으로 BlockStructure를 먼저
+        돌리면 NodeJoin 분리 실패. **근본**: BlockStructure의 collapse가 `negateCondition`(collapse.go:
+        961 ruleBlockDoWhile)으로 루프 CBRANCH에 `PcodeOpBooleanFlip` 설정(block_basic.go:182, 공유 op
+        이라 basic block에도 적용) -> ConditionalJoin.findDups가 BooleanFlip 있으면 **reject**
+        (action_nodejoin.go:147). collapse는 clone 그래프에 작동하나 op은 공유.
+   - **트리가 막히는 이유**: 트리 mainloop은 BlockStructure(action.go:1349) -> NodeJoin(1364) 순서.
+     BlockStructure가 먼저 collapse해 BooleanFlip 설정 + 구조 그래프를 build-once(block_actions.go:142
+     guard, C++도 동일)로 고정 -> NodeJoin이 영원히 reject -> do-while 고정. production decompile.go는
+     NodeJoin -> BlockStructure 순서라 무사.
+   - **미해결 (C++ 모순)**: C++ universalAction도 mainloop에서 BlockStructure(5670) -> NodeJoin(5685)
+     순서인데 golden은 while. 즉 C++는 BooleanFlip을 **propagate**(실제 condition flip 수행 + 플래그
+     clear)하는 rule이 있어 이후 mainloop iteration에서 NodeJoin이 매칭하고, ConditionalJoin.execute가
+     구조를 무효화/재빌드하는 것으로 추정. Gosleigh는 이 BooleanFlip propagation이 불완전.
+   - **다음 작업 (next session 명확)**: (a) BooleanFlip을 physically 적용+clear하는 rule/패스가 트리
+     oppool에 있는지 확인(없으면 포팅), 그래야 NodeJoin이 매칭. (b) ConditionalJoin.execute가 basic
+     block 변경 시 구조 그래프 무효화(rebuild)하는지 확인. (c) findDups의 isBooleanFlip reject를 flip-aware
+     매칭으로 대체하는 대안 검토(C++ 대조 필요). C++ 참조: `RuleBooleanNegate`/boolean flip propagation,
+     `blockaction.cc ConditionalJoin::execute`(구조 무효화), `coreaction.cc`(oppool rule 순서).
+   - 진단 도구: `TestProductionStagesDiag`(TREE_DIAG=1) -- production 파이프라인 단계별 blockShape 추적
+     (NodeJoin이 3->4 분리 확인). `TestTreeOutputDiag`(TREE_DIAG=1 GCD_DUMP=1) -- 트리/production SSA 대조.
    - 정렬되면 나머지 10 골든 -> decompile.go 41-call subset을 트리로 대체.
    - 성공 기준: universal 트리(SetCurrent("decompile"))가 gcd 등 전 골든을 byte-identical 출력.
 
