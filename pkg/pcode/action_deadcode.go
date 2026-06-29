@@ -141,9 +141,13 @@ func (a *ActionSetCasts) Apply(data *Funcdata) int {
 		// Skip NonPrinting ops. C++ skips op->notPrinted(). In Gosleigh this also
 		// covers the for-loop iterate/initialize ops, which ActionForLoops marks
 		// NonPrinting before ActionSetCasts runs (C++ order is the reverse). We must
-		// not insert an output CAST on those: doing so splits the iterate op's output
-		// out of the for-header structure. Their casts stay with the render-time
-		// assignCastStr fallback (printc.go) until ActionSetCasts can precede ForLoops.
+		// not run castOutput on them: it splits the op's output (the loop variable)
+		// into a separate unique + CAST, breaking the for-header. And the for-iterate
+		// cast for a LOAD-based iterator (e.g. param_3 = (int *)param_3[1]) is an
+		// OUTPUT cast, so castInput alone cannot supply it. Both confirmed by
+		// experiment; their casts stay with the render-time assignCastStr fallback
+		// (printc.go) until ActionSetCasts can precede ForLoops with a cast-aware
+		// for-loop detector. C++ parity: ActionSetCasts runs before the for-loop fold.
 		if op.IsDead() || op.HasFlag(PcodeOpNonPrinting) {
 			continue
 		}
