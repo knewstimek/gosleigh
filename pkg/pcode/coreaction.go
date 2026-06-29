@@ -1315,7 +1315,27 @@ func (a *ActionReturnSplit) Apply(data *Funcdata) int {
 		if !isReturnSplitSplittable(parent) {
 			continue
 		}
-		for i := parent.SizeIn() - 1; i >= 1; i-- {
+		// Only split in-edges that reach this RETURN via a goto (an unstructured
+		// jump). C++ gatherReturnGotos marks exactly these by walking the structured
+		// tree for BlockGoto/BlockIf nodes whose goto-target is this return; a return
+		// reached only by structured edges (e.g. gcd's if-guard plus loop fall-through)
+		// has no goto in-edges and must NOT be split, otherwise the single shared
+		// return is duplicated and the loop can no longer be structured as one while.
+		// Gosleigh has no getCopyMap (basic-block -> structured-copy) link, so this is
+		// approximated by the block's own goto in-edge flags set during structuring.
+		// C++ parity: blockaction.cc ActionReturnSplit::apply + gatherReturnGotos.
+		var gotoEdges []int
+		for i := parent.SizeIn() - 1; i >= 0; i-- {
+			if parent.IsGotoIn(i) {
+				gotoEdges = append(gotoEdges, i)
+			}
+		}
+		// Can't split ALL in-edges (one must remain as the original block).
+		// C++ pops the last queued split when splitcount == sizeIn.
+		if len(gotoEdges) > 0 && len(gotoEdges) == parent.SizeIn() {
+			gotoEdges = gotoEdges[:len(gotoEdges)-1]
+		}
+		for _, i := range gotoEdges {
 			data.NodeSplit(parent, i)
 			changed++
 		}
