@@ -273,6 +273,7 @@ func TestX86CountedLoop(t *testing.T) {
 		cdeclLoop.WithReturnReg(regSpaceIdxLoop, 0, 4)
 	}
 	pcode.ApplyCallingConvention(result.Funcdata, cdeclLoop)
+	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclLoop, result.HeritageSpaces, result.Graph)
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
 	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
@@ -353,6 +354,7 @@ func TestX86IfElse(t *testing.T) {
 		cdeclIfElse.WithReturnReg(regSpaceIdxIfElse, 0, 4)
 	}
 	pcode.ApplyCallingConvention(result.Funcdata, cdeclIfElse)
+	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclIfElse, result.HeritageSpaces, result.Graph)
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
 	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
@@ -489,6 +491,7 @@ func TestX86MultiplyFunction(t *testing.T) {
 		cdeclMultiply.WithReturnReg(regSpaceIdxMultiply, 0, 4)
 	}
 	pcode.ApplyCallingConvention(result.Funcdata, cdeclMultiply)
+	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclMultiply, result.HeritageSpaces, result.Graph)
 
 	// Merge MULTIEQUAL/INDIRECT phi-nodes so they don't appear verbatim in PrintC output.
 	pcode.NewMerge(result.Funcdata).MergeMarker()
@@ -654,6 +657,7 @@ func TestX86Add3Function(t *testing.T) {
 		cdeclAdd3.WithReturnReg(regSpaceIdxAdd3, 0, 4)
 	}
 	pcode.ApplyCallingConvention(result.Funcdata, cdeclAdd3)
+	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclAdd3, result.HeritageSpaces, result.Graph)
 
 	// Merge MULTIEQUAL/INDIRECT phi-nodes.
 	pcode.NewMerge(result.Funcdata).MergeMarker()
@@ -1043,6 +1047,7 @@ func TestX86ClassifySignFunction(t *testing.T) {
 		cdeclModel.WithReturnReg(regSpaceIdx, 0, 4)
 	}
 	pcode.ApplyCallingConvention(result.Funcdata, cdeclModel)
+	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclModel, result.HeritageSpaces, result.Graph)
 
 	// 2a. Merge MULTIEQUAL/INDIRECT phi-nodes: force-merge output and all inputs
 	//     of each marker op into a single HighVariable so that MULTIEQUAL does not
@@ -1249,6 +1254,7 @@ func TestX86SwitchFunction(t *testing.T) {
 		cdeclSwitch.WithReturnReg(regSpaceIdxSwitch, 0, 4)
 	}
 	pcode.ApplyCallingConvention(result.Funcdata, cdeclSwitch)
+	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclSwitch, result.HeritageSpaces, result.Graph)
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
 	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
@@ -1329,6 +1335,7 @@ func TestX86StructAccessFunction(t *testing.T) {
 		cdeclStruct.WithReturnReg(regSpaceIdxStruct, 0, 4)
 	}
 	pcode.ApplyCallingConvention(result.Funcdata, cdeclStruct)
+	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclStruct, result.HeritageSpaces, result.Graph)
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
 	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
@@ -1411,6 +1418,7 @@ func TestX86ArrayIndexFunction(t *testing.T) {
 		cdeclArray.WithReturnReg(regSpaceIdxArray, 0, 4)
 	}
 	pcode.ApplyCallingConvention(result.Funcdata, cdeclArray)
+	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclArray, result.HeritageSpaces, result.Graph)
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
 	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
@@ -1734,6 +1742,7 @@ func TestX86CdeclParamLocalFunction(t *testing.T) {
 	// Build ProtoModel from cspec and apply calling convention.
 	model := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace, nil)
 	pcode.ApplyCallingConvention(result.Funcdata, model)
+	pcode.ApplyGuardReturnsLive(result.Funcdata, model, result.HeritageSpaces, result.Graph)
 
 	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
@@ -1887,6 +1896,7 @@ func TestE2DeadCodeElimination(t *testing.T) {
 
 	model := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace, nil)
 	pcode.ApplyCallingConvention(result.Funcdata, model)
+	pcode.ApplyGuardReturnsLive(result.Funcdata, model, result.HeritageSpaces, result.Graph)
 
 	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
 	if err != nil {
@@ -2433,6 +2443,7 @@ func TestAARCH64SimpleFunction(t *testing.T) {
 	// X0=param_0 (16384), X1=param_1 (16392) per AArch64 AAPCS64 ABI.
 	aarch64Model.WithRegParams([]uint64{16384, 16392})
 	pcode.ApplyCallingConvention(result.Funcdata, aarch64Model)
+	pcode.ApplyGuardReturnsLive(result.Funcdata, aarch64Model, result.HeritageSpaces, result.Graph)
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
 	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
@@ -2539,6 +2550,7 @@ func TestX86ClassifySignGoldenProcessEntry(t *testing.T) {
 		cdecl.WithReturnReg(regSpaceIdx, 0, 4)
 	}
 	pcode.ApplyCallingConvention(result.Funcdata, cdecl)
+	pcode.ApplyGuardReturnsLive(result.Funcdata, cdecl, result.HeritageSpaces, result.Graph)
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
 	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
@@ -2642,6 +2654,7 @@ func TestX86MultiplyGoldenProcessEntry(t *testing.T) {
 		cdecl.WithReturnReg(regSpaceIdx, 0, 4)
 	}
 	pcode.ApplyCallingConvention(result.Funcdata, cdecl)
+	pcode.ApplyGuardReturnsLive(result.Funcdata, cdecl, result.HeritageSpaces, result.Graph)
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
 	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
@@ -2732,6 +2745,7 @@ func TestX86Add3GoldenProcessEntry(t *testing.T) {
 		cdecl.WithReturnReg(regSpaceIdx, 0, 4)
 	}
 	pcode.ApplyCallingConvention(result.Funcdata, cdecl)
+	pcode.ApplyGuardReturnsLive(result.Funcdata, cdecl, result.HeritageSpaces, result.Graph)
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
 	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
