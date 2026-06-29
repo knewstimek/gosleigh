@@ -15,23 +15,30 @@
    Heritage()가 heritage-known varnode skip(IsHeritageKnown, heritage.cc:2704-2719), OpHeritage가
    persistent Heritage 재사용 + 스택 슬롯 HeritageRange 슬롯별 1회. ApplyActiveParamModel은 input-lock 시
    early-return(oscillation 제거). -> 트리 수렴 + param_3가 루프 본체에 fold.
+3. **step3a -- early stack heritage**. SSA 대조로 param_4 미fold 근본 규명(트리 ECX phi가 stack:0x8 대신
+   COPY const:0 추적). OpHeritage가 첫 register heritage 직후 ActionStackPtrFlow 실행(GetPass()==1)으로
+   stack을 rule pool 전에 heritage. -> param_3/param_4 모두 fold(의미적으로 정확한 gcd). 남은 갭 =
+   while-comma 루프 구조(step3b, 아래).
 
 ### 다음 작업 (우선순위) -- #1 게이트: 트리 출력을 골든 byte-identical로
 
-1. **[대형, 최우선] H8-debt-2 step3 -- 트리 출력의 남은 갭 제거**. 트리는 수렴하고 시그니처/param_3는
-   골든 일치하나 본체 일부가 다름. 현재 트리 gcd 출력 vs 골든:
-   - 트리: `if (iVar1) { do { iVar2 = param_3 % iVar1; param_3 = iVar1; iVar1 = iVar2; } while (iVar1); return; } return;`
+1. **[대형, 최우선] H8-debt-2 step3b -- 트리 루프 구조를 골든과 일치(while-comma)**. step3a까지 트리는
+   수렴 + 시그니처/param_3/param_4 모두 골든 일치(의미적으로 정확한 gcd). 남은 건 cosmetic 루프 구조뿐:
+   - 트리: `if (param_4) { do { iVar1 = param_3 % param_4; param_3 = param_4; param_4 = iVar1; } while (param_4); return; } return;`
    - 골든: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; } return;`
-   - 갭 (a): **param_4가 temp(iVar)로 coalesce** -- 골든은 param_4를 loop-carried로 유지. 스택 슬롯
-     [esp+8](param_4)의 loop phi가 production처럼 스택 심볼로 안 묶임. Merge/MergeRequired 순서 또는
-     스택 slot 2차 heritage 타이밍 의심.
-   - 갭 (b): **while-comma 구조** -- 골든은 `while (iVar1 = param_4, iVar1 != 0)` 단일 while,
-     트리는 if-guard + do-while + double-return. production(decompile.go)은 골든을 정확히 출력하므로
-     production의 NormalizeBranches/NodeJoin/BlockStructure/Merge 순서를 트리와 대조해 차이 식별.
-   - 진단 도구: `TestTreeOutputDiag`(TREE_DIAG=1, pkg/loader/tree_output_diag_test.go) -- 트리를 돌려
-     processEntry/ghidra 포맷으로 출력. production 비교는 `runPipelineGhidra`(msvc_diag_test.go).
-   - 접근: 트리 출력을 production 출력과 단계적으로 대조(트리는 decompile.go와 같은 action impl 공유하나
-     순서/선택이 다름). 정렬되면 나머지 10 골든 -> decompile.go 41-call subset을 트리로 대체.
+   - 정밀 진단(SSA 대조, `TestTreeOutputDiag` + `dumpSSA` GCD_DUMP=1): **production은 entry guard와
+     loop test를 단일 head test로 병합(loop rotation)** -- production block 1(loop head)에
+     `iVar1 = COPY param_4; INT_EQUAL iVar1,0; CBRANCH`로 조건이 헤드에 있음(while 형태). **트리는
+     조건이 entry(block 0 INT_EQUAL stack:0x8) + loop tail(block 2 INT_NOTEQUAL)로 분리**되어
+     if-guard + do-while로 남음. 즉 트리의 ConditionalJoin(NodeJoin)/loop-rotation이 중복 조건을
+     병합 안 함. H8-debt-1의 swapped-loop/trimOpOutput과 같은 블록 구조화 계열.
+   - C++ 참조: `condexe.cc`(ConditionalExecution/NodeJoin), `blockaction.cc`(BlockStructure 루프
+     형성), `coreaction.cc ActionDeterminedBranch`. production decompile.go의 NormalizeBranches ->
+     NodeJoin -> BlockStructure 순서/효과를 트리와 SSA 레벨에서 대조.
+   - 진단 도구: `TestTreeOutputDiag`(TREE_DIAG=1 GCD_DUMP=1) -- 트리/production SSA를 나란히 덤프
+     (pkg/loader/tree_output_diag_test.go). production 비교 기준 = bridge.Decompile(result.Funcdata
+     in-place mutate 후 dumpSSA).
+   - 정렬되면 나머지 10 골든 -> decompile.go 41-call subset을 트리로 대체.
    - 성공 기준: universal 트리(SetCurrent("decompile"))가 gcd 등 전 골든을 byte-identical 출력.
 
 2. **[대형] #2 breadth + #4 x64/ARM**: 골든 11개(거의 x86-32 + 사소한 x64/aarch64 add_ret)뿐.
@@ -130,9 +137,10 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
     forward-snip 워크어라운드보다 충실.
   - C++ 참조: `merge.cc Merge::mergeOp`(719-772, 759-760 trimOpOutput), `condexe.cc getNewMulti`(206).
 
-- [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **step1+2 완료 (2026-06-30): 트리 proto 배선 +
-  incremental heritage로 트리가 수렴하고 시그니처/param_3가 골든 일치. 남은 갭 = param_4 coalesce +
-  while-comma 구조(step3, 위 "다음 작업" 참조)**. 아래는 이전 진단 이력(참고).
+- [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **step1+2+3a 완료 (2026-06-30): 트리 proto 배선 +
+  incremental heritage + early stack heritage로 트리가 수렴하고 시그니처/param_3/param_4 모두 골든 일치
+  (의미적으로 정확한 gcd). 남은 갭 = while-comma 루프 구조뿐(step3b, 위 "다음 작업" 참조)**. 아래는
+  이전 진단 이력(참고).
   - **2026-06-30 측정 발견(정정)**: `BuildUniversalAction`(action.go:1159)은 C++ universalAction의
     구조적 스켈레톤(250 action/rule, 올바른 순서 + group 필터)을 갖췄고 **대부분의 action은 decompile.go가
     쓰는 것과 동일한 real impl을 공유**(InferTypes/BlockStructure/StackPtrFlow/Merge* 등 실제 Apply 보유).
