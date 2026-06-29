@@ -17,25 +17,30 @@
    early-return(oscillation 제거). -> 트리 수렴 + param_3가 루프 본체에 fold.
 3. **step3a -- early stack heritage**. SSA 대조로 param_4 미fold 근본 규명(트리 ECX phi가 stack:0x8 대신
    COPY const:0 추적). OpHeritage가 첫 register heritage 직후 ActionStackPtrFlow 실행(GetPass()==1)으로
-   stack을 rule pool 전에 heritage. -> param_3/param_4 모두 fold(의미적으로 정확한 gcd). 남은 갭 =
-   while-comma 루프 구조(step3b, 아래).
+   stack을 rule pool 전에 heritage. -> param_3/param_4 모두 fold(의미적으로 정확한 gcd).
+4. **step3b-1 -- 충실 ActionReturnSplit**. CFG 대조로 트리가 return을 과분리(2개)함을 규명 -- C++는
+   goto-to-return 엣지만 분리(gatherReturnGotos)나 Gosleigh는 모든 in-edge 분리. goto in-edge만 분리
+   (IsGotoIn)로 수정 -> 단일 return 복원. 남은 갭 = do-while -> while 루프 회전(step3b, 아래).
 
 ### 다음 작업 (우선순위) -- #1 게이트: 트리 출력을 골든 byte-identical로
 
-1. **[대형, 최우선] H8-debt-2 step3b -- 트리 루프 구조를 골든과 일치(while-comma)**. step3a까지 트리는
-   수렴 + 시그니처/param_3/param_4 모두 골든 일치(의미적으로 정확한 gcd). 남은 건 cosmetic 루프 구조뿐:
-   - 트리: `if (param_4) { do { iVar1 = param_3 % param_4; param_3 = param_4; param_4 = iVar1; } while (param_4); return; } return;`
+1. **[대형, 최우선] H8-debt-2 step3b -- 트리 루프 회전(do-while -> while)**. step3a+3b-1까지 트리는
+   수렴 + 시그니처/param_3/param_4 모두 골든 일치 + 단일 return(의미적으로 정확한 gcd). 남은 건 루프
+   회전(cosmetic, 의미 동일):
+   - 트리: `if (param_4) { do { iVar1 = param_3 % param_4; param_3 = param_4; param_4 = iVar1; } while (param_4); } return;`
    - 골든: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; } return;`
-   - 정밀 진단(SSA 대조, `TestTreeOutputDiag` + `dumpSSA` GCD_DUMP=1): **production은 entry guard와
-     loop test를 단일 head test로 병합(loop rotation)** -- production block 1(loop head)에
-     `iVar1 = COPY param_4; INT_EQUAL iVar1,0; CBRANCH`로 조건이 헤드에 있음(while 형태). **트리는
-     조건이 entry(block 0 INT_EQUAL stack:0x8) + loop tail(block 2 INT_NOTEQUAL)로 분리**되어
-     if-guard + do-while로 남음. 즉 트리의 ConditionalJoin(NodeJoin)/loop-rotation이 중복 조건을
-     병합 안 함. H8-debt-1의 swapped-loop/trimOpOutput과 같은 블록 구조화 계열.
-   - C++ 참조: `condexe.cc`(ConditionalExecution/NodeJoin), `blockaction.cc`(BlockStructure 루프
-     형성), `coreaction.cc ActionDeterminedBranch`. production decompile.go의 NormalizeBranches ->
-     NodeJoin -> BlockStructure 순서/효과를 트리와 SSA 레벨에서 대조.
-   - 진단 도구: `TestTreeOutputDiag`(TREE_DIAG=1 GCD_DUMP=1) -- 트리/production SSA를 나란히 덤프
+   - **근본 (CFG/구조화 대조 확정)**: 트리는 **test가 tail에 있는 self-loop 블록**(body+test 결합) ->
+     `ruleBlockDoWhile`(collapse.go:961)로 BlockDoWhile 형성 + entry guard = `if(do-while)`. production은
+     **test가 별도 head 블록으로 분리**(block 1 = phi + `iVar1=COPY param_4` + INT_EQUAL + CBRANCH,
+     block 3 = body) -> `ruleBlockWhileDo`(collapse.go:928)로 BlockWhileDo = `while`. 즉 production CFG는
+     loop test가 phi 기반 head 블록으로 회전돼 있고, 트리 CFG는 entry test(block 0) + tail test가 결합.
+   - **다음 조사**: production이 어떻게 test를 별도 phi-head 블록으로 분리(loop pre-header/rotation)하는지.
+     production SSA block 1이 phi+test만 갖는 head라는 점이 단서 -- entry test와 loop test가 단일 head로
+     통합됨. NodeJoin(ConditionalJoin, condexe.cc)/NormalizeBranches/BlockStructure가 트리에선 이 회전을
+     안 일으킴. 트리가 production과 다른 SSA/block 상태로 BlockStructure에 진입하는 지점을 bisect.
+   - C++ 참조: `blockaction.cc`(BlockStructure 루프 형성, while-do vs do-while), `condexe.cc`(NodeJoin),
+     `collapse.go ruleBlockWhileDo/ruleBlockDoWhile`(이미 둘 다 구현됨 -- 입력 CFG 모양이 관건).
+   - 진단 도구: `TestTreeOutputDiag`(TREE_DIAG=1 GCD_DUMP=1) -- 트리/production SSA 나란히 덤프
      (pkg/loader/tree_output_diag_test.go). production 비교 기준 = bridge.Decompile(result.Funcdata
      in-place mutate 후 dumpSSA).
    - 정렬되면 나머지 10 골든 -> decompile.go 41-call subset을 트리로 대체.
@@ -137,10 +142,10 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
     forward-snip 워크어라운드보다 충실.
   - C++ 참조: `merge.cc Merge::mergeOp`(719-772, 759-760 trimOpOutput), `condexe.cc getNewMulti`(206).
 
-- [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **step1+2+3a 완료 (2026-06-30): 트리 proto 배선 +
-  incremental heritage + early stack heritage로 트리가 수렴하고 시그니처/param_3/param_4 모두 골든 일치
-  (의미적으로 정확한 gcd). 남은 갭 = while-comma 루프 구조뿐(step3b, 위 "다음 작업" 참조)**. 아래는
-  이전 진단 이력(참고).
+- [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **step1+2+3a+3b-1 완료 (2026-06-30): 트리 proto 배선 +
+  incremental/early heritage + 충실 ReturnSplit로 트리가 수렴하고 시그니처/param_3/param_4/단일 return
+  모두 골든 일치(의미적으로 정확한 gcd). 남은 갭 = do-while->while 루프 회전뿐(step3b, 위 "다음 작업"
+  참조)**. 아래는 이전 진단 이력(참고).
   - **2026-06-30 측정 발견(정정)**: `BuildUniversalAction`(action.go:1159)은 C++ universalAction의
     구조적 스켈레톤(250 action/rule, 올바른 순서 + group 필터)을 갖췄고 **대부분의 action은 decompile.go가
     쓰는 것과 동일한 real impl을 공유**(InferTypes/BlockStructure/StackPtrFlow/Merge* 등 실제 Apply 보유).
