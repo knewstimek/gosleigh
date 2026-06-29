@@ -29,7 +29,12 @@ type ActionInferTypes struct {
 // NewActionInferTypes creates an ActionInferTypes in the given group.
 func NewActionInferTypes(group string) *ActionInferTypes {
 	a := &ActionInferTypes{}
-	a.ActionBase = NewActionBase(a, ActionRuleOncePerFunc, "infertypes", group)
+	// C++ parity: ActionInferTypes uses flags=0 (coreaction.hh:974), NOT once-per-func.
+	// It must re-run every mainloop pass so types reach varnodes created late by other
+	// passes (e.g. the snapshot MULTIEQUAL that RulePushMultiME inserts after NodeJoin):
+	// a once-per-func InferTypes types everything in pass 1 and never revisits the
+	// snapshot, leaving it undefined4 (uVar1) instead of int (iVar1).
+	a.ActionBase = NewActionBase(a, 0, "infertypes", group)
 	return a
 }
 

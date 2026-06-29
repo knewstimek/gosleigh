@@ -35,6 +35,34 @@ func buildGcd(t *testing.T) (*sla.Engine, *bridge.Result) {
 	return engine, result
 }
 
+// TestUniversalActionTreeGcdGolden is the #1-gate regression guard: the faithful
+// universal-action tree (BuildUniversalAction + BuildDefaultGroups +
+// SetCurrent("decompile")) must emit gcd byte-identically to the Ghidra golden.
+// This proves the tree -- not the 41-call hand-ordered subset -- produces correct
+// output, including the do-while->while loop rotation (H8-debt-2 step3b: faithful
+// RuleCondNegate, NodeJoin/NormalizeBranches/InferTypes flags=0, BlockCopy edge
+// forwarding in NegateCondition, and RulePushMultiME).
+func TestUniversalActionTreeGcdGolden(t *testing.T) {
+	engine, result := buildGcd(t)
+	fd := result.Funcdata
+
+	db := pcode.NewActionDatabase()
+	db.BuildUniversalAction(nil)
+	db.BuildDefaultGroups()
+	act := db.SetCurrent("decompile")
+	act.Perform(fd)
+
+	out, err := pcode.NewPrintC().
+		SetRegisterNames(engine.RegisterNamesByLocation()).
+		SetProcessEntry("processEntry", 2).
+		SetGhidraFormat().
+		Emit(fd)
+	if err != nil {
+		t.Fatalf("PrintC: %v", err)
+	}
+	assertGoldenMatch(t, "gcd_x86_32", out)
+}
+
 // countOpcode returns the number of live ops of the given opcode in fd.
 func countOpcode(fd *pcode.Funcdata, code pcode.OpCode) int {
 	n := 0
