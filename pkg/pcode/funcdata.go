@@ -68,6 +68,7 @@ type Funcdata struct {
 	// C++ parity: Funcdata owns bblocks and the heritage's address-space set.
 	graph          *BlockGraph
 	heritageSpaces []*address.Space
+	heritageDone   bool
 
 	// Architecture-adjacent services used by the op factories.
 	// C++ parity: these live on Architecture (glb) in the C++ code; the Go
@@ -246,6 +247,15 @@ func (fd *Funcdata) OpHeritage() {
 	if fd.graph == nil || len(fd.heritageSpaces) == 0 {
 		return
 	}
+	// Gosleigh's Heritage is not incremental (a second full pass re-places phis),
+	// so running it on every mainloop iteration recreates MULTIEQUALs and prevents
+	// the universal tree from converging. Until incremental heritage is ported,
+	// run it once. C++ Heritage::heritage is incremental (processes only newly
+	// freed Varnodes via the per-pass disjoint set). See docs/STATUS.md H8-debt-2.
+	if fd.heritageDone {
+		return
+	}
+	fd.heritageDone = true
 	var model *ProtoModel
 	if fd.funcProto != nil {
 		model = fd.funcProto.Model()

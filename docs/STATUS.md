@@ -167,11 +167,19 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
     MULTIEQUAL worklist) + `PcodeOp.getNZMaskLocal`(op.cc:548 충실, size>8은 보수적 fullmask). 단위테스트
     `TestCalcNZMaskPropagation`(COPY/ZEXT/AND/LEFT 마스크 정확). **production-safe**: decompile.go가
     CalcNZMask/ActionNonzeroMask를 호출 안 함 -> 골든 무영향(전 패키지 그린).
-  - **그러나 트리는 여전히 hang(실측)**: 실제 CalcNZMask로도 universal 트리가 gcd에서 수렴 안 함
-    (scratch 30s timeout). 즉 CalcNZMask는 **필요하지만 단독 불충분** -- Consumed 기본값이 `~0`이라
-    초기 NZMask&Consumed!=0(VarnodeProps skip)이고, 비수렴은 후기 iteration의 VarnodeProps/
-    conditionalconst/multicse/oppool1 oscillation으로 보임(근본 미확정). 다음: 이 oscillation을 per-iteration
-    count diff로 정밀 isolate(어느 action이 매번 같은 변경을 무한 반복하는지) + repeat-apply iter cap.
+  - **트리 수렴 달성(HEAD) -- 근본은 non-incremental heritage**: SKIP_ACTION bisect로 비수렴원을
+    {oppool1, conditionalconst, multicse}로 좁힌 뒤(varnodeprops 무죄), 진짜 근본을 규명: **`OpHeritage`가
+    매 mainloop iteration마다 full(비-incremental) heritage 재실행 -> phi 재생성 -> 위 액션들이 매번
+    변환 -> oscillation**. C++ Heritage는 incremental(새 free varnode만). **수정(interim)**: OpHeritage를
+    `heritageDone` 가드로 1회만 실행. => universal 트리가 gcd에서 **수렴 + C 출력 생성**(end-to-end).
+    회귀 가드 `TestUniversalActionTreeConverges`. production-safe(decompile.go는 OpHeritage 미호출).
+  - **트리 출력은 아직 부정확(다음 작업)**: 수렴된 트리 gcd 출력 = `int entry(param_1,param_2){...
+    return *local_91;}` -- param_3/4 미복구 + tmp 미정의 + stack heritage 누락 + return 쓰레기. 원인:
+    (1) 트리 경로에 proto/param 셋업 부재(decompile.go는 ApplyCallingConvention으로 cspec proto+return-reg
+    수동 셋업; 트리의 ActionDefaultParams/PrototypeTypes는 arch/cspec default를 기대하나 bridge.Build이
+    트리용으로 미배선), (2) heritage-once라 stack-var 2차 heritage 누락(faithful=incremental heritage 포팅).
+    => 다음: (a) 트리 경로 proto/param 셋업 배선, (b) incremental heritage 포팅(heritage-once 대체),
+    (c) gcd부터 골든 일치까지 단계 검증.
   - **첫 fill 완료(HEAD)**: Funcdata에 graph/heritageSpaces 주입(`SetAnalysisContext`, bridge.Build이
     채움, additive 무회귀) + `OpHeritage` 실화(fd.graph/spaces로 register heritage) -> ActionHeritage가
     실제 SSA 빌드. 단위테스트 `TestUniversalActionHeritageBuildsSSA`(pre=phi 0, post>0). 프로덕션

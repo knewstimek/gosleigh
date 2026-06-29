@@ -5,6 +5,18 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-2 -- universal 트리 수렴 달성 (heritage-once); end-to-end 실행
+universal-action 트리가 gcd에서 hang -> 수렴+C출력으로 전환. 미션 #1 게이트 핵심 전진. production 무영향.
+- **근본 규명**: SKIP_ACTION bisect로 비수렴원을 {oppool1,conditionalconst,multicse}로 좁힘(varnodeprops
+  무죄). 진짜 근본 = **`OpHeritage`가 매 mainloop iteration마다 full 비-incremental heritage 재실행 ->
+  phi 재생성 -> 위 액션들이 매번 변환 -> oscillation**. C++ Heritage는 incremental(새 free varnode만).
+- **수정(interim)**: OpHeritage에 `heritageDone` 가드 -> 1회만 실행. universal 트리가 gcd에서 수렴하고
+  C 출력을 생성(end-to-end). 회귀 가드 테스트 `TestUniversalActionTreeConverges`(30s timeout fail).
+  production-safe: decompile.go는 OpHeritage 미호출.
+- **남은 갭(트리 출력 부정확)**: `int entry(param_1,param_2){...return *local_91;}` -- param_3/4 미복구 +
+  stack heritage 누락 + return 쓰레기. 원인: 트리 경로 proto/param 셋업 부재 + heritage-once의 stack-var
+  2차 heritage 누락. 다음: 트리 proto/param 배선 + incremental heritage 포팅 -> gcd 골든 일치까지 단계 검증.
+
 ### 2026-06-30: H7 step4 -- 실제 CalcNZMask 포팅 (production-safe, validated)
 nzmask 전파를 stub(~0)에서 충실 구현으로 교체. 미래 universal-tree 수렴의 필요 조건.
 - **추가**: `Funcdata.CalcNZMask`(funcdata.cc Funcdata::calcNZMask 충실 -- DFS post-order로 input부터
