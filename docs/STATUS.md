@@ -41,11 +41,16 @@
      타입을 전파하지 않도록(Ghidra는 unknown 유지) 하는 편이나, broad type-prop 변경이라
      보류. 현재 marker-skip은 전 골든에서 출력 정확.
 
-2. **[진행중] H7 -- consume-bit DeadCode LIVE(step1+2 완료), step3 = multi-pass heritage**.
-   step1+2(2026-06-29 `42069c4`+`ef53e39`): consume-bit DeadCode 충실 포팅 + 프로덕션 기본 경로
-   배선, 전 골든 그린. **step3(다음)**: anchorReturnReg(SeqNum 휴리스틱) 제거 -> C++
-   Heritage::guardReturns + multi-pass heritage + ActionActiveReturn interplay 포팅 선행(사이즈 큼).
-   현재 anchorReturnReg가 guardReturns 근사로 전 골든 정확. 미시작 H7 상세 참조.
+2. **[진행중] H7 -- step1+2 LIVE, step3a 포팅 완료(dormant), step3b = live 배선**.
+   step1+2(`42069c4`+`ef53e39`): consume-bit DeadCode 충실 포팅 + 프로덕션 기본 경로. step3a
+   (`34e5d6b`): `Heritage::guardReturns`/`guardReturnsOverlapping`/`characterizeReturnOutput`를
+   heritage.go에 충실 포팅, callerless `Guard()`에 dormant 배선, 단위테스트 4종. 무회귀.
+   **step3b(다음)**: guardReturns를 live화 -> fresh RETURN varnode를 dominating def에 renaming 연결.
+   블로커: `placeMultiequals` non-idempotent(2nd-pass 재-heritage=중복 phi). 정공법 = guardReturns를
+   Heritage() 루프 Collect 전에 호출(1st-pass 통합, 단일 rename). 단 activeoutput+return-reg 위치를
+   heritage 전 셋업하는 파이프라인 재정렬 필요(현 WithReturnReg/ApplyCallingConvention이 heritage 후).
+   step3c = anchorReturnReg/stripReturnIndirectRef 제거 + printc RETURN 렌더 정리(12+ 참조).
+   현재 anchorReturnReg(live)가 guardReturns 근사로 전 골든 정확. CHANGELOG 2026-06-29 step3a 상세.
 
 3. **[대형, 대안] H8-debt-2 reconcile** -- bridge.Decompile 손정렬 subset을 프로덕션
    `BuildUniversalAction`(universalAction 충실 포팅)과 통합. consume-DeadCode가 LIVE가 되며
