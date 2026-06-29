@@ -371,14 +371,9 @@ func ApplyCallingConvention(fd *Funcdata, model *ProtoModel) {
 	// load (e.g. EIP = *ESP on x86 RET) so ActionDeadCode can remove those ops.
 	// C++ parity: ActionPrototypeTypes::apply() in coreaction.cc lines 4636-4646.
 	stripReturnIndirectRef(fd)
-	// H7 step3c: by default the faithful Heritage::guardReturns wiring
-	// (ApplyGuardReturnsLive, called from the decompile driver once the block graph
-	// is available) handles the return value. anchorReturnReg is the legacy SeqNum
-	// heuristic, kept as an escape hatch under GOSL_LEGACY_ANCHOR_RETURN.
-	if guardReturnsLiveEnabled() {
-		return
-	}
-	anchorReturnReg(fd, model)
+	// H7 step3: the return value is wired by ApplyGuardReturnsLive (the faithful
+	// Heritage::guardReturns + dominance rename), called from the decompile driver
+	// once the block graph is available. (Formerly anchorReturnReg's SeqNum heuristic.)
 }
 
 // stripReturnIndirectRef replaces the indirect branch target (input[0]) of
@@ -409,98 +404,6 @@ func stripReturnIndirectRef(fd *Funcdata) {
 	}
 }
 
-// anchorReturnReg wires the return-register varnode that is live at each
-// RETURN op into that op as an additional input.  The register is identified
-// by (model.ReturnRegSpaceIndex, model.ReturnRegOffset, model.ReturnRegSize).
-//
-// Strategy (per RETURN op):
-//  1. Prefer a written varnode defined in the SAME block as the RETURN op.
-//     That varnode is guaranteed to be the live value at the return site.
-//  2. Fall back to the written varnode with the latest SeqNum -- a good
-//     approximation of "live at RETURN" when no same-block write exists
-//     (e.g. a function with a single merge phi right before the exit block).
-//
-// A global "prefer any MULTIEQUAL" heuristic is wrong for loops: the
-// loop-header phi (e.g. phi_eax at the loop condition block) would be chosen
-// even though a later plain write (e.g. EAX = LOAD [EBP-8] in the exit block)
-// is the actual return value.  Wiring the wrong phi as a RETURN input keeps it
-// alive through DeadCode, preventing inlining of the increment expression.
-//
-// C++ parity: ActionPrototypeTypes::apply() resolves per-site live values via
-// Heritage dominance; this per-RETURN selection approximates that behaviour.
-func anchorReturnReg(fd *Funcdata, model *ProtoModel) {
-	retSize := model.ReturnRegSize
-	retOffset := model.ReturnRegOffset
-	retSpaceIdx := model.ReturnRegSpaceIndex
-
-	// Collect all written varnodes at the return-register location.
-	var candidates []*Varnode
-	for _, vn := range fd.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		if int(vn.Space().Index) != retSpaceIdx {
-			continue
-		}
-		if vn.Offset() != retOffset || vn.Size() != retSize {
-			continue
-		}
-		if vn.IsWritten() && vn.Def() != nil {
-			candidates = append(candidates, vn)
-		}
-	}
-	if len(candidates) == 0 {
-		return
-	}
-
-	// For each RETURN op, select the best candidate and wire it in.
-	for _, op := range fd.GetPcodeOpBank().AllOps() {
-		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN {
-			continue
-		}
-		retBlock := op.Parent()
-
-		// Pass 1: prefer a candidate defined in the same block as this RETURN.
-		// Among same-block candidates, pick the latest by SeqNum: the last write
-		// in the block is the one still live when RETURN executes.
-		var best *Varnode
-		for _, vn := range candidates {
-			if vn.Def().Parent() == retBlock {
-				if best == nil || SeqNumLess(best.Def().Seq(), vn.Def().Seq()) {
-					best = vn
-				}
-			}
-		}
-		// Pass 2: fall back to latest SeqNum among all candidates.
-		// Handles functions where the return value is a phi merge in a
-		// predecessor block (e.g. abs: phi_eax in the merge block before RETURN).
-		if best == nil {
-			for _, vn := range candidates {
-				if best == nil || SeqNumLess(best.Def().Seq(), vn.Def().Seq()) {
-					best = vn
-				}
-			}
-		}
-		if best == nil {
-			continue
-		}
-		// Skip if best is already wired into this RETURN.
-		alreadyWired := false
-		for i := 0; i < op.NumInput(); i++ {
-			if op.Input(i) == best {
-				alreadyWired = true
-				break
-			}
-		}
-		if alreadyWired {
-			continue
-		}
-		slot := op.NumInput()
-		op.SetNumInputs(slot + 1)
-		fd.OpSetInput(op, best, slot)
-	}
-}
-
 // applyReturnRecovery un-wires the return-register varnode from each RETURN op
 // when the varnode's value is not exclusively consumed by that RETURN.
 // This is the post-dead-code recovery step: after ActionDeadCode eliminates
@@ -520,7 +423,7 @@ func applyReturnRecovery(fd *Funcdata) {
 		if op.NumInput() <= 1 {
 			continue
 		}
-		// slot 1 is where anchorReturnReg wires the return-register varnode.
+		// slot 1 is where the return-value wiring appends the return-register varnode.
 		const retSlot = 1
 		retVn := op.Input(retSlot)
 		if retVn == nil || retVn.IsConstant() {

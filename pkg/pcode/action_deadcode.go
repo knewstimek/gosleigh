@@ -101,9 +101,9 @@ func (a *ActionDeadCode) Apply(data *Funcdata) int {
 // its inputs' outputs newly unconsumed. Side-effect ops (STORE/CALL/BRANCH/
 // RETURN/INDIRECT) are preserved exactly as in the descendant-based path.
 //
-// The return value stays alive because anchorReturnReg (~ C++ Heritage::guardReturns)
-// has already wired the return-register Varnode into RETURN input[1], which the
-// seed loop marks consumed via gatherConsumedReturn.
+// The return value stays alive because the return-value wiring (ApplyGuardReturnsLive,
+// the faithful Heritage::guardReturns) has already appended the return-register Varnode
+// to RETURN input[1], which the seed loop marks consumed via gatherConsumedReturn.
 //
 // C++ parity: the deletion loop of ActionDeadCode::apply (coreaction.cc 4036-4068),
 // reduced to the not-consume-vacuous branch (the neverConsumed bit-precise branch
