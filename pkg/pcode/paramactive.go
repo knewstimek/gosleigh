@@ -741,6 +741,18 @@ func ApplyActiveParamModel(fd *Funcdata) bool {
 	if fp == nil || fp.Model() == nil {
 		return false
 	}
+	// Idempotent guard: once the function input prototype is locked, parameter
+	// recovery is complete. Without this, every mainloop pass rebuilds ScopeLocal
+	// and returns true (a reported change), which -- coupled with the downstream
+	// ActionRestructureVarnode re-sync -- makes the mainloop oscillate forever once
+	// stack parameters become visible. This Go-local helper stands in for the
+	// current-function side of C++ parameter recovery; the faithful
+	// ActionActiveParam::apply resolves each call's input trials exactly once
+	// (markFullyChecked after maxpass, then clearActiveInput) and likewise stops
+	// reporting work. A call-less function (e.g. gcd) reaches its fixpoint here.
+	if fp.IsInputLocked() {
+		return false
+	}
 	model := fp.Model()
 	active := NewParamActive(false)
 

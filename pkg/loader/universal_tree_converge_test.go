@@ -9,13 +9,17 @@ import (
 
 // TestUniversalActionTreeConverges is an H8-debt-2 regression guard: the full
 // universal-action tree (decompile group) must run to completion on gcd without
-// hanging. It previously spun forever because Funcdata.OpHeritage re-ran a full
-// (non-incremental) heritage on every mainloop iteration, recreating MULTIEQUALs
-// that downstream actions kept transforming. Heritage is now run once.
+// hanging. Two non-convergence sources were fixed: (1) Funcdata.OpHeritage now
+// reuses a persistent, incremental Heritage engine (pass + globalDisjoint state
+// retained) so already-resolved varnodes are not re-placed each mainloop pass,
+// and stack slots synthesized by ActionStackPtrFlow are heritaged per-slot once;
+// (2) ApplyActiveParamModel is idempotent once the input prototype is locked, so
+// it no longer rebuilds ScopeLocal and oscillates with ActionRestructureVarnode.
 //
-// The tree's C output is NOT yet golden-correct (parameter recovery + stack
-// heritage in the tree path are still incomplete); this test only asserts
-// convergence. A timeout guard fails the test instead of hanging the suite.
+// The tree's C output is close but not yet byte-identical to the golden (stack
+// params fold into the loop now, but the loop is rendered as if/do-while rather
+// than the golden's while-comma form); this test only asserts convergence. A
+// timeout guard fails the test instead of hanging the suite.
 func TestUniversalActionTreeConverges(t *testing.T) {
 	_, result := buildGcd(t)
 	fd := result.Funcdata
