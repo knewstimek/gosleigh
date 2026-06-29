@@ -77,7 +77,14 @@ type Funcdata struct {
 	// C++ parity: Funcdata owns bblocks and the heritage's address-space set.
 	graph          *BlockGraph
 	heritageSpaces []*address.Space
-	heritageDone   bool
+	// heritage is the persistent SSA engine the universal-action tree reuses across
+	// mainloop iterations so heritage is incremental (pass/globalDisjoint state is
+	// retained). The hand-ordered decompile driver builds its own Heritage and does
+	// not use this field. C++ parity: Funcdata::heritage member.
+	heritage *Heritage
+	// heritagedStackSlots records stack slots already processed by per-slot
+	// HeritageRange so each is heritaged once across mainloop passes (tree path).
+	heritagedStackSlots map[heritageSlotKey]bool
 
 	// Architecture-adjacent services used by the op factories.
 	// C++ parity: these live on Architecture (glb) in the C++ code; the Go
@@ -265,20 +272,72 @@ func (fd *Funcdata) OpHeritage() {
 	if fd.graph == nil || len(fd.heritageSpaces) == 0 {
 		return
 	}
-	// Gosleigh's Heritage is not incremental (a second full pass re-places phis),
-	// so running it on every mainloop iteration recreates MULTIEQUALs and prevents
-	// the universal tree from converging. Until incremental heritage is ported,
-	// run it once. C++ Heritage::heritage is incremental (processes only newly
-	// freed Varnodes via the per-pass disjoint set). See docs/STATUS.md H8-debt-2.
-	if fd.heritageDone {
-		return
-	}
-	fd.heritageDone = true
 	var model *ProtoModel
 	if fd.funcProto != nil {
 		model = fd.funcProto.Model()
 	}
-	NewHeritage(fd, fd.heritageSpaces).WithProtoModel(model).Heritage(fd.graph)
+	// Reuse a persistent Heritage engine so the pass counter and globalDisjoint
+	// cover survive across mainloop iterations -- this makes heritage incremental
+	// (only newly freed varnodes are reprocessed) instead of re-placing every phi
+	// on each pass, which previously forced a heritage-once guard and prevented the
+	// tree from picking up later stack-slot SSA. C++ parity: Funcdata::opHeritage
+	// drives the single persistent Heritage::heritage.
+	if fd.heritage == nil {
+		fd.heritage = NewHeritage(fd, fd.heritageSpaces).WithProtoModel(model)
+	}
+	// Incremental register/default-space heritage: pass and globalDisjoint persist,
+	// so already-resolved varnodes are skipped and only new free reads are placed.
+	fd.heritage.Heritage(fd.graph)
+	// Stack slots synthesized mid-run by ActionStackPtrFlow are heritaged one slot
+	// at a time (HeritageRange), never via the full Heritage() task list, because
+	// the latter merges adjacent stack offsets into a single oversized range and
+	// produces wrong-size phis. Each distinct slot is heritaged exactly once (the
+	// heritagedStackSlots guard) so re-running OpHeritage on later iterations does
+	// not re-place stack phis. This mirrors the hand-ordered decompile driver,
+	// which runs HeritageRange per StackPtrFlow slot after the register pass.
+	fd.heritageNewStackSlots(model)
+}
+
+// heritageSlotKey identifies a heritaged stack slot by space, offset, and size so
+// each slot is processed by HeritageRange exactly once across mainloop passes.
+type heritageSlotKey struct {
+	space  *address.Space
+	offset uint64
+	size   int32
+}
+
+// heritageNewStackSlots runs per-slot SSA construction for any stack varnode not
+// yet heritaged, and records the resolved stack space on the proto model so
+// ScopeLocal restructure can classify stack parameters and locals.
+func (fd *Funcdata) heritageNewStackSlots(model *ProtoModel) {
+	if fd.heritage == nil {
+		return
+	}
+	if fd.heritagedStackSlots == nil {
+		fd.heritagedStackSlots = make(map[heritageSlotKey]bool)
+	}
+	// Snapshot first: HeritageRange creates new varnodes (phis) as it runs.
+	snapshot := append([]*Varnode(nil), fd.vbank.AllVarnodes()...)
+	var stackSpace *address.Space
+	for _, vn := range snapshot {
+		if vn == nil || vn.Space() == nil {
+			continue
+		}
+		sp := vn.Space()
+		if sp.Kind != address.SpaceKindStack && sp.Name != "stack" {
+			continue
+		}
+		stackSpace = sp
+		key := heritageSlotKey{sp, vn.Offset(), vn.Size()}
+		if fd.heritagedStackSlots[key] {
+			continue
+		}
+		fd.heritagedStackSlots[key] = true
+		fd.heritage.HeritageRange(fd.graph, vn.Addr(), vn.Size())
+	}
+	if stackSpace != nil && model != nil && model.StackSpace == nil {
+		model.StackSpace = stackSpace
+	}
 }
 
 // CalcNZMask computes non-zero masks for all varnodes.

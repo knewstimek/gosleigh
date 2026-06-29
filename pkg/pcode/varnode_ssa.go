@@ -181,6 +181,18 @@ func (vn *Varnode) IsAnnotation() bool { return vn.flags&VarnodeAnnotation != 0 
 func (vn *Varnode) IsInput() bool      { return vn.flags&VarnodeInput != 0 }
 func (vn *Varnode) IsWritten() bool    { return vn.flags&VarnodeWritten != 0 }
 func (vn *Varnode) IsFree() bool       { return vn.flags&(VarnodeWritten|VarnodeInput) == 0 }
+
+// IsHeritageKnown reports whether the varnode's SSA location is already resolved,
+// so an incremental heritage pass can skip it. C++ Varnode::isHeritageKnown tests
+// the insert|constant|annotation flags. Gosleigh has no explicit insert flag, but
+// after a heritage pass every renamed read is replaced by the reaching definition
+// (a written varnode) or a function input, so a varnode counts as known once it is
+// a constant, an annotation, a definition, or an input. Genuinely new free reads
+// (neither written nor input) remain unresolved and fall through to processing.
+// C++ parity: varnode.hh Varnode::isHeritageKnown.
+func (vn *Varnode) IsHeritageKnown() bool {
+	return vn.flags&(VarnodeConstant|VarnodeAnnotation|VarnodeWritten|VarnodeInput) != 0
+}
 func (vn *Varnode) IsImplied() bool    { return vn.flags&VarnodeImplied != 0 }
 func (vn *Varnode) IsExplicit() bool   { return vn.flags&VarnodeExplicit != 0 }
 func (vn *Varnode) IsMark() bool       { return vn.flags&VarnodeMark != 0 }

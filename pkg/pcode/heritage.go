@@ -150,6 +150,7 @@ func (h *Heritage) BuildInfoList() {
 	}
 }
 
+
 // toBasic recovers the *BlockBasic from a *FlowBlock using the concrete
 // back-pointer. Returns nil if the block is not a BlockBasic.
 func toBasic(bl *FlowBlock) *BlockBasic {
@@ -679,20 +680,40 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			continue
 		}
 
-		// Build task list: group varnodes into address ranges
+		// Build task list: group varnodes into address ranges. Incremental across
+		// passes -- only ranges containing newly freed varnodes are reprocessed, so
+		// re-running Heritage() on later mainloop iterations does not re-place phis
+		// for already-resolved (heritage-known) varnodes.
+		// C++ parity: heritage.cc Heritage::heritage (2702-2732).
 		h.disjoint.Clear()
 		for _, vn := range vns {
-			flags := uint32(0)
+			// Skip dead free varnodes (no def, no uses, not unaffected, not input):
+			// they carry no data-flow to heritage. C++ parity: heritage.cc:2704.
+			if !vn.IsWritten() && vn.HasNoDescend() && !vn.IsUnaffected() && !vn.IsInput() {
+				continue
+			}
 			_, code := h.globalDisjoint.Add(vn.Addr(), vn.Size(), h.pass)
 			switch code {
 			case 0:
-				flags = MemRangeNewAddresses
-			case 1:
-				flags = MemRangeNewAddresses | MemRangeOldAddresses
+				// All-new location (first time heritaged, or intersecting new).
+				h.disjoint.Add(vn.Addr(), vn.Size(), MemRangeNewAddresses)
 			case 2:
-				flags = MemRangeOldAddresses
+				// Completely contained in a previous-pass range. Skip if already in
+				// SSA (heritage-known) or dead -- this is the incremental key that
+				// stops the second pass from re-placing phis over old ranges.
+				// C++ parity: heritage.cc:2711-2719.
+				if vn.IsHeritageKnown() {
+					continue
+				}
+				if vn.HasNoDescend() {
+					continue
+				}
+				h.disjoint.Add(vn.Addr(), vn.Size(), MemRangeOldAddresses)
+			default:
+				// case 1: partially contained in an old range but may contain new
+				// addresses; always reprocess. C++ parity: heritage.cc:2721-2722.
+				h.disjoint.Add(vn.Addr(), vn.Size(), MemRangeOldAddresses|MemRangeNewAddresses)
 			}
-			h.disjoint.Add(vn.Addr(), vn.Size(), flags)
 		}
 
 		// Place multiequals and rename for each range.
