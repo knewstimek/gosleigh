@@ -1,65 +1,48 @@
 # 프로젝트 상태
 
-## 현재 상태 (2026-06-29 세션 종료, master `f4fcfb4`)
+## 현재 상태 (2026-06-30 세션 종료, master `fdaa54c`)
 
-**전 패키지 그린** (loader/pcode/sla/bridge). 이번 세션 성과:
-1. **H9 assignCastStr 전면 제거 완료** -- ActionForLoops를 ActionSetCasts 뒤로 재배치(C++
-   print-time for-fold 순서), castOutput marker-skip으로 loop phi split 방지, printc.go
-   assignCastStr/effectiveLoadResultType 삭제(-116줄). 전 골든 그린.
-2. **H7 step1+2 완료 -- consume-bit DeadCode가 충실한 프로덕션 기본값으로 LIVE**
-   (`deadcode_consume.go` + `ActionDeadCode.applyConsume`). anchorReturnReg 블로커를 실험으로
-   bedrock 진단(3 부재 서브시스템), 그 중 consume-bit DeadCode를 충실 포팅+배선. 전 골든 +
-   전 패키지 byte-identical. step3(anchorReturnReg 제거)은 multi-pass heritage 선행 필요.
-3. **정밀 진단**: H8-debt-1(MergeMarker 순서, H8-debt-2와 entangled), H7 step3 블로커.
-상세는 CHANGELOG 2026-06-29. 이전 성과:
+**전 패키지 그린** (loader/pcode/sla/bridge). 최종 목표 = Ghidra C++ 디컴파일러를 Go로 동일동작
+포팅(실제 .sla x86/x64/ARM -> C). #1 게이트 = 손정렬 41-call `bridge.Decompile`을 충실한
+`ActionDatabase.BuildUniversalAction`(250 action/rule) 트리로 대체(= H8-debt-2). 이번 세션 성과:
 
-1. **H8 gcd_x86_32 golden parity 완료** -- TestMSVC_Gcd PASS. gcd가 Ghidra golden과
-   완전 일치: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; }`.
-   근본 5수정 (RulePropagateCopy addr-tied guard / RuleMultiCollapse self-ref + OpDestroy
-   dead-flag / **CoverBlock.Empty** / ActionNameVars explicit-unique + allocateCopyTrim 타입 /
-   TrimJoinblockMultiequals unique-output 게이트 + printc explicit-unique 선언). 상세는 CHANGELOG.
-2. **프로덕션 디컴파일 진입점 `bridge.Decompile`** 추출 (H8-debt-2 부분 완료). 골든 파이프라인이
-   테스트 헬퍼가 아니라 프로덕션 함수에 단일 소스화됨.
-3. **H9 CastStrategy 프리미티브 포팅+배선+검증** -- `CastStrategyC.CastStandard` +
-   `IsSubpieceCast`/`IsSextCast`/`IsZextCast` (cast.go, 단위 테스트). render-time 캐스트
-   판정 4종(assignCastStr / SUBPIECE / SEXT / ZEXT)을 C++ 충실 CastStrategy로 교체.
+1. **H7 완료** -- anchorReturnReg(SeqNum 휴리스틱) 물리 제거(-161줄). return 값은 충실한
+   `ApplyGuardReturnsLive`(Heritage::guardReturns + dominance rename)가 유일 경로.
+2. **H8-debt-1 완료** -- TrimJoinblockMultiequals(forward-snip 휴리스틱) 제거, 충실 mergeOp
+   trimOpOutput(merge.cc:759-760)으로 대체. loop-cond phi 게이트는 isLoopCond(cyclic 실험으로 검증).
+3. **H7 step4 완료** -- 실제 CalcNZMask(funcdata.go/pcodeop.go, op.cc:548 충실). stub(~0) 대체.
+   production-safe(decompile.go 미호출).
+4. **H8-debt-2 핵심 전진 -- universal 트리가 수렴 + end-to-end 실행**. 트리는 대부분 decompile.go와
+   같은 real impl 공유(껍데기 아님). hang 근본 = OpHeritage가 매 iteration full(비-incremental)
+   heritage 재실행 -> oscillation. heritage-once 가드(interim)로 수정. Funcdata self-contained
+   (graph/spaces 보유) + ActionHeritage 실화. 회귀 가드 `TestUniversalActionTreeConverges`.
+상세는 CHANGELOG 2026-06-30.
 
-### 완료: H9 ActionSetCasts 정식 배선 (`432b30e`~`58693bc`)
+### 다음 작업 (우선순위) -- #1 게이트: universal 트리를 golden-correct로
 
-분석-time CPUI_CAST 삽입이 bridge.Decompile에서 라이브, 전 골든 그린. 인프라(입력/출력
-타입 + int-promotion + arithmeticOutputStandard) + 본체(Apply/castInput/castOutput) +
-배선. 해결한 블로커: ActionStartTypes 미배선(typeRec 영구 false), PrintC PTRADD subscript
-렌더, read-facing 갭 castStandardRead. 상세는 CHANGELOG 2026-06-29.
+1. **[대형, 최우선] H8-debt-2 -- 트리 출력을 골든 일치로**. 트리는 수렴하나 출력 부정확:
+   `int entry(param_1,param_2){...return *local_91;}` (param_3/4 미복구, undefined tmp, stack
+   heritage 누락, return 쓰레기). 작업:
+   - (a) **트리 경로 proto/param/ScopeLocal 셋업 배선**. decompile.go는 `ApplyCallingConvention`
+     (NewProtoModelFromCspec + WithReturnReg + ScopeLocal)로 수동 셋업하나 트리 경로엔 부재. 단
+     stack space는 StackPtrFlow(트리 중 실행)가 풀어서 chicken-and-egg -- C++는
+     ActionDefaultParams/PrototypeTypes/RestructureVarnode가 단계적으로 처리. 트리에 cspec proto를
+     초기 부착(bridge.Build 또는 pre-tree)하고 param-recovery 액션들이 동작하게.
+   - (b) **incremental heritage 포팅** (heritage-once 대체). C++ Heritage는 pass-tracking으로 새
+     free varnode만 처리. 같은 작업이 H7 step3 multi-pass도 해결. 현 heritage-once는 stack-var
+     2차 heritage 누락.
+   - (c) gcd부터 골든 일치까지 단계 검증(트리 출력 vs `testdata/ghidra_golden/ghidra_golden.json`) ->
+     나머지 10 골든 -> 검증되면 decompile.go 41-call subset을 트리로 대체.
+   - 성공 기준: universal 트리(SetCurrent("decompile"))가 gcd 등 전 골든을 byte-identical 출력.
 
-### 다음 작업 (우선순위)
+2. **[대형] #2 breadth + #4 x64/ARM**: 골든 11개(거의 x86-32 + 사소한 x64/aarch64 add_ret)뿐.
+   x64 실함수(register params RCX/RDX..) 성공 필요(사용자 요구). struct/union/switch/jumptable/
+   미포팅 opcode(PARITY_AUDIT). 새 Ghidra 골든 생성 필요(Ghidra 12 `C:\ghidra12`,
+   `testdata/ghidra_decompile.py`).
 
-1. **[완료] H9 잔여 -- assignCastStr 전면 제거** (2026-06-29). ActionForLoops를 ActionSetCasts
-   뒤로 재배치, castOutput marker-skip으로 loop phi split 방지, printc.go assignCastStr/
-   effectiveLoadResultType 삭제. 전 골든 그린. 상세 CHANGELOG.
-   - **잔여 부채(저우선)**: castOutput marker-skip은 C++ `tokenct==outHighType` short-circuit
-     (coreaction.cc:2546)의 등가 대체. 더 충실하려면 InferTypes가 phi 출력 high에 포인터
-     타입을 전파하지 않도록(Ghidra는 unknown 유지) 하는 편이나, broad type-prop 변경이라
-     보류. 현재 marker-skip은 전 골든에서 출력 정확.
-
-2. **[완료] H7 -- guardReturns가 유일한 return 경로, anchorReturnReg 완전 제거**.
-   step1+2: consume-bit DeadCode. step3a(`34e5d6b`): guardReturns 충실 포팅(dormant, 단위테스트 4종).
-   step3b(`dd1ae88`): `ApplyGuardReturnsLive`(activeoutput 설치 -> guardReturns로 RETURN에 fresh varnode
-   append -> def 재마킹 -> Rename으로 dominating def 연결, placeMultiequals 미재실행=중복 phi 회피).
-   step3c(`f61120f`): 14개 레거시 테스트 사이트 배선 + 전 corpus byte-identical 확인 후 기본값 전환.
-   **step3 완료(2026-06-30): anchorReturnReg/ApplyActiveReturnModel/guardReturnsLiveEnabled 물리 제거**
-   (-161줄). ApplyCallingConvention은 stripReturnIndirectRef만, return 값은 ApplyGuardReturnsLive 전담.
-   ActionActiveReturn.Apply는 no-op 스텁(미배선, C++ call-output 본체 미포팅 명시). printc 주석 정리.
-   GOSL_LEGACY_ANCHOR_RETURN fallback 폐기(blast radius 작고 전 corpus 검증). 전 패키지 그린.
-
-3. **[대형, 대안] H8-debt-2 reconcile** -- bridge.Decompile 손정렬 subset을 프로덕션
-   `BuildUniversalAction`(universalAction 충실 포팅)과 통합. consume-DeadCode가 LIVE가 되며
-   universalAction 완성도 1보 전진. **H8-debt-1**(스냅샷 판별자)은 MergeMarker 순서 문제로 이와 entangled.
-
-4. **H7 step4 / H9 미포팅 잔여(저우선)**: 실제 CalcNZMask(현 stub, consume 비트정밀도+rule 영향) /
-   SUBPIECE·PTRSUB getOutputToken / union resolution / markExplicitUnsigned·LongSize. 현재 보수적 동작.
-
-5. **정리(저우선)**: consume-DeadCode가 broader corpus에서 검증되면 `GOSL_DESCENDANT_DC` fallback +
-   레거시 descendant-count 삭제 루프(action_deadcode.go) 제거.
+3. **정리(저우선)**: consume-DeadCode broader corpus 검증 후 `GOSL_DESCENDANT_DC` fallback +
+   레거시 descendant-count 루프 제거. H9 미포팅 잔여(SUBPIECE/PTRSUB getOutputToken / union
+   resolution / markExplicitUnsigned·LongSize). 트리 6개 stub delegate 중 비-CalcNZMask 채우기.
 
 세션 상세 이력: `docs/CHANGELOG.md` (2026-06-29 항목).
 
