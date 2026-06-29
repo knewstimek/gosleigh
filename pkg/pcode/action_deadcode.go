@@ -14,6 +14,8 @@
 
 package pcode
 
+import "os"
+
 // ActionDeadCode is a general dead store eliminator. It removes ops whose
 // output varnode has no consumers (NumDescend == 0) and no side effects.
 // Runs to fixpoint: eliminating one op may expose its inputs as newly dead.
@@ -47,6 +49,13 @@ func (a *ActionDeadCode) Clone(groups ActionGroupList) Action {
 // POPCOUNT -> BOOL_AND -> INT_EQUAL -> (dead varnode)
 // are fully pruned once the chain tail is eliminated.
 func (a *ActionDeadCode) Apply(data *Funcdata) int {
+	// Consume-bit dead-code is the default (the faithful C++ mechanism, H7 step 2).
+	// The legacy descendant-count path is kept as a transition fallback so any
+	// edge case is a one-env-var A/B revert; it can be removed once consume-based
+	// deadcode is proven across the broader corpus. C++ parity: ActionDeadCode::apply.
+	if os.Getenv("GOSL_DESCENDANT_DC") == "" {
+		return a.applyConsume(data)
+	}
 	total := 0
 	for {
 		count := 0
@@ -81,6 +90,52 @@ func (a *ActionDeadCode) Apply(data *Funcdata) int {
 	applyReturnRecovery(data)
 	if total > 0 {
 		return 1 // signal modification
+	}
+	return 0
+}
+
+// applyConsume is the experimental consume-based dead-code path (H7 step 2).
+// It runs the consume-bit analysis (deadcode_consume.go) and removes any op whose
+// output Varnode was never reached by a consume push (not consumeVacuous), i.e.
+// nothing downstream uses its result. Iterated to fixpoint: removing an op makes
+// its inputs' outputs newly unconsumed. Side-effect ops (STORE/CALL/BRANCH/
+// RETURN/INDIRECT) are preserved exactly as in the descendant-based path.
+//
+// The return value stays alive because anchorReturnReg (~ C++ Heritage::guardReturns)
+// has already wired the return-register Varnode into RETURN input[1], which the
+// seed loop marks consumed via gatherConsumedReturn.
+//
+// C++ parity: the deletion loop of ActionDeadCode::apply (coreaction.cc 4036-4068),
+// reduced to the not-consume-vacuous branch (the neverConsumed bit-precise branch
+// and per-space deadRemovalAllowed gating are not modeled; see docs/STATUS.md H7).
+func (a *ActionDeadCode) applyConsume(data *Funcdata) int {
+	total := 0
+	for {
+		ca := newConsumeAnalysis()
+		ca.computeConsumed(data)
+		count := 0
+		for _, op := range data.allOpsOrdered() {
+			if op.IsDead() {
+				continue
+			}
+			out := op.Output()
+			if out == nil || opHasSideEffects(op.Code()) {
+				continue
+			}
+			if ca.vacuous[out] {
+				continue // reached by a consume push -> keep
+			}
+			data.OpDestroy(op)
+			count++
+		}
+		total += count
+		if count == 0 {
+			break
+		}
+	}
+	applyReturnRecovery(data)
+	if total > 0 {
+		return 1
 	}
 	return 0
 }
