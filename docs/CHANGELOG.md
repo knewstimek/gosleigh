@@ -5,6 +5,23 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-29: H7 step 3a -- Heritage::guardReturns 충실 포팅 (dormant foundation)
+anchorReturnReg(SeqNum 휴리스틱)을 대체할 C++ 메커니즘을 dormant로 포팅. 무회귀, 전 패키지 그린.
+- **포팅**: `pkg/pcode/heritage.go`에 `guardReturns`/`guardReturnsOverlapping`/`characterizeReturnOutput`
+  추가(heritage.cc 1609-1692 충실). activeoutput 존재 시 RETURN마다 fresh return-reg varnode를
+  append(exact/overlap), contained_by는 SUBPIECE 절단. callerless `Guard()`에 배선해 dormant 유지.
+- **omission**: ParamEntry 출력 모델 미포팅이라 characterizeReturnOutput은 model.ReturnReg* 기반
+  register subset. persist 분기(global address-forced COPY)는 register return엔 미발화 + markReturnCopy/
+  setAddrForce 미포팅이라 생략(주석 명시).
+- **단위테스트**: `TestGuardReturns{AppendsReturnInput,NoActiveOutput,NoContainment,Overlapping}`.
+- **step 3b 블로커(분석 확정)**: live 배선 시 fresh varnode를 renaming으로 dominating def에 연결해야 하나
+  Gosleigh `placeMultiequals`가 idempotent 아님 -> 단순 2nd-pass 재-heritage는 중복 phi 생성.
+  충실 경로 2안: (1) **1st-pass 통합** -- guardReturns를 Heritage() 루프의 Collect 전에 호출(단일 rename,
+  중복 phi 없음). activeoutput+return-reg 위치를 heritage 전 셋업하는 파이프라인 재정렬 필요(현재
+  WithReturnReg/ApplyCallingConvention이 heritage 후). (2) **2nd-pass + re-mark** -- 기존 def/phi를
+  ActiveHeritage 재마킹 후 placeMultiequals 생략, Rename만 실행(기존 SSA 변형 위험). (1)이 정공법.
+- 결과: anchorReturnReg(live) 유지, 전 골든 + 전 패키지 그린. master `34e5d6b`.
+
 ### 2026-06-29: H7 step 1+2 -- consume-bit DeadCode를 충실 프로덕션 기본값으로 LIVE
 anchorReturnReg 휴리스틱을 둘러싼 핵심 서브시스템(consume-bit DeadCode)을 충실 포팅하고
 프로덕션 DeadCode 경로로 배선. 전 골든 + 전 패키지 byte-identical 통과.
