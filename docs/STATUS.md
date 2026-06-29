@@ -79,14 +79,24 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
     seed -> 보존. getActiveOutput()은 ActionReturnRecovery가 일찍 SetActiveOutput으로 설정
     (Gosleigh coreaction.go:1158에 이미 존재). 즉 C++는 consume-bit 전파 분석으로 return값을
     살린다.
-  - **진짜 블로커 = consume-bit DeadCode 부재**: Gosleigh ActionDeadCode(action_deadcode.go)는
-    descendant-count(NumDescend==0) 기반 단순 제거이지 C++의 consume-bit 분석(pushConsumed/
-    propagateConsumed ~40 opcode + gatherConsumedReturn + pre-live register + markConsumedParameters
-    + deadRemovalAllowed/heritage-pass 게이트 + autoLive)이 아님. **선행 = consume-based
-    ActionDeadCode 서브시스템 전체 포팅** (그 자체로 다세션, 전 함수 dead-code 동작 변경 -> 고위험).
-    이게 되기 전엔 anchorReturnReg가 그 역할을 대신하므로 유지. ActionReturnRecovery/
-    OutputPrototype/PrototypeTypes 본체는 이미 구현(K1)되어 배선만 남았으나, 배선해도 선행
-    DeadCode가 return값을 못 살려 무의미.
+  - **진짜 블로커 = 3개 부재 서브시스템(bedrock 진단)**: Gosleigh ActionDeadCode는 descendant-count
+    기반이고, C++의 충실 경로는 다음 3개를 모두 요구함:
+    1. **consume-bit DeadCode** (pushConsumed/propagateConsumed ~40 opcode + gatherConsumedReturn +
+       markConsumedParameters). -- **step 1 착수: `pkg/pcode/deadcode_consume.go` 충실 포팅 +
+       단위테스트(`TestConsumeAnalysisReturnReachable`). 현재 DORMANT(computeConsumed가 consume만
+       계산, 삭제 미배선). RETURN 도달 체인=consumed, 죽은 varnode=0 검증됨.**
+    2. **heritage-pass / deadcode-delay 추적** (numHeritagePasses/deadRemovalAllowed/doesDeadcode).
+       pre-live register 보존(C++ 3960)에 필요. Gosleigh 부재(condexe.go/rules_ghidra_port.go에
+       known mismatch 명시). **미착수**.
+    3. **실제 CalcNZMask** (현재 stub, nzm 비상수 기본 ~0). consume 비트정밀도 + 많은 rule이 의존.
+       구현 시 rule들이 공격적으로 바뀌어 회귀 위험 -> 보수적 ~0 유지 중. **미착수(저우선,
+       consume는 ~0로 보수적 동작)**.
+    early-wiring(anchorReturnReg)이 (2) pre-live register 부재를 메우는 구조라 작은 슬라이스로
+    분리 불가. ReturnRecovery/OutputPrototype/PrototypeTypes 본체는 이미 구현(K1)되어 배선만
+    남았으나, (1)+(2) 없이는 선행 DeadCode가 return값을 못 살려 무의미.
+  - **남은 로드맵**: step2 = consume-DeadCode를 ActionDeadCode에 통합(삭제 배선) + heritage-pass
+    추적 추가 -> 골든 검증. step3 = ReturnRecovery/OutputPrototype/PrototypeTypes 배선 +
+    anchorReturnReg/stripReturnIndirectRef 제거 -> 골든 검증. step4 = printc RETURN 렌더 정리.
   - C++ 참조: `coreaction.cc ActionDeadCode::apply`(3936)/`gatherConsumedReturn`(3882)/
     `propagateConsumed`(3580)/`markConsumedParameters`(3851) + `ActionPrototypeTypes::apply` +
     `ActionReturnRecovery`/`ActionActiveReturn`. printc.go anchorReturnReg 의존(12+ 참조)도 동반 제거.
