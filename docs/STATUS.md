@@ -1,13 +1,16 @@
 # 프로젝트 상태
 
-## 현재 상태 (2026-06-29 세션 종료, master `513903f`+)
+## 현재 상태 (2026-06-29 세션 종료, master `f4fcfb4`)
 
-**전 패키지 그린** (loader/pcode/sla/bridge). 이번 세션: **H9 assignCastStr 전면 제거
-완료** -- render-time 캐스트 fallback을 모두 걷어내고 메커니즘 parity 달성. ActionForLoops를
-ActionSetCasts **뒤**로 재배치(C++ 순서: 분석-time cast -> print-time for-fold). 재배치
-블로커(SetCasts가 loop phi MULTIEQUAL에 castOutput을 걸어 출력을 High 없는 unique로 split
--> for-detection 실패)를 런타임 op 덤프로 진단, castOutput에서 marker skip으로 해결.
-printc.go assignCastStr/effectiveLoadResultType 삭제(-116줄). 전 MSVC 골든 통과.
+**전 패키지 그린** (loader/pcode/sla/bridge). 이번 세션 성과:
+1. **H9 assignCastStr 전면 제거 완료** -- ActionForLoops를 ActionSetCasts 뒤로 재배치(C++
+   print-time for-fold 순서), castOutput marker-skip으로 loop phi split 방지, printc.go
+   assignCastStr/effectiveLoadResultType 삭제(-116줄). 전 골든 그린.
+2. **H7 step1+2 완료 -- consume-bit DeadCode가 충실한 프로덕션 기본값으로 LIVE**
+   (`deadcode_consume.go` + `ActionDeadCode.applyConsume`). anchorReturnReg 블로커를 실험으로
+   bedrock 진단(3 부재 서브시스템), 그 중 consume-bit DeadCode를 충실 포팅+배선. 전 골든 +
+   전 패키지 byte-identical. step3(anchorReturnReg 제거)은 multi-pass heritage 선행 필요.
+3. **정밀 진단**: H8-debt-1(MergeMarker 순서, H8-debt-2와 entangled), H7 step3 블로커.
 상세는 CHANGELOG 2026-06-29. 이전 성과:
 
 1. **H8 gcd_x86_32 golden parity 완료** -- TestMSVC_Gcd PASS. gcd가 Ghidra golden과
@@ -38,19 +41,21 @@ printc.go assignCastStr/effectiveLoadResultType 삭제(-116줄). 전 MSVC 골든
      타입을 전파하지 않도록(Ghidra는 unknown 유지) 하는 편이나, broad type-prop 변경이라
      보류. 현재 marker-skip은 전 골든에서 출력 정확.
 
-2. **[대형] H7 ActionPrototypeTypes 배선** -- **consume-bit DeadCode 선행(2026-06-29 진단 확정)**.
-   anchorReturnReg의 본질은 return-reg 쓰기를 DeadCode prune로부터 보존하는 것(끄면 전 non-void
-   골든이 void 붕괴, 실험 측정). C++는 consume-bit 전파(gatherConsumedReturn + getActiveOutput
-   + pre-live register)로 보존하나, Gosleigh DeadCode는 descendant-count 기반이라 그 분석 부재.
-   선행 = consume-based ActionDeadCode 전체 포팅(다세션, 고위험). ReturnRecovery/OutputPrototype/
-   PrototypeTypes 본체는 이미 구현, 배선만 남았으나 선행 없이는 무의미. 미시작 H7 상세 참조.
+2. **[진행중] H7 -- consume-bit DeadCode LIVE(step1+2 완료), step3 = multi-pass heritage**.
+   step1+2(2026-06-29 `42069c4`+`ef53e39`): consume-bit DeadCode 충실 포팅 + 프로덕션 기본 경로
+   배선, 전 골든 그린. **step3(다음)**: anchorReturnReg(SeqNum 휴리스틱) 제거 -> C++
+   Heritage::guardReturns + multi-pass heritage + ActionActiveReturn interplay 포팅 선행(사이즈 큼).
+   현재 anchorReturnReg가 guardReturns 근사로 전 골든 정확. 미시작 H7 상세 참조.
 
 3. **[대형, 대안] H8-debt-2 reconcile** -- bridge.Decompile 손정렬 subset을 프로덕션
-   `BuildUniversalAction`(universalAction 충실 포팅)과 통합. **H8-debt-1** 스냅샷 판별자 원리화.
+   `BuildUniversalAction`(universalAction 충실 포팅)과 통합. consume-DeadCode가 LIVE가 되며
+   universalAction 완성도 1보 전진. **H8-debt-1**(스냅샷 판별자)은 MergeMarker 순서 문제로 이와 entangled.
 
-4. **H9 미포팅 잔여(저우선)**: SUBPIECE getOutputToken(findTruncation, 전용 struct)/PTRSUB
-   getOutputToken(downChain)/union resolution/testStructOffset0/markExplicitUnsigned·LongSize/
-   typeOrder(Equal-NotEqual·arithmeticOutputStandard 단순화 중). 현재 render-time이 커버.
+4. **H7 step4 / H9 미포팅 잔여(저우선)**: 실제 CalcNZMask(현 stub, consume 비트정밀도+rule 영향) /
+   SUBPIECE·PTRSUB getOutputToken / union resolution / markExplicitUnsigned·LongSize. 현재 보수적 동작.
+
+5. **정리(저우선)**: consume-DeadCode가 broader corpus에서 검증되면 `GOSL_DESCENDANT_DC` fallback +
+   레거시 descendant-count 삭제 루프(action_deadcode.go) 제거.
 
 세션 상세 이력: `docs/CHANGELOG.md` (2026-06-29 항목).
 
