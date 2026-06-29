@@ -171,7 +171,45 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		}
 	}
 
+	// Attach the default evaluation prototype model (Architecture::defaultfp
+	// equivalent) so the universal-action tree's ActionPrototypeTypes can create
+	// a FuncProto + ScopeLocal. This mirrors the model the hand-ordered decompile
+	// driver builds in ApplyCallingConvention; the StackSpace is left nil here
+	// (ActionStackPtrFlow resolves it during the run, then ScopeLocal restructure
+	// maps the stack varnodes). Additive: the decompile driver replaces the proto
+	// via its own ApplyCallingConvention so production output is unaffected.
+	fd.SetDefaultModel(buildDefaultModel(engine, result.CspecData, fd))
+
 	return result, nil
+}
+
+// buildDefaultModel constructs the architecture evaluation prototype model the
+// universal-action tree attaches to a function without a locked prototype. It
+// mirrors the model the hand-ordered decompile driver builds (decompile.go:
+// NewProtoModelFromCspec + WithEffectOffsets + WithReturnReg) except the
+// StackSpace, which ActionStackPtrFlow resolves during the run.
+// C++ parity: Architecture::defaultfp construction.
+func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdata) *pcode.ProtoModel {
+	model := pcode.NewProtoModelFromCspec(cspec, nil, nil)
+	xr := engine.XRefs()
+	model.WithEffectOffsets(func(name string) (uint64, int32, bool) {
+		_, off, sz, ok := xr.RegisterByName(name)
+		return off, int32(sz), ok
+	})
+	// Resolve the integer return register space (x86 EAX: register space, offset 0,
+	// size 4) so guardReturns can wire the return value. Mirrors decompile.go's
+	// regSpaceIdx scan. The offset/size match the production driver's WithReturnReg.
+	for _, vn := range fd.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.Space() == nil {
+			continue
+		}
+		sp := vn.Space()
+		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" {
+			model.WithReturnReg(int(sp.Index), 0, 4)
+			break
+		}
+	}
+	return model
 }
 
 func BuildFuncdata(engine *sla.Engine, cfg BuildConfig) (*pcode.Funcdata, error) {
