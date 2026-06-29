@@ -135,22 +135,27 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
     `while(iVar1=param_4,...){param_4=param_3%iVar1;param_3=iVar1;}` (lost-copy swap snapshot).
   - **MergeMarker 순서는 lever 아님(실험 반증)**: 조기 MergeMarker(:84,:91) 제거해도 gcd 출력
     불변. 즉 조기 병합이 자연 TrimOpOutput을 막는 게 아님.
-  - **진짜 divergence (상류 SSA/HV 배정)**: TrimJoin off에서 loop-cond phi(seq36, isLoopCond=true)는
-    cover 충돌(allOK=false)을 감지하나 **TrimOpInput으로 해소(trimmed=true)** -> trimOpOutput
-    미발화. 원인: Gosleigh는 이 phi 출력이 **unique varnode + 별도 fresh HV**라 충돌이
-    "input vs output-unique"여서 input trim으로 해소됨. C++는 같은 phi 출력이 **param_4-storage
-    varnode(HV=param_4)**라 충돌이 "output vs param"이어서 input trim으로 해소 불가 -> trimOpOutput
-    -> iVar1 snapshot 자연 생성. 즉 phi 출력 varnode가 unique냐 addr-tied(param storage)냐의
-    상류 차이(Heritage/NodeJoin placement + AssignHigh)가 근본. TrimJoinblockMultiequals는 unique
-    phi 출력을 forward-snip해 보정하는 필수 워크어라운드(제거 시 gcd 회귀).
-  - **원리적 해법(대형, 상류)**: loop-cond phi 출력을 param-storage varnode로 배치(또는 그 HV를
-    param HV로) 하여 MergeOp 충돌이 output-vs-param이 되게 함 -> 자연 trimOpOutput 발화. NodeJoin/
-    ConditionalJoin의 phi 출력 storage 결정 + AssignHigh 검토 필요. last session "lost-copy 못 깸"이
-    이 지점.
-  - C++ 참조: `merge.cc Merge::mergeOp`(719-772, 759-760 trimOpOutput 최후 수단)/`trimOpInput`(692-712),
-    phi 출력 storage는 NodeJoin/Heritage placeMultiequals + ActionAssignHigh.
-  - 수정 대상: `pkg/pcode/coreaction.go`(NodeJoin phi 출력 storage)/`pkg/pcode/merge.go`(AssignHigh,
-    TrimJoinblockMultiequals 제거는 상류 수정 후).
+  - **divergence는 mergeOp trim 선택 (2026-06-30 측정, phi-storage 가설 반증)**: TrimJoin off에서
+    loop-cond phi(seq36, isLoopCond=true)는 cover 충돌(allOK=false)을 감지하나 **TrimOpInput으로
+    해소(trimmed=true)** -> trimOpOutput 미발화. C++ mergeOp(merge.cc:747-761)는 동일 구조지만 같은
+    phi에서 input trim으로 해소 안 돼 trimOpOutput(iVar1 snapshot)으로 떨어짐.
+  - **phi-storage 가설 반증(condexe.cc:206)**: "C++ phi 출력은 param-storage라 충돌이 output-vs-param"
+    가설은 틀림. C++ `ConditionalExecution::getNewMulti`(condexe.cc:206)는 join MULTIEQUAL 출력에
+    **`newUniqueOut` 사용**(addr-tied newVarnodeOut은 "merge conflicts" 우려로 주석처리, 205행). 즉
+    join phi 출력은 **양쪽 다 unique**. GCD_DUMP로 확인: Gosleigh NodeJoin도 register-tied loop phi를
+    unique-output phi로 변환(`register:0x4 = MULTIEQUAL` -> `unique:0xae416 = MULTIEQUAL`), C++와 동일.
+  - **for-fold는 lost-copy라 semantically 틀림**: TrimJoin off의 `for(param_4=param_4;...){param_3=
+    param_4;}`는 iterate가 body 뒤에 실행돼 swap이 깨짐(param_3=새 param_4). 즉 snapshot(iVar1)은 필수.
+    단순 for-fold 거부만으론 부족 -- C++는 snapshot을 mergeOp trimOpOutput으로 생성. TrimJoinblockMultiequals가
+    이 snapshot을 forward-snip으로 대체(필수 워크어라운드, 제거 시 gcd 회귀).
+  - **원리적 해법(다음 세션, 깊은 런타임 조사 필요)**: Gosleigh mergeOp의 TrimOpInput이 이 phi 충돌을
+    "해소"하는데 C++는 안 됨 -- 왜 input trim 후 mergeTest가 통과하는지(Cover/mergeTest fidelity) 또는
+    trimOpInput이 cover에 미치는 영향을 런타임으로 규명. merge.go TrimOpInput/mergeTest vs merge.cc
+    trimOpInput(692-712)/mergeTest. last session "lost-copy 못 깸"이 이 지점.
+  - C++ 참조: `merge.cc Merge::mergeOp`(719-772, 759-760 trimOpOutput 최후 수단)/`trimOpInput`(692-712)/
+    `mergeTest`, `condexe.cc ConditionalExecution::getNewMulti`(206 newUniqueOut).
+  - 수정 대상: `pkg/pcode/merge.go` TrimOpInput/mergeTest/Cover fidelity (TrimJoinblockMultiequals
+    제거는 mergeOp가 자연 trimOpOutput을 발화하게 된 후).
   - 성공 기준: gcd/SumList/CountedLoop 전부 PASS 유지하며 TrimJoinblockMultiequals 휴리스틱 제거.
 
 - [~] H8-debt-2: golden 파이프라인 프로덕션화 -- **부분 완료 (2026-06-29, `5a39f6c`)**
