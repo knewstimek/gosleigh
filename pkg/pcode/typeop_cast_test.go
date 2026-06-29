@@ -159,6 +159,48 @@ func TestActionSetCastsInsertsCopyCast(t *testing.T) {
 	}
 }
 
+// TestGetInputCastSignedCompare verifies the signed-comparison getInputCast: a
+// uint operand of INT_SLESS is cast to int (the complex_max `(int)param` pattern),
+// while an undefined (TYPE_UNKNOWN) operand is left uncast (castStandardRead models
+// Ghidra's inherits_sign read-facing type). C++ parity: TypeOpIntSless::getInputCast.
+func TestGetInputCastSignedCompare(t *testing.T) {
+	fd := makeInferTestFuncdata(t)
+	insts := RegisterTypeOps()
+	tf := sharedTypeFactory
+
+	u4 := tf.GetBase(4, TYPE_UINT, "uint")
+	und4 := tf.GetBase(4, TYPE_UNKNOWN, "undefined4")
+	i4 := Datatype(tf.GetBase(4, TYPE_INT, "int"))
+
+	build := func(t0, t1 Datatype) *PcodeOp {
+		op := fd.NewOp(2, fd.BaseAddr())
+		fd.OpSetOpcode(op, CPUI_INT_SLESS)
+		a := fd.NewVarnode(4, makeInferRamAddr(fd, 0x6100))
+		b := fd.NewVarnode(4, makeInferRamAddr(fd, 0x6108))
+		a.SetFlags(VarnodeExplicit)
+		b.SetFlags(VarnodeExplicit)
+		fd.OpSetInput(op, a, 0)
+		fd.OpSetInput(op, b, 1)
+		a.UpdateType(t0)
+		b.UpdateType(t1)
+		return op
+	}
+
+	// uint operand in a signed comparison -> cast to int.
+	op := build(u4, u4)
+	got := insts[CPUI_INT_SLESS].GetInputCast(op, 0, sharedCastStrategyC)
+	if got == nil || got.Metatype() != TYPE_INT {
+		t.Errorf("SLESS uint operand: expected cast to int, got %v", got)
+	}
+	_ = i4
+
+	// undefined operand -> no cast (read-facing gap compensation).
+	op2 := build(und4, und4)
+	if got := insts[CPUI_INT_SLESS].GetInputCast(op2, 0, sharedCastStrategyC); got != nil {
+		t.Errorf("SLESS undefined operand: expected no cast, got %v", got)
+	}
+}
+
 // TestIntPromotionConstants exercises localExtensionType / intPromotionType on
 // constant varnodes, the cases that do not require a defining op.
 // C++ parity: cast.cc CastStrategyC::localExtensionType / intPromotionType.
