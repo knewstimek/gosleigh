@@ -62,6 +62,13 @@ type Funcdata struct {
 	// C++ parity: funcdata.hh Funcdata::jumpvec
 	jumpTables []*JumpTable
 
+	// graph and heritageSpaces let the universal-action tree run analysis actions
+	// (ActionHeritage etc.) without external context. The hand-ordered decompile
+	// driver passes these explicitly; the action-tree path reads them from here.
+	// C++ parity: Funcdata owns bblocks and the heritage's address-space set.
+	graph          *BlockGraph
+	heritageSpaces []*address.Space
+
 	// Architecture-adjacent services used by the op factories.
 	// C++ parity: these live on Architecture (glb) in the C++ code; the Go
 	// port attaches them to Funcdata so helpers like GetInternalString can
@@ -212,10 +219,38 @@ func (fd *Funcdata) SetTypeRecovery(on bool) {
 	fd.ClearFlag(FuncTypeRecoveryOn)
 }
 
-// OpHeritage performs SSA heritage construction.
-// C++ parity: funcdata.hh Funcdata::opHeritage
+// SetAnalysisContext records the block graph and heritage spaces so the
+// universal-action tree can run self-contained (bridge.Build calls this).
+func (fd *Funcdata) SetAnalysisContext(graph *BlockGraph, heritageSpaces []*address.Space) {
+	fd.graph = graph
+	fd.heritageSpaces = heritageSpaces
+}
+
+// Graph returns the block graph attached by SetAnalysisContext (may be nil).
+func (fd *Funcdata) Graph() *BlockGraph { return fd.graph }
+
+// HeritageSpaces returns the heritage space set attached by SetAnalysisContext.
+func (fd *Funcdata) HeritageSpaces() []*address.Space { return fd.heritageSpaces }
+
+// OpHeritage performs SSA heritage construction over the register/default spaces
+// using the attached analysis context. This is the action-tree entry point
+// (ActionHeritage); the hand-ordered decompile driver instead calls NewHeritage
+// directly with an explicit graph. The ProtoModel (when a FuncProto is attached)
+// enables call-site INDIRECT guards; nil is leaf-safe.
+//
+// Stack-slot heritage is driven separately by ActionStackPtrFlow once the stack
+// space is resolved; in the iterative mainloop a later ActionHeritage pass picks
+// up newly stack-heritaged varnodes.
+// C++ parity: funcdata.hh Funcdata::opHeritage -> Heritage::heritage.
 func (fd *Funcdata) OpHeritage() {
-	_ = fd
+	if fd.graph == nil || len(fd.heritageSpaces) == 0 {
+		return
+	}
+	var model *ProtoModel
+	if fd.funcProto != nil {
+		model = fd.funcProto.Model()
+	}
+	NewHeritage(fd, fd.heritageSpaces).WithProtoModel(model).Heritage(fd.graph)
 }
 
 // CalcNZMask computes non-zero masks for all varnodes.
