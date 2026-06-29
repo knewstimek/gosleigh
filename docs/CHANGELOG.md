@@ -5,7 +5,7 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
-### 2026-06-30: H8-debt-2 step1+2 -- 트리 proto 배선 + incremental heritage (스택 파라미터 fold)
+### 2026-06-30: H8-debt-2 step1+2+3a -- 트리 proto 배선 + incremental/early heritage (스택 파라미터 fold)
 universal 트리의 출력을 골든에 근접시킴. 미션 #1 게이트 핵심 전진. production 무영향(전 패키지 그린).
 - **step1 (proto/param/ScopeLocal 배선)**: 트리는 FuncProto/ScopeLocal을 전혀 안 만들었음(트리 실행 후에도
   둘 다 nil) -> ActionDefaultParams/PrototypeTypes/RestructureVarnode 전부 early-return, 파라미터/로컬
@@ -29,11 +29,19 @@ universal 트리의 출력을 골든에 근접시킴. 미션 #1 게이트 핵심
   ActionRestructureVarnode와 영원히 oscillate(각 ~118k회). input-lock 시 early-return으로 수정(C++
   ActionActiveParam은 call input trial을 1회 resolve 후 markFullyChecked로 종료; call-less 함수는 fixpoint).
   결과: 트리 수렴 + param_3가 루프 본체에 fold(`iVar2 = param_3 % iVar1; param_3 = iVar1`).
-- **남은 갭**: param_4가 아직 temp로 coalesce + 루프가 골든의 while-comma 대신 if/do-while로 렌더(PrintC/
-  block-structure 갭). 다음: 트리 merge/blockstructure 순서를 production driver와 reconcile.
+- **step3a (early stack heritage)**: SSA 대조(tree vs production, dumpSSA)로 param_4 미fold 근본 규명 --
+  트리 루프 ECX phi가 stack:0x8([esp+8]) 대신 `COPY const:0` 추적(production은 param_4 phi가 stack:0x8 +
+  register:0x8(EDX) 병합). 근본: Ghidra는 스택을 pass 0에 register와 함께 heritage하나 Gosleigh는
+  StackPtrFlow가 mainloop 깊숙이(stackstall) 있어 rule pool이 register 읽기를 변형한 뒤 stack heritage가
+  늦게 실행. 수정: OpHeritage가 첫 register heritage 직후(GetPass()==1) ActionStackPtrFlow 실행 -> stack을
+  rule 전에 heritage(production driver와 같은 순서). 결과: param_3/param_4 모두 fold, 의미적으로 정확한
+  gcd(`if (param_4) { do { iVar1 = param_3 % param_4; param_3 = param_4; param_4 = iVar1; } while (param_4); ...}`).
+- **남은 갭(step3b)**: 루프가 골든의 while-comma(`while (iVar1 = param_4, iVar1 != 0)`) 대신 if/do-while로
+  렌더. SSA 대조: production은 entry guard + loop test를 단일 head test로 병합(loop rotation), 트리는
+  분리 유지. condexe.cc/blockaction.cc 블록 구조화 계열(H8-debt-1 swapped-loop와 동류). 다음 세션.
 - 회귀 가드 `TestUniversalActionTreeConverges`(수렴 단언). production-safe: Heritage() incremental gating은
-  single-pass(production)에선 inert, OpHeritage/ApplyActiveParamModel은 트리 전용. 진단 `TestTreeOutputDiag`
-  (TREE_DIAG=1 gated).
+  single-pass(production)에선 inert, OpHeritage/ApplyActiveParamModel/early-stack은 트리 전용. 진단
+  `TestTreeOutputDiag`(TREE_DIAG=1; GCD_DUMP=1로 tree/production SSA 대조).
 
 ### 2026-06-30: H8-debt-2 -- universal 트리 수렴 달성 (heritage-once); end-to-end 실행
 universal-action 트리가 gcd에서 hang -> 수렴+C출력으로 전환. 미션 #1 게이트 핵심 전진. production 무영향.
