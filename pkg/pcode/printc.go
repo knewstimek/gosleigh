@@ -2097,6 +2097,13 @@ func (s *printCState) effectiveLoadResultType(vn *Varnode) Datatype {
 //
 // C++ parity: PrintC emits explicit casts when the RHS metatype is less specific
 // than the LHS pointer type (typeop.cc / printc.cc cast emission).
+// assignCastStr is now a residual fallback: ActionSetCasts inserts real CPUI_CAST
+// ops for all normal (printed) ops, so for those this returns "" (the input is
+// already a CAST and CastStandard reports no further cast). It still supplies the
+// pointer cast for the for-loop iterate/initialize ops, which are NonPrinting at
+// ActionSetCasts time and therefore not given an inserted cast (see
+// ActionSetCasts.Apply). Once ActionSetCasts can run before ActionForLoops this
+// fallback can be removed entirely.
 func (s *printCState) assignCastStr(op *PcodeOp) string {
 	if op == nil {
 		return ""

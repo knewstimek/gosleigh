@@ -138,6 +138,12 @@ func (a *ActionSetCasts) Clone(groups ActionGroupList) Action {
 func (a *ActionSetCasts) Apply(data *Funcdata) int {
 	cs := sharedCastStrategyC
 	for _, op := range data.allOpsOrdered() {
+		// Skip NonPrinting ops. C++ skips op->notPrinted(). In Gosleigh this also
+		// covers the for-loop iterate/initialize ops, which ActionForLoops marks
+		// NonPrinting before ActionSetCasts runs (C++ order is the reverse). We must
+		// not insert an output CAST on those: doing so splits the iterate op's output
+		// out of the for-header structure. Their casts stay with the render-time
+		// assignCastStr fallback (printc.go) until ActionSetCasts can precede ForLoops.
 		if op.IsDead() || op.HasFlag(PcodeOpNonPrinting) {
 			continue
 		}
