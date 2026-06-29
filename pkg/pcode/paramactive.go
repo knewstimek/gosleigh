@@ -22,11 +22,13 @@ import (
 )
 
 // guardReturnsLiveEnabled reports whether the faithful Heritage::guardReturns
-// return-value wiring should replace the anchorReturnReg SeqNum heuristic.
-// Gated behind GOSL_GUARD_RETURNS while it is validated against the goldens
-// (H7 step3b); the default path remains anchorReturnReg. C++ has no such switch.
+// return-value wiring is active. As of H7 step3c it is the DEFAULT: guardReturns
+// + dominance rename replaces the anchorReturnReg SeqNum heuristic, validated
+// byte-identical across the full test corpus. Setting GOSL_LEGACY_ANCHOR_RETURN
+// restores the legacy anchorReturnReg path as an escape hatch. C++ has no such
+// switch (it always uses the guarding-heritage + ReturnRecovery mechanism).
 func guardReturnsLiveEnabled() bool {
-	return os.Getenv("GOSL_GUARD_RETURNS") != ""
+	return os.Getenv("GOSL_LEGACY_ANCHOR_RETURN") == ""
 }
 
 // paramEntry mirrors the small subset of Ghidra ParamEntry state needed for ParamTrial ordering.
@@ -822,7 +824,7 @@ func ApplyActiveParamModel(fd *Funcdata) bool {
 // heritage object. graph is the (already RPO+idom-resolved) block graph.
 func ApplyGuardReturnsLive(fd *Funcdata, model *ProtoModel, spaces []*address.Space, graph *BlockGraph) bool {
 	if !guardReturnsLiveEnabled() {
-		return false // anchorReturnReg remains the active wiring (default path)
+		return false // GOSL_LEGACY_ANCHOR_RETURN: anchorReturnReg is the active wiring
 	}
 	if fd == nil || model == nil || graph == nil {
 		return false
