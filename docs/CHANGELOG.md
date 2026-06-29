@@ -5,6 +5,23 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-29: H9 ActionSetCasts 정식 배선 완료 (분석-time CPUI_CAST 라이브)
+`51edf33`+`03ef9d2`: ActionSetCasts를 bridge.Decompile에 배선, 전 패키지 그린.
+배선 블로커였던 PTRADD 미형성을 런타임 프로브로 진단/해결한 연쇄:
+- **근본 원인**: `ActionStartTypes`가 bridge.Decompile에 미배선 ->
+  HasTypeRecoveryStarted() 영구 false -> RulePtrArith가 포인터 룰을 절대 안 켰음.
+  최종 InferTypes 뒤 ActionStartTypes + RulePtrArith(단일 룰 풀) 재발화 배선 -> PTRADD 형성.
+- **렌더**: PrintC가 LOAD[PTRADD]를 subscript로 안 만듦(tryRenderSubscript는 INT_ADD만).
+  PTRADD 분기 추가 + buildTree가 남기는 COPY(PTRADD) 통과 -> `param_3[1]` (printc.go).
+- **read-facing 갭**: undefined4 피연산자가 비교(careUI=true) getInputCast에서 `(int)`로
+  스퓨리어스 캐스트(CountedLoop `(int)local_8 < 5`). Ghidra는 inherits_sign으로
+  read-facing이 int라 무캐스트. Gosleigh는 read/def-facing 구분 부재 -> `castStandardRead`
+  (cast.go)로 비교/확장에서 curtype UNKNOWN이면 무캐스트 보정.
+- **assignCastStr**: 전면 제거 시 sum_list 회귀(for-loop iterate op은 NonPrinting이라
+  ActionSetCasts 스킵 -> 출력 CAST 삽입 시 for-구조 깨짐). 하이브리드 유지: 정상 op은
+  ActionSetCasts 실제 CAST, NonPrinting for-loop op만 assignCastStr 잔여 fallback(이중 없음).
+- 결과: sum_list `(int *)param_3[1]`, gcd/counted_loop/absval/classify2 전부 통과.
+
 ### 2026-06-29: H9 ActionSetCasts 본체 + 출력타입 인프라 + 배선 블로커 진단
 `705d5eb`+`483d3f9`:
 - 출력측 인프라(typeop_cast.go): opOutputMeta + OutputTypeLocal/GetOutputToken.
