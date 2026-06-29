@@ -768,7 +768,7 @@ func (s *printCState) inferReturnType() Datatype {
 		if vn == nil {
 			continue
 		}
-		// If vn is a free (stale) varnode (ActionDeadCode freed it after anchorReturnReg),
+		// If vn is a free (stale) varnode (ActionDeadCode freed it after the return-value wiring),
 		// recover the type from the live defining op or live varnode at the same location.
 		if vn.IsFree() && !vn.IsConstant() && vn.Space() != nil {
 			if defOp := s.findDefiningOpForFreeVarnode(vn); defOp != nil && defOp.Output() != nil {
@@ -893,20 +893,24 @@ func returnValue(op *PcodeOp) *Varnode {
 	// C++ parity: PrintC::emitStatement CPUI_RETURN case (printc.cc line 781-784):
 	//   if (op->numInput()>1) { pushVn(op->getIn(1), op, mods); }
 	// input[0] is the return-address reference injected by the SLA (e.g. EIP/LR);
-	// input[1] is the actual C return value wired by anchorReturnReg.
+	// input[1] is the actual C return value wired by the return-value wiring.
+	//
+	// "return-value wiring" is ApplyGuardReturnsLive (Heritage::guardReturns +
+	// dominance rename, the default) or, under GOSL_LEGACY_ANCHOR_RETURN, the legacy
+	// anchorReturnReg SeqNum heuristic. Both append the return register as input[1].
 	//
 	// For raw p-code without SLA pre-processing (unit tests, etc.) RETURN may have
 	// only input[0] which directly carries the C return value. In that case use input[0].
 	//
-	// anchorReturnReg always appends to the end, so numInput>1 signals the full pipeline.
+	// The return-value wiring always appends to the end, so numInput>1 signals the full pipeline.
 	var inp *Varnode
 	if op.NumInput() > 1 {
 		inp = op.Input(1)
 	} else {
 		inp = op.Input(0)
-		// When the full pipeline ran (stripReturnIndirectRef + anchorReturnReg),
+		// When the full pipeline ran (stripReturnIndirectRef + the return-value wiring),
 		// input[0] is the zero-constant placeholder for the return address.
-		// If anchorReturnReg found no valid return value (void function), the RETURN
+		// If the return-value wiring found no valid return value (void function), the RETURN
 		// op has only this one constant input and no real return varnode exists.
 		// Zero-constant specifically: stripReturnIndirectRef always substitutes 0.
 		// Non-zero constants may appear in raw unit tests as legitimate return values.
@@ -1977,7 +1981,7 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 	case CPUI_RETURN:
 		// C++ parity: PrintC::emitStatement CPUI_RETURN (printc.cc ~line 780):
 		//   if (op->numInput()>1) { pushVn(op->getIn(1), op, mods); }
-		// returnValue selects input[1] (anchorReturnReg form) or input[0] (raw form).
+		// returnValue selects input[1] (the return-value wiring form) or input[0] (raw form).
 		// renderReturnValue handles free (stale) varnodes by recovering the live expression.
 		expr := ""
 		if vn := returnValue(op); vn != nil {
@@ -2054,15 +2058,14 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 	}
 }
 
-
 func (s *printCState) renderReturnValue(vn *Varnode) (string, error) {
 	if vn == nil {
 		return "", nil
 	}
-	// If vn is free (its defining op was killed by ActionDeadCode after anchorReturnReg
+	// If vn is free (its defining op was killed by ActionDeadCode after the return-value wiring
 	// wired it into RETURN), try to find a live varnode at the same location that
 	// carries the actual return expression.
-	// This handles the pattern where anchorReturnReg picks a SUBPIECE or SSA version
+	// This handles the pattern where the return-value wiring picks a SUBPIECE or SSA version
 	// that later gets dead-code-eliminated, leaving a stale free reference in RETURN.
 	// C++ parity: ActionMarkImplied / Funcdata::deadCode cleans up stale RETURN inputs;
 	// Gosleigh approximates this at render time.
@@ -2142,7 +2145,7 @@ func (s *printCState) findDefiningOpForFreeVarnode(ref *Varnode) *PcodeOp {
 
 // findFreeReturnVarnode returns the return-value varnode from op if it is a
 // free (stale) non-constant varnode. Uses the same slot selection as returnValue:
-// input[1] when numInput>1 (anchorReturnReg form), input[0] otherwise (raw form).
+// input[1] when numInput>1 (the return-value wiring form), input[0] otherwise (raw form).
 func (s *printCState) findFreeReturnVarnode(op *PcodeOp) *Varnode {
 	var inp *Varnode
 	if op.NumInput() > 1 {
@@ -2162,7 +2165,7 @@ func (s *printCState) findFreeReturnVarnode(op *PcodeOp) *Varnode {
 }
 
 // findLiveReturnVarnode searches fd's VarnodeBank for a written (non-free) varnode
-// at the same location as ref. This recovers the return value when anchorReturnReg
+// at the same location as ref. This recovers the return value when the return-value wiring
 // wired a varnode that was subsequently killed by ActionDeadCode.
 // Returns the most recent (by Seq) written varnode, preferring MULTIEQUAL outputs.
 func (s *printCState) findLiveReturnVarnode(ref *Varnode) *Varnode {
@@ -3441,7 +3444,7 @@ func (s *printCState) markPrologueOps() {
 // are in this "return-only" category, the standalone assignment statement is
 // redundant: the return value is already rendered inline from the actual computation.
 //
-// Example: after anchorReturnReg, EAX has two consumers: IMUL (computation) and
+// Example: after the return-value wiring, EAX has two consumers: IMUL (computation) and
 // RETURN (return anchor). The COPY that loaded param_0 into EAX now has EAX as
 // output with consumers = {IMUL, RETURN}. IMUL is inlined into "return ...", so
 // the standalone "local_0 = param_0" is dead from C's perspective.
