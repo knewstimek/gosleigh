@@ -55,11 +55,20 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
 
 - [ ] H7: ActionPrototypeTypes 정식 배선 -- 함수 반환형/인자형 결정
   - 역할: 함수 프로토타입(반환형, 인자 타입)을 Heritage 전에 확정. `ActionPrototypeTypes`는
-    이미 구현됨(coreaction.go, stub 아님)이나 골든 파이프라인(`bridge.Decompile`)이 이를
+    이미 구현됨(coreaction.go:778, stub 아님)이나 골든 파이프라인(`bridge.Decompile`)이 이를
     호출하지 않고 `anchorReturnReg` 휴리스틱(paramactive.go)을 씀. gcd는 이미 `void`로 통과.
-  - C++ 참조: `coreaction.cc ActionPrototypeTypes::apply()`, `funcdata.cc Funcdata::startProcessing()`
-  - 수정 대상: `pkg/bridge/decompile.go` 파이프라인에 ActionPrototypeTypes 배선,
-    `pkg/pcode/funcproto.go`/`printc.go`의 anchorReturnReg 의존 제거.
+  - **2026-06-29 조사**: ActionPrototypeTypes.Apply는 `fp.IsOutputLocked()`일 때만 RETURN에
+    반환 레지스터 varnode를 input으로 배선(coreaction.go:802-821). anchorReturnReg는 lock
+    없이 EAX->RETURN을 휴리스틱으로 배선. 따라서 **단순 배선 불가**: ActionPrototypeTypes를
+    그냥 추가하면 (a) output unlocked인 함수(대부분)는 반환 미배선 -> 회귀, (b) anchorReturnReg와
+    동시 적용 시 RETURN input[1] 이중 배선. **선행 필요**: prototype-recovery 체인
+    (ActionOutputPrototype/ActionReturnRecovery)이 output 타입+lock을 설정해야 ActionPrototypeTypes가
+    배선 가능. 그 후 anchorReturnReg 제거. = 대형 작업(단순 배선 아님).
+  - C++ 참조: `coreaction.cc ActionPrototypeTypes::apply()` + `ActionOutputPrototype` +
+    `funcdata.cc Funcdata::startProcessing()`. printc.go의 anchorReturnReg 의존(RETURN
+    input[1] 렌더, 12+ 참조)도 함께 제거 필요.
+  - 수정 대상: `pkg/bridge/decompile.go`(프로토타입 복구 체인 + ActionPrototypeTypes 배선),
+    `pkg/pcode/funcproto.go`/`paramactive.go`/`printc.go`의 anchorReturnReg 의존 제거.
   - 성공 기준: 전 골든 PASS 유지하며 anchorReturnReg 휴리스틱 제거.
 
 - [x] H8: gcd_x86_32 golden parity **완료 (2026-06-29)**. TestMSVC_Gcd PASS.
