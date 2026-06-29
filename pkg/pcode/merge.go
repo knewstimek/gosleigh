@@ -490,7 +490,12 @@ func (m *Merge) MergeOp(op *PcodeOp) {
 		// route loop-condition phis straight to trimOpOutput. trimOpOutput splits the
 		// long-lived output off via a COPY, producing the loop-head snapshot (iVar1).
 		// This replaces the former TrimJoinblockMultiequals forward-snip pass with the
-		// faithful C++ trimOpOutput mechanism.
+		// faithful C++ trimOpOutput mechanism. The loop-condition test (not a bare
+		// cyclic-input test) is deliberate: in gcd BOTH loop-variable phis are cyclic,
+		// but only the condition phi -- whose output is also consumed in the body as the
+		// pre-swap value (iVar1) -- has the output-side cover conflict that input-trim
+		// cannot resolve. Trimming the non-condition cyclic phi's output would split a
+		// variable Ghidra leaves merged. (Verified: a bare cyclic gate over-trims gcd.)
 		forceOutputTrim := op.Code() == CPUI_MULTIEQUAL && isLoopCondMultiequal(op)
 		trimmed := false
 		if !forceOutputTrim {
