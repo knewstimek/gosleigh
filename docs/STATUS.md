@@ -68,10 +68,16 @@ CHANGELOG 2026-06-30 step3b COMPLETE):
      Heritage::heritage -> guard()는 guardCalls+guardReturns 둘 다). 단, **naive하게 guardReturns만 추가하면
      실패**(실측): gcd 등 void 함수도 activeoutput이 설정돼(ActionPrototypeTypes coreaction.go:844) EAX가
      RETURN에 붙어 비-void로 깨지고, sum_list는 ActionConditionalConst.propagateConstant에서 nil deref.
-     즉 충실 return 복구는 guardReturns + **ActionActiveReturn 출력-trial 머신리**(void vs 실제 반환 판정 +
-     activeoutput clear, C++ ActionActiveReturn 본체 = checkOutputTrialUse/deriveOutputMap, 현재 트리에서
-     no-op stub) + 다운스트림 액션의 새 return SSA 처리까지 필요. production은 ApplyGuardReturnsLive(2-pass
-     워크어라운드)로 우회. 별도 세션.
+     **정밀 규명(이번 세션 추가 조사)**: 함수 자기 반환은 ActionActiveReturn(=CALL 출력 복구, coreaction.cc
+     :1774)이 아니라 **ActionReturnRecovery**(coreaction.cc:1909, mainloop 5511) + ActionOutputPrototype
+     (5747)이 담당. 트리는 ActionReturnRecovery를 가지나(coreaction.go:1183) void/실제 판정을 간이
+     `ancestorOpUseReturn`(funcproto.go:591, onlyReturnUse 기반)으로 함 -- C++ **AncestorRealistic**
+     (funcdata_varnode.cc, ~200줄 백워드 dataflow)의 충실 포팅이 아님. gcd EAX(`mov eax,ecx` 후 return만
+     읽힘)를 onlyReturnUse=true로 **오판정** -> naive guardReturns 시 gcd가 비-void로 깨짐(실측). Ghidra
+     AncestorRealistic은 "현실적 반환"인지(입력 레지스터 passthrough/undefined 거부 등)를 정교 판정해 gcd를
+     void로 정리. **따라서 트리 return 복구의 크럭스 = AncestorRealistic 충실 포팅**(대형) + heritage에
+     guardReturns 통합. production은 ApplyGuardReturnsLive(2-pass 워크어라운드)로 우회하나 트리 통합 경로엔
+     AncestorRealistic 필수. 별도 세션(C++ funcdata_varnode.cc AncestorRealistic::execute/enterNode 먼저 읽기).
    - 성공 기준: TestTreeGoldensDiag가 5/5(나아가 전 골든) byte-identical.
 
 2. **[대형] #2 breadth + #4 x64/ARM**: 골든 11개(거의 x86-32 + 사소한 x64/aarch64 add_ret)뿐.
