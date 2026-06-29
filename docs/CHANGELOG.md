@@ -5,6 +5,24 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-1 완료 -- TrimJoinblockMultiequals 제거, 충실 mergeOp trimOpOutput으로 대체
+swapped-loop snapshot(iVar1)을 Gosleigh-고안 forward-snip 워크어라운드 대신 실제 C++ mergeOp
+trimOpOutput 메커니즘으로 생성. 전 골든 + 전 패키지 그린(guardReturns 양쪽 상태).
+- **메커니즘 확인(FORCE_TRIMOUT 실험)**: loop-cond MULTIEQUAL에 trimOpOutput 강제(input-trim skip) +
+  TrimJoin off -> gcd가 정확한 golden(iVar1 while) 출력, 전 loader 스위트 그린. trimOpOutput이
+  올바른 메커니즘임을 결정적으로 확인.
+- **정식화**: `Merge.MergeOp`에서 !allOK(cover 충돌)인 loop-cond phi는 input-trim 루프를 건너뛰고
+  곧장 `TrimOpOutput`(merge.cc:759-760). 이유: 그 phi의 back-edge input이 출력을 transitively 읽어
+  (cyclic) 모든 input-trim COPY가 여전히 출력의 loop-spanning cover 안에 있음 -- C++는 input-trim 소진
+  후 trimOpOutput에 도달하나 Gosleigh input-trim 재테스트는 spurious 성공(residual loop-carried Cover
+  gap)이라 우회.
+- **삭제**: `TrimJoinblockMultiequals`(별도 pass, forward-snip, unique-output/anyPhysical/IsAddrTied
+  게이트) + `hasPhysicalSource` 헬퍼 + decompile.go/msvc_diag_test.go의 호출. `isLoopCondMultiequal`은
+  이제 mergeOp가 사용(유지).
+- **잔여(저우선)**: isLoopCondMultiequal 게이트는 cyclic-phi의 stand-in. 완전 원리화는 Cover/mergeTest
+  fidelity 수정(input-trim이 자연 실패하게)으로 게이트 제거 -- broad cover 변경이라 별도 세션.
+- 결과: gcd/SumList/CountedLoop 등 전 골든 PASS, TrimJoinblockMultiequals 휴리스틱 제거 완료.
+
 ### 2026-06-30: H8-debt-1 진단 재정정 -- phi-storage 가설도 반증, divergence는 mergeOp trim 선택
 GCD_DUMP + C++ 대조로 이전(같은 날) "phi 출력 storage(unique vs param)" 가설을 반증. 코드 변경 없음.
 - **phi-storage 가설 반증**: C++ `ConditionalExecution::getNewMulti`(condexe.cc:206)는 join MULTIEQUAL
