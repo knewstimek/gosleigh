@@ -133,19 +133,24 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 	// Re-infer types so trim COPYs created after the first InferTypes pass (the
 	// loop-head snapshot) propagate their source type and name as iVar, not uVar.
 	pcode.NewActionInferTypes("analysis").Apply(fd)
+	// Enable type recovery so the pointer-arithmetic rules (RulePtrArith) activate,
+	// then re-run RulePtrArith now that final types are known to form PTRADD from
+	// pointer INT_ADD. C++ parity: ActionStartTypes precedes the actprop pointer
+	// rules; Gosleigh defers it to here so the addr-tied SSA passes run first.
+	pcode.NewActionStartTypes("analysis").Apply(fd)
+	ptrArithLate := pcode.NewActionPool(0, "ptrarith-late")
+	ptrArithLate.AddRule(pcode.NewRulePtrArith("analysis"))
+	ptrArithLate.Perform(fd)
 	// ActionNameVars assigns iVar1/uVar1 names to unnamed register/explicit-unique HVs.
 	// C++ parity: coreaction.cc ActionNameVars::apply() + ScopeLocal::assignDefaultNames().
 	pcode.NewActionNameVars("analysis").Apply(fd)
 
-	// NOTE: ActionSetCasts (analysis-time CPUI_CAST insertion) is implemented
-	// (action_deadcode.go) but intentionally NOT wired here yet. Wiring it
-	// regresses pointer-arithmetic goldens (sum_list, counted_loop): Gosleigh
-	// keeps pointer arithmetic as INT_ADD and synthesizes `ptr[index]` at render
-	// time (printc.tryRenderSubscript), whereas Ghidra forms a PTRADD. The base
-	// getInputCast for INT_ADD then casts the pointer operand to `(int)`, breaking
-	// the subscript pattern. Parity requires PTRADD formation (RulePtrArith after
-	// the final InferTypes) before ActionSetCasts can be enabled. Until then the
-	// render-time assignCastStr / isSubpieceCast paths remain the cast source.
+	// ActionSetCasts inserts explicit CPUI_CAST ops at type mismatches (analysis-time).
+	// Runs after the late RulePtrArith so pointer arithmetic is PTRADD (whose
+	// getInputCast leaves the pointer operand uncast) rather than INT_ADD (whose
+	// base getInputCast would cast the pointer to (int), breaking subscripts).
+	// C++ parity: coreaction.cc ActionSetCasts, late in the type-recovery phase.
+	pcode.NewActionSetCasts("analysis").Apply(fd)
 
 	p := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation())
 	if cfg.ProcessEntryName != "" {
