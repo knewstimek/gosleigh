@@ -1,14 +1,24 @@
 # 프로젝트 상태
 
-## 현재 상태 (2026-06-30 세션 종료, step3b 루프회전 부분진전)
+## 현재 상태 (2026-06-30 세션 종료, step3b COMPLETE: 트리 gcd byte-identical)
 
-**전 패키지 그린**. 이번 세션(step3b): do-while -> while 회전을 막던 **2개 진짜 C++ parity 버그** 규명/수정
-(상세 CHANGELOG 2026-06-30 step3b): (1) `RuleCondNegate`가 C++와 무관한 임포스터였음 -> 충실 포팅
-(CBRANCH+boolean_flip -> BOOL_NEGATE+clear). (2) `ActionNodeJoin`/`ActionNormalizeBranches`가
-`ActionRuleOncePerFunc` 오등록 -> C++는 flags=0(매 pass 재실행) -> 수정. 결과: 트리 NodeJoin이 매 pass
-재실행 + RuleCondNegate가 flip을 풀어 entry/loop 조건이 일치(둘 다 INT_NOTEQUAL noflip)까지 도달. **남은
-블로커는 edge-order mismatch**(아래 "다음 작업" 1번). 트리 출력은 아직 do-while(production은 NormalizeBranches가
-NodeJoin 전이라 무사, C++는 post-mainloop이라 모순). 아래 옛 현황 블록은 직전 세션 기준.
+**전 패키지 그린**. 이번 세션: **H8-debt-2 step3b 완료 -- universal-action 트리가 gcd를 golden과 완전히
+동일(byte-identical)하게 출력**. do-while -> while 루프 회전을 막던 5개 C++ parity 버그를 모두 잡음(상세
+CHANGELOG 2026-06-30 step3b COMPLETE):
+1. `RuleCondNegate` 임포스터 -> 충실 포팅(CBRANCH+boolean_flip -> BOOL_NEGATE+clear).
+2. `ActionNodeJoin`/`ActionNormalizeBranches` once-per-func 오등록 -> flags=0(매 pass 재실행).
+3. **`BlockBasic.NegateCondition`이 소스 기본블록 edge 미swap** (핵심 블로커) -> C++ BlockCopy처럼
+   srcDelegate edge도 swap. collapse가 entry를 loop와 정렬 -> NodeJoin join -> while.
+4. 트리 풀이 잘못된 `RulePushMulti` 등록 -> 충실 `RulePushMultiME`(MULTIEQUAL 트리거). 조건 인라인.
+5. `ActionInferTypes` once-per-func -> flags=0. 스냅샷 타입(undefined4 -> int).
+
+근본 패턴 = "C++ flags=0 액션을 once-per-func 오등록 + 동명 임포스터 rule + BlockCopy edge-forward 누락"
+클러스터. **production 무영향**(이 액션/rule을 .Apply 직접 호출, 액션 프레임워크 밖). 회귀 가드
+`TestUniversalActionTreeGcdGolden`. 진단 `TestTreeGoldensDiag`(TREE_DIAG=1).
+
+**다음 단계 = #1 게이트 나머지(아래 "다음 작업" 1번)**: 트리 x86-32 골든 **1/5 byte-identical**(gcd만).
+나머지 4개는 EBP-프레임 + 스택 로컬 함수라 갭 큼(return-value/for-fold/스택 로컬 경로 미완). 아래 옛 현황
+블록은 직전 세션 기준.
 
 ## 이전 상태 (2026-06-30, master `4581cf5`)
 
@@ -35,39 +45,24 @@ NodeJoin 전이라 무사, C++는 post-mainloop이라 모순). 아래 옛 현황
 
 ### 다음 작업 (우선순위) -- #1 게이트: 트리 출력을 골든 byte-identical로
 
-1. **[대형, 최우선] H8-debt-2 step3b -- 트리 루프 회전(do-while -> while)**. step3b에서 2개 parity 버그
-   해소 후 남은 단일 블로커 = **edge-order mismatch**. (트리: `if (param_4) { do {...} while (param_4); }`
-   vs 골든: `while (iVar1 = param_4, iVar1 != 0) {...}`)
-   - **이번 세션 해소(2개 진짜 C++ parity 버그, 둘 다 production-safe)**:
-     1. `RuleCondNegate` 임포스터 교체 -> 충실 포팅. C++(ruleaction.cc:5492)는 CBRANCH+isBooleanFlip ->
-        BOOL_NEGATE 삽입 + opFlipCondition clear. Gosleigh엔 동명의 무관한 rule이 있었음. (findDups:1920
-        "flip hasn't propagated through yet"가 기대하는 전파 주체.)
-     2. `ActionNodeJoin`/`ActionNormalizeBranches` flags `ActionRuleOncePerFunc` -> **0** 수정. C++
-        `Action(0,...)`(blockaction.hh:352)는 매 mainloop pass 재실행. once-per-func면 1회 후 status_end로
-        고정돼 RuleCondNegate가 flip을 풀어도 NodeJoin이 재시도 안 함. (가설 나 structureReset는 이미
-        구현됨: NodeJoinCreateBlock:1125.)
-     => 트리에서 NodeJoin 매 pass 재실행 + RuleCondNegate FIRED로 flip clear + loop 조건 폴드
-        (INT_EQUAL+flip -> INT_NOTEQUAL noflip) -> entry/loop **조건 일치**. (계측 트레이스로 확정.)
-   - **남은 블로커 = edge-order mismatch (정밀화됨)**: match()가 findDups(조건)보다 **먼저** 실패 --
-     ConditionalJoin::match의 `block2->getOut(0) != exita`(blockaction.cc:2077, Gosleigh action_nodejoin.go
-     `b2.FalseOut() != exita`). entry guard와 loop self-block의 out-edge가 **mirror**(entry out0=loop/
-     out1=end, loop out0=end/out1=self). production은 ActionNormalizeBranches(opFlipInPlaceExecute가 loop
-     INT_NOTEQUAL을 normalize -> 물리 opcode flip + **edge swap**)가 NodeJoin 전에 돌아 정렬하나, C++
-     universalAction은 NormalizeBranches가 **post-mainloop**(coreaction.cc:5733)이라 faithful mainloop
-     NodeJoin엔 edge-정렬 패스가 없음. collapse negateCondition은 기본 블록으로 forward(faithful)하나
-     do-while i==0만 swap -- gcd self-edge는 jnz 분기타겟이라 out1(i==1) -> negate 안 함.
-   - **샤프해진 C++ 모순 (다음 세션 진입점)**: golden=while(production이 byte-identical 재현 = Ghidra가
-     universalAction으로 while 생성 확정, "다른 경로" 가설 배제). 그런데 faithful C++ 순서 mainloop엔 gcd
-     loop edge를 정렬하는 패스가 없음. **미해결 = Ghidra mainloop이 edge를 어떻게 정렬하는가**. 후보:
-     (A) Ghidra CFG 구성 시 entry/loop out-edge가 자연 정렬(Gosleigh buildGcd는 mirror) -- CFG 구성/edge
-     ordering divergence. (C) 미식별 mainloop 액션(ActionConditionalExe=condexe.cc 등)이 basic-block edge를
-     swap. **다음 작업**: 실제 Ghidra 런타임(C:\ghidra12)으로 gcd 디컴파일 시 basic-block edge ordering을
-     덤프하거나 universalAction mainloop trace -> (A)/(C) 확정 후 충실 포팅. 주의: ConditionalJoin/
-     BlockStructure/NormalizeBranches는 production(decompile.go)도 사용 -> 전 골든 회귀 테스트 필수.
-   - 진단 도구: `TestProductionStagesDiag`(TREE_DIAG=1, production blockShape 단계 추적),
-     `TestTreeOutputDiag`(TREE_DIAG=1 GCD_DUMP=1, 트리/production SSA + C 출력 대조).
-   - 정렬되면 나머지 10 골든 -> decompile.go 41-call subset을 트리로 대체.
-   - 성공 기준: universal 트리(SetCurrent("decompile"))가 gcd 등 전 골든을 byte-identical 출력.
+1. **[대형, 최우선] H8-debt-2 -- 트리를 전 골든에 byte-identical로 (41-call subset 대체)**. step3b(gcd
+   루프 회전) **완료**. 트리가 gcd를 golden과 byte-identical 출력(`TestUniversalActionTreeGcdGolden`).
+   남은 = 나머지 x86-32 골든(현재 1/5). 진단 `TestTreeGoldensDiag`(TREE_DIAG=1).
+   - **step3b 완료 요약(5개 parity 버그, 전부 production-safe)**: (1) RuleCondNegate 임포스터->충실 포팅,
+     (2) NodeJoin/NormalizeBranches once-per-func->flags=0, (3) **NegateCondition 소스-edge swap 누락**
+     (C++ BlockCopy::negateCondition, block.hh:534 -- 핵심 블로커), (4) RulePushMulti->RulePushMultiME
+     (충실, MULTIEQUAL 트리거), (5) InferTypes once-per-func->flags=0. 상세 CHANGELOG step3b COMPLETE.
+   - **남은 갭 (TestTreeGoldensDiag 실측)**: 트리 x86-32 골든 1/5 byte-identical(gcd만). 나머지 4개
+     (counted_loop/sum_list/abs_val/classify2)는 모두 EBP-프레임(push ebp; mov ebp,esp) + 스택 로컬
+     함수라 갭 큼. 예) counted_loop 트리 출력:
+     `void entry(void){ local_8=0; while(local_8<5){ uVar1=local_8+1; } return; }` vs golden
+     `int entry(void){ for(local_8=0; local_8<5; local_8=local_8+1){ local_c=local_c+local_8; } return local_c; }`.
+     -> 트리의 (a) return-value 복구(void), (b) 스택 로컬 누락(local_c, 누산기), (c) for-loop fold 미인식
+     (while), (d) 루프 본체 dead(uVar1 미사용) 경로 미완. gcd는 frameless라 통과.
+   - **다음 작업**: TestTreeGoldensDiag로 한 골든씩 트리 출력 vs golden 대조 -> 차이별 근본을 production
+     경로(작동)와 비교(step3b처럼 flags/임포스터/edge-forward 류 의심 우선) -> 충실 포팅. EBP-프레임 스택
+     로컬 + return-value + for-fold가 핵심. 전 골든 정렬되면 decompile.go 41-call subset을 트리로 교체.
+   - 성공 기준: TestTreeGoldensDiag가 5/5(나아가 전 골든) byte-identical.
 
 2. **[대형] #2 breadth + #4 x64/ARM**: 골든 11개(거의 x86-32 + 사소한 x64/aarch64 add_ret)뿐.
    x64 실함수(register params RCX/RDX..) 성공 필요(사용자 요구). struct/union/switch/jumptable/

@@ -5,6 +5,40 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-2 step3b COMPLETE -- universal 트리가 gcd를 golden과 byte-identical 출력 (루프 회전 완성)
+이전 step3b 항목(아래)에서 edge-정렬 블로커로 정밀화한 뒤, 5개 parity 버그를 모두 잡아 **트리가 gcd를
+golden과 완전히 동일**하게 출력. 미션 #1 게이트의 결정적 전진(트리가 손정렬 41-call subset 없이 정확한
+출력 생성 입증). 전 골든 + 전 패키지 그린, production 무영향.
+- **최종 5개 버그 (전부 충실 C++ parity)**:
+  1. `RuleCondNegate` 임포스터 -> 충실 포팅(CBRANCH+boolean_flip -> BOOL_NEGATE + clear, ruleaction.cc:5492).
+  2. `ActionNodeJoin`/`ActionNormalizeBranches` `ActionRuleOncePerFunc` -> **flags=0**(C++ Action(0,...),
+     blockaction.hh:352/286). 매 mainloop pass 재실행돼야 RuleCondNegate가 flip 푼 뒤 join 재시도 가능.
+  3. **`BlockBasic.NegateCondition`이 소스 기본블록 edge 미swap** -> C++ BlockCopy::negateCondition
+     (block.hh:534)처럼 srcDelegate(소스) edge도 swap. **이게 핵심 블로커**: collapse가 clone edge만 swap +
+     공유 op flip만 leak해 소스 기본블록 branch 순서가 stale -> NodeJoin이 mirror된 entry/loop edge를 못 맞춰
+     do-while 고정. 수정 후 if-collapse negate가 entry를 loop와 정렬 -> join 성공 -> while 회전.
+  4. 트리 풀이 **잘못된 `RulePushMulti`(arithmetic 트리거)** 등록 -> 충실 `RulePushMultiME`
+     (CPUI_MULTIEQUAL 트리거, ruleaction.cc:5529 C++ RulePushMulti). join된 boolean MULTIEQUAL을 merge
+     블록으로 밀어 `MULTIEQUAL(a,b)!=0` 인라인(`while(uVar1)` 물질화 -> `while(iVar1=param_4, iVar1!=0)`).
+  5. `ActionInferTypes` `ActionRuleOncePerFunc` -> **flags=0**(coreaction.hh:974). 매 pass 재실행돼야
+     RulePushMultiME가 나중에 만든 스냅샷 MULTIEQUAL을 타입(undefined4 uVar1 -> int iVar1).
+- **공통 패턴**: step3b 근본은 "C++ flags=0(매 pass 재실행)인 액션을 Gosleigh가 once-per-func로 오등록" +
+  "동명 임포스터 rule" + "BlockCopy edge-forward 누락" 클러스터. production은 이 액션/rule을 .Apply 직접
+  호출(액션 프레임워크 밖)이라 무영향 -- 트리 전용 수정.
+- **진단 경로**: NJ_CFG로 NodeJoin 시점 CFG edge 덤프(entry=[loop,end] vs loop=[end,loop] mirror 확정,
+  production은 NormalizeBranches 후 정렬됨 확인) -> negateCondition 소스-swap 누락 규명. 단계별 트레이스로
+  RuleCondNegate/flag/RulePushMultiME/InferTypes 순차 확인 후 디버그 전량 제거.
+- **회귀 가드**: `TestUniversalActionTreeGcdGolden`(트리 -> gcd golden byte-identical 단언, 일반 스위트 실행).
+  진단 `TestTreeGoldensDiag`(TREE_DIAG=1, 트리를 5개 x86-32 골든에 돌려 match/mismatch 보고).
+- **다음 단계 평가(TestTreeGoldensDiag)**: 트리 x86-32 골든 **1/5 byte-identical**(gcd만). 나머지 4개
+  (counted_loop/sum_list/abs_val/classify2)는 EBP-프레임 + 스택 로컬 함수라 갭 큼: 예) counted_loop 트리는
+  `void`(return 값 미복구) + local_c 누락 + for-loop 미인식(while) + 루프 본체 dead. 즉 트리의 EBP-프레임
+  스택-로컬/return-value/for-fold 경로가 미완. gcd는 frameless라 통과. #1 게이트(41-call subset 대체)는
+  이 갭들 해소 후 가능 -- 별도 세션 다수.
+- C++ 참조: ruleaction.cc RuleCondNegate(5492)/RulePushMulti(1062-1137), block.hh BlockCopy::negateCondition
+  (534)/block.cc BlockBasic::negateCondition(2351), blockaction.hh ActionNodeJoin/NormalizeBranches(352/286),
+  coreaction.hh ActionInferTypes(974), coreaction.cc universalAction(5529 RulePushMulti).
+
 ### 2026-06-30: H8-debt-2 step3b -- 충실 RuleCondNegate + NodeJoin flags 수정 (루프 회전 2개 parity 버그 해소, edge-정렬 블로커로 정밀화)
 do-while -> while 루프 회전을 막던 2개 진짜 C++ parity 버그를 C++ 코드 근거로 규명/수정. 전 패키지 그린.
 production 무영향(production은 이 rule/flags를 .Apply 직접 호출 경로 밖에서 안 씀). 트리 출력은 아직 do-while
