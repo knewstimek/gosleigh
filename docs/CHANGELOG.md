@@ -5,7 +5,7 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
-### 2026-06-30: H8-debt-2 step1+2+3a -- 트리 proto 배선 + incremental/early heritage (스택 파라미터 fold)
+### 2026-06-30: H8-debt-2 step1~3b-1 -- 트리 proto 배선 + incremental heritage + 충실 ReturnSplit (의미적으로 정확한 gcd)
 universal 트리의 출력을 골든에 근접시킴. 미션 #1 게이트 핵심 전진. production 무영향(전 패키지 그린).
 - **step1 (proto/param/ScopeLocal 배선)**: 트리는 FuncProto/ScopeLocal을 전혀 안 만들었음(트리 실행 후에도
   둘 다 nil) -> ActionDefaultParams/PrototypeTypes/RestructureVarnode 전부 early-return, 파라미터/로컬
@@ -36,9 +36,16 @@ universal 트리의 출력을 골든에 근접시킴. 미션 #1 게이트 핵심
   늦게 실행. 수정: OpHeritage가 첫 register heritage 직후(GetPass()==1) ActionStackPtrFlow 실행 -> stack을
   rule 전에 heritage(production driver와 같은 순서). 결과: param_3/param_4 모두 fold, 의미적으로 정확한
   gcd(`if (param_4) { do { iVar1 = param_3 % param_4; param_3 = param_4; param_4 = iVar1; } while (param_4); ...}`).
-- **남은 갭(step3b)**: 루프가 골든의 while-comma(`while (iVar1 = param_4, iVar1 != 0)`) 대신 if/do-while로
-  렌더. SSA 대조: production은 entry guard + loop test를 단일 head test로 병합(loop rotation), 트리는
-  분리 유지. condexe.cc/blockaction.cc 블록 구조화 계열(H8-debt-1 swapped-loop와 동류). 다음 세션.
+- **step3b-1 (충실 ActionReturnSplit)**: CFG 대조로 트리가 return 블록을 2개로 과분리함을 규명(gcd는 RET
+  1개). C++ ActionReturnSplit는 goto-to-return 엣지만 분리(gatherReturnGotos, blockaction.cc)하고 모든
+  in-edge를 분리하지 않으나 Gosleigh는 index>=1 모든 in-edge를 무조건 분리. 수정: goto in-edge만 분리
+  (parent.IsGotoIn, "can't split all" 가드). Gosleigh는 getCopyMap 부재라 블록 자체 goto in-edge 플래그로
+  근사. -> 단일 return 복원, double-return 제거. production은 ReturnSplit 미실행이라 무영향(전 골든 그린).
+- **남은 갭(step3b)**: do-while -> while 루프 회전만 남음. CFG/구조화 대조: 트리는 test가 tail인 self-loop
+  블록 -> ruleBlockDoWhile로 BlockDoWhile + entry guard = `if(do-while)`. production은 test가 별도 phi-head
+  블록으로 분리 -> ruleBlockWhileDo로 BlockWhileDo = `while`. ruleBlockWhileDo/ruleBlockDoWhile은 둘 다
+  구현됨 -- 입력 CFG 모양이 관건(production은 loop test를 phi-head로 회전). condexe.cc(NodeJoin)/
+  blockaction.cc 영역. 다음 세션.
 - 회귀 가드 `TestUniversalActionTreeConverges`(수렴 단언). production-safe: Heritage() incremental gating은
   single-pass(production)에선 inert, OpHeritage/ApplyActiveParamModel/early-stack은 트리 전용. 진단
   `TestTreeOutputDiag`(TREE_DIAG=1; GCD_DUMP=1로 tree/production SSA 대조).
