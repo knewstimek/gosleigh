@@ -5,6 +5,20 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H7 step 3c -- guardReturns를 프로덕션 기본 return 경로로 전환
+충실 Heritage::guardReturns + dominance rename을 anchorReturnReg SeqNum 휴리스틱 대신 **기본값**으로
+승격. 전 테스트 corpus(골든 + ~14개 레거시 파이프라인) byte-identical 검증 후 전환. 전 패키지 그린.
+- **corpus 검증(step3c-prep)**: `ApplyGuardReturnsLive`를 self-contained화(spaces+graph로 자체 heritage
+  빌드) + loader_test.go의 14개 ApplyCallingConvention 사이트마다 호출 추가. 플래그 ON에서 전 패키지
+  그린 -> guardReturns-live가 anchorReturnReg의 완전한 drop-in 대체임을 전 corpus에서 확인.
+- **기본값 전환**: `guardReturnsLiveEnabled()`를 invert -- 이제 guardReturns가 기본, anchorReturnReg는
+  `GOSL_LEGACY_ANCHOR_RETURN` opt-out fallback(GOSL_DESCENDANT_DC와 동일 패턴). ApplyCallingConvention은
+  기본적으로 anchorReturnReg 스킵, bridge.Decompile/테스트가 ApplyGuardReturnsLive로 return 값 wiring.
+- **검증**: 기본(guardReturns) + GOSL_LEGACY_ANCHOR_RETURN(anchorReturnReg) 양쪽 전 패키지 그린.
+- **남은 tail(저위험 follow-up)**: anchorReturnReg 함수 자체 + ApplyActiveReturnModel(anchorReturnReg
+  호출, ActionActiveReturn 본체, 골든 파이프라인 미배선) 정리 + printc.go anchorReturnReg 주석(11개,
+  로직은 input[1] 기반이라 mechanism-agnostic, 갱신만) 정리. 기능 영향 없음.
+
 ### 2026-06-30: H7 step 3b -- guardReturns live wiring 검증 (GOSL_GUARD_RETURNS 플래그 뒤)
 충실 guardReturns + rename 경로를 anchorReturnReg 대체로 배선하고, 프로덕션 경로(bridge.Decompile)
 전 MSVC 골든에서 byte-identical임을 검증. 플래그 default off라 무회귀.
