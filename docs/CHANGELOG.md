@@ -5,6 +5,36 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-2 step1+2 -- 트리 proto 배선 + incremental heritage (스택 파라미터 fold)
+universal 트리의 출력을 골든에 근접시킴. 미션 #1 게이트 핵심 전진. production 무영향(전 패키지 그린).
+- **step1 (proto/param/ScopeLocal 배선)**: 트리는 FuncProto/ScopeLocal을 전혀 안 만들었음(트리 실행 후에도
+  둘 다 nil) -> ActionDefaultParams/PrototypeTypes/RestructureVarnode 전부 early-return, 파라미터/로컬
+  미명명 + return 쓰레기(`return *local_91`). 근본: C++ Funcdata는 생성 시 FuncProto+ScopeLocal 부착
+  (funcdata.cc:66-70) 후 ActionPrototypeTypes::apply가 setModel(defaultfp)+initActiveOutput
+  (coreaction.cc:4626-4662)하나 Gosleigh 포팅은 둘 다 누락. 수정: (a) `Funcdata.defaultModel`
+  (Architecture::defaultfp 등가) + bridge.Build이 buildDefaultModel(NewProtoModelFromCspec+
+  WithEffectOffsets+WithReturnReg)로 부착, (b) ActionPrototypeTypes 충실화(fp 없으면 default model로
+  FuncProto+ScopeLocal 생성, output unlocked면 SetActiveOutput). 결과: 트리 gcd 시그니처가 골든과
+  byte-match(`void processEntry entry(undefined4 param_1,undefined4 param_2,int param_3,int param_4)`),
+  파라미터/로컬 명명, 쓰레기 return 소멸.
+- **step2 (incremental heritage + activeparam 멱등)**: step1 후에도 루프 본체가 스택 파라미터 대신 register
+  temp(iVar) 사용 -- StackPtrFlow가 만든 스택 슬롯이 heritage 안됨(heritage-once + build-time space set에
+  스택 부재). heritage를 매 pass 돌리면 oscillation 재발. 계측(per-pass/per-action probe)으로 2개 근본 규명:
+  (1) **incremental heritage**(heritage-once 대체, H7 step3 multi-pass도 해결): Heritage()가 이후 pass에서
+  heritage-known varnode 범위 skip(`Varnode.IsHeritageKnown`=constant|annotation|written|input,
+  heritage.cc:2704-2719) -> 새 free varnode만 재배치. OpHeritage가 persistent Heritage 재사용
+  (pass+globalDisjoint 유지) + 스택 슬롯은 HeritageRange로 슬롯별 1회씩(full task list는 인접 오프셋을
+  병합해 wrong-size phi 생성, heritagedStackSlots 가드). 해석된 스택 space를 proto model에 기록.
+  (2) **ApplyActiveParamModel 멱등**: 매 호출 ScopeLocal 재구축+true 반환 -> 스택 파라미터 가시화 후
+  ActionRestructureVarnode와 영원히 oscillate(각 ~118k회). input-lock 시 early-return으로 수정(C++
+  ActionActiveParam은 call input trial을 1회 resolve 후 markFullyChecked로 종료; call-less 함수는 fixpoint).
+  결과: 트리 수렴 + param_3가 루프 본체에 fold(`iVar2 = param_3 % iVar1; param_3 = iVar1`).
+- **남은 갭**: param_4가 아직 temp로 coalesce + 루프가 골든의 while-comma 대신 if/do-while로 렌더(PrintC/
+  block-structure 갭). 다음: 트리 merge/blockstructure 순서를 production driver와 reconcile.
+- 회귀 가드 `TestUniversalActionTreeConverges`(수렴 단언). production-safe: Heritage() incremental gating은
+  single-pass(production)에선 inert, OpHeritage/ApplyActiveParamModel은 트리 전용. 진단 `TestTreeOutputDiag`
+  (TREE_DIAG=1 gated).
+
 ### 2026-06-30: H8-debt-2 -- universal 트리 수렴 달성 (heritage-once); end-to-end 실행
 universal-action 트리가 gcd에서 hang -> 수렴+C출력으로 전환. 미션 #1 게이트 핵심 전진. production 무영향.
 - **근본 규명**: SKIP_ACTION bisect로 비수렴원을 {oppool1,conditionalconst,multicse}로 좁힘(varnodeprops
