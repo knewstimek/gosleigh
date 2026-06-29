@@ -1,12 +1,12 @@
 # 프로젝트 상태
 
-## 현재 상태 (2026-06-29 세션 종료, master `03ef9d2`)
+## 현재 상태 (2026-06-29 세션 종료, master `10fdf39`)
 
 **전 패키지 그린** (loader/pcode/sla/bridge). 이번 세션: **H9 ActionSetCasts 정식 배선
 완료** -- 분석-time CPUI_CAST 삽입이 bridge.Decompile에서 라이브. PTRADD 형성 블로커를
 런타임 프로브로 진단/해결(ActionStartTypes 미배선 -> 배선, RulePtrArith 재발화, PrintC
 PTRADD subscript 렌더, read-facing 갭 castStandardRead 보정). 전 MSVC 골든 통과.
-상세는 위 "다음 작업 1" + CHANGELOG. 이전 성과:
+상세는 "다음 작업" + CHANGELOG. 이전 성과:
 
 1. **H8 gcd_x86_32 golden parity 완료** -- TestMSVC_Gcd PASS. gcd가 Ghidra golden과
    완전 일치: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; }`.
@@ -19,27 +19,41 @@ PTRADD subscript 렌더, read-facing 갭 castStandardRead 보정). 전 MSVC 골�
    `IsSubpieceCast`/`IsSextCast`/`IsZextCast` (cast.go, 단위 테스트). render-time 캐스트
    판정 4종(assignCastStr / SUBPIECE / SEXT / ZEXT)을 C++ 충실 CastStrategy로 교체.
 
+### 완료: H9 ActionSetCasts 정식 배선 (`432b30e`~`58693bc`)
+
+분석-time CPUI_CAST 삽입이 bridge.Decompile에서 라이브, 전 골든 그린. 인프라(입력/출력
+타입 + int-promotion + arithmeticOutputStandard) + 본체(Apply/castInput/castOutput) +
+배선. 해결한 블로커: ActionStartTypes 미배선(typeRec 영구 false), PrintC PTRADD subscript
+렌더, read-facing 갭 castStandardRead. 상세는 CHANGELOG 2026-06-29.
+
 ### 다음 작업 (우선순위)
 
-1. **H9 ActionSetCasts -- 정식 배선 완료 (`51edf33`/`03ef9d2`)**. 분석-time CPUI_CAST
-   삽입이 bridge.Decompile에서 라이브, 전 골든 그린. 해결 경로:
-   - **블로커 진단(런타임 프로브)**: `ActionStartTypes`가 bridge.Decompile에 미배선 ->
-     HasTypeRecoveryStarted() 영구 false -> RulePtrArith가 포인터 룰을 안 켬(PTRADD
-     미형성 근본 원인). 최종 InferTypes 뒤 ActionStartTypes + RulePtrArith 재발화 배선.
-   - PrintC가 LOAD[PTRADD]를 subscript로 렌더하도록 tryRenderSubscript에 PTRADD 분기 +
-     buildTree가 남기는 COPY(PTRADD) 통과 추가(printc.go).
-   - read-facing 갭 보정: undefined4 피연산자가 비교(careUI=true)에서 `(int)` 스퓨리어스
-     캐스트. Ghidra는 inherits_sign으로 read-facing int. `castStandardRead`(cast.go)로
-     비교/확장에서 curtype UNKNOWN이면 무캐스트.
-   - **잔여 (다음)**: (a) assignCastStr 전면 제거 미완 -- ActionSetCasts가 ForLoops 뒤라
-     for-loop iterate/init op(NonPrinting)은 스킵(출력 CAST 삽입 시 for-구조 깨짐).
-     그 op 캐스트는 assignCastStr 잔여 fallback이 담당. 전면 제거하려면 ActionSetCasts를
-     ForLoops 앞에 배치(최종 타입 의존성 순환 해소). (b) 미포팅: SUBPIECE
-     getOutputToken(findTruncation)/PTRSUB getOutputToken(downChain)/union resolution/
-     testStructOffset0/markExplicit*. (c) read-facing/def-facing 타입 모델 부재(근본).
-2. **[대안] H8-debt-2 reconcile** -- `bridge.Decompile` 손정렬 subset을 프로덕션
-   `BuildUniversalAction`과 통합 (universalAction 내 미완 action 완성 필요).
-3. **[대안] H8-debt-1** 스냅샷 판별자 원리화, **H7** ActionPrototypeTypes 배선.
+1. **[중] H9 잔여 -- assignCastStr 전면 제거**. 현재 hybrid: 정상 op은 ActionSetCasts 실제
+   CAST, NonPrinting for-loop iterate/init op만 render-time `assignCastStr`(printc.go) 잔여
+   fallback. 출력은 이미 전 골든 정확이라 **출력 개선 목적 아님, 메커니즘 parity 목적**.
+   - **막힌 이유 (이번 세션 2접근 실험으로 확정)**: (1) ActionSetCasts를 ForLoops 앞으로
+     옮기면 삽입 CAST가 for-detection(tryMarkForLoop/findLoopVariable/testIterateForm)을
+     교란 -> while+comma. (2) NonPrinting op에 castInput만 수행하면 proper for-loop은 되나
+     sum_list for-iterate 캐스트는 LOAD **출력** 캐스트라 castInput으로 못 잡음(누락).
+     근본: for-iterate 캐스트가 출력 캐스트 -> loop변수=op출력과 충돌.
+   - **선행 필요**: ActionSetCasts를 ForLoops **앞**에 배치 + for-detector를 cast-aware로
+     (findLoopVariable/testIterateForm/SetForLoop이 CAST 체인을 iterate로 인식 + for-header가
+     CAST 포함 렌더). C++ 순서(ActionSetCasts -> 그 다음 printing 단계의 for-fold)와 일치시킴.
+   - 수정 대상: bridge/decompile.go(순서), action_forloops.go(cast-aware), printc.go(assignCastStr 제거).
+   - 성공 기준: 전 MSVC 골든 유지하며 printc.go assignCastStr 제거.
+
+2. **[대형] H7 ActionPrototypeTypes 배선** -- **단순 배선 아님(이번 세션 재분류)**.
+   ActionPrototypeTypes.Apply는 `fp.IsOutputLocked()`에서만 RETURN 반환 배선(coreaction.go:802).
+   anchorReturnReg는 lock 없이 EAX->RETURN 휴리스틱. 선행: ActionOutputPrototype/ReturnRecovery
+   (K1에서 구현됨)로 output 타입+lock 설정 -> ActionPrototypeTypes 배선 -> anchorReturnReg
+   (paramactive.go/printc.go 12+참조) 제거. 미시작 H7 상세 참조.
+
+3. **[대형, 대안] H8-debt-2 reconcile** -- bridge.Decompile 손정렬 subset을 프로덕션
+   `BuildUniversalAction`(universalAction 충실 포팅)과 통합. **H8-debt-1** 스냅샷 판별자 원리화.
+
+4. **H9 미포팅 잔여(저우선)**: SUBPIECE getOutputToken(findTruncation, 전용 struct)/PTRSUB
+   getOutputToken(downChain)/union resolution/testStructOffset0/markExplicitUnsigned·LongSize/
+   typeOrder(Equal-NotEqual·arithmeticOutputStandard 단순화 중). 현재 render-time이 커버.
 
 세션 상세 이력: `docs/CHANGELOG.md` (2026-06-29 항목).
 
