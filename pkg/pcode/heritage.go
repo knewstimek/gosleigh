@@ -837,10 +837,130 @@ func (h *Heritage) Guard(addr address.Address, size int32, addIndirects bool,
 	if !addIndirects {
 		return
 	}
-	// Only the call-site guard is wired in Go; guardStores/guardLoads/
-	// guardReturns are not yet ported (see heritage.cc lines 1538-1652).
-	// TODO C++ parity: port Heritage::guardStores, guardLoads, guardReturns.
+	// C++ parity: heritage.cc Heritage::guard (lines 1188-1197). guardStores/
+	// guardLoads remain unported; guardReturns is ported below. fl is 0 for
+	// register ranges (the register return value is never persistent).
 	h.guardCalls(addr.Space, addr.Offset, size)
+	h.guardReturns(0, addr, size)
+}
+
+// Return-output containment classes for guardReturns, the register-space subset
+// of the ParamEntry containment outcomes that FuncProto::characterizeAsOutput
+// reports. Gosleigh has not ported the ParamEntry output model, so only the
+// single configured integer return register participates.
+const (
+	retOutNoContainment = iota // no overlap with the return register
+	retOutContainedBy          // query range properly contains the return register
+	retOutOther                // exact match, query inside output, or partial overlap
+)
+
+// characterizeReturnOutput classifies how the heritaged range [addr,addr+size)
+// relates to the function's single integer return register (ProtoModel.ReturnReg*).
+// C++ parity: fspec.cc FuncProto::characterizeAsOutput (register subset).
+func (h *Heritage) characterizeReturnOutput(addr address.Address, size int32) int {
+	if h.proto == nil || h.proto.ReturnRegSpaceIndex < 0 || h.proto.ReturnRegSize == 0 {
+		return retOutNoContainment
+	}
+	if addr.Space == nil || int(addr.Space.Index) != h.proto.ReturnRegSpaceIndex {
+		return retOutNoContainment
+	}
+	qStart := addr.Offset
+	qEnd := addr.Offset + uint64(size)
+	oStart := h.proto.ReturnRegOffset
+	oEnd := h.proto.ReturnRegOffset + uint64(h.proto.ReturnRegSize)
+	if qEnd <= oStart || oEnd <= qStart {
+		return retOutNoContainment
+	}
+	if qStart <= oStart && oEnd <= qEnd && size > h.proto.ReturnRegSize {
+		return retOutContainedBy
+	}
+	return retOutOther
+}
+
+// guardReturns prepopulates data-flow for the given register range at every
+// CPUI_RETURN op so that, on a re-heritage pass, the return value reaches the
+// function exit. When an active return trial exists, a fresh Varnode at the
+// range is appended as a new input to each RETURN (or a truncating SUBPIECE is
+// inserted when the range properly contains the return storage). SSA renaming on
+// the subsequent pass then connects that fresh Varnode to the dominating
+// definition of the return register.
+//
+// This is the faithful replacement for the anchorReturnReg SeqNum heuristic
+// (funcproto.go): the fresh RETURN input plus dominance-based renaming reproduces
+// "the value live at the return site" exactly, where anchorReturnReg approximates
+// it by picking the latest-SeqNum write at the return-register location.
+//
+// Dormant: invoked only from Guard(), which currently has no live callers. Live
+// wiring requires installing the active output (ActionActiveReturn) and a second
+// heritage pass over the register range so the appended Varnodes get renamed.
+//
+// C++ parity: heritage.cc Heritage::guardReturns (lines 1652-1692). The persist
+// branch (Varnode::persist -> address-forced COPY) is intentionally omitted: it
+// applies to persistent memory ranges, never to the register return value, and
+// depends on markReturnCopy/setAddrForce which are not ported.
+func (h *Heritage) guardReturns(fl uint32, addr address.Address, size int32) {
+	fp := h.fd.GetFuncProto()
+	if fp == nil {
+		return
+	}
+	active := fp.GetActiveOutput()
+	if active != nil {
+		switch h.characterizeReturnOutput(addr, size) {
+		case retOutContainedBy:
+			h.guardReturnsOverlapping(addr, size)
+		case retOutNoContainment:
+			// No overlap with the return register; nothing to guard.
+		default:
+			active.RegisterTrial(addr, size)
+			for _, op := range h.fd.GetPcodeOpBank().AllOps() {
+				if op == nil || op.IsDead() || op.Code() != CPUI_RETURN {
+					continue
+				}
+				if op.HaltType() != 0 { // special halt points cannot take return values
+					continue
+				}
+				invn := h.fd.NewVarnode(size, addr)
+				invn.SetActiveHeritage()
+				h.fd.OpInsertInput(op, invn, op.NumInput())
+			}
+		}
+	}
+	// C++ persist branch omitted (see doc comment). fl is accepted to keep the
+	// signature aligned with Heritage::guardReturns.
+	_ = fl
+}
+
+// guardReturnsOverlapping handles the case where the heritaged range properly
+// contains the return storage: a SUBPIECE truncates the oversized range down to
+// the return register before the result is appended to each RETURN op.
+// C++ parity: heritage.cc Heritage::guardReturnsOverlapping (lines 1609-1638).
+func (h *Heritage) guardReturnsOverlapping(addr address.Address, size int32) {
+	retSize := h.proto.ReturnRegSize
+	truncAddr := address.Address{Space: addr.Space, Offset: h.proto.ReturnRegOffset}
+	active := h.fd.GetFuncProto().GetActiveOutput()
+	active.RegisterTrial(truncAddr, retSize)
+	// Number of least significant bytes to truncate.
+	offset := int32(h.proto.ReturnRegOffset - addr.Offset)
+	if addr.Space != nil && addr.Space.BigEndian {
+		offset = (size - retSize) - offset
+	}
+	for _, op := range h.fd.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN {
+			continue
+		}
+		if op.HaltType() != 0 {
+			continue
+		}
+		invn := h.fd.NewVarnode(size, addr)
+		subOp := h.fd.NewOp(2, op.Addr())
+		h.fd.OpSetOpcode(subOp, CPUI_SUBPIECE)
+		h.fd.OpSetInput(subOp, invn, 0)
+		h.fd.OpSetInput(subOp, h.fd.NewConstant(4, uint64(uint32(offset))), 1)
+		h.fd.OpInsertBefore(subOp, op)
+		retVal := h.fd.NewVarnodeOut(retSize, truncAddr, subOp)
+		invn.SetActiveHeritage()
+		h.fd.OpInsertInput(op, retVal, op.NumInput())
+	}
 }
 
 // ProtectFreeStores walks all CPUI_STORE ops whose pointer ultimately resolves
