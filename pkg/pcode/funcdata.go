@@ -58,6 +58,15 @@ type Funcdata struct {
 	scopeLocal *ScopeLocal
 	callSpecs  []*FuncCallSpecs
 
+	// defaultModel is the architecture evaluation prototype model (the C++
+	// Architecture::defaultfp equivalent). The universal-action tree reads it in
+	// ActionPrototypeTypes to attach a FuncProto + ScopeLocal when none is set,
+	// mirroring how the C++ Funcdata is constructed with a prototype and
+	// ActionPrototypeTypes::apply sets the model. The hand-ordered decompile
+	// driver instead builds the model itself via ApplyCallingConvention.
+	// C++ parity: Architecture::defaultfp / evalfp_current.
+	defaultModel *ProtoModel
+
 	// jumpTables tracks all recovered JumpTable objects for this function.
 	// C++ parity: funcdata.hh Funcdata::jumpvec
 	jumpTables []*JumpTable
@@ -139,6 +148,15 @@ func (fd *Funcdata) SetFuncProto(fp *FuncProto) { fd.funcProto = fp }
 // GetScopeLocal returns the local variable scope, or nil if not set.
 // C++ parity: Funcdata::getScopeLocal
 func (fd *Funcdata) GetScopeLocal() *ScopeLocal { return fd.scopeLocal }
+
+// DefaultModel returns the architecture evaluation prototype model, or nil.
+// C++ parity: Architecture::defaultfp (read via data.getArch()->defaultfp).
+func (fd *Funcdata) DefaultModel() *ProtoModel { return fd.defaultModel }
+
+// SetDefaultModel records the architecture evaluation prototype model so the
+// universal-action tree (ActionPrototypeTypes) can attach a FuncProto when the
+// function has no locked prototype.
+func (fd *Funcdata) SetDefaultModel(m *ProtoModel) { fd.defaultModel = m }
 
 // SetScopeLocal attaches a local variable scope.
 func (fd *Funcdata) SetScopeLocal(sl *ScopeLocal) { fd.scopeLocal = sl }

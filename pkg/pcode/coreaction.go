@@ -776,9 +776,27 @@ func (a *ActionPrototypeTypes) extendInput(data *Funcdata, invn *Varnode, param 
 // Apply applies the prototype model to locked inputs and outputs.
 // C++ parity: coreaction.cc ActionPrototypeTypes::apply
 func (a *ActionPrototypeTypes) Apply(data *Funcdata) int {
+	// Set the evaluation prototype model if not already locked. The C++ Funcdata
+	// is constructed with a FuncProto + ScopeLocal (funcdata.cc:66-70) and
+	// ActionPrototypeTypes::apply then calls setModel(defaultfp). Gosleigh bundles
+	// the model into FuncProto/ScopeLocal, so when none is attached (the
+	// universal-action tree path) we create both here from the architecture
+	// default model. The hand-ordered decompile driver attaches its own FuncProto
+	// via ApplyCallingConvention before this would run, so fp is non-nil there.
+	// C++ parity: coreaction.cc ActionPrototypeTypes::apply (4626-4630).
+	evalfp := data.DefaultModel()
 	fp := data.GetFuncProto()
 	if fp == nil {
-		return 0
+		if evalfp == nil {
+			return 0
+		}
+		fp = NewFuncProto(evalfp)
+		data.SetFuncProto(fp)
+		if data.GetScopeLocal() == nil {
+			data.SetScopeLocal(NewScopeLocal(evalfp))
+		}
+	} else if evalfp != nil && !fp.IsModelLocked() && !fp.HasMatchingModel(evalfp) {
+		fp.SetModel(evalfp)
 	}
 
 	if fp.HasThisPointer() {
@@ -817,6 +835,14 @@ func (a *ActionPrototypeTypes) Apply(data *Funcdata) int {
 				data.OpSetInput(op, vn, op.NumInput())
 				SetVarnodeType(vn, out.Type())
 			}
+		}
+	} else {
+		// Initiate gathering potential return values: install an active output so
+		// the subsequent Heritage::guardReturns appends the return register to each
+		// RETURN op and SSA renaming connects it to the dominating definition.
+		// C++ parity: coreaction.cc:4662 data.initActiveOutput().
+		if fp.GetActiveOutput() == nil {
+			fp.SetActiveOutput(NewParamActive(false))
 		}
 	}
 
