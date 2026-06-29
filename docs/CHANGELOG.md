@@ -5,6 +5,26 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-29: H7 step 1+2 -- consume-bit DeadCode를 충실 프로덕션 기본값으로 LIVE
+anchorReturnReg 휴리스틱을 둘러싼 핵심 서브시스템(consume-bit DeadCode)을 충실 포팅하고
+프로덕션 DeadCode 경로로 배선. 전 골든 + 전 패키지 byte-identical 통과.
+- **H7 bedrock 진단**: anchorReturnReg를 끄면(GOSL_NO_ANCHOR 실험) 전 non-void 골든이 void로
+  붕괴(DeadCode가 return-reg 쓰기 prune). C++는 consume-bit 전파로 return값을 보존하나 Gosleigh
+  DeadCode는 descendant-count 기반. 충실 경로는 3개 부재 서브시스템 요구: ①consume-bit DeadCode
+  ②heritage-pass 추적 ③실제 CalcNZMask.
+- **step 1 (`42069c4`)**: `pkg/pcode/deadcode_consume.go` -- C++ ActionDeadCode consume 절반 충실
+  포팅(pushConsumed/propagateConsumed ~20 opcode + gatherConsumedReturn/markConsumedParameters +
+  coveringmask/minimalmask/leastsigbit). 단위테스트 `TestConsumeAnalysisReturnReachable`(RETURN
+  도달 체인=consumed, 죽은 varnode=0). 헬퍼는 C++ 정의 대조.
+- **step 2 (`ef53e39`)**: `ActionDeadCode.applyConsume`가 consume 분석으로 "consume 미도달 출력"을
+  fixpoint 제거 -> **프로덕션 기본 DeadCode 경로**. descendant 경로는 GOSL_DESCENDANT_DC fallback.
+  안전성: 모든 omission(pre-live/neverConsumed/>8byte/call-param)이 보수적(과보존, 오삭제 X)이고
+  Gosleigh DeadCode는 전부 post-heritage라 pre-live 미발화. return값은 anchorReturnReg가 RETURN에
+  배선한 input을 gatherConsumedReturn이 보존.
+- **step 3 블로커(재진단)**: anchorReturnReg 제거는 C++ Heritage::guardReturns(heritage.cc:1652,
+  getActiveOutput()!=null 조건 + multi-pass heritage)에 의존 -> Gosleigh single-pass라 부재. 사이즈 큼.
+- 결과: gcd/sum_list/counted_loop/abs/nested_if + 전 패키지 그린.
+
 ### 2026-06-29: H9 assignCastStr 전면 제거 (for-fold를 ActionSetCasts 뒤로 재배치)
 render-time 캐스트 fallback을 완전히 제거하고 메커니즘 parity 달성. 전 패키지 그린.
 - **재배치**: ActionForLoops를 ActionSetCasts **뒤**로 이동(decompile.go). C++ 순서와
