@@ -62,6 +62,16 @@ CHANGELOG 2026-06-30 step3b COMPLETE):
    - **다음 작업**: TestTreeGoldensDiag로 한 골든씩 트리 출력 vs golden 대조 -> 차이별 근본을 production
      경로(작동)와 비교(step3b처럼 flags/임포스터/edge-forward 류 의심 우선) -> 충실 포팅. EBP-프레임 스택
      로컬 + return-value + for-fold가 핵심. 전 골든 정렬되면 decompile.go 41-call subset을 트리로 교체.
+   - **return-value 갭 (조사됨, 큰 작업)**: abs_val 트리 = `void entry(){ if(param_3<0){} return; }`
+     (값 계산 dead-code 제거 + void) vs golden `int entry(){ if(param_3<0){param_3=-param_3;} return param_3; }`.
+     근본: 트리 Heritage.Heritage(heritage.go:728~)가 guardCalls만 호출하고 **guardReturns 미호출**(C++
+     Heritage::heritage -> guard()는 guardCalls+guardReturns 둘 다). 단, **naive하게 guardReturns만 추가하면
+     실패**(실측): gcd 등 void 함수도 activeoutput이 설정돼(ActionPrototypeTypes coreaction.go:844) EAX가
+     RETURN에 붙어 비-void로 깨지고, sum_list는 ActionConditionalConst.propagateConstant에서 nil deref.
+     즉 충실 return 복구는 guardReturns + **ActionActiveReturn 출력-trial 머신리**(void vs 실제 반환 판정 +
+     activeoutput clear, C++ ActionActiveReturn 본체 = checkOutputTrialUse/deriveOutputMap, 현재 트리에서
+     no-op stub) + 다운스트림 액션의 새 return SSA 처리까지 필요. production은 ApplyGuardReturnsLive(2-pass
+     워크어라운드)로 우회. 별도 세션.
    - 성공 기준: TestTreeGoldensDiag가 5/5(나아가 전 골든) byte-identical.
 
 2. **[대형] #2 breadth + #4 x64/ARM**: 골든 11개(거의 x86-32 + 사소한 x64/aarch64 add_ret)뿐.
