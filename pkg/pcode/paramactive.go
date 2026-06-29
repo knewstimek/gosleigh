@@ -15,10 +15,19 @@
 package pcode
 
 import (
+	"os"
 	"sort"
 
 	"gosleigh/pkg/address"
 )
+
+// guardReturnsLiveEnabled reports whether the faithful Heritage::guardReturns
+// return-value wiring should replace the anchorReturnReg SeqNum heuristic.
+// Gated behind GOSL_GUARD_RETURNS while it is validated against the goldens
+// (H7 step3b); the default path remains anchorReturnReg. C++ has no such switch.
+func guardReturnsLiveEnabled() bool {
+	return os.Getenv("GOSL_GUARD_RETURNS") != ""
+}
 
 // paramEntry mirrors the small subset of Ghidra ParamEntry state needed for ParamTrial ordering.
 // C++ parity: fspec.hh ParamEntry (partial)
@@ -787,6 +796,78 @@ func ApplyActiveParamModel(fd *Funcdata) bool {
 	sl := NewScopeLocal(model)
 	fd.SetScopeLocal(sl)
 	sl.BuildFromVarnodes(filtered, fp)
+	return true
+}
+
+// ApplyGuardReturnsLive is the faithful return-value wiring (H7 step3b): instead
+// of anchorReturnReg's latest-SeqNum heuristic, it installs an active output,
+// runs Heritage::guardReturns to append a fresh return-register Varnode to each
+// RETURN op, then renames so SSA dominance connects that Varnode to the dominating
+// definition at the return site.
+//
+// placeMultiequals is intentionally NOT re-run: the register phis already exist
+// from the first heritage pass and Gosleigh's placeMultiequals is not idempotent
+// (re-running would create duplicate phis). Instead the existing return-register
+// definitions are re-marked ActiveHeritage so the rename pass pushes them onto the
+// reaching-definition stack, and only the fresh free RETURN inputs get renamed.
+//
+// The active output is cleared before returning so downstream passes (consume-bit
+// DeadCode) see the same FuncProto state as the anchorReturnReg path.
+//
+// C++ parity: Funcdata::initActiveOutput + Heritage::guardReturns (on a guarding
+// heritage pass) + the rename that follows. Returns true when wiring ran.
+func ApplyGuardReturnsLive(fd *Funcdata, model *ProtoModel, h *Heritage, graph *BlockGraph) bool {
+	if !guardReturnsLiveEnabled() {
+		return false // anchorReturnReg remains the active wiring (default path)
+	}
+	if fd == nil || model == nil || h == nil || graph == nil {
+		return false
+	}
+	if model.ReturnRegSpaceIndex < 0 || model.ReturnRegSize == 0 {
+		return false
+	}
+	fp := fd.GetFuncProto()
+	if fp == nil {
+		return false
+	}
+	// Resolve the return-register space from the heritage space set.
+	var regSp *address.Space
+	for _, sp := range h.spaces {
+		if sp != nil && int(sp.Index) == model.ReturnRegSpaceIndex {
+			regSp = sp
+			break
+		}
+	}
+	if regSp == nil {
+		return false
+	}
+	retAddr := address.Address{Space: regSp, Offset: model.ReturnRegOffset}
+	retSize := model.ReturnRegSize
+
+	// Install the active output so guardReturns takes the registerTrial/append path.
+	active := NewParamActive(false)
+	fp.SetActiveOutput(active)
+
+	// Append a fresh return-register Varnode to each RETURN op.
+	h.guardReturns(0, retAddr, retSize)
+
+	// Re-mark existing return-register definitions and the function-entry input as
+	// ActiveHeritage; the first heritage pass consumed these flags. Without this the
+	// rename below would find no reaching definition and create a spurious input.
+	for _, vn := range fd.VarnodesByRange(retAddr, retSize) {
+		if vn == nil {
+			continue
+		}
+		if vn.IsWritten() || vn.IsInput() {
+			vn.SetActiveHeritage()
+		}
+	}
+
+	// Rename connects the fresh free RETURN inputs to the dominating definition.
+	h.Rename(graph, retAddr, retSize)
+
+	// Match the anchorReturnReg path's downstream FuncProto state.
+	fp.ClearActiveOutput()
 	return true
 }
 

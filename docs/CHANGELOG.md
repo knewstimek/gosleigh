@@ -5,6 +5,23 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H7 step 3b -- guardReturns live wiring 검증 (GOSL_GUARD_RETURNS 플래그 뒤)
+충실 guardReturns + rename 경로를 anchorReturnReg 대체로 배선하고, 프로덕션 경로(bridge.Decompile)
+전 MSVC 골든에서 byte-identical임을 검증. 플래그 default off라 무회귀.
+- **배선**: `ApplyGuardReturnsLive`(paramactive.go) -- activeoutput 설치 -> `h.guardReturns`로 각
+  RETURN에 fresh return-reg varnode append -> 기존 return-reg def/input을 ActiveHeritage 재마킹 ->
+  `h.Rename`으로 fresh varnode를 dominating def에 연결. placeMultiequals 미재실행(중복 phi 회피).
+  activeoutput은 종료 전 clear(downstream consume-DeadCode를 anchorReturnReg 경로와 동일 상태로).
+- **gate**: `GOSL_GUARD_RETURNS` 시 ApplyCallingConvention이 anchorReturnReg 스킵(funcproto.go),
+  bridge.Decompile이 regHeritage+graph로 ApplyGuardReturnsLive 호출(decompile.go).
+- **검증 결과**: 플래그 ON에서 전 MSVC 골든 PASS = anchorReturnReg와 byte-identical(**gcd void
+  포함**). 즉 충실 메커니즘(guardReturns + dominance rename)이 SeqNum 휴리스틱을 정확히 재현.
+- **step3c 블로커**: anchorReturnReg를 default에서 제거하려면 ~14개 레거시 손조립 테스트
+  파이프라인(loader_test.go, ApplyCallingConvention 직접 호출 + bridge.Decompile 미경유)을
+  bridge.Decompile로 마이그레이션 선행 필요(= H8-debt-2). 플래그 ON 시 이 테스트 중 비-void
+  반환 단언 5개가 void로 렌더(ApplyGuardReturnsLive 미호출 경로). default OFF에선 전 패키지 그린.
+- 결과: default 전 패키지 그린, 플래그 ON에서 프로덕션 골든 byte-identical 검증.
+
 ### 2026-06-29: H7 step 3a -- Heritage::guardReturns 충실 포팅 (dormant foundation)
 anchorReturnReg(SeqNum 휴리스틱)을 대체할 C++ 메커니즘을 dormant로 포팅. 무회귀, 전 패키지 그린.
 - **포팅**: `pkg/pcode/heritage.go`에 `guardReturns`/`guardReturnsOverlapping`/`characterizeReturnOutput`
