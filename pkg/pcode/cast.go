@@ -18,13 +18,14 @@ package pcode
 // needed between two data-types when rendering / inserting casts.
 // C++ parity: cast.hh / cast.cc CastStrategy, CastStrategyC.
 //
-// This is the keystone primitive for ActionSetCasts (currently a no-op stub).
-// Only CastStandard is ported so far; the remaining strategy methods
-// (markExplicitUnsigned, arithmeticOutputStandard, isSubpieceCast, ...) and the
-// ActionSetCasts apply/castInput/castOutput driver remain future work.
+// This is the keystone primitive for ActionSetCasts, which is now live
+// (apply/castInput/castOutput insert CPUI_CAST ops; see action_deadcode.go).
+// CastStandard / IsSubpieceCast / IsSextCast / IsZextCast / arithmeticOutputStandard
+// are ported; markExplicitUnsigned / LongSize and union resolution remain future work.
 
-// sharedCastStrategyC is the process-wide C cast strategy used by render-time
-// cast decisions (printc.go assignCastStr). It is backed by sharedTypeFactory.
+// sharedCastStrategyC is the process-wide C cast strategy used by ActionSetCasts
+// (castInput/castOutput) to decide where to insert CPUI_CAST ops. It is backed by
+// sharedTypeFactory.
 var sharedCastStrategyC = NewCastStrategyC(sharedTypeFactory)
 
 // Integer-promotion codes returned by intPromotionType / localExtensionType.

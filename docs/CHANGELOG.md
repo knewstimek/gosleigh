@@ -5,6 +5,28 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-29: H9 assignCastStr 전면 제거 (for-fold를 ActionSetCasts 뒤로 재배치)
+render-time 캐스트 fallback을 완전히 제거하고 메커니즘 parity 달성. 전 패키지 그린.
+- **재배치**: ActionForLoops를 ActionSetCasts **뒤**로 이동(decompile.go). C++ 순서와
+  일치 -- ActionSetCasts는 분석 루프에서, for-loop fold는 print-time(block.cc
+  BlockWhileDo::finalTransform/finalizePrinting)에서. for-detection은 cast-transparent
+  (findLoopVariable/testIterateForm가 CAST를 call/marker 아니므로 그대로 통과). 이로써
+  for-iterate op이 실제 삽입된 CPUI_CAST를 보유(sum_list `param_3 = (int *)param_3[1]`의
+  cast는 LOAD 출력 캐스트라 castOutput이 공급).
+- **근본 블로커 진단(런타임 op 덤프)**: 재배치 시 SetCasts가 param_3 loop phi(MULTIEQUAL)에
+  castOutput을 걸어 출력을 High 없는 unknown unique로 split -> ActionForLoops가 loop변수
+  phi의 High를 못 찾아(`testIterateForm: high nil`) while+comma로 폴백. C++는
+  `tokenct == outHighType` short-circuit(coreaction.cc:2546)으로 phi cast를 회피(phi
+  outputTypeLocal 토큰 == high 타입). Gosleigh는 InferTypes가 int*를 phi high에 전파하나
+  base 토큰은 TYPE_UNKNOWN이라 short-circuit이 miss. **수정**: castOutput에서 marker
+  (MULTIEQUAL/INDIRECT) skip(action_deadcode.go) -- phi/indirect는 C 표현식이 아니므로
+  출력 캐스트 비대상(C++의 marker no-op과 동등).
+- **제거**: printc.go `assignCastStr` + `effectiveLoadResultType` 완전 삭제(-116줄). 모든
+  출력 캐스트가 ActionSetCasts 삽입 CPUI_CAST에서 나옴. renderForPartOp/op-statement 렌더는
+  renderOpExpr만 호출(이중 캐스트 없음).
+- 결과: 전 MSVC 골든(sum_list/counted_loop/gcd/abs_ifelse/nested_if) + 전 패키지(loader/
+  pcode/sla/bridge) 그린.
+
 ### 2026-06-29: H9 ActionSetCasts 정식 배선 완료 (분석-time CPUI_CAST 라이브)
 `51edf33`+`03ef9d2`: ActionSetCasts를 bridge.Decompile에 배선, 전 패키지 그린.
 배선 블로커였던 PTRADD 미형성을 런타임 프로브로 진단/해결한 연쇄:

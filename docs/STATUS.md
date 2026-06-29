@@ -1,12 +1,14 @@
 # 프로젝트 상태
 
-## 현재 상태 (2026-06-29 세션 종료, master `10fdf39`)
+## 현재 상태 (2026-06-29 세션 종료, master `513903f`+)
 
-**전 패키지 그린** (loader/pcode/sla/bridge). 이번 세션: **H9 ActionSetCasts 정식 배선
-완료** -- 분석-time CPUI_CAST 삽입이 bridge.Decompile에서 라이브. PTRADD 형성 블로커를
-런타임 프로브로 진단/해결(ActionStartTypes 미배선 -> 배선, RulePtrArith 재발화, PrintC
-PTRADD subscript 렌더, read-facing 갭 castStandardRead 보정). 전 MSVC 골든 통과.
-상세는 "다음 작업" + CHANGELOG. 이전 성과:
+**전 패키지 그린** (loader/pcode/sla/bridge). 이번 세션: **H9 assignCastStr 전면 제거
+완료** -- render-time 캐스트 fallback을 모두 걷어내고 메커니즘 parity 달성. ActionForLoops를
+ActionSetCasts **뒤**로 재배치(C++ 순서: 분석-time cast -> print-time for-fold). 재배치
+블로커(SetCasts가 loop phi MULTIEQUAL에 castOutput을 걸어 출력을 High 없는 unique로 split
+-> for-detection 실패)를 런타임 op 덤프로 진단, castOutput에서 marker skip으로 해결.
+printc.go assignCastStr/effectiveLoadResultType 삭제(-116줄). 전 MSVC 골든 통과.
+상세는 CHANGELOG 2026-06-29. 이전 성과:
 
 1. **H8 gcd_x86_32 golden parity 완료** -- TestMSVC_Gcd PASS. gcd가 Ghidra golden과
    완전 일치: `while (iVar1 = param_4, iVar1 != 0) { param_4 = param_3 % iVar1; param_3 = iVar1; }`.
@@ -28,19 +30,13 @@ PTRADD subscript 렌더, read-facing 갭 castStandardRead 보정). 전 MSVC 골�
 
 ### 다음 작업 (우선순위)
 
-1. **[중] H9 잔여 -- assignCastStr 전면 제거**. 현재 hybrid: 정상 op은 ActionSetCasts 실제
-   CAST, NonPrinting for-loop iterate/init op만 render-time `assignCastStr`(printc.go) 잔여
-   fallback. 출력은 이미 전 골든 정확이라 **출력 개선 목적 아님, 메커니즘 parity 목적**.
-   - **막힌 이유 (이번 세션 2접근 실험으로 확정)**: (1) ActionSetCasts를 ForLoops 앞으로
-     옮기면 삽입 CAST가 for-detection(tryMarkForLoop/findLoopVariable/testIterateForm)을
-     교란 -> while+comma. (2) NonPrinting op에 castInput만 수행하면 proper for-loop은 되나
-     sum_list for-iterate 캐스트는 LOAD **출력** 캐스트라 castInput으로 못 잡음(누락).
-     근본: for-iterate 캐스트가 출력 캐스트 -> loop변수=op출력과 충돌.
-   - **선행 필요**: ActionSetCasts를 ForLoops **앞**에 배치 + for-detector를 cast-aware로
-     (findLoopVariable/testIterateForm/SetForLoop이 CAST 체인을 iterate로 인식 + for-header가
-     CAST 포함 렌더). C++ 순서(ActionSetCasts -> 그 다음 printing 단계의 for-fold)와 일치시킴.
-   - 수정 대상: bridge/decompile.go(순서), action_forloops.go(cast-aware), printc.go(assignCastStr 제거).
-   - 성공 기준: 전 MSVC 골든 유지하며 printc.go assignCastStr 제거.
+1. **[완료] H9 잔여 -- assignCastStr 전면 제거** (2026-06-29). ActionForLoops를 ActionSetCasts
+   뒤로 재배치, castOutput marker-skip으로 loop phi split 방지, printc.go assignCastStr/
+   effectiveLoadResultType 삭제. 전 골든 그린. 상세 CHANGELOG.
+   - **잔여 부채(저우선)**: castOutput marker-skip은 C++ `tokenct==outHighType` short-circuit
+     (coreaction.cc:2546)의 등가 대체. 더 충실하려면 InferTypes가 phi 출력 high에 포인터
+     타입을 전파하지 않도록(Ghidra는 unknown 유지) 하는 편이나, broad type-prop 변경이라
+     보류. 현재 marker-skip은 전 골든에서 출력 정확.
 
 2. **[대형] H7 ActionPrototypeTypes 배선** -- **단순 배선 아님(이번 세션 재분류)**.
    ActionPrototypeTypes.Apply는 `fp.IsOutputLocked()`에서만 RETURN 반환 배선(coreaction.go:802).
@@ -105,9 +101,9 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
     actmainloop 트리로 통합. universalAction 내 미완 action들이 완성돼야 가능.
   - 참고: 진단용 `runPipeline`(비골든 변형)은 아직 손조립 + dumpSSA 유지.
 
-- [~] H9: ActionSetCasts -- 타입 캐스트 삽입 (**대형 다중 세션 포팅**, 프리미티브 완료)
-  - 역할: 타입 불일치 지점에 명시적 `CPUI_CAST` op 삽입 (현재는 render-time
-    `assignCastStr` 근사 + `ActionSetCasts` no-op stub).
+- [x] H9: ActionSetCasts -- 타입 캐스트 삽입 **완료 (2026-06-29)**. 분석-time CPUI_CAST
+  삽입이 bridge.Decompile에서 라이브, render-time assignCastStr 완전 제거. 아래는 포팅 이력.
+  - 역할: 타입 불일치 지점에 명시적 `CPUI_CAST` op 삽입.
   - 컴포넌트:
     1. `CastStrategy::castStandard` (C 전략) -- **완료 `f545917` + 배선 `64e8c90`**
        (`pkg/pcode/cast.go` `CastStrategyC.CastStandard` + 단위 테스트). printc
@@ -131,10 +127,11 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
   - C++ 참조: `cast.cc`, `coreaction.cc ActionSetCasts::apply` (2724+), `typeop.cc`
     각 TypeOp::getInputCast.
   - 렌더링: PrintC는 이미 CPUI_CAST 처리(renderCast) -> 삽입만 하면 됨.
-  - 주의: ActionSetCasts가 CAST op을 넣으면 기존 `assignCastStr` 문자열 캐스트와 **이중 캐스트**
-    충돌. driver 배선 시 assignCastStr를 동시에 걷어내야 함.
+  5. **for-fold 재배치 + assignCastStr 제거 -- 완료(2026-06-29)**: ActionForLoops를
+     ActionSetCasts 뒤로 이동(C++ print-time for-fold 순서), castOutput marker-skip으로
+     loop phi split 방지, printc.go assignCastStr/effectiveLoadResultType 삭제. 상세 CHANGELOG.
   - 성공 기준: 기존 캐스트 golden (sum_list `(int *)`, complex_max `(int)`) 유지하며
-    assignCastStr 의존 제거.
+    assignCastStr 의존 제거. **충족(전 골든 그린)**.
 
 ### 기타 미시작 (참고)
 - H9 외: struct/union 타입 복구, switch statement, 6502 NOP/LDA/BNE 등 대부분 opcode

@@ -138,16 +138,13 @@ func (a *ActionSetCasts) Clone(groups ActionGroupList) Action {
 func (a *ActionSetCasts) Apply(data *Funcdata) int {
 	cs := sharedCastStrategyC
 	for _, op := range data.allOpsOrdered() {
-		// Skip NonPrinting ops. C++ skips op->notPrinted(). In Gosleigh this also
-		// covers the for-loop iterate/initialize ops, which ActionForLoops marks
-		// NonPrinting before ActionSetCasts runs (C++ order is the reverse). We must
-		// not run castOutput on them: it splits the op's output (the loop variable)
-		// into a separate unique + CAST, breaking the for-header. And the for-iterate
-		// cast for a LOAD-based iterator (e.g. param_3 = (int *)param_3[1]) is an
-		// OUTPUT cast, so castInput alone cannot supply it. Both confirmed by
-		// experiment; their casts stay with the render-time assignCastStr fallback
-		// (printc.go) until ActionSetCasts can precede ForLoops with a cast-aware
-		// for-loop detector. C++ parity: ActionSetCasts runs before the for-loop fold.
+		// Skip NonPrinting ops. C++ parity: ActionSetCasts::apply skips op->notPrinted()
+		// (coreaction.cc 2729). These are redundant internal COPYs marked by
+		// ActionCopyMarker. ActionForLoops now runs AFTER ActionSetCasts, so the
+		// for-loop iterate/initialize ops are still printing here and DO receive their
+		// inserted CAST (e.g. sum_list: param_3 = (int *)param_3[1] is an output cast on
+		// the LOAD iterator). That CAST is what ActionForLoops then folds into the
+		// for-header, replacing the old render-time assignCastStr fallback.
 		if op.IsDead() || op.HasFlag(PcodeOpNonPrinting) {
 			continue
 		}
@@ -220,6 +217,21 @@ func (a *ActionSetCasts) castInput(op *PcodeOp, slot int, data *Funcdata, cs *Ca
 // op's output expression differs from the output Varnode's type. C++ parity:
 // ActionSetCasts::castOutput (coreaction.cc 2534-2618).
 func (a *ActionSetCasts) castOutput(op *PcodeOp, data *Funcdata, cs *CastStrategyC) int {
+	// Markers (MULTIEQUAL/INDIRECT) are SSA merge / indirect-effect ops, not C
+	// expressions: a C compiler assigns no distinct token type to a phi, so its
+	// output must not be split by a cast. In C++ this falls out of the
+	// tokenct==outHighType short-circuit (coreaction.cc:2546): the phi output's
+	// HighVariable type equals its outputTypeLocal token. Gosleigh's InferTypes
+	// propagates the merged pointer type onto the phi output high while the base
+	// token stays TYPE_UNKNOWN, so the short-circuit would miss and castOutput would
+	// wrongly split the phi output into a High-less unique + CAST -- which then
+	// breaks ActionForLoops (findLoopVariable lands on the phi whose output now has
+	// no HighVariable). The cast belongs on the actual computation feeding the phi
+	// (e.g. sum_list's LOAD iterator), which is cast normally. C++ parity: the
+	// effective no-op for markers in ActionSetCasts::castOutput.
+	if op.IsMarker() {
+		return 0
+	}
 	tokenct := op.GetOpcode().GetOutputToken(op, cs)
 	outvn := op.Output()
 	outHighType := outvn.Type()

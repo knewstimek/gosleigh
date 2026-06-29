@@ -1673,7 +1673,10 @@ func (s *printCState) renderForPartOp(op *PcodeOp) (string, error) {
 		}
 		return lhs + " = " + rhs, nil
 	default:
-		castStr := s.assignCastStr(op)
+		// ActionSetCasts has already inserted any required CPUI_CAST op, including
+		// the for-iterate output cast (e.g. sum_list: the LOAD iterator's output is
+		// cast to int*, and that CAST is the folded iterateOp here). renderOpExpr
+		// renders the cast naturally, so no render-time cast synthesis is needed.
 		rhs, err := s.renderOpExpr(op, cPrecAssign)
 		if err != nil {
 			return "", err
@@ -1682,9 +1685,6 @@ func (s *printCState) renderForPartOp(op *PcodeOp) (string, error) {
 			return rhs, nil
 		}
 		lhs := s.nameOf(op.Output())
-		if castStr != "" {
-			return lhs + " = " + castStr + rhs, nil
-		}
 		return lhs + " = " + rhs, nil
 	}
 }
@@ -2030,8 +2030,8 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 		})
 		return nil
 	default:
-		castStr := s.assignCastStr(op)
-
+		// Any required cast is already a CPUI_CAST op inserted by ActionSetCasts and
+		// rendered by renderOpExpr; no render-time cast synthesis is needed.
 		expr, err := s.renderOpExpr(op, cPrecAssign)
 		if err != nil {
 			return err
@@ -2048,116 +2048,12 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 			s.lang.Space()
 			s.lang.Token("=")
 			s.lang.Space()
-			if castStr != "" {
-				s.lang.Token(castStr)
-			}
 			s.lang.Token(expr)
 		})
 		return nil
 	}
 }
 
-// effectiveLoadResultType traces vn's definition to find if it comes from a LOAD
-// whose address has a pointer type. If so, returns the pointee type (the "natural"
-// result type of the LOAD dereference), not the potentially overridden committed type.
-// Returns nil if vn is not traceable to a LOAD with known pointer address.
-func (s *printCState) effectiveLoadResultType(vn *Varnode) Datatype {
-	if vn == nil {
-		return nil
-	}
-	def := vn.Def()
-	if def == nil {
-		return nil
-	}
-	switch def.Code() {
-	case CPUI_LOAD:
-		addr := def.Input(def.NumInput() - 1)
-		if addr == nil {
-			return nil
-		}
-		if ptrType, ok := addr.TypeReadFacing(nil).(*Pointer); ok {
-			return ptrType.Pointee()
-		}
-	case CPUI_COPY:
-		if def.NumInput() > 0 {
-			return s.effectiveLoadResultType(def.Input(0))
-		}
-	}
-	return nil
-}
-
-// assignCastStr returns the cast string needed when an op's output has a pointer
-// type but the rendered expression is semantically non-pointer (e.g. LOAD or COPY
-// of a LOAD result). Returns "" if no cast is needed.
-//
-// Covers:
-//   - COPY where input comes from a LOAD through a pointer address.
-//   - LOAD directly used as an assignment op (e.g. when LOAD is the for-iterate op
-//     and its output carries a pointer type via HighVariable propagation).
-//
-// C++ parity: PrintC emits explicit casts when the RHS metatype is less specific
-// than the LHS pointer type (typeop.cc / printc.cc cast emission).
-// assignCastStr is now a residual fallback: ActionSetCasts inserts real CPUI_CAST
-// ops for all normal (printed) ops, so for those this returns "" (the input is
-// already a CAST and CastStandard reports no further cast). It still supplies the
-// pointer cast for the for-loop iterate/initialize ops, which are NonPrinting at
-// ActionSetCasts time and therefore not given an inserted cast (see
-// ActionSetCasts.Apply). Once ActionSetCasts can run before ActionForLoops this
-// fallback can be removed entirely.
-func (s *printCState) assignCastStr(op *PcodeOp) string {
-	if op == nil {
-		return ""
-	}
-	out := op.Output()
-	if out == nil {
-		return ""
-	}
-	outPtr, ok := out.TypeReadFacing(nil).(*Pointer)
-	if !ok {
-		return "" // output is not a pointer -- no cast needed
-	}
-
-	switch op.Code() {
-	case CPUI_COPY:
-		if op.NumInput() == 0 {
-			return ""
-		}
-		srcType := s.effectiveLoadResultType(op.Input(0))
-		if srcType == nil {
-			return ""
-		}
-		// C++ parity: a cast is needed iff CastStrategyC::castStandard says so
-		// (cast.cc:300). Replaces the ad-hoc "src is a pointer -> no cast" check.
-		if sharedCastStrategyC.CastStandard(outPtr, srcType, false, true) == nil {
-			return ""
-		}
-		return "(" + CTypeString(outPtr) + ")"
-
-	case CPUI_LOAD:
-		// LOAD's natural result is the pointee (non-pointer when addr is int*).
-		// If the output varnode carries a pointer type (via HighVariable propagation
-		// from the MULTIEQUAL phi), an explicit cast is needed.
-		// Verify that the LOAD address is indeed a pointer to confirm we're in the
-		// linked-list traversal pattern (LOAD[ptr_addr] -> next_ptr).
-		if op.NumInput() >= 2 {
-			addr := op.Input(op.NumInput() - 1)
-			if addr != nil {
-				if addrPtr, addrIsPtr := addr.TypeReadFacing(nil).(*Pointer); addrIsPtr {
-					// Natural LOAD result is addrPtr.Pointee(); a cast is needed iff
-					// castStandard says the output pointer type differs from it.
-					// C++ parity: CastStrategyC::castStandard (cast.cc:300).
-					if sharedCastStrategyC.CastStandard(outPtr, addrPtr.Pointee(), false, true) != nil {
-						return "(" + CTypeString(outPtr) + ")"
-					}
-				}
-			}
-		}
-		return ""
-
-	default:
-		return ""
-	}
-}
 
 func (s *printCState) renderReturnValue(vn *Varnode) (string, error) {
 	if vn == nil {
