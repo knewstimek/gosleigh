@@ -7,16 +7,18 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ### 2026-06-30: H8-debt-2 재정의 + 첫 fill -- universal 트리는 hollow, Funcdata self-contain 시작
 미션 #1 게이트(universalAction 단일화)를 측정으로 재정의하고 첫 action 본체를 채움. 무회귀.
-- **측정 발견**: `BuildUniversalAction`(250 action/rule)은 구조적 스켈레톤은 충실하나 본체가 hollow.
-  `ActionHeritage.Apply -> Funcdata.OpHeritage()`가 빈 스텁이었음(`_ = fd`); 진짜 heritage는 decompile.go가
-  외부 graph로 직접 호출. 즉 H8-debt-2는 "패스 순서 reconcile"가 아니라 "hollow 본체 채우기 + Funcdata를
-  graph/spaces 보유하는 self-contained로 만들기".
+- **측정 발견**: `BuildUniversalAction`(250 action/rule)은 구조 스켈레톤 + **대부분 decompile.go와 동일한
+  real action impl 공유**(InferTypes/BlockStructure/StackPtrFlow 등). hollow은 한정적: Funcdata가
+  graph/spaces 미보유(self-contained 불가) + `OpHeritage` 등 6개 stub delegate. 즉 H8-debt-2는 "패스 순서
+  reconcile"가 아니라 "Funcdata self-contain + 소수 stub 채우기 + full-pool 수렴 문제 해결".
 - **추가**: Funcdata에 `SetAnalysisContext(graph, heritageSpaces)`/`Graph()`/`HeritageSpaces()` +
   bridge.Build이 채움(additive). `OpHeritage`를 fd.graph/spaces 기반 register heritage로 실화.
   단위테스트 `TestUniversalActionHeritageBuildsSSA`(ActionHeritage 후 MULTIEQUAL>0)로 검증.
-- **부수 발견**: `ActionBase.Perform` repeat-apply 루프에 max-iteration cap 부재 -> 전체 트리 실행이
-  non-convergence로 hang(gcd). 향후 fill 시 cap 추가 필요. (진단 테스트는 hang하므로 미커밋, 주석으로 기록.)
-- 프로덕션(decompile.go)은 외부 NewHeritage 유지 -> 무영향, 전 패키지 그린.
+- **수렴 블로커 root-cause(CONV_PROBE 계측)**: 전체 트리가 gcd에서 hang. 근본은 `ActionVarnodeProps`가
+  `NZMask & Consumed == 0` varnode를 const 0으로 교체하는데, 트리엔 CalcNZMask가 stub(~0) + consume 미계산
+  -> 모든 varnode가 Consumed==0으로 보여 매 iteration마다 live varnode를 0으로 교체 -> 무한 비수렴.
+  **즉 트리 수렴이 H7 step4(실제 CalcNZMask)에 직결**. repeat-apply max-iter cap 부재는 부차적.
+- 프로덕션(decompile.go)은 외부 NewHeritage 유지 + ActionVarnodeProps 미실행 -> 무영향, 전 패키지 그린.
 
 ### 2026-06-30: H7 step3 완결 -- anchorReturnReg 물리 제거 (guardReturns가 유일 return 경로)
 guardReturns가 기본값으로 검증된 뒤, 레거시 anchorReturnReg 경로를 완전 삭제(-161줄). 전 패키지 그린.
