@@ -3040,7 +3040,41 @@ func (s *printCState) tryRenderSubscript(addrVn *Varnode) (ExprFragment, bool, e
 		return ExprFragment{}, false, nil
 	}
 	def := addrVn.Def()
-	if def == nil || def.Code() != CPUI_INT_ADD || def.NumInput() < 2 {
+	// See through an implied COPY: RulePtrArith's buildTree leaves the LOAD address
+	// as COPY(PTRADD(...)) when there is no extra additive term. Follow the COPY to
+	// reach the PTRADD so the subscript renders.
+	for def != nil && def.Code() == CPUI_COPY && def.NumInput() == 1 && def.Input(0) != nil {
+		addrVn = def.Input(0)
+		def = addrVn.Def()
+	}
+	if def == nil {
+		return ExprFragment{}, false, nil
+	}
+	// PTRADD(base, index, scale) is the address of element `index`; a LOAD of it
+	// renders as base[index]. The index input is already in element units (the
+	// scale is divided out by RulePtrArith), so it maps straight to the subscript.
+	if def.Code() == CPUI_PTRADD && def.NumInput() >= 2 {
+		baseVn := def.Input(0)
+		idxVn := def.Input(1)
+		if _, ok := baseVn.TypeReadFacing(nil).(*Pointer); !ok {
+			return ExprFragment{}, false, nil
+		}
+		baseExpr, err := s.renderVarnodeExpr(baseVn)
+		if err != nil {
+			return ExprFragment{}, false, err
+		}
+		if idxVn.IsConstant() {
+			frag := s.lang.PostfixExpr(baseExpr, fmt.Sprintf("[%d]", int64(idxVn.Offset())))
+			return frag, true, nil
+		}
+		idxExpr, err := s.renderVarnodeExpr(idxVn)
+		if err != nil {
+			return ExprFragment{}, false, err
+		}
+		frag := s.lang.PostfixExpr(baseExpr, "["+s.lang.ExprString(idxExpr, cPrecLowest, ExprPosNone, ExprAssocNone)+"]")
+		return frag, true, nil
+	}
+	if def.Code() != CPUI_INT_ADD || def.NumInput() < 2 {
 		return ExprFragment{}, false, nil
 	}
 	// Find base (pointer) and constant offset in the INT_ADD inputs.
