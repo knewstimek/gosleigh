@@ -163,10 +163,15 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
     `NZMask & Consumed == 0`인 varnode를 const 0으로 교체하는데, 트리 경로엔 (1) `CalcNZMask`가 stub(~0),
     (2) consume 분석 미계산 -> 모든 varnode가 Consumed==0으로 보여 매 iteration마다 live varnode를 0으로
     교체 -> 수렴 불가 + SSA 손상. decompile.go는 ActionVarnodeProps를 안 돌려서 무사했음.
-  - **결론: 트리 수렴 = H7 step4(실제 CalcNZMask) + consume 분석 트리 배선에 의존**. 즉 H8-debt-2와
-    H7 step4가 직결. 실제 CalcNZMask 없이는 ActionVarnodeProps/Nonzeromask 의존 액션들이 misfire.
-    repeat-apply max-iteration cap도 없음(부차적). => 다음: 실제 CalcNZMask 포팅(많은 rule이 nzm 읽어
-    공격적 변경=회귀 위험, 작은 단위 필수) -> 트리 재실행으로 수렴 확인.
+  - **실제 CalcNZMask 포팅 완료(HEAD, validated)** -- `Funcdata.CalcNZMask`(DFS post-order +
+    MULTIEQUAL worklist) + `PcodeOp.getNZMaskLocal`(op.cc:548 충실, size>8은 보수적 fullmask). 단위테스트
+    `TestCalcNZMaskPropagation`(COPY/ZEXT/AND/LEFT 마스크 정확). **production-safe**: decompile.go가
+    CalcNZMask/ActionNonzeroMask를 호출 안 함 -> 골든 무영향(전 패키지 그린).
+  - **그러나 트리는 여전히 hang(실측)**: 실제 CalcNZMask로도 universal 트리가 gcd에서 수렴 안 함
+    (scratch 30s timeout). 즉 CalcNZMask는 **필요하지만 단독 불충분** -- Consumed 기본값이 `~0`이라
+    초기 NZMask&Consumed!=0(VarnodeProps skip)이고, 비수렴은 후기 iteration의 VarnodeProps/
+    conditionalconst/multicse/oppool1 oscillation으로 보임(근본 미확정). 다음: 이 oscillation을 per-iteration
+    count diff로 정밀 isolate(어느 action이 매번 같은 변경을 무한 반복하는지) + repeat-apply iter cap.
   - **첫 fill 완료(HEAD)**: Funcdata에 graph/heritageSpaces 주입(`SetAnalysisContext`, bridge.Build이
     채움, additive 무회귀) + `OpHeritage` 실화(fd.graph/spaces로 register heritage) -> ActionHeritage가
     실제 SSA 빌드. 단위테스트 `TestUniversalActionHeritageBuildsSSA`(pre=phi 0, post>0). 프로덕션
