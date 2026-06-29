@@ -5,6 +5,21 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H7 step3 완결 -- anchorReturnReg 물리 제거 (guardReturns가 유일 return 경로)
+guardReturns가 기본값으로 검증된 뒤, 레거시 anchorReturnReg 경로를 완전 삭제(-161줄). 전 패키지 그린.
+- **삭제**: `anchorReturnReg`(funcproto.go, SeqNum 휴리스틱), `ApplyActiveReturnModel`(paramactive.go,
+  Go-local return-anchoring helper), `guardReturnsLiveEnabled`(게이트) + `GOSL_LEGACY_ANCHOR_RETURN` 폐기.
+- **ApplyCallingConvention**: 이제 stripReturnIndirectRef만 수행(epilogue 체인 절단). return 값 wiring은
+  ApplyGuardReturnsLive(bridge.Decompile + 레거시 테스트 사이트)가 무조건 전담.
+- **ActionActiveReturn.Apply**: no-op 스텁화. 이 액션의 충실 C++ 본체는 CALL-site output trial 복구
+  (checkOutputTrialUse/deriveOutputMap/buildOutputFromTrials)인데 Gosleigh의 기존 본체는 함수 자기
+  return을 anchorReturnReg로 처리하던 비충실 Go-local 헬퍼였음. 함수 return은 guardReturns가 전담하므로
+  헬퍼 제거. actfullloop엔 구조 parity 위해 액션은 유지(call-output 본체는 unported로 명시).
+- **fallback 폐기 근거**: guardReturns는 blast radius가 작고(RETURN input만) 전 corpus byte-identical
+  검증됨 -> GOSL_DESCENDANT_DC(전 dead-code 영향)와 달리 escape hatch 불필요.
+- printc/action_deadcode/funcproto의 anchorReturnReg 참조 주석을 "return-value wiring"으로 정정.
+- 결과: 전 골든 + 전 패키지 그린. anchorReturnReg 휴리스틱 완전 소멸.
+
 ### 2026-06-30: H8-debt-1 완료 -- TrimJoinblockMultiequals 제거, 충실 mergeOp trimOpOutput으로 대체
 swapped-loop snapshot(iVar1)을 Gosleigh-고안 forward-snip 워크어라운드 대신 실제 C++ mergeOp
 trimOpOutput 메커니즘으로 생성. 전 골든 + 전 패키지 그린(guardReturns 양쪽 상태).

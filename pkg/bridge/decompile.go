@@ -80,9 +80,9 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 		cdecl.WithReturnReg(regSpaceIdx, 0, 4)
 	}
 	pcode.ApplyCallingConvention(fd, cdecl)
-	// H7 step3c: faithful Heritage::guardReturns wiring of the return value (the
-	// default), replacing the anchorReturnReg SeqNum heuristic. ApplyCallingConvention
-	// skips anchorReturnReg unless GOSL_LEGACY_ANCHOR_RETURN restores it.
+	// H7 step3: wire the return value via the faithful Heritage::guardReturns +
+	// dominance rename (ApplyGuardReturnsLive), which appends the return register to
+	// each RETURN op so consume-bit DeadCode preserves the return computation.
 	pcode.ApplyGuardReturnsLive(fd, cdecl, result.HeritageSpaces, result.Graph)
 
 	pcode.NewMerge(fd).MergeMarker()

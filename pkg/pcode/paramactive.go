@@ -15,21 +15,10 @@
 package pcode
 
 import (
-	"os"
 	"sort"
 
 	"gosleigh/pkg/address"
 )
-
-// guardReturnsLiveEnabled reports whether the faithful Heritage::guardReturns
-// return-value wiring is active. As of H7 step3c it is the DEFAULT: guardReturns
-// + dominance rename replaces the anchorReturnReg SeqNum heuristic, validated
-// byte-identical across the full test corpus. Setting GOSL_LEGACY_ANCHOR_RETURN
-// restores the legacy anchorReturnReg path as an escape hatch. C++ has no such
-// switch (it always uses the guarding-heritage + ReturnRecovery mechanism).
-func guardReturnsLiveEnabled() bool {
-	return os.Getenv("GOSL_LEGACY_ANCHOR_RETURN") == ""
-}
 
 // paramEntry mirrors the small subset of Ghidra ParamEntry state needed for ParamTrial ordering.
 // C++ parity: fspec.hh ParamEntry (partial)
@@ -801,11 +790,11 @@ func ApplyActiveParamModel(fd *Funcdata) bool {
 	return true
 }
 
-// ApplyGuardReturnsLive is the faithful return-value wiring (H7 step3b): instead
-// of anchorReturnReg's latest-SeqNum heuristic, it installs an active output,
-// runs Heritage::guardReturns to append a fresh return-register Varnode to each
-// RETURN op, then renames so SSA dominance connects that Varnode to the dominating
-// definition at the return site.
+// ApplyGuardReturnsLive is the faithful return-value wiring (H7 step3): it installs
+// an active output, runs Heritage::guardReturns to append a fresh return-register
+// Varnode to each RETURN op, then renames so SSA dominance connects that Varnode to
+// the dominating definition at the return site. This is the production return-value
+// recovery; it superseded the former anchorReturnReg latest-SeqNum heuristic.
 //
 // placeMultiequals is intentionally NOT re-run: the register phis already exist
 // from the first heritage pass and Gosleigh's placeMultiequals is not idempotent
@@ -814,7 +803,7 @@ func ApplyActiveParamModel(fd *Funcdata) bool {
 // reaching-definition stack, and only the fresh free RETURN inputs get renamed.
 //
 // The active output is cleared before returning so downstream passes (consume-bit
-// DeadCode) see the same FuncProto state as the anchorReturnReg path.
+// DeadCode) see a clean FuncProto state (no lingering active output).
 //
 // C++ parity: Funcdata::initActiveOutput + Heritage::guardReturns (on a guarding
 // heritage pass) + the rename that follows. Returns true when wiring ran.
@@ -823,9 +812,6 @@ func ApplyActiveParamModel(fd *Funcdata) bool {
 // built internally for guardReturns/Rename so callers need not retain the original
 // heritage object. graph is the (already RPO+idom-resolved) block graph.
 func ApplyGuardReturnsLive(fd *Funcdata, model *ProtoModel, spaces []*address.Space, graph *BlockGraph) bool {
-	if !guardReturnsLiveEnabled() {
-		return false // GOSL_LEGACY_ANCHOR_RETURN: anchorReturnReg is the active wiring
-	}
 	if fd == nil || model == nil || graph == nil {
 		return false
 	}
@@ -878,61 +864,8 @@ func ApplyGuardReturnsLive(fd *Funcdata, model *ProtoModel, spaces []*address.Sp
 	// Rename connects the fresh free RETURN inputs to the dominating definition.
 	h.Rename(graph, retAddr, retSize)
 
-	// Match the anchorReturnReg path's downstream FuncProto state.
+	// Clear the active output so downstream passes see a clean FuncProto state.
 	fp.ClearActiveOutput()
-	return true
-}
-
-// ApplyActiveReturnModel wires the active return register and prunes dead return uses.
-// C++ parity: ActionActiveReturn::apply (Go-local helper)
-func ApplyActiveReturnModel(fd *Funcdata) bool {
-	if fd == nil {
-		return false
-	}
-	fp := fd.GetFuncProto()
-	if fp == nil || fp.Model() == nil {
-		return false
-	}
-	model := fp.Model()
-	if model.ReturnRegSpaceIndex < 0 || model.ReturnRegSize == 0 {
-		return false
-	}
-
-	active := NewParamActive(false)
-	foundActive := false
-	for _, vn := range fd.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		if int(vn.Space().Index) != model.ReturnRegSpaceIndex || vn.Offset() != model.ReturnRegOffset || vn.Size() != model.ReturnRegSize {
-			continue
-		}
-		active.RegisterTrial(vn.Addr(), vn.Size())
-		cur := active.Trial(active.NumTrials() - 1)
-		if vn.IsWritten() {
-			for _, op := range fd.GetPcodeOpBank().AllOps() {
-				if op == nil || op.IsDead() || op.Code() != CPUI_RETURN {
-					continue
-				}
-				if ancestorOpUseReturn(vn, op, 1, 5, make(map[*PcodeOp]bool)) {
-					cur.MarkUsed()
-					cur.MarkActive()
-					foundActive = true
-					break
-				}
-			}
-		}
-	}
-
-	if !foundActive {
-		fp.SetOutputLock(false)
-		applyReturnRecovery(fd)
-		return false
-	}
-
-	fp.SetOutputLock(true)
-	anchorReturnReg(fd, model)
-	applyReturnRecovery(fd)
 	return true
 }
 

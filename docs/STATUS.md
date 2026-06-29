@@ -41,15 +41,15 @@
      타입을 전파하지 않도록(Ghidra는 unknown 유지) 하는 편이나, broad type-prop 변경이라
      보류. 현재 marker-skip은 전 골든에서 출력 정확.
 
-2. **[거의 완료] H7 -- step1+2 LIVE, step3a/3b/3c 완료(guardReturns가 기본 return 경로), tail만 남음**.
+2. **[완료] H7 -- guardReturns가 유일한 return 경로, anchorReturnReg 완전 제거**.
    step1+2: consume-bit DeadCode. step3a(`34e5d6b`): guardReturns 충실 포팅(dormant, 단위테스트 4종).
    step3b(`dd1ae88`): `ApplyGuardReturnsLive`(activeoutput 설치 -> guardReturns로 RETURN에 fresh varnode
-   append -> def 재마킹 -> Rename으로 dominating def 연결, placeMultiequals 미재실행=중복 phi 회피) 플래그
-   검증. **step3c(2026-06-30): guardReturns를 프로덕션 기본값으로 전환 완료** -- ApplyGuardReturnsLive를
-   self-contained화 + 14개 레거시 테스트 사이트에 배선, 전 corpus byte-identical 확인 후 `guardReturnsLiveEnabled()`
-   invert. 이제 guardReturns 기본, anchorReturnReg는 `GOSL_LEGACY_ANCHOR_RETURN` opt-out. 양쪽 전 패키지 그린.
-   **남은 tail(저위험)**: anchorReturnReg 함수 + ApplyActiveReturnModel(ActionActiveReturn 본체, 골든
-   미배선) 정리 + printc.go anchorReturnReg 주석 11개(로직은 input[1] mechanism-agnostic) 갱신. 기능 영향 없음.
+   append -> def 재마킹 -> Rename으로 dominating def 연결, placeMultiequals 미재실행=중복 phi 회피).
+   step3c(`f61120f`): 14개 레거시 테스트 사이트 배선 + 전 corpus byte-identical 확인 후 기본값 전환.
+   **step3 완료(2026-06-30): anchorReturnReg/ApplyActiveReturnModel/guardReturnsLiveEnabled 물리 제거**
+   (-161줄). ApplyCallingConvention은 stripReturnIndirectRef만, return 값은 ApplyGuardReturnsLive 전담.
+   ActionActiveReturn.Apply는 no-op 스텁(미배선, C++ call-output 본체 미포팅 명시). printc 주석 정리.
+   GOSL_LEGACY_ANCHOR_RETURN fallback 폐기(blast radius 작고 전 corpus 검증). 전 패키지 그린.
 
 3. **[대형, 대안] H8-debt-2 reconcile** -- bridge.Decompile 손정렬 subset을 프로덕션
    `BuildUniversalAction`(universalAction 충실 포팅)과 통합. consume-DeadCode가 LIVE가 되며
@@ -73,10 +73,13 @@ golden diff 맞추기 목표를 폐기. 대신: **C++ actmainloop 순서대로 �
 
 **NOTE**: 아래 항목들은 golden match가 아니라 C++ 알고리즘 충실 구현이 성공 기준. 각 항목 완료 후 `go test ./...` 기존 테스트 통과 여부로 regression 확인.
 
-- [ ] H7: ActionPrototypeTypes 정식 배선 -- 함수 반환형/인자형 결정
+- [x] H7: return-value 복구 -- **완료 (2026-06-30, step3 전체)**. anchorReturnReg 휴리스틱을 충실한
+  Heritage::guardReturns + dominance rename(ApplyGuardReturnsLive)으로 대체하고 anchorReturnReg를
+  물리 제거. 아래는 진단/포팅 이력(참고). (잔여 참고: ActionPrototypeTypes 정식 배선 + ActionActiveReturn
+  call-output 본체는 미포팅 -- 현재 guardReturns로 return 값 복구는 충실, 전 골든 정확.)
   - 역할: 함수 프로토타입(반환형, 인자 타입)을 Heritage 전에 확정. `ActionPrototypeTypes`는
     이미 구현됨(coreaction.go:778, stub 아님)이나 골든 파이프라인(`bridge.Decompile`)이 이를
-    호출하지 않고 `anchorReturnReg` 휴리스틱(paramactive.go)을 씀. gcd는 이미 `void`로 통과.
+    호출하지 않음(과거: `anchorReturnReg` 휴리스틱; 현재: ApplyGuardReturnsLive). gcd는 `void`로 통과.
   - **2026-06-29 진단 (실험 측정)**: anchorReturnReg를 끄면(GOSL_NO_ANCHOR 실험) 전 non-void
     골든이 void로 붕괴 -- DeadCode가 return-reg(EAX) 쓰기를 prune해 계산 본체까지 소멸
     (abs_val -> `if (param_3 < 0) {}` 빈 몸체). 즉 anchorReturnReg의 본질은 **return-reg 쓰기를

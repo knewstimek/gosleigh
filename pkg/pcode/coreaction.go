@@ -1115,11 +1115,17 @@ func (a *ActionActiveReturn) Clone(groups ActionGroupList) Action {
 }
 
 // Apply determines the active return value from the current SSA graph.
-// C++ parity: coreaction.cc ActionActiveReturn::apply
+//
+// Unimplemented (no-op stub): the faithful C++ ActionActiveReturn::apply recovers
+// CALL-site output trials (checkOutputTrialUse/deriveOutputMap/buildOutputFromTrials)
+// for the call-output ParamActive objects. The current function's own return value
+// is instead recovered by ApplyGuardReturnsLive (Heritage::guardReturns + dominance
+// rename) wired in the decompile driver, so the former Go-local return-anchoring
+// helper (ApplyActiveReturnModel + anchorReturnReg) was removed in H7 step3.
+// This action is present in actfullloop for universalAction structure parity but
+// its call-output body is not yet ported.
+// C++ parity: coreaction.cc ActionActiveReturn::apply (call-output recovery -- unported).
 func (a *ActionActiveReturn) Apply(data *Funcdata) int {
-	if ApplyActiveReturnModel(data) {
-		a.count++
-	}
 	return 0
 }
 
@@ -1996,8 +2002,6 @@ func (a *ActionLaneDivide) Apply(data *Funcdata) int {
 	data.ClearLanedAccessMap()
 	return 0
 }
-
-
 
 // ActionLikelyTrash zeroes out reads of register locations that the compiler
 // wrote only as a side-effect (e.g. x86 "push ecx" to reserve stack).

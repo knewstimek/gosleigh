@@ -896,8 +896,7 @@ func returnValue(op *PcodeOp) *Varnode {
 	// input[1] is the actual C return value wired by the return-value wiring.
 	//
 	// "return-value wiring" is ApplyGuardReturnsLive (Heritage::guardReturns +
-	// dominance rename, the default) or, under GOSL_LEGACY_ANCHOR_RETURN, the legacy
-	// anchorReturnReg SeqNum heuristic. Both append the return register as input[1].
+	// dominance rename), which appends the return register to each RETURN as input[1].
 	//
 	// For raw p-code without SLA pre-processing (unit tests, etc.) RETURN may have
 	// only input[0] which directly carries the C return value. In that case use input[0].
