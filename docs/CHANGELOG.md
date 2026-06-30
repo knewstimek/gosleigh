@@ -5,6 +5,33 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-2 -- 트리 default ProtoModel arch-aware 화 (cspec 구동), aarch64 register-param 복구 = 멀티아치 9/10
+트리가 쓰는 default ProtoModel을 x86-32 하드코딩에서 cspec 구동 arch-aware로 교체. register-param 아키텍처
+(x86-64 SysV, AArch64 AAPCS64)의 (1) 레지스터 파라미터 복구, (2) signed-long 반환 타입, (3) 반환값 복구가 트리
+파이프라인에서 동작. **aarch64_add_ret = void 붕괴 -> `long entry(long param_1,long param_2)` MATCH**. 멀티아치
+8/10 -> 9/10. x86-32 8/8 무회귀, 전 패키지 그린.
+- **근본(전 세션 코드 추적 검증됨)**: `bridge.go buildDefaultModel`이 `NewProtoModelFromCspec(cspec, nil, nil)`
+  (regLookup=nil -> RegParamOffsets 미설정) + `WithReturnReg(sp.Index, 0, 4)`(x86 EAX 하드코딩)이라 x64/aarch64에서
+  scopelocal.go:110 register-param 게이트 미발동 + 반환 레지스터 오설정. 추가로 `runTreeCase`가 CspecPath 미전달이라
+  CspecData=nil(ABI 정보 전무).
+- **수정 1 -- buildDefaultModel arch-aware**(bridge.go): regLookup(`xr.RegisterByName`)을 NewProtoModelFromCspec에
+  전달 -> cspec IntegerRegParams()로 RegParamOffsets 채움. 반환 레지스터를 cspec default-proto `<output>` 첫 정수
+  register pentry(EAX/RAX/x0)에서 유도 -> 자연 폭(EAX 4/RAX 8/x0 8)으로 WithReturnReg. cspec nil이면 기존 EAX(0,4)
+  스캔 fallback(gcd 트리 가드 등 cspec-less 경로 byte-identical 유지).
+- **수정 2 -- cspec storage 속성 파싱**(cspec.go): AArch64 cspec은 `metatype` 대신 `storage="float"`/`"hiddenret"`
+  사용. CspecPentry에 Storage 추가 + `isIntegerRegPentry` 헬퍼(register && !addr && metatype!=float &&
+  storage!=float/hiddenret)로 IntegerRegParams/신규 IntegerReturnReg 공통화. x86-64 metatype 경로 무영향.
+- **수정 3 -- runTreeCase cspec 전달**(tree_fullmap_diag_test.go): treeMapCase에 cspecRel 추가, BuildConfig.CspecPath
+  배선. x86-32=x86gcc.cspec(no reg param, EAX), x64=x86-64-gcc.cspec(RDI/RSI.., RAX), aarch64=AARCH64.cspec(x0/x1.., x0).
+  AARCH64.cspec를 Ghidra 12.0.4에서 testdata/sla로 복사.
+- **검증**: RegisterByName 덤프로 cspec 소문자 이름 해석 확인(x0=0x4000/8, RDI=0x38/8, RAX=0x0/8; 대문자 X0는 미해석=케이스민감).
+- **x64 잔여(별도 경로)**: x64_add_ret은 register 복구 + long 반환은 됐으나 processEntry 모드라 golden은
+  `entry(void)` + live-on-entry `in_RDI`/`in_RSI` 형태를 원함. 트리는 param_3/param_4로 복구. 필요한 것:
+  (a) entry-point void 프로토타입(register-param 복구 억제), (b) `in_<reg>` 입력 레지스터 네이밍(printc 미구현 --
+  `isSpecialInputRegister`는 pc/sp/lr만 처리). aarch64(non-processEntry)는 영향 없음.
+- C++ 참조: Architecture::defaultfp/PrototypeModel cspec 구성, ProtoModel output ParamList(반환 슬롯),
+  ScopeLocal::buildFromVarnodes(scopelocal.go register-param 게이트).
+
 ### 2026-06-30: H8-debt-2 -- RuleRangeMeld 충실 포팅 (CircleRange subset), x86-32 8/8 byte-identical
 classify_sign 잔여(BOOL_OR comparison-merge 미구현)를 닫아 트리 x86-32 전 골든(8/8) byte-identical 달성.
 멀티아치 전체 7/10 -> 8/10. 전 패키지 그린, production `TestMSVC*` 무회귀.

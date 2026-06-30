@@ -27,9 +27,25 @@ type CspecPentry struct {
 	MaxSize  int    `xml:"maxsize,attr"`
 	Align    int    `xml:"align,attr"`
 	Metatype string `xml:"metatype,attr"`
+	// Storage carries the AArch64-style class attribute ("float", "hiddenret").
+	// Older x86 cspecs use Metatype instead; both are checked when classifying a
+	// pentry as an integer register slot. C++ parity: ParamEntry type class.
+	Storage string `xml:"storage,attr"`
 	// Addr sub-element: space + offset, or register name
 	Addr     *CspecAddr     `xml:"addr"`
 	Register *CspecRegister `xml:"register"`
+}
+
+// isIntegerRegPentry reports whether a pentry assigns an integer/pointer value to
+// a single register (not a stack addr, not a float slot, not a hidden-return
+// pointer slot). These are exactly the pentries that define register-passed
+// parameters and the integer return slot, across x86-64 SysV (metatype="float"
+// excluded) and AArch64 (storage="float"/"hiddenret" excluded).
+// C++ parity: ParamEntry float/hiddenret filtering in ProtoModel::assignMap.
+func isIntegerRegPentry(pe CspecPentry) bool {
+	return pe.Register != nil && pe.Addr == nil &&
+		pe.Metatype != "float" &&
+		pe.Storage != "float" && pe.Storage != "hiddenret"
 }
 
 // CspecAddr is the <addr> sub-element of <pentry>.
@@ -283,10 +299,32 @@ func (cs *CspecData) IntegerRegParams() []string {
 	}
 	var regs []string
 	for _, pe := range cs.allInputPentries() {
-		// Only register pentries without float metatype and without an addr element.
-		if pe.Register != nil && pe.Addr == nil && pe.Metatype != "float" {
+		if isIntegerRegPentry(pe) {
 			regs = append(regs, pe.Register.Name)
 		}
 	}
 	return regs
+}
+
+// IntegerReturnReg returns the name of the integer/pointer return register from
+// the default prototype's <output> block: the first register pentry that is not
+// a float slot or hidden-return pointer slot. Empty when the convention returns
+// via stack/join or declares no register output.
+//
+// Examples:
+//   - x86-32 cdecl:  "EAX"
+//   - x86-64 SysV:   "RAX" (after the float XMM0/XMM1 output pentries)
+//   - AArch64:       "x0"  (after the float q0..q3 output pentries)
+//
+// C++ parity: ProtoModel output ParamList -- first integer register slot.
+func (cs *CspecData) IntegerReturnReg() string {
+	if cs == nil || cs.DefaultProto == nil {
+		return ""
+	}
+	for _, pe := range cs.DefaultProto.Output.Pentries {
+		if isIntegerRegPentry(pe) {
+			return pe.Register.Name
+		}
+	}
+	return ""
 }
