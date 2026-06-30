@@ -296,3 +296,70 @@ func needsExprParens(child ExprPrecedence, parent ExprPrecedence, pos ExprPositi
 		return pos != ExprPosNone
 	}
 }
+
+// mostNaturalBase returns 16 (hex) or 10 (decimal) as the more natural radix for
+// displaying val, counting runs of 0/9 decimal digits vs runs of 0/f hex digits.
+// C++ parity: PrintLanguage::mostNaturalBase (printlanguage.cc:735).
+func mostNaturalBase(val uint64) int {
+	countdec := 0 // Count trailing run of 0's or 9's (decimal)
+	tmp := val
+	if tmp == 0 {
+		return 10
+	}
+	setdig := int(tmp % 10)
+	if setdig == 0 || setdig == 9 {
+		countdec++
+		tmp /= 10
+		for tmp != 0 {
+			dig := int(tmp % 10)
+			if dig == setdig {
+				countdec++
+			} else {
+				break
+			}
+			tmp /= 10
+		}
+	}
+	switch countdec {
+	case 0:
+		return 16
+	case 1:
+		if tmp > 1 || setdig == 9 {
+			return 16
+		}
+	case 2:
+		if tmp > 10 {
+			return 16
+		}
+	case 3, 4:
+		if tmp > 100 {
+			return 16
+		}
+	default:
+		if tmp > 1000 {
+			return 16
+		}
+	}
+
+	counthex := 0 // Count trailing run of 0's or f's (hex)
+	tmp = val
+	setdig = int(tmp & 0xf)
+	if setdig == 0 || setdig == 0xf {
+		counthex++
+		tmp >>= 4
+		for tmp != 0 {
+			dig := int(tmp & 0xf)
+			if dig == setdig {
+				counthex++
+			} else {
+				break
+			}
+			tmp >>= 4
+		}
+	}
+
+	if countdec > counthex {
+		return 10
+	}
+	return 16
+}

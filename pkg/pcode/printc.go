@@ -2564,10 +2564,16 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 			return renderFloatLiteral(vn.Offset(), uint32(typed.Size()))
 		}
 	}
-	if vn.Offset() < 10 {
+	// Untyped constant: choose decimal vs hex following Ghidra's heuristic.
+	// C++ parity: PrintC::push_integer (printc.cc:1395-1399) -- values <= 10
+	// print decimal; otherwise the radix is mostNaturalBase(val).
+	if vn.Offset() <= 10 {
 		return fmt.Sprintf("%d", vn.Offset())
 	}
-	return fmt.Sprintf("0x%x", vn.Offset())
+	if mostNaturalBase(vn.Offset()) == 16 {
+		return fmt.Sprintf("0x%x", vn.Offset())
+	}
+	return fmt.Sprintf("%d", vn.Offset())
 }
 
 // inferSignedConstType returns a TYPE_INT base type for a constant varnode whose
