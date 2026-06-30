@@ -320,6 +320,42 @@ func (s *printCState) collectSymbols() {
 					}
 				}
 			}
+			// Non-entry argument register that was read but not recovered as a named
+			// parameter -- e.g. an accumulator parameter (read AND written) whose full
+			// register-width input was created by heritage sub-register normalization and
+			// then trimmed back to its sub-register by subvariable flow AFTER parameter
+			// recovery ran, so the param HighVariable died with the discarded full-width
+			// input. Reclaim it as a parameter by its ABI register slot so it renders as
+			// param_N (assigned below by IsRegParam order) instead of a machine temp.
+			// Read-only params keep their param HighVariable and take the normal path.
+			// C++ parity: ScopeLocal identifies a parameter by its storage address
+			// (ParamEntry), not by a pre-assigned HighVariable.
+			if vn.IsInput() && sl != nil && sl.model != nil && !sl.model.EntryPoint &&
+				isRegisterSpace(vn) && vn.NumDescend() > 0 {
+				if _, isArg := sl.model.IsRegParam(vn.Offset()); isArg {
+					hv := vn.High()
+					hvName := ""
+					if hv != nil {
+						hvName = hv.Name()
+					}
+					if !strings.HasPrefix(hvName, "param_") {
+						if vn.Type() == nil {
+							sz := vn.Size()
+							if sz <= 0 {
+								sz = 4
+							}
+							SetVarnodeType(vn, sharedTypeFactory.GetBase(int32(sz), TYPE_INT, ""))
+						}
+						if hv == nil || !seenParamHV[hv] {
+							if hv != nil {
+								seenParamHV[hv] = true
+							}
+							params = append(params, vn)
+						}
+						continue
+					}
+				}
+			}
 			// Classify via ScopeLocal/HighVariable assignment.
 			if hv := vn.High(); hv != nil {
 				name := hv.Name()
