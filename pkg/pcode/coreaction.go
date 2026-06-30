@@ -1250,6 +1250,17 @@ func (a *ActionReturnRecovery) Apply(data *Funcdata) int {
 		changed = true
 	}
 
+	// C++ parity: ActionReturnRecovery::apply calls data.clearActiveOutput() once the
+	// output is fully checked and buildReturnOutput has rewired the RETURN ops
+	// (coreaction.cc:1951). Clearing the active output is what lets the subsequent
+	// ActionDeadCode pass narrow the return register via gatherConsumedReturn's NZMask
+	// path instead of treating it as fully consumed: for x86-64 the RETURN holds
+	// RAX(8) = ZEXT(EAX), whose NZMask consumes only the low 4 bytes, so the ZEXT
+	// promotion chain collapses to a plain int. While the active output stays set the
+	// return is force-consumed at full width and the ZEXT artifacts survive (x86-32 is
+	// unaffected because EAX already spans the full register width).
+	fp.ClearActiveOutput()
+
 	if changed {
 		a.count++
 	}

@@ -66,10 +66,15 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ## 다음 작업 (우선순위)
 
-> **활성 작업(2026-07-01): 갭1 = x64 반환값 크기 추론 faithful 포팅.** 상세 핸드오프는 `NEXT_SESSION_PROMPT.md`
-> + 아래 #2 갭 분류. 휴리스틱 금지(원본 C++ parity). 충실 경로 = ActionReturnRecovery::apply +
-> ProtoModel::assumedOutputExtension + ActionOutputPrototype/updateOutputTypes. 트리는 이미 10/10 byte-identical
-> + x64 register-param 복구 작동; 실 x64 함수(corpus)의 반환 타입만 RAX(8) 고정이라 미스매치.
+> **활성 작업(2026-07-01 진행): 갭1 = x64 반환 크기 추론 -- 메커니즘 충실 포팅 완료, 갭3으로 이관.**
+> 핸드오프 분석(ActionReturnRecovery/assumedOutputExtension/updateOutputTypes)은 **오진이었음**: deriveOutputMap/
+> fillinMap은 출력 trial을 좁히지 않는다(assumedExtension는 CALL-output 전용). x64 반환 narrowing의 실제 충실
+> 경로는 **(1) ActionReturnRecovery가 buildReturnOutput 후 `clearActiveOutput`(coreaction.cc:1951)** ->
+> ActionDeadCode `gatherConsumedReturn`가 ActiveOutput=nil 상태에서 RETURN 입력 NZMask(RAX=ZEXT(EAX)는 하위
+> 4바이트)로 consume를 4로 좁힘 + **(2) `SubvariableFlow::tryReturnPull`(subflow.cc:238)** 가 subvar flow를
+> RETURN 통과시켜 ZEXT 트림. 두 곳 충실 포팅 완료(coreaction.go ActionReturnRecovery + subvarflow.go
+> tryReturnPull stub 교체). **결과: corpus add4/poly4 반환 타입 `unsigned long long`->`int` 정확.** 전 회귀
+> 그린(10/10 트리 + production). **남은 미스매치 = 갭3(아래)**: 내부 ZEXT 프로모션 체인 미붕괴라 아직 MATCH 아님.
 
 ### 1. [최우선] 미션 #1 게이트 완료 -- production 경로(bridge.Decompile)를 universal-action 트리로 교체
 
@@ -131,23 +136,31 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
     놓쳐 스택 locals를 `uVar7[10]` 포인터 deref로 오복구. 수정: buildStackOffsetMap(SP 오프셋 전파) +
     encodeStackSlotOffset(포인터 폭 wrap). max3/sum_to_n이 `uVar7[10]` -> 3 params + local_18/local_14
     복구로 개선. x86-32(EBP, 수학적 동일) 무회귀.
-  - **[갭1: 반환 크기 추론, 전 함수] 미완 -- faithful 포팅 필요**: 함수는 EAX(4바이트 `int`) 반환인데 트리가
-    RAX(8바이트) 고정 -> `unsigned long long`/`undefined8` + ZEXT/promotion 캐스트 도배. x86-32은 EAX 폭=int
-    폭이라 안 걸림. **휴리스틱 금지(원본 C++ parity)**: 충실 경로 = `ActionReturnRecovery::apply`
-    (coreaction.cc:1909) -- output ParamActive 트라이얼 + AncestorRealistic(output use) + `finishPass`/
-    `markFullyChecked` -> `FuncProto::deriveOutputMap` -> `ProtoModel::assumedOutputExtension`(ZEXT 인식해
-    출력 폭 좁힘) -> `buildReturnOutput`(retop 입력 재구성). 출력 타입은 `ActionOutputPrototype::apply`
-    (coreaction.cc:4776) -> `FuncProto::updateOutputTypes`(triallist[0]의 addr+High 타입). Gosleigh의
-    `ActionActiveReturn`은 현재 no-op stub -> 이 서브시스템(ParamActive output trial + deriveOutputMap +
-    assumedOutputExtension)을 충실 포팅해야 함. **다함수 포팅 + 전 함수 반환 와이어링 변경 -> 회귀 위험 큼,
-    전용 세션 권장.** 대상 Go: paramactive.go(ApplyGuardReturnsLive/ParamActive), funcproto.go, protomodel.go.
+  - **[갭1: 반환 크기 추론 메커니즘] 충실 포팅 완료(2026-07-01)**: 핸드오프의 deriveOutputMap/
+    assumedOutputExtension 가설은 오진(그 경로는 출력 trial 폭을 안 좁힘; assumedExtension는 funcLinkOutput의
+    CALL-output 전용). 실제 narrowing = consume(NZMask) + subvariable flow:
+    1. `ActionReturnRecovery.Apply`(coreaction.go) 끝에 **`fp.ClearActiveOutput()`** 추가(C++ coreaction.cc:1951
+       parity). ActiveOutput이 남아있으면 `gatherConsumedReturn`(deadcode_consume.go:314)이 `^0`(전체 소비)
+       반환 -> ZEXT 영구 잔존. 클리어하면 RETURN 입력 RAX=ZEXT(EAX)의 NZMask로 consume=4바이트.
+    2. `SubvariableFlow::tryReturnPull`(subvarflow.go) stub(return false) -> subflow.cc:238 충실 포팅. subvar
+       flow가 RETURN을 통과해 RAX(8) trim. (`returnsTraversed` 전파 + `addTerminalPatchSameOp`.)
+    **결과: corpus add4/poly4 반환 타입 `unsigned long long`->`int` 정확.** x86-32(EAX=int 폭)/10-10 트리/
+    production 전 회귀 그린. **아직 MATCH 아님 -> 잔여는 갭3.**
   - **[갭2b: 루프 home-slot 통합]** Windows x64는 register param(RCX/RDX..)을 home slot([rsp+8/0x10/..])에
     spill. max3는 본문 param 사용이 param_1..3로 통합되나, sum_to_n 루프 조건의 home-slot read는 param_1로
     통합 안 되고 uVar1로 남음(루프 back-edge 횡단). 별도.
-  - **[갭3: promotion 캐스트]** 4바이트 산술의 `(unsigned long long)(unsigned int)`/`ZEXT` 연쇄 -- 갭1에서
-    파생, 갭1 해결 후 재측정.
-  - **다음 단계**: 갭1(반환 크기) faithful 포팅이 가장 보편적(전 함수 + 갭3 연쇄 해소). 단 전용 세션 필요.
-    실함수 골든 파이프라인(`testdata/x64_corpus/`)이 갖춰져 갭 수정 -> 재측정 루프 가능.
+  - **[갭3: 내부 ZEXT 프로모션 체인 미붕괴] 갭1 후 잔여 메인 블로커(다음 세션)**: 갭1으로 반환 타입은
+    `int`이나 본문 산술이 `(unsigned long long)(unsigned int)(...)` 캐스트 도배 + dead `uVar3` 잔존.
+    **근본(진단 완료)**: raw p-code는 정상(`add eax` = 4바이트 INT_ADD + `RAX=ZEXT(EAX)` 상위 클리어, 중간
+    ZEXT는 전부 dead여야 함). 그런데 heritage normalization/copy-prop이 `add eax`의 EAX(4) 피연산자 read를
+    RAX(8)=ZEXT로 **넓혀서**(`iVar1[4]=INT_ADD(uVar6[8],param_3[4])` 식 혼합 크기) 중간 ZEXT를 live로 만듦.
+    그 결과 `RuleSubvarZext.DoTrace`가 중간 ZEXT에서 **pullcount=0으로 실패**(체인이 terminal/RETURN에 미도달
+    -- 4바이트 add 출력이 terminal로 끊김). clean IR(미widening)이면 중간 ZEXT가 dead라 제거되고 최종 ZEXT만
+    tryReturnPull로 trim돼 `int add4{return p1+p2+p3+p4;}` 됨. **조사 대상: heritage가 sub-register read를
+    8바이트로 넓히는 지점**(normalizeReadSize/disjoint cover) 또는 copy-prop 포워딩. subvar/typeop 아님.
+    진단 도구: corpus 빌드 후 RETURN 입력/alive-op nzm+con 덤프(이번 세션 임시 test로 확인, 필요시 재작성).
+  - **다음 단계**: 갭3(heritage sub-register widening) 규명이 add4/poly4 MATCH의 마지막 관문. 갭1 두 수정은
+    그대로 유지(충실 + 무회귀). 실함수 골든 파이프라인(`testdata/x64_corpus/`)으로 수정->재측정 루프.
 
 ### 3. [저우선] 정리
 - consume-DeadCode broader corpus 검증 후 `GOSL_DESCENDANT_DC` fallback + 레거시 descendant-count 루프 제거.
