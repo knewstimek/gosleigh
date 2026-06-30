@@ -66,11 +66,30 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ## 다음 작업 (우선순위)
 
-> **활성 작업(2026-07-01): x64 corpus add4 + poly4 byte-identical MATCH (2/8). 사용자 1차 목표 달성.**
+> **활성 작업(2026-07-01 후반): x64 corpus 3/8 MATCH (add4 + poly4 + sum_to_n).** sum_to_n flip은 세 충실
+> 수정으로 달성:
+>   1. **OpInsertEnd flow-break 분기**(funcdata.go): C++ `Funcdata::opInsertEnd`(funcdata_op.cc:435)는 블록이
+>      이미 branch terminator로 끝나면 그 앞에 삽입한다. 우리는 단순 append라 addrtied merge용 COPY가 CBRANCH
+>      뒤로 갔다 -> 조건/선행 statement 깨짐. (max3의 `if (param_1 < param_2)` 복구.)
+>   2. **emitBlockIf no_branch 선행 statement**(printc.go emitIfBlockChain): C++ `PrintC::emitBlockIf`
+>      (printc.cc:3026-3030)는 condition 블록을 no_branch로 먼저 emit해 CBRANCH 앞 statement(`local = param_1;`)를
+>      출력한다. plain-if 경로에 추가(else-if는 별도 복잡도, 미적용). (max3의 `local_18 = param_1;` 복구.)
+>   3. **RuleLessNotEqualBoolAnd를 트리 actprop에 추가**(action.go): 트리 actprop의 `NewRuleLessNotEqual`은
+>      C++ RuleLessNotEqual과 다른(bool-const) 규칙이고, 충실 포팅인 RuleLessNotEqualBoolAnd(=C++
+>      RuleLessNotEqual, ruleaction.cc:2310)는 production batchA에만 있었다. 트리에 누락 -> 변수-대-변수 signed
+>      compare의 JG/JLE flag 재구성이 `BOOL_AND(NOTEQUAL,SLESSEQUAL)`로 남음. 추가하니 `local_18 <= param_1`로
+>      collapse. (sum_to_n MATCH.) 전 회귀 그린(10/10 트리 + production + 전 패키지).
+> **max3 잔여 = known mismatch(타입 추론 갭)**: 유일 차이는 `int local_18` vs golden `undefined4 local_18`.
+> 근본: register param은 scopelocal.go:182에서 TYPE_INT 시드(시그니처 `int param`용, x64/aarch64 add_ret이 의존),
+> 이게 `local_18 = COPY param_1`로 addrtied 스택 로컬에 전파된다. Ghidra는 동일 구조(process는 `int` 로컬,
+> max3/sum_to_n은 deref 강한 int 없으면 undefined4)에서 약한 param int을 로컬에 안 남긴다. 충실 해결은 Ghidra
+> buildLocaltypes/getLocalType/propagateOneType 완전 포팅 필요(현재 ActionInferTypes는 단순화 + ActionSeedSignedOps
+> heuristic). 휴리스틱 차단은 CLAUDE.md 위반이라 보류. 남은 5개: max3(타입), sum_array(타입+캐스트), classify(상수
+> decimal vs hex), grid_score/process(스택 프레임/포인터/switch).
+> 이하 add4/poly4(2/8) 기록 보존:
 > 갭1(반환 narrowing: ClearActiveOutput + tryReturnPull) + 갭3(heritage normalizeRead/WriteSize sub-register
 > widening 해소 + printc param reclaim + dead RAX-ZEXT 정리) + 괄호 precedence(PrintLanguage::parentheses
-> 충실 포팅)로 add4/poly4 완전 일치. 전 회귀 그린(10/10 트리 + production). 다음 = max3/sum_to_n(stack frame +
-> 갭2b home-slot). 아래 #2 갭3 항목 참조. 이하 갭1 기록 보존:
+> 충실 포팅)로 add4/poly4 완전 일치. 이하 갭1 기록 보존:
 > 핸드오프 분석(ActionReturnRecovery/assumedOutputExtension/updateOutputTypes)은 **오진이었음**: deriveOutputMap/
 > fillinMap은 출력 trial을 좁히지 않는다(assumedExtension는 CALL-output 전용). x64 반환 narrowing의 실제 충실
 > 경로는 **(1) ActionReturnRecovery가 buildReturnOutput 후 `clearActiveOutput`(coreaction.cc:1951)** ->

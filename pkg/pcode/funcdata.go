@@ -933,12 +933,18 @@ func (fd *Funcdata) OpInsertBegin(op *PcodeOp, bb *BlockBasic) {
 }
 
 // OpInsertEnd creates an op and inserts it at the end of a basic block.
-// The op is marked alive and its parent is set.
-// C++ parity: Funcdata::opInsertEnd
+// The op is marked alive and its parent is set. If the block already ends in a
+// flow-break op (branch terminator), the new op is inserted just before it so
+// the terminator stays last; otherwise the op is appended.
+// C++ parity: Funcdata::opInsertEnd (funcdata_op.cc:435)
 func (fd *Funcdata) OpInsertEnd(op *PcodeOp, bb *BlockBasic) {
 	fd.OpMarkAlive(op)
 	op.SetParent(bb)
-	bb.InsertOpEnd(op)
+	if last := bb.LastOp(); last != nil && last.IsFlowBreak() {
+		bb.InsertOpBefore(op, last)
+	} else {
+		bb.InsertOpEnd(op)
+	}
 }
 
 // OpInsertBefore inserts op immediately before follow in follow's basic block.
