@@ -1417,6 +1417,17 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	actcleanup.AddRule(NewRuleInsertAbsorb("bitfields"))
 	act.AddAction(actcleanup)
 
+	// Post-cleanup dead-code sweep. C++ universalAction has no ActionDeadCode between
+	// actcleanup and the merge phase (coreaction.cc 5729-5736) because by the time its
+	// actfullloop converges no dead code remains. Gosleigh's heritage sub-register
+	// normalization (normalizeReadSize/normalizeWriteSize) leaves a residual dead
+	// return-register zero-extension (RAX = ZEXT(EAX_return)) whose consume goes stale
+	// once subvariable flow retargets the RETURN to the narrow value: it is unreferenced
+	// (NumDescend 0) but a prior pass already seeded its consume, so the in-loop
+	// ActionDeadCode keeps it and it would otherwise render as a dead `uVarN = (...)`
+	// statement. Removing it here matches Ghidra's (dead-code-free) output. The deeper
+	// parity fix is to clear that residual within the main loop; tracked in docs/STATUS.md.
+	act.AddAction(NewActionDeadCode("deadcode"))
 	act.AddAction(NewActionPreferComplement("blockrecovery"))
 	act.AddAction(NewActionStructureTransform("blockrecovery"))
 	act.AddAction(NewActionNormalizeBranches("normalizebranches"))
