@@ -78,9 +78,26 @@ classify_sign 완성**(x86-32 7/8 -> 8/8):
   RestructureVarnode 경로엔 register-param 인식이 빠짐(또는 stackparam 전용). 단 이 골든들도 tiny -- 실제 x64/ARM
   함수는 훨씬 큰 갭.
 - **다음 우선순위 (갭 지도 기반)**:
-  1. **[최우선 잔여] x64/ARM register-param**: 트리에 register-param 복구 배선(scopelocal.go BuildFromVarnodes는
-     RegParamOffsets 경로가 이미 있음 -- 트리 proto model이 RegParamOffsets를 안 채우거나 ActionDefaultParams가
-     register trial을 안 도는지 규명). aarch64 void 붕괴부터(가장 큰 갭). 상세는 위 x64_add_ret/aarch64_add_ret 항목.
+  1. **[최우선 잔여] x64/ARM register-param** -- **root cause 규명됨(2026-06-30, 코드 근거)**:
+     - **현상**: 트리가 x64_add_ret를 `undefined8 ... { return local_31 + local_30; }`(WANT `long ... in_RDI/in_RSI`),
+       aarch64_add_ret를 `void entry(void){return;}`(WANT `long entry(long,long)`)로 출력. register 입력이
+       param/in_REG로 복구 안 됨.
+     - **근본(코드 확인)**: 트리 proto model이 `RegParamOffsets`를 **절대 안 채움**. 두 지점:
+       (a) `bridge.go:192 buildDefaultModel`이 `NewProtoModelFromCspec(cspec, nil, nil)` -- **regLookup=nil** 전달.
+       `protomodel.go:139`은 regLookup!=nil일 때만 RegParamOffsets 채움 -> nil이면 no-op.
+       (b) `tree_fullmap_diag_test.go runTreeCase`(L46)가 `BuildConfig`에 **CspecPath 미전달** -> `result.CspecData=nil`
+       -> `NewProtoModelFromCspec(nil,...)`이 L119-121에서 early-return(ABI 정보 전무). x86-32는 스택 ABI라
+       ParamBaseOffset=4 기본값으로 동작하지만, register-param 아키는 둘 다 막힘.
+       => `scopelocal.go:110` `len(sl.model.RegParamOffsets)>0` 게이트가 x64/aarch64에서 절대 안 걸림.
+     - **수정 대상 Go 파일**: `pkg/bridge/bridge.go`(buildDefaultModel에 regLookup 전달 -- 이미 WithEffectOffsets가
+       `xr.RegisterByName`을 쓰므로 동일 lookup으로 `func(name)(uint64,bool)` 구성), `pkg/loader/tree_fullmap_diag_test.go`
+       (runTreeCase가 CspecPath 전달하도록 -- 각 case에 cspecRel 추가; x64/aarch64 cspec 경로 확인 필요).
+       그 다음 잔여 갭(input-register 네이밍 in_RDI, signed-long 반환 추론, aarch64 dead-code 전소)은 RegParamOffsets
+       배선 후 재측정해 단계별로.
+     - **C++ 참조**: ScopeLocal::BuildFromVarnodes 대응(scopelocal.go), ActionDefaultParams/ActionPrototypeTypes
+       (coreaction.cc), PrototypeModel 구성(Architecture::setPrimitiveMethods). register trial 복구는 paramactive.go:904.
+     - **성공 기준**: `TREE_MAP=1 ... TestTreeFullGoldenMap`에서 x64_add_ret/aarch64_add_ret MATCH -> 8/10 -> 10/10.
+       먼저 aarch64 void 붕괴부터(가장 큰 갭). 진단 1단계 = x64 case에서 proto model RegParamOffsets가 비어있는지 덤프 확인.
   2. 정렬되면 production 골든 전체 그린 확인 후 decompile.go subset 제거.
   - **(완료) classify_sign = RuleRangeMeld 포팅**: golden `else if (param_3 < 1)`. 트리 `BOOL_OR(INT_EQUAL(p,0),
     INT_SLESS(p,0))`를 RuleRangeMeld가 `INT_SLESS(p,1)`로 collapse. 두 수정으로 완성:
