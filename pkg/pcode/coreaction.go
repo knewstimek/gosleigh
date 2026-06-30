@@ -1048,7 +1048,12 @@ func (a *ActionOutputPrototype) Apply(data *Funcdata) int {
 		hv = NewHighVariable("return")
 		fp.SetOutput(hv)
 	}
-	hv.AddInstance(firstRet)
+	// C++ parity: ActionOutputPrototype::apply only updates the output prototype TYPE
+	// (FuncProto::updateOutputTypes) from the return Varnodes; it does NOT add them as
+	// instances of the output HighVariable. Calling hv.AddInstance(firstRet) would steal
+	// firstRet from its merged HighVariable -- breaking a loop-accumulator return where
+	// the return value (a stack local) is merged with its loop-body register definition,
+	// which then renders as a dead temp instead of writing back to the local.
 	if firstRet.Type() != nil {
 		hv.SetType(firstRet.Type())
 	}
