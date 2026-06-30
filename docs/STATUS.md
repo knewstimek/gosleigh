@@ -114,8 +114,25 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 딜리버리에 더 가까울 수 있음 -- 다음 세션에서 판단.
 - **표본 부족 실증(2026-06-30)**: 유일 x64 골든이 processEntry(in_RDI)라 x64 named-param 복구를 미테스트.
   breadth probe(non-processEntry x64 add 스니펫)로 **시그니처 파라미터 순서 역전 버그**를 즉시 발견/수정(SysV
-  register offset 순서 != 인자 순서; printc가 offset 정렬). 회귀 가드 `TestX64RegParamOrder` 추가. 실함수 골든
-  없이는 이런 갭이 계속 숨음 -- 새 Ghidra 골든 생성이 미션 검증의 병목.
+  register offset 순서 != 인자 순서; printc가 offset 정렬). 회귀 가드 `TestX64RegParamOrder` 추가.
+- **x64 breadth corpus 생성(2026-07-01)**: 재현 가능한 Ghidra 골든 파이프라인 구축
+  (`testdata/x64_corpus/`: MSVC `cl /c /Od` -> COFF obj -> Ghidra 12 헤드리스 Java postScript
+  `GenGoldens.java` -> `x64_goldens.json`). **Windows x64 ABI**(RCX/RDX/R8/R9, `x86-64-win.cspec`).
+  8개 실함수(add4/poly4/max3/sum_to_n/sum_array/classify/grid_score/process: 다인자/중첩루프/포인터/switch/
+  나눗셈). 갭 맵 `TestX64CorpusGoldenMap`(X64_CORPUS=1). **현재 0/8**. 코드 근거 갭 분류:
+  - **register-param 복구는 작동**: add4/poly4가 RCX/RDX/R8/R9 -> param_1..4 정확 복구.
+  - **[갭1: 반환 크기 추론, 전 함수]** 함수는 EAX(4바이트 `int`) 반환인데 트리가 RAX(8바이트)로 고정 ->
+    `unsigned long long` + promotion 캐스트 도배. 원인: buildDefaultModel이 반환 레지스터를 자연 폭(RAX=8)으로
+    설정. Ghidra는 실제 write 폭(EAX=4)으로 좁힘. C++ 참조: Heritage::characterizeReturnOutput /
+    ActionOutputPrototype output trial(이미 일부 포팅 = heritage.go guardReturns).
+  - **[갭2: RSP-relative 스택 프레임, locals 함수]** x86-32은 EBP 프레임이라 OK였으나 x64 /Od는 프레임포인터
+    없는 RSP-relative -> 스택 locals를 포인터 deref(`uVar7[10]`)로 오복구(max3/sum_to_n/sum_array/grid_score/
+    process 붕괴). ActionStackPtrFlow가 RSP-relative(EBP 부재) 미처리 추정 -> coreaction.cc ActionStackPtrFlow/
+    stackvars.cc 재확인 필요.
+  - **[갭3: promotion 캐스트]** 4바이트 산술에 `(unsigned long long)(unsigned int)` 연쇄 -- 갭1 + sign/width
+    캐스트 처리에서 파생(ActionSetCasts/typeop).
+  - **다음 단계 후보**: 갭1(반환 크기)이 가장 보편적 + add4/poly4를 match로 flip 가능성 높음 -> 먼저 착수 권장.
+    갭2(RSP 프레임)는 별도 큰 작업. 실함수 골든 파이프라인이 갖춰졌으니 갭 수정 -> 재측정 루프 가능.
 
 ### 3. [저우선] 정리
 - consume-DeadCode broader corpus 검증 후 `GOSL_DESCENDANT_DC` fallback + 레거시 descendant-count 루프 제거.

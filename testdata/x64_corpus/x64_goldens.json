@@ -1,0 +1,52 @@
+{
+  "functions": [
+    {
+      "name": "add4",
+      "entry": 9216,
+      "bytes": "44894c2420448944241889542410894c24088b4424108b4c240803c88bc10344241803442420c3",
+      "c": "\r\nint add4(int param_1,int param_2,int param_3,int param_4)\r\n\r\n{\r\n  return param_1 + param_2 + param_3 + param_4;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "poly4",
+      "entry": 9264,
+      "bytes": "44894c2420448944241889542410894c24088b4424080faf442410034424182b442420c3",
+      "c": "\r\nint poly4(int param_1,int param_2,int param_3,int param_4)\r\n\r\n{\r\n  return (param_1 * param_2 + param_3) - param_4;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "max3",
+      "entry": 9312,
+      "bytes": "448944241889542410894c24084883ec188b4424208904248b0424394424287e078b4424288904248b0424394424307e078b4424308904248b04244883c418c3",
+      "c": "\r\nint max3(int param_1,int param_2,int param_3)\r\n\r\n{\r\n  undefined4 local_18;\r\n  \r\n  local_18 = param_1;\r\n  if (param_1 < param_2) {\r\n    local_18 = param_2;\r\n  }\r\n  if (local_18 < param_3) {\r\n    local_18 = param_3;\r\n  }\r\n  return local_18;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "sum_to_n",
+      "entry": 9392,
+      "bytes": "894c24084883ec18c744240400000000c7042401000000eb088b0424ffc08904248b4424203904247f118b04248b4c240403c88bc189442404ebde8b4424044883c418c3",
+      "c": "\r\nint sum_to_n(int param_1)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  \r\n  local_14 = 0;\r\n  for (local_18 = 1; local_18 <= param_1; local_18 = local_18 + 1) {\r\n    local_14 = local_14 + local_18;\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "sum_array",
+      "entry": 9472,
+      "bytes": "8954241048894c24084883ec18c744240400000000c7042400000000eb088b0424ffc08904248b4424283904247d1a48630424488b4c24208b04818b4c240403c88bc189442404ebd58b4424044883c418c3",
+      "c": "\r\nint sum_array(longlong param_1,int param_2)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  \r\n  local_14 = 0;\r\n  for (local_18 = 0; local_18 < param_2; local_18 = local_18 + 1) {\r\n    local_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "classify",
+      "entry": 9568,
+      "bytes": "894c24084883ec188b442420890424833c24007414833c24017415833c24027416833c24037417eb1cb864000000eb1ab8c8000000eb13b82c010000eb0cb890010000eb05b8ffffffff4883c418c3",
+      "c": "\r\nundefined8 classify(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 == 0) {\r\n    uVar1 = 100;\r\n  }\r\n  else if (param_1 == 1) {\r\n    uVar1 = 200;\r\n  }\r\n  else if (param_1 == 2) {\r\n    uVar1 = 300;\r\n  }\r\n  else if (param_1 == 3) {\r\n    uVar1 = 400;\r\n  }\r\n  else {\r\n    uVar1 = 0xffffffff;\r\n  }\r\n  return uVar1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "grid_score",
+      "entry": 9664,
+      "bytes": "89542410894c24084883ec18c744240800000000c744240400000000eb0a8b442404ffc0894424048b442420394424047d55c7042400000000eb088b0424ffc08904248b4424283904247d398b04248b4c240403c88bc183e00185c075168b4424040faf04248b4c240803c88bc189442408eb0f8b04248b4c24082bc88bc189442408ebb6eb978b4424084883c418c3",
+      "c": "\r\nint grid_score(int param_1,int param_2)\r\n\r\n{\r\n  int iVar1;\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  undefined4 local_10;\r\n  \r\n  local_10 = 0;\r\n  for (local_14 = 0; local_14 < param_1; local_14 = local_14 + 1) {\r\n    for (local_18 = 0; local_18 < param_2; local_18 = local_18 + 1) {\r\n      if ((local_14 + local_18 & 1U) == 0) {\r\n        iVar1 = local_14 * local_18;\r\n      }\r\n      else {\r\n        iVar1 = -local_18;\r\n      }\r\n      local_10 = local_10 + iVar1;\r\n    }\r\n  }\r\n  return local_10;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "process",
+      "entry": 9824,
+      "bytes": "44894c242044894424188954241048894c24084883ec18c744240c00000000c744240800000000c744240400000000eb0a8b442404ffc0894424048b442428394424047d4f4863442404488b4c24208b04818904248b4424303904247d098b442430890424eb1c8b4424383904247e098b442438890424eb0a8b442408ffc0894424088b04248b4c240c03c88bc18944240ceb9d837c2408007507b8ffffffffeb098b44240c99f77c24084883c418c3",
+      "c": "\r\nulonglong process(longlong param_1,int param_2,int param_3,int param_4)\r\n\r\n{\r\n  int iVar1;\r\n  ulonglong uVar2;\r\n  int local_18;\r\n  int local_14;\r\n  int local_10;\r\n  int local_c;\r\n  \r\n  local_c = 0;\r\n  local_10 = 0;\r\n  for (local_14 = 0; local_14 < param_2; local_14 = local_14 + 1) {\r\n    iVar1 = *(int *)(param_1 + (longlong)local_14 * 4);\r\n    local_18 = param_3;\r\n    if ((param_3 <= iVar1) && (local_18 = param_4, iVar1 <= param_4)) {\r\n      local_10 = local_10 + 1;\r\n      local_18 = iVar1;\r\n    }\r\n    local_c = local_c + local_18;\r\n  }\r\n  if (local_10 == 0) {\r\n    uVar2 = 0xffffffff;\r\n  }\r\n  else {\r\n    uVar2 = (longlong)local_c / (longlong)local_10 & 0xffffffff;\r\n  }\r\n  return uVar2;\r\n}\r\n\r\n"
+    }
+  ]
+}
