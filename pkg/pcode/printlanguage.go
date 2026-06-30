@@ -42,10 +42,20 @@ const (
 )
 
 // ExprFragment is a rendered expression plus the precedence it binds at.
+// op records the binary operator token that produced the fragment (empty for
+// non-binary fragments); it lets the parenthesization rule distinguish two
+// same-precedence operators (e.g. + vs -) the way Ghidra's OpToken identity
+// comparison does. C++ parity: PrintLanguage::parentheses (printlanguage.cc:281).
 type ExprFragment struct {
 	Text       string
 	Precedence ExprPrecedence
+	op         string
 }
+
+// associativeBinaryOps are the binary operators Ghidra marks associative in its
+// OpToken table (printc.cc): two adjacent uses at equal precedence do NOT require
+// parentheses. All other equal-precedence adjacencies are parenthesized.
+var associativeBinaryOps = map[string]bool{"*": true, "+": true, "&": true, "^": true, "|": true}
 
 // PrintLanguage owns shared token and expression helpers used by concrete printers.
 type PrintLanguage struct {
@@ -206,12 +216,40 @@ func (pl *PrintLanguage) UnaryExpr(op string, precedence ExprPrecedence, expr Ex
 
 func (pl *PrintLanguage) BinaryExpr(left ExprFragment, op string, right ExprFragment, precedence ExprPrecedence, assoc ExprAssociativity) ExprFragment {
 	var builder strings.Builder
-	builder.WriteString(pl.ExprString(left, precedence, ExprPosLeft, assoc))
+	builder.WriteString(pl.binaryChildString(left, op, precedence))
 	builder.WriteByte(' ')
 	builder.WriteString(op)
 	builder.WriteByte(' ')
-	builder.WriteString(pl.ExprString(right, precedence, ExprPosRight, assoc))
-	return ExprFragment{Text: builder.String(), Precedence: precedence}
+	builder.WriteString(pl.binaryChildString(right, op, precedence))
+	return ExprFragment{Text: builder.String(), Precedence: precedence, op: op}
+}
+
+// binaryChildString parenthesizes a binary operand following Ghidra's rule
+// (PrintLanguage::parentheses, printlanguage.cc:278-287): a child binding looser
+// than the parent is parenthesized; a child binding tighter is not; at equal
+// precedence the child is parenthesized UNLESS it is the same associative operator
+// as the parent. This differs from textbook C left/right associativity: Ghidra
+// parenthesizes e.g. (a + b) - c and (a - b) - c because '-' is non-associative
+// and '+' != '-'.
+func (pl *PrintLanguage) binaryChildString(child ExprFragment, parentOp string, parentPrec ExprPrecedence) string {
+	if child.Text == "" {
+		return ""
+	}
+	paren := false
+	switch {
+	case child.Precedence == ExprPrecPrimary || parentPrec == ExprPrecLowest:
+		paren = false
+	case child.Precedence < parentPrec:
+		paren = true
+	case child.Precedence > parentPrec:
+		paren = false
+	default:
+		paren = !(child.op == parentOp && associativeBinaryOps[parentOp])
+	}
+	if paren {
+		return "(" + child.Text + ")"
+	}
+	return child.Text
 }
 
 func (pl *PrintLanguage) PostfixExpr(expr ExprFragment, suffix string) ExprFragment {
