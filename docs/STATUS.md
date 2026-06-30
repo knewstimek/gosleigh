@@ -93,13 +93,22 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 >     (golden `int local_8`)/counted_loop가 깨진다 -> symbol 타입 캡처가 먼저 정확해야 함. varmap 포팅이 부분적
 >     이라 ScopeLocal/restructure 타이밍 정합 필요 = 테스트 가드된 전용 세션. (ActionInferTypes 전체 재작성은
 >     불필요 -- varnode 추론은 그대로 두고 선언 타입 경로만 충실화.)
->     **추가 단서(다음 세션 검증 우선)**: Ghidra max3의 local_18은 varnode 타입 자체가 undefined4로 보인다
->     (symbol뿐 아니라). 우리 SSA는 `INT_SLESS(stack:local_18, param_3)`로 addrtied 스택 var를 **직접** 읽어
->     getLocalType이 INT_SLESS의 metain=TYPE_INT를 주워 int이 된다. Ghidra는 addrtied-merge의 snipReads/
->     copyTrim(merge.cc:443/trimOpInput)으로 비교 전에 local_18을 unique temp로 복사해 읽을 가능성이 크다 ->
->     그러면 local_18(addrtied)의 read 집합에 INT_SLESS가 없어 getLocalType=undefined4. 즉 선언-소스 수정과
->     별개로 **copyTrim read-snip 정합**이 진짜 근본일 수 있음. 다음 세션은 Ghidra 12 실측(TYPEPROP_DEBUG 또는
->     SSA 덤프)으로 local_18 varnode 타입과 비교 op의 입력(직접 vs temp)을 먼저 확인할 것.
+>     **Ghidra 12 실측 완료(2026-07-01, DumpHigh.java HighFunction 덤프)로 확정 + 오답 제거**:
+>       - copyTrim/read-snip 가설 **틀림**: Ghidra 비교는 `INT_SLESS stack:0x..e8{local_18:int} param_3`로
+>         addrtied 스택 var를 **직접** 읽는다 (temp 경유 아님). HighVariable 타입은 int이다(우리 누수값과 동일).
+>       - **확정 근본**: Ghidra `LocalSymbolMap`의 **HighSymbol 타입**이 max3/sum_to_n/sum_array의 모든 스택
+>         로컬에서 `undefined4`(HighVariable 타입은 int인데도). PrintC::emitVarDecl이 이 Symbol 타입으로 선언 ->
+>         `undefined4 local_N`. process는 동일 스택 로컬들의 Symbol 타입이 `int` -> `int local_N`.
+>       - **단순 규칙 아님(주의)**: sum_array local_18은 `*(int*)(p+(longlong)local_18*4)` 배열 인덱스인데
+>         Symbol=undefined4; process local_14는 **동일하게** `*(int*)(p+(longlong)local_14*4)` 인덱스인데
+>         Symbol=int. 같은 사용, 다른 Symbol 타입. 즉 Symbol 타입은 committed `Varnode::getType()`(HV 타입과 별개)
+>         을 `MapState::gatherVarnodes`+`RangeHint::merge/preferred`(varmap.cc:30-157)로 합친 결과이고, Ghidra의
+>         committed varnode 타입 자체가 max3 로컬은 undefined4 / process 로컬은 int로 갈린다(타입 전파 strength
+>         차이; 우리는 전부 int로 누수). **충실 해결 = (1) committed varnode 타입 전파를 Ghidra와 맞추거나
+>         (getLocalType/propagateOneType/writeBack), (2) 최소한 ScopeLocal에 RangeHint 기반 symbol 타입을 committed
+>         varnode 타입에서 빌드 + emitVarDecl을 symbol 타입에서.** 둘 다 ActionInferTypes/ScopeLocal 깊은 작업.
+>       - 디버그 도구: testdata/x64_corpus/DumpHigh.java + run_dumphigh.py (이번에 만들고 삭제함; 재현은 git
+>         history 또는 GenGoldens.java 패턴 참고).
 >   - **데이터모델 타입명 (sum_array/grid_score/process 시그니처)**: `long param_1` vs golden `longlong`.
 >     Win x64는 LLP64(long=4, longlong=8)인데 normalizedBaseType(printc.go:1177)이 8바이트 INT를 "long"으로
 >     하드코딩(LP64). cspec `<data_organization><long_size=4/><long_long_size=8/>`는 이미 파싱되나 printc까지
