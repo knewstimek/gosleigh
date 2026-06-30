@@ -5,6 +5,21 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: x86-64 SysV 파라미터 선언 순서 버그 수정 (breadth probe로 발견)
+표본 충분성 점검차 x64 add 스니펫을 non-processEntry 모드로 트리에 돌려 register-param 복구를 확인하다
+**시그니처 파라미터 순서 역전 버그**를 발견. `entry(long param_1,long param_2)` 대신 `entry(long param_2,long param_1)`
+출력(본문은 정상). 원인: x86-64 SysV는 register offset 순서가 인자 순서와 반대(RDI=0x38=arg0, RSI=0x30=arg1)인데
+printc가 param을 storage offset(CompareLocDef)으로 정렬 -> 역전. aarch64(x0<x1, offset순=인덱스순)는 우연히
+정상이라 안 걸렸고, 유일 x64 골든은 processEntry(in_RDI)라 param 복구를 아예 미테스트 -> 표본이 작아 숨었던 버그.
+- **수정**(printc.go FuncProto param 정렬): param을 ABI 슬롯 인덱스로 정렬 -- register 인자는 calling-convention
+  순서(IsRegParam index)로 먼저, stack 인자는 frame offset 오름차순으로 뒤에. C++ 참조: FuncProto는 파라미터를
+  ParamList 슬롯 인덱스(ParamEntry 순서)로 순회, storage address가 아님.
+- **회귀 가드 추가**(x64_regparam_test.go TestX64RegParamOrder): x64 add2/add3를 non-processEntry로 돌려
+  `entry(long param_1,long param_2[,param_3])` 순서 단언(ABI 구조적 불변식, 골든 무관). RDI/RSI/RDX 3인자 복구도 커버.
+- **무회귀**: TREE_MAP 10/10 유지, x86-32(stack param, offset순=인덱스순)/aarch64 무영향, 전 패키지 그린.
+- **시사**: 골든 표본이 tiny + processEntry 편중이라 실제 x64 register-param 경로(named param 복구)가 사실상
+  미검증이었음. 실함수 breadth(#2/#3)로 새 Ghidra 골든 생성 필요성 재확인.
+
 ### 2026-06-30: H8-debt-2 -- x64 processEntry in_RDI (entry-point void proto + irregular input 네이밍) = 멀티아치 10/10
 유일 잔여 x64_add_ret를 닫아 **트리 전체 골든 맵 10/10 byte-identical** 달성. entry-point(processEntry) 함수의
 register 인자를 param이 아닌 live-on-entry `in_<reg>`로 렌더 + void 프로토타입. x86-32 8/8 + aarch64 무회귀,
