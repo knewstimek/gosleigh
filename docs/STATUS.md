@@ -66,6 +66,11 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ## 다음 작업 (우선순위)
 
+> **활성 작업(2026-07-01): 갭1 = x64 반환값 크기 추론 faithful 포팅.** 상세 핸드오프는 `NEXT_SESSION_PROMPT.md`
+> + 아래 #2 갭 분류. 휴리스틱 금지(원본 C++ parity). 충실 경로 = ActionReturnRecovery::apply +
+> ProtoModel::assumedOutputExtension + ActionOutputPrototype/updateOutputTypes. 트리는 이미 10/10 byte-identical
+> + x64 register-param 복구 작동; 실 x64 함수(corpus)의 반환 타입만 RAX(8) 고정이라 미스매치.
+
 ### 1. [최우선] 미션 #1 게이트 완료 -- production 경로(bridge.Decompile)를 universal-action 트리로 교체
 
 #1 게이트의 실제 교체 작업: `bridge.Decompile`(decompile.go)의 손정렬 41-call subset을
