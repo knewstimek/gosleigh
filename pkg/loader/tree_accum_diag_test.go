@@ -42,6 +42,33 @@ func TestTreeAccumDiag(t *testing.T) {
 		t.Fatalf("bridge.Build: %v", err)
 	}
 	fd := result.Funcdata
+
+	// RAW_DUMP: dump SSA right after heritage (before any analysis rules) to see
+	// the raw instruction lowering (e.g. the jg flag expression). Returns early.
+	if os.Getenv("RAW_DUMP") != "" {
+		pcode.NewHeritage(fd, result.HeritageSpaces).Heritage(result.Graph)
+		pcode.NewActionStackPtrFlow("analysis").Apply(fd)
+		var rb strings.Builder
+		rb.WriteString("=== RAW SSA (post-heritage) ===\n")
+		for _, op := range fd.GetPcodeOpBank().AliveOps() {
+			par := "detached"
+			if op.Parent() != nil {
+				par = fmt.Sprintf("blk%d", op.Parent().Index())
+			}
+			rb.WriteString("  [" + par + "] ")
+			if out := op.Output(); out != nil {
+				rb.WriteString(vnHi(out) + " = ")
+			}
+			rb.WriteString(op.Code().String())
+			for s := 0; s < op.NumInput(); s++ {
+				rb.WriteString(" " + vnHi(op.Input(s)))
+			}
+			rb.WriteString("\n")
+		}
+		t.Logf("%s", rb.String())
+		return
+	}
+
 	db := pcode.NewActionDatabase()
 	db.BuildUniversalAction(nil)
 	db.BuildDefaultGroups()

@@ -30,6 +30,15 @@ func getBooleanFlipOpcode(opc OpCode) (flip OpCode, reorder bool, ok bool) {
 	case CPUI_BOOL_NEGATE:
 		// Sentinel: remove the op by propagating input[0] directly.
 		return CPUI_COPY, false, true
+	case CPUI_BOOL_AND, CPUI_BOOL_OR:
+		// Sentinel CPUI_MAX (with ok=true) routes opFlipInPlaceExecute to its
+		// De Morgan branch, which swaps BOOL_AND<->BOOL_OR. opFlipInPlaceTest
+		// already recurses into both operands so they are flipped too; without
+		// this case the op was skipped (ok=false), flipping the operands but NOT
+		// the connective -- e.g. negating (a!=0 && a>=0) wrongly yielded
+		// (a==0 && a<0) instead of (a==0 || a<0). C++ parity: funcdata_op.cc
+		// Funcdata::opFlipInPlaceExecute handles CPUI_BOOL_AND/CPUI_BOOL_OR.
+		return CPUI_MAX, false, true
 	case CPUI_FLOAT_EQUAL:
 		return CPUI_FLOAT_NOTEQUAL, false, true
 	case CPUI_FLOAT_NOTEQUAL:
