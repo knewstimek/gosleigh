@@ -1439,6 +1439,18 @@ func (s *printCState) emitIfBlockChain(bl *FlowBlock, isElseIf bool) error {
 			})
 		}
 	} else {
+		// Emit the condition block's leading (non-branch) statements before the
+		// "if" keyword. The condition block can carry real assignments preceding
+		// the CBRANCH (e.g. an addrtied local written in the same block as the
+		// first comparison: "local = param_1;" then "if (...)"). emitOps with
+		// suppressControl skips the branch and the implied condition temp.
+		// C++ parity: PrintC::emitBlockIf emits condBlock once with no_branch set
+		// (printc.cc:3026-3030) before rendering the "if".
+		if basic := toBasic(children[0]); basic != nil {
+			if err := s.emitOps(basic, true); err != nil {
+				return err
+			}
+		}
 		s.lang.OpenBlockAfter(func() {
 			s.lang.Token("if")
 			s.lang.Space()
