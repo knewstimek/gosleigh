@@ -1184,6 +1184,11 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	actmainloop.AddAction(NewActionDirectWrite("protorecovery_a", true))
 	actmainloop.AddAction(NewActionDirectWrite("protorecovery_b", false))
 	actmainloop.AddAction(NewActionActiveParam("protorecovery"))
+	// Wire the function return value (Heritage::guardReturns + dominance rename) once
+	// per function, after the first ActionHeritage pass resolved register/stack SSA.
+	// In C++ guardReturns runs inside ActionHeritage every pass; Gosleigh isolates it
+	// here to avoid disturbing the persistent heritage engine's loop snapshots.
+	actmainloop.AddAction(NewActionGuardReturns("protorecovery"))
 	actmainloop.AddAction(NewActionReturnRecovery("protorecovery"))
 	// ActionParamShiftStop: not yet ported (paramshift).
 	actmainloop.AddAction(NewActionRestrictLocal("localrecovery")) // before dead code removed

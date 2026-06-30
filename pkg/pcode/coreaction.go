@@ -1198,15 +1198,24 @@ func (a *ActionReturnRecovery) Apply(data *Funcdata) int {
 			if vn == nil || vn.IsConstant() {
 				continue
 			}
-			if !ancestorOpUseReturn(vn, op, i, 5, make(map[*PcodeOp]bool)) {
-				continue
-			}
 			trialIdx := active.WhichTrial(vn.Addr(), vn.Size())
 			if trialIdx < 0 {
 				active.RegisterTrial(vn.Addr(), vn.Size())
 				trialIdx = active.NumTrials() - 1
 			}
 			trial := active.Trial(trialIdx)
+			// C++ parity: ActionReturnRecovery::apply marks a trial active only when
+			// AncestorRealistic::execute confirms the storage has realistic ancestors
+			// (rules out unaffected/killedbycall and bare-input pass-through such as a
+			// loop-carried parameter) AND ancestorOpUse confirms active use. A bare
+			// input return (e.g. gcd's loop-carried param) fails execute and stays void.
+			ar := &ancestorRealistic{}
+			if !ar.execute(op, i, trial, false) {
+				continue
+			}
+			if !ancestorOpUseReturn(vn, op, i, 5, make(map[*PcodeOp]bool)) {
+				continue
+			}
 			trial.MarkUsed()
 			trial.MarkActive()
 		}

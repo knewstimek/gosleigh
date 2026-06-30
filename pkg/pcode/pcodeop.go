@@ -350,6 +350,8 @@ func (op *PcodeOp) IsCommutative() bool      { return op.flags&PcodeOpCommutativ
 func (op *PcodeOp) IsIndirectCreation() bool { return op.flags&PcodeOpIndirectCreation != 0 }
 func (op *PcodeOp) IsIndirectSource() bool   { return op.flags&PcodeOpIndirectSource != 0 }
 func (op *PcodeOp) IsIndirectStore() bool    { return op.flags&PcodeOpIndirectStore != 0 }
+func (op *PcodeOp) IsIncidentalCopy() bool   { return op.flags&PcodeOpIncidentalCopy != 0 }
+func (op *PcodeOp) IsStoreUnmapped() bool    { return op.flags&PcodeOpStoreUnmapped != 0 }
 
 // IsFlowBreak returns true if this op breaks sequential flow
 // (branches, calls with noreturn, returns).
