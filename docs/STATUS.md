@@ -13,7 +13,7 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   본체. #1 게이트 = 트리를 프로덕션 경로로 만들어 41-call subset을 대체(= H8-debt-2). **현재 트리 x86-32
   골든 3/5 byte-identical(gcd/abs_val/classify2).**
 
-## 현재 상태 (2026-06-30 세션 종료, master `f66a2b5`, 전 패키지 그린)
+## 현재 상태 (2026-06-30 세션 종료, master `d265c2a`, 전 패키지 그린)
 
 **H8-debt-2 step4 완료 -- AncestorRealistic 포팅 + 트리 return-value 복구로 골든 1/5 -> 3/5.** 값 반환
 함수가 트리에서 void + dead-code로 렌더되던 공통 블로커 해소(상세 CHANGELOG 2026-06-30 step4). 이후
@@ -78,16 +78,26 @@ return-value가 아니라 루프 본체 렌더링:
      아님**. 근본: `syncVarnodeFlags`(funcdata.go:586)는 C++ "addrtied can be cleared but not set" 의미로
      **addrtied를 set 못 함** -- C++은 varnode 생성 시 상속, Gosleigh의 merge-그룹 COPY는 미상속. #3(심볼
      addrtied 부여)도 sync가 set 못 해 varnode에 전파 안 됨(실측 -- ActionMappedLocalSync 재실행 실험도 실패).
-- **다음 세션 진입점 (둘 중 택1, 둘 다 H8-debt-1 broad/위험, gcd 회귀 주의)**:
-  (A) **addrtied 상속**: stack-space varnode 생성/COPY-trim 시 addrtied 상속(mergeAddrTied 등) 또는 merge
-      가드에서 spacebase varnode를 inherently-tied 취급 -> mergeByDatatype over-merge 차단. 단 레지스터
-      snapshot(uVar2)이 stack과 anchor되기 전 먼저 over-merge되므로 stack 가드만으론 부족할 수 있음.
-  (B) **loop-snapshot 통합**: register:0x4 snapshot 버전을 phi-input 버전(=local_c)과 통합(mergeAdjacentCopies
-      /trimOpOutput 경로 점검) -> write-back 렌더. gcd의 trimOpOutput이 한 방향만 처리(step3b) -- 누산기
-      케이스 확장 필요.
-  cover/snapshot 정리 후 #2(BuildFromVarnodes 재사용) 재적용 -> counted_loop 5/5 기대.
-- **진단 재현**: buildGcd 패턴 + counted_loop 바이트(tree_goldens_diag_test.go:64), MERGE_DBG 계측(이번
-  세션 제거됨)으로 SETHIGH action-tagged + BYTYPE 로그 -> register/stack High 이동 추적.
+- **이번 세션 추가 수정 (전부 충실 C++ parity, green, master `d265c2a`)**:
+  - **setVarnodeProperties 포팅**(44f6e80): NewVarnode/NewVarnodeOut가 생성 시 local-scope SymbolEntry
+    flags(addrtied)를 stamp. + RestructureVarnode가 기존 stack varnode를 re-stamp. -> 두 스택 로컬
+    (stack:fff4/fff8)이 addrtied가 돼 mergeByDatatype blob에서 빠짐(stack over-merge 해결, 실측).
+  - **moveIntersectTests 충실 포팅**(d265c2a): 병합 survivor의 stale `false` 캐시 무효화(C++ variable.cc:
+    1091). cover 정확 계산 시 stale-false로 인한 over-merge 방지(잠재 선행수정).
+  - OutputPrototype AddInstance 제거 + 스택 심볼 addrtied(f66a2b5).
+- **남은 단 하나의 블로커 (정밀 규명, 최심층)**: 루프 본문 누산기 INT_ADD 출력 `register:0x4`가 스택
+  로컬 `local_c`와 **통합 안 됨**. SSA: `local_cT = MULTIEQUAL register:0x4#uVar2 unique#uVar2`(phi 출력
+  =local_c, 입력=uVar2 별도) -> printer가 `uVar2 = local_c + local_8`(dead). MergeMarker가 phi 입력
+  register:0x4를 출력 stack:fff4와 병합했다가(mergerequired SETHIGH 확인) 다른 register:0x4 SSA 버전이
+  uVar2로 남음 = **gcd iVar1과 같은 loop-snapshot(trimOpOutput) 머신이 누산기 케이스에서 snapshot 버전을
+  로컬과 통합 못 함**. 여러 register:0x4 SSA 버전 중 어느 게 phi 입력/snapshot인지 + MergeOp의 phi-trim이
+  왜 입력을 trim하는지가 핵심.
+- **다음 세션 진입점**: `merge.go MergeOp`(phi 입력/출력 trim 결정, Phase 2 cover) + `trimOpOutput`(snapshot
+  생성, gcd는 loop-cond phi만 처리 -- 누산기 non-cond phi로 확장). gcd 회귀 주의(loop-snapshot 공유). 정렬
+  후 #2(BuildFromVarnodes 재사용) 재적용 -> counted_loop 5/5 기대.
+- **진단 재현**: buildGcd 패턴 + counted_loop 바이트(tree_goldens_diag_test.go:64). MERGE_DBG 계측(SETHIGH
+  action-tagged + ISECT/CACHE-HIT + cover-block dump, 이번 세션 제거됨)으로 register:0x4의 여러 SSA 버전
+  High 이동 추적. dumpSSA(GCD_DUMP=1)로 phi 구조 확인.
 - **수정 대상 Go 파일**: `pkg/pcode/highvariable.go`(Cover.Rebuild/getCover), `pkg/pcode/merge.go`
   (computeHighIntersection/highBlockIntersection), `pkg/pcode/scopelocal.go`(#2 BuildFromVarnodes 재사용).
   ForLoops(for-fold)는 병합 풀리면 자동 따라올 가능성(production은 같은 SSA로 for-fold 성공).
