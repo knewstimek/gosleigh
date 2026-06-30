@@ -66,7 +66,10 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ## 다음 작업 (우선순위)
 
-> **활성 작업(2026-07-01 진행): 갭1 = x64 반환 크기 추론 -- 메커니즘 충실 포팅 완료, 갭3으로 이관.**
+> **활성 작업(2026-07-01 진행): 갭1(반환 크기) + 갭3 프로모션 체인 핵심 해결. 잔여 = param_1 naming.**
+> 갭3 = heritage rename offset-key 충돌로 EAX read가 RAX(8)로 넓혀지던 것 -> normalizeRead/WriteSize 포팅으로
+> corpus add4/poly4 깨끗한 4바이트 산술. 잔여: param_1(accumulator) subvar input-trim으로 이름 상실 + dead temp.
+> 아래 #2 갭3 항목 참조. 이하 갭1 기록 보존:
 > 핸드오프 분석(ActionReturnRecovery/assumedOutputExtension/updateOutputTypes)은 **오진이었음**: deriveOutputMap/
 > fillinMap은 출력 trial을 좁히지 않는다(assumedExtension는 CALL-output 전용). x64 반환 narrowing의 실제 충실
 > 경로는 **(1) ActionReturnRecovery가 buildReturnOutput 후 `clearActiveOutput`(coreaction.cc:1951)** ->
@@ -149,22 +152,22 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
   - **[갭2b: 루프 home-slot 통합]** Windows x64는 register param(RCX/RDX..)을 home slot([rsp+8/0x10/..])에
     spill. max3는 본문 param 사용이 param_1..3로 통합되나, sum_to_n 루프 조건의 home-slot read는 param_1로
     통합 안 되고 uVar1로 남음(루프 back-edge 횡단). 별도.
-  - **[갭3: heritage refinement 미포팅 -- sub-register read 넓힘] 근본 정밀 규명 완료(2026-07-01), 다음 세션 메인**:
-    갭1으로 반환 타입은 `int`이나 본문이 `(unsigned long long)(unsigned int)(...)` 캐스트 도배 + dead `uVar3`.
-    **근본**: `refinedSubTaskSize`(heritage.go:630)가 task 시작 offset의 **max** varnode 크기를 사용 ->
-    EAX(4)+RAX(8) 오버랩 시 maxSz=8=size라 **분할 안 함** -> EAX(4) read가 [0,8) 8바이트 phi에 rename되어
-    8바이트로 넓혀짐 -> 중간 `RAX=ZEXT(EAX)`가 live화. 그 결과 `RuleSubvarZext.DoTrace`가 중간 ZEXT에서
-    pullcount=0 실패(반환 ZEXT trim은 outer만 벗기고 내부 add가 8바이트 RAX 읽음). C++ `Heritage::refinement`
-    (heritage.cc, buildRefinement)은 **모든 varnode 경계(0,4,8)에서 분할** -> [0,4)+[4,8), EAX read는 size 4
-    유지(미넓힘), RAX(8) ZEXT write만 `normalizeWriteSize`(PIECE)로 분할(상위 [4,8)는 dead). raw p-code는 정상
-    (`add eax`=4바이트 INT_ADD + `RAX=ZEXT(EAX)`). heritage가 깨끗이 분할하면 중간 ZEXT가 dead->제거되고
-    최종 ZEXT만 tryReturnPull로 trim -> `int add4{return p1+p2+p3+p4;}`.
-    **수정 = `Heritage::refinement` + `normalizeReadSize`(heritage.cc:382, SUBPIECE) + `normalizeWriteSize`
-    (heritage.cc:416, PIECE) 충실 포팅.** 현재 heritage.go 주석이 "no PIECE/SUBPIECE physical splits"로 생략을
-    명시(refinedSubTaskSize는 그 simplified stand-in). **코어 heritage 변경 -> 전 아키텍처 영향(x86-32 sub-reg
-    AX/AL 등) = 고위험. 10/10 트리 + production 회귀 필수, 작은 단위.** 검증: X64_CORPUS add4/poly4 MATCH.
-  - **다음 단계**: 갭3 = heritage refinement/normalizeRead·WriteSize 충실 포팅(전용 세션). 갭1 두 수정은 유지
-    (충실 + 무회귀, 커밋 c5fc308). 실함수 골든 파이프라인(`testdata/x64_corpus/`)으로 수정->재측정.
+  - **[갭3: 프로모션 캐스트 체인] 핵심 해결(2026-07-01) -- normalizeRead/WriteSize 포팅**: 근본 = Gosleigh
+    heritage rename이 **offset-only key**(renameRecurse `makeAddressKey(inp.Addr())`)라 EAX(0,4)와 RAX(0,8)가
+    같은 키로 충돌 -> EAX read가 RAX(8) ZEXT def를 집어 8바이트로 넓혀짐 -> 중간 ZEXT live화 -> 프로모션 캐스트
+    도배. **수정**: `Heritage::normalizeReadSize`(heritage.cc:382, SUBPIECE) + `normalizeWriteSize`
+    (heritage.cc:416, PIECE) 충실 포팅 + `Collect`에 WriteMask 필터 + task 루프에 `normalizeRange` 배선. range
+    보다 작은 read/write를 range 크기로 균일화 -> rename 충돌 제거 -> subvar(SUBPIECE/ZEXT)가 정상 collapse.
+    **결과: corpus add4/poly4가 깨끗한 4바이트 산술**(`return iVar2 + ...`, `(unsigned long long)(unsigned int)`
+    체인 소멸). 10/10 트리 + production + 전 패키지 무회귀. (CALL-effect newIndirectCreation 경로 미포팅 --
+    CALL-def write는 skip. refineInput/refinement boundary-split도 미포팅 -- 현 corpus는 normalize만으로 충분.)
+  - **[갭3 잔여: param_1 naming + dead temp] 다음 단계**: normalize 후 add4가 아직 MATCH 아님 -- (a) param_1(RCX
+    accumulator: 본문에서 read+write 둘 다)이 subvar에 RCX(8)->ECX(4) input으로 trim되며 param_1 이름 상실
+    (`uVar2`로 렌더; param_2/3/4는 read-only라 정상). subvar setReplacement의 input trim(IsInput && mask&1 &&
+    bitsize>=8 허용)이 param storage를 trim -> param-naming/lock과 상호작용. (b) dead `uVar1=ZEXT(...)` +
+    self-COPY 잔존 -> 최종 deadcode 패스 부재. **조사: subvar의 param-input trim을 Ghidra처럼 막거나(lock),
+    param naming이 sub-register offset 매칭하게.** 갭2b(home-slot)와도 인접.
+  - **다음 단계**: 갭3 잔여(param_1 naming) 해결이 add4/poly4 MATCH 관문. normalize 포팅은 유지(충실+무회귀).
 
 ### 3. [저우선] 정리
 - consume-DeadCode broader corpus 검증 후 `GOSL_DESCENDANT_DC` fallback + 레거시 descendant-count 루프 제거.

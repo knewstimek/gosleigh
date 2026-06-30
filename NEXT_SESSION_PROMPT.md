@@ -30,39 +30,34 @@ deriveOutputMap->fillinMap은 출력 trial 폭을 안 좁히고, assumedOutputEx
   Java postScript -> `x64_goldens.json`(8 실함수). 갭 맵 `TestX64CorpusGoldenMap`(X64_CORPUS=1). 재생성:
   `py -3 testdata/x64_corpus/build.py && py -3 testdata/x64_corpus/run_ghidra.py`.
 
-## 다음 작업 [최우선] -- 갭3: 내부 ZEXT 프로모션 체인 미붕괴 (add4/poly4 MATCH의 마지막 관문)
+## 다음 작업 [최우선] -- 갭3 잔여: param_1 naming (add4/poly4 MATCH의 마지막 관문)
 
-### 현상 (갭1 수정 후)
-add4 반환 타입은 `int`로 정확하나 본문이 여전히 캐스트 도배 + dead 잔존:
-- GOT: `int add4(...) { unsigned long long uVar3; uVar3 = (unsigned long long)(unsigned int)iVar2; return (int)((unsigned long long)(unsigned int)(... p1 + ... p2) + p3) + p4); }`
-- WANT: `int add4(...) { return param_1 + param_2 + param_3 + param_4; }`
+### 갭3 프로모션 체인은 해결됨 (2026-07-01, normalizeRead/WriteSize 포팅)
+근본은 heritage rename의 **offset-only key**(`renameRecurse` `makeAddressKey(inp.Addr())`)였음: EAX(0,4)와
+RAX(0,8)가 같은 키로 충돌 -> EAX read가 RAX(8) ZEXT def를 집어 8바이트로 넓혀짐 -> 중간 ZEXT live화. C++는
+`normalizeReadSize`(SUBPIECE)/`normalizeWriteSize`(PIECE)로 range 내 varnode를 균일 크기로 만들어 충돌을 없앰.
+포팅 완료(heritage.go: normalizeReadSize/normalizeWriteSize/normalizeRange + Collect WriteMask 필터 + task 루프
+배선). **결과: add4/poly4 깨끗한 4바이트 산술**(`return iVar2 + param_2 + ...`, 프로모션 캐스트 소멸). 전 회귀 그린.
 
-### 근본 (이번 세션 정밀 규명 완료 -- 핵심)
-- **raw p-code는 정상**: `add eax,x` = 4바이트 `EAX[4] = INT_ADD(EAX[4], x[4])` + `RAX[8] = ZEXT(EAX[4])`
-  (상위 클리어). 중간 RAX ZEXT는 전부 dead(아무도 8바이트 RAX를 안 읽음, 최종 반환만 읽음)여야 함.
-- **범인 = `refinedSubTaskSize`(heritage.go:630)**: task 시작 offset의 **max** varnode 크기를 반환. offset 0에
-  EAX(4)+RAX(8) 오버랩 시 maxSz=8=size -> **분할 안 함** -> EAX(4) read가 [0,8) 8바이트 phi에 rename되어
-  8바이트로 넓혀짐(`iVar1[4]=INT_ADD(uVar6[8]=ZEXT, ...)` 혼합 크기) -> 중간 ZEXT live화.
-- **그래서 `RuleSubvarZext.DoTrace`가 중간 ZEXT에서 pullcount=0 실패**(반환 ZEXT trim은 outer만 벗김; 내부 add가
-  8바이트 RAX 읽음). traceForward/Backward 자체는 정상(계측 확인).
-- **C++ 정답**: `Heritage::refinement`(heritage.cc, buildRefinement)이 **모든 varnode 경계(0,4,8)에서 분할** ->
-  [0,4)+[4,8). EAX read는 size 4 유지(미넓힘), RAX(8) ZEXT write만 `normalizeWriteSize`로 PIECE 분할(상위
-  [4,8)는 dead). clean IR이면 중간 ZEXT가 dead -> deadcode 제거, 최종 ZEXT만 tryReturnPull로 trim -> WANT.
+### 현상 (남은 미스매치)
+- GOT(add4): `int add4(int param_2,int param_3,int param_4) { unsigned long long uVar1; uVar1 = ...; return uVar2 + param_2 + param_3 + param_4; }`
+- WANT: `int add4(int param_1,...) { return param_1 + param_2 + param_3 + param_4; }`
+- 차이: (a) **param_1 손실** -- RCX는 본문에서 read+write(accumulator)라 subvar가 RCX(8)->ECX(4) input으로
+  trim하며 param_1 이름 상실(`uVar2`로 렌더). param_2/3/4(RDX/R8/R9)는 read-only라 정상 유지. (b) dead
+  `uVar1=ZEXT(..)` + self-COPY 잔존(최종 deadcode 부재).
 
-### 수정 대상 (다음 세션 -- 코어 heritage, 고위험)
-- **`Heritage::refinement` 충실 포팅**: heritage.go의 `refinedSubTaskSize` simplified 분할(max varnode 크기)을
-  C++ buildRefinement(모든 varnode start+size 경계 마킹 -> 경계마다 split)로 교체.
-- **`normalizeReadSize`(heritage.cc:382) 포팅**: range size보다 작은 read varnode를 `SUBPIECE(big[size], overlap)`로
-  재정의. (현재 미포팅 -- heritage.go Guard가 안 부름.)
-- **`normalizeWriteSize`(heritage.cc:416) 포팅**: range size보다 작은 write를 PIECE로 빈 조각 채워 size 맞춤.
-- heritage.go 728-758 task 루프 + Guard(846)에 read/write normalize 배선. 현재 주석이 "no PIECE/SUBPIECE physical
-  splits"로 생략 명시 -- 그걸 되살리는 작업.
-- **회귀 필수(전 아키텍처 영향)**: x86-32은 sub-register(AX/AL) 함수에서 영향 가능 -> 10/10 트리 + 전 production
-  `TestMSVC*` 반드시. 작은 단위 + 매 단계 전 스위트.
+### 수정 대상 (다음 세션)
+- **subvar의 param-input trim 차단**: subvarflow.go `setReplacement`가 `vn.IsInput() && (mask&1) && bitsize>=8`
+  이면 input을 trim 허용 -> param storage(RCX)를 ECX로 trim. Ghidra는 param을 full-width 유지(SUBPIECE(param)이
+  param으로 렌더). param이 lock/recover된 input은 trim 거부하거나, param naming이 sub-register offset 매칭하도록.
+  C++ subflow.cc setReplacement의 input/typelock 가드와 대조.
+- **dead temp 정리**: normalize가 만든 PIECE/SUBPIECE 잔재(uVar1 ZEXT, self-COPY) -> 최종 deadcode 패스 확인.
+- (선택) refineInput / refinement boundary-split도 C++엔 있으나 현 corpus엔 불필요. CALL-def write의
+  newIndirectCreation 경로도 미포팅(현재 skip) -- call 있는 함수에서 필요해지면 포팅.
 
-### 진단 도구 (재작성 필요 -- 이번 세션 임시 test는 정리함)
-corpus 함수를 트리로 빌드 후 alive-op stream을 nzm+con 포함 덤프(add4부터). `INT_ADD`가 8바이트 RAX 피연산자를
-읽으면 widening 발생 확인. 수정 후 4바이트 add + dead 중간 ZEXT 제거 확인.
+### 진단 도구 (재작성 필요 -- 임시 test는 정리함)
+corpus를 트리로 빌드 후 alive-op stream 덤프(add4). param_1=reg0x8(RCX) input이 `uVar2`(ECX 4바이트)인지 확인.
+subvar input-trim 차단 후 `param_1` 복구 + dead temp 제거 확인.
 
 ### 성공 기준
 - `X64_CORPUS=1 go test ./pkg/loader/ -run TestX64CorpusGoldenMap -v`: **add4/poly4가 MATCH로 flip**.
