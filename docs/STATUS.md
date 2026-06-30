@@ -40,13 +40,35 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ### 1. [최우선] 미션 #1 게이트 완료 -- production 경로(bridge.Decompile)를 universal-action 트리로 교체
 
-트리 x86-32 골든 **5/5 byte-identical** 달성으로 "트리가 임의 함수를 golden과 동일 출력" 실증이 5개 함수에서
-완료됨. 이제 #1 게이트의 실제 교체 작업이 남음: `bridge.Decompile`(decompile.go)의 손정렬 41-call subset을
-`db.BuildUniversalAction(nil) + SetCurrent("decompile").Perform(fd)` 경로로 대체.
-- **현상**: production은 여전히 41-call 손정렬(decompile.go). 트리(runTreeGhidra 패턴, tree_goldens_diag_test.go:18)는
-  같은 5개 골든을 동일 출력하나 별도 경로. 두 경로가 공존.
-- **트리 골든 커버리지(2026-06-30 확장, TestTreeGoldensDiag 8케이스)**: x86-32 골든 9개 중 **7/8 트리 통과**
-  (gcd/abs_val/classify2/counted_loop/sum_list/multiply/add3). 잔여:
+#1 게이트의 실제 교체 작업: `bridge.Decompile`(decompile.go)의 손정렬 41-call subset을
+`db.BuildUniversalAction(nil) + SetCurrent("decompile").Perform(fd)` 경로로 대체. production은 여전히 41-call
+손정렬, 트리는 별도 경로로 공존.
+
+#### 트리 전체 골든 갭 지도 (2026-06-30, `TestTreeFullGoldenMap` TREE_MAP=1, 10 testable)
+**7/10 byte-identical.** 트리가 모든 골든에 동일 출력하는지의 전체 지도:
+- **x86-32 (8/9 가용, 7 MATCH)**: gcd/abs_val/classify2/counted_loop/sum_list/multiply/add3 = MATCH. classify_sign
+  = MISMATCH(아래 상세, RuleRangeMeld). complex_max = 바이트 미보유(instruction-overlap 골든) -> 미테스트.
+- **x64_add_ret = MISMATCH (register-param 갭)**: GOT `undefined8 ... { return local_31 + local_30; }` vs WANT
+  `long ... { long in_RDI; long in_RSI; return in_RDI + in_RSI; }`. 두 갭: (a) **입력 레지스터(RDI/RSI)가
+  `in_RDI`/`in_RSI`가 아닌 `local_31`/`local_30`(스택 로컬)로 오분류** -- 트리가 register 입력을 input-register로
+  네이밍 안 함, (b) **반환타입 `undefined8` vs `long`** -- signed-long 추론 안 됨. 본문 계산 자체는 됨.
+- **aarch64_add_ret = MISMATCH (완전 붕괴)**: GOT `void entry(void) { return; }` vs WANT
+  `long entry(long param_1,long param_2) { return param_1 + param_2; }`. 레지스터 파라미터(X0/X1) + 반환값
+  복구가 트리에서 **전혀 안 됨** -> 본문이 dead-code로 전소. (production 부분 파이프라인 테스트는 시그니처 복구됨
+  -> 트리 전용 미배선.)
+- **핵심 결론**: 트리는 x86-32(스택 기반 param/local)엔 견고하나, **register-param 아키텍처(x64 SysV RDI/RSI,
+  ARM X0/X1)의 (1) 레지스터-파라미터 복구, (2) input-register 네이밍(in_RDI), (3) signed-long 타입 추론이 트리
+  파이프라인에 미배선**. 이게 미션 명시 목표(x64 register param 실함수)의 직접 블로커. production decompile.go는
+  ApplyCallingConvention + ScopeLocal RegParam 경로로 일부 처리하나 트리의 ActionDefaultParams/PrototypeTypes/
+  RestructureVarnode 경로엔 register-param 인식이 빠짐(또는 stackparam 전용). 단 이 골든들도 tiny -- 실제 x64/ARM
+  함수는 훨씬 큰 갭.
+- **다음 우선순위 (갭 지도 기반)**:
+  1. classify_sign: RuleRangeMeld 포팅(아래).
+  2. x64/ARM register-param: 트리에 register-param 복구 배선(scopelocal.go BuildFromVarnodes는 RegParamOffsets
+     경로가 이미 있음 -- 트리 proto model이 RegParamOffsets를 안 채우거나 ActionDefaultParams가 register trial을
+     안 도는지 규명). aarch64 void 붕괴부터(가장 큰 갭).
+  3. 둘 다 정렬되면 production 골든 전체 그린 확인 후 decompile.go subset 제거.
+- **x86-32 classify_sign 상세** (위 7/10 중 유일 x86 잔여):
   - **classify_sign MISMATCH (잔여 = RuleRangeMeld 미구현)**: golden `else if (param_3 < 1)`. 두 단계로 규명됨:
     - **(수정완료) De Morgan connective flip 버그**: raw jg = `BOOL_AND(BOOL_NEGATE(ZF), INT_EQUAL(OF,SF))`.
       분기 반전 시 `getBooleanFlipOpcode`가 BOOL_AND/BOOL_OR를 미처리(ok=false)해 opFlipInPlaceExecute가 swap
