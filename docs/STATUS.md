@@ -15,10 +15,19 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 현재 상태 (2026-06-30 세션 진행, 전 패키지 그린)
 
-**트리 전체 골든 맵 7/10 byte-identical** (`TestTreeFullGoldenMap`). x86-32 7/8(gcd/abs_val/classify2/
-counted_loop/sum_list/multiply/add3 MATCH; classify_sign은 의미상 정확하나 RuleRangeMeld 미구현으로 byte 차이;
-complex_max 바이트 미보유). x64_add_ret/aarch64_add_ret MISMATCH(register-param 트리 미배선 -- 아래 갭 지도).
-이번 세션 4개 충실 수정으로 x86-32 3/5 -> 7/8 + register-param 갭 지도 작성:
+**트리 전체 골든 맵 8/10 byte-identical** (`TestTreeFullGoldenMap`). **x86-32 8/8 전부 MATCH**(gcd/abs_val/
+classify2/classify_sign/counted_loop/sum_list/multiply/add3; complex_max 바이트 미보유로 미테스트). 잔여 MISMATCH 2개는
+x64_add_ret/aarch64_add_ret(register-param 트리 미배선 -- 아래 갭 지도). 이번 세션 = **RuleRangeMeld 충실 포팅으로
+classify_sign 완성**(x86-32 7/8 -> 8/8):
+- **RuleRangeMeld 실구현**(rules_ghidra_port.go + 신규 circlerange.go): 기존 stub(미구현)을 Ghidra CircleRange
+  subset 충실 포팅으로 교체. `BOOL_OR(INT_EQUAL(p,0), INT_SLESS(p,0))` -> `INT_SLESS(p,1)` collapse가 정상 작동
+  (`else if (param_3 < 1)` golden 일치). CircleRange.pullBack/pullBackUnary/pullBackBinary/intersect/circleUnion/
+  translate2Op + normalize/complement/convertToBoolean/contains/isSingle/newStride/newDomain/encodeRangeOverlaps를
+  rangeutil.cc에서 직접 포팅. usenzmask 경로(setNZMask)와 constant Symbol markup(copySymbolIfValid)은 의도적 미포팅
+  (rule이 항상 usenzmask=false 호출 + Gosleigh는 per-Varnode 상수 심볼 markup 없음 -- 명명 상수 표시에만 영향).
+  공유 rule이나 production `TestMSVC*` 전수 무회귀(BOOL_OR 형성 순서가 production과 달라 충돌 없음).
+
+전 세션(2026-06-30 앞부분) 4개 충실 수정으로 x86-32 3/5 -> 7/8 + register-param 갭 지도 작성:
 - **루프 누산기 dead-temp 근본 해소**(scopelocal.go BuildFromVarnodes): 이전 세션의 "loop-snapshot/trimOpOutput
   누산기 미통합" 가설은 **오진**이었음. 실제 근본 = merge 이후 ActionInputPrototype(coreaction.go:986)이
   BuildFromVarnodes를 호출 -> local 루프가 새 high를 만들어 stack varnode만 훔쳐 병합된 register(누산기/카운터)를
@@ -51,9 +60,9 @@ complex_max 바이트 미보유). x64_add_ret/aarch64_add_ret MISMATCH(register-
 손정렬, 트리는 별도 경로로 공존.
 
 #### 트리 전체 골든 갭 지도 (2026-06-30, `TestTreeFullGoldenMap` TREE_MAP=1, 10 testable)
-**7/10 byte-identical.** 트리가 모든 골든에 동일 출력하는지의 전체 지도:
-- **x86-32 (8/9 가용, 7 MATCH)**: gcd/abs_val/classify2/counted_loop/sum_list/multiply/add3 = MATCH. classify_sign
-  = MISMATCH(아래 상세, RuleRangeMeld). complex_max = 바이트 미보유(instruction-overlap 골든) -> 미테스트.
+**8/10 byte-identical.** 트리가 모든 골든에 동일 출력하는지의 전체 지도:
+- **x86-32 (8/9 가용, 8 MATCH = 전부)**: gcd/abs_val/classify2/classify_sign/counted_loop/sum_list/multiply/add3 =
+  MATCH. complex_max = 바이트 미보유(instruction-overlap 골든) -> 미테스트.
 - **x64_add_ret = MISMATCH (register-param 갭)**: GOT `undefined8 ... { return local_31 + local_30; }` vs WANT
   `long ... { long in_RDI; long in_RSI; return in_RDI + in_RSI; }`. 두 갭: (a) **입력 레지스터(RDI/RSI)가
   `in_RDI`/`in_RSI`가 아닌 `local_31`/`local_30`(스택 로컬)로 오분류** -- 트리가 register 입력을 input-register로
@@ -69,27 +78,17 @@ complex_max 바이트 미보유). x64_add_ret/aarch64_add_ret MISMATCH(register-
   RestructureVarnode 경로엔 register-param 인식이 빠짐(또는 stackparam 전용). 단 이 골든들도 tiny -- 실제 x64/ARM
   함수는 훨씬 큰 갭.
 - **다음 우선순위 (갭 지도 기반)**:
-  1. classify_sign: RuleRangeMeld 포팅(아래).
-  2. x64/ARM register-param: 트리에 register-param 복구 배선(scopelocal.go BuildFromVarnodes는 RegParamOffsets
-     경로가 이미 있음 -- 트리 proto model이 RegParamOffsets를 안 채우거나 ActionDefaultParams가 register trial을
-     안 도는지 규명). aarch64 void 붕괴부터(가장 큰 갭).
-  3. 둘 다 정렬되면 production 골든 전체 그린 확인 후 decompile.go subset 제거.
-- **x86-32 classify_sign 상세** (위 7/10 중 유일 x86 잔여):
-  - **classify_sign MISMATCH (잔여 = RuleRangeMeld 미구현)**: golden `else if (param_3 < 1)`. 두 단계로 규명됨:
-    - **(수정완료) De Morgan connective flip 버그**: raw jg = `BOOL_AND(BOOL_NEGATE(ZF), INT_EQUAL(OF,SF))`.
-      분기 반전 시 `getBooleanFlipOpcode`가 BOOL_AND/BOOL_OR를 미처리(ok=false)해 opFlipInPlaceExecute가 swap
-      코드 도달 전 skip -> operand만 뒤집히고 connective는 AND 유지 -> `(p==0)&&(p<0)`(모순) 렌더. 수정:
-      `getBooleanFlipOpcode`에 BOOL_AND/BOOL_OR -> (CPUI_MAX, true) 추가(prefer_complement.go, C++
-      opFlipInPlaceExecute parity). 이제 `(p==0)||(p<0)`(=p<=0, 의미상 정확) 렌더. 전 패키지 그린.
-    - **(잔여) BOOL_OR comparison-merge 미구현**: 트리 잔여 `BOOL_OR(INT_EQUAL(p,0), INT_SLESS(p,0))`를
-      golden은 `INT_SLESS(p,1)`(= `p<=0` 단일 비교)로 collapse. 이 동일-변수 비교 병합은 `RuleRangeMeld`
-      (rules_ghidra_port.go:858)가 담당하나 **newKnownMismatchBatchRule stub(미구현)** -- "CircleRange
-      pullBack/intersect/union 미포팅". 트리는 BOOL_OR 잔존, golden은 단일 비교. 다음 = RuleRangeMeld 포팅
-      (CircleRange interval, ruleaction.cc:1341 RuleRangeMeld + circlerange.cc) 또는 동일-변수-동일-상수
-      2-비교 병합 targeted subset. production은 다른 순서로 단일 비교를 일찍 형성해 BOOL_OR 미형성(회피).
+  1. **[최우선 잔여] x64/ARM register-param**: 트리에 register-param 복구 배선(scopelocal.go BuildFromVarnodes는
+     RegParamOffsets 경로가 이미 있음 -- 트리 proto model이 RegParamOffsets를 안 채우거나 ActionDefaultParams가
+     register trial을 안 도는지 규명). aarch64 void 붕괴부터(가장 큰 갭). 상세는 위 x64_add_ret/aarch64_add_ret 항목.
+  2. 정렬되면 production 골든 전체 그린 확인 후 decompile.go subset 제거.
+  - **(완료) classify_sign = RuleRangeMeld 포팅**: golden `else if (param_3 < 1)`. 트리 `BOOL_OR(INT_EQUAL(p,0),
+    INT_SLESS(p,0))`를 RuleRangeMeld가 `INT_SLESS(p,1)`로 collapse. 두 수정으로 완성:
+    (1) De Morgan connective flip(전 단계, prefer_complement.go getBooleanFlipOpcode BOOL_AND/BOOL_OR -> (CPUI_MAX,true)).
+    (2) RuleRangeMeld stub -> CircleRange subset 충실 포팅(신규 circlerange.go + rules_ghidra_port.go). x86-32 8/8.
   - **complex_max**: 바이트 미보유 + instruction-overlap 경고 골든(`/* WARNING: ...overlaps */`), 별도 처리.
 - **작업 순서**:
-  1. classify_sign De Morgan/flag-collapse 갭 수정(트리 8/8 -> production 골든 전체 검증).
+  1. x64/ARM register-param 트리 배선(위 갭 지도 상세).
   2. 11개 production 골든 전부 트리로 검증(아직 일부만). mismatch 골든별 규명.
   3. 전부 통과하면 `bridge.Decompile`을 트리 호출로 교체(또는 옵션 플래그). `TestMSVC*`가 트리 경로로 그린이면
      41-call subset 제거.
@@ -123,8 +122,9 @@ complex_max 바이트 미보유). x64_add_ret/aarch64_add_ret MISMATCH(register-
 - **H8-debt-1** TrimJoinblockMultiequals 제거 -> 충실 mergeOp trimOpOutput(merge.cc:759-760). (완료 2026-06-30)
 - **H8-debt-2** 트리 프로덕션화: step1(proto 배선)+step2(incremental heritage)+step3a(early stack heritage)+
   step3b-1(충실 ReturnSplit)+step3b(루프 회전, gcd byte-identical)+step4(AncestorRealistic + return-value 복구,
-  1/5->3/5)+**step5(누산기 BuildFromVarnodes high 재사용 + ActionForLoops 배선 + detached dead COPY 정리,
-  3/5->5/5 byte-identical)**. 다음 = 위 "다음 작업 1"(production 경로를 트리로 교체). (진행 중)
+  1/5->3/5)+step5(누산기 BuildFromVarnodes high 재사용 + ActionForLoops 배선 + detached dead COPY 정리,
+  3/5->5/5 byte-identical)+step6(De Morgan flip + **RuleRangeMeld CircleRange 포팅 = x86-32 8/8, 전체 8/10**).
+  다음 = x64/ARM register-param 트리 배선 후 production 경로를 트리로 교체. (진행 중)
 - **H9** ActionSetCasts: 분석-time CPUI_CAST 삽입 라이브, render-time assignCastStr 제거. (완료 2026-06-29)
 - 기타 미시작: struct/union 타입 복구, switch statement, 대부분 opcode resolution(PARITY_AUDIT), BatchC 품질.
 

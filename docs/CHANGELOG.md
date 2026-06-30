@@ -5,6 +5,25 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-2 -- RuleRangeMeld 충실 포팅 (CircleRange subset), x86-32 8/8 byte-identical
+classify_sign 잔여(BOOL_OR comparison-merge 미구현)를 닫아 트리 x86-32 전 골든(8/8) byte-identical 달성.
+멀티아치 전체 7/10 -> 8/10. 전 패키지 그린, production `TestMSVC*` 무회귀.
+- **RuleRangeMeld 실구현**(rules_ghidra_port.go RuleRangeMeld.apply + 신규 circlerange.go): 기존
+  newKnownMismatchBatchRule stub을 Ghidra CircleRange subset 충실 포팅으로 교체. 트리 잔여
+  `BOOL_OR(INT_EQUAL(p,0), INT_SLESS(p,0))`를 `INT_SLESS(p,1)`(= `param_3 < 1` golden)로 collapse.
+  applyOp 흐름: 두 bool-output 입력을 각각 CircleRange로 pullBack -> BOOL_AND이면 intersect, BOOL_OR이면
+  circleUnion -> translate2Op로 단일 비교 op 복원(restype 0=비교, 1=항상참 COPY 1, 2=불가 no-op, 3=항상거짓 COPY 0).
+- **CircleRange subset 포팅**(circlerange.go, 신규): 모듈러 반열린구간 [left,right)+step+mask 표현.
+  rangeutil.cc에서 직접 포팅 -- pullBack/pullBackUnary(BOOL_NEGATE/COPY/2COMP/NEGATE/ZEXT/SEXT)/
+  pullBackBinary(EQUAL/NOTEQUAL/LESS/LESSEQUAL/SLESS/SLESSEQUAL/CARRY/ADD/SUB/RIGHT/SRIGHT)/intersect/
+  circleUnion/translate2Op + normalize/complement/convertToBoolean/contains/isSingle/newStride/newDomain/
+  encodeRangeOverlaps(arrange 테이블 verbatim). **의도적 미포팅**: usenzmask 경로(setNZMask, rule이 항상
+  usenzmask=false 호출) + constant Symbol markup(copySymbolIfValid, Gosleigh는 per-Varnode 상수 심볼 markup
+  미보유 -- 명명/enum 상수 표시에만 영향). 코드 주석에 명시.
+- **무회귀 근거**: RuleRangeMeld는 공유 rule이나 production은 비교를 다른 순서로 일찍 단일화해 BOOL_OR/BOOL_AND
+  comparison-pair를 형성하지 않으므로 충돌 없음. TestMSVC* 전수 + TestUniversalActionTreeGcdGolden/Converges 그린.
+- C++ 참조: ruleaction.cc:1357 RuleRangeMeld::applyOp, rangeutil.cc(CircleRange 전반), rangeutil.hh:50/358.
+
 ### 2026-06-30: H8-debt-2 -- De Morgan 분기반전 수정 + 트리 전체 골든 갭 지도 (멀티아치 7/10)
 5/5 후 breadth 확장(x86-32 8개 + x64 + aarch64 = 10 testable)으로 트리 전체 갭 지도 작성. classify_sign에서
 진짜 De Morgan 버그를 잡아 의미 정확성 확보. 전 패키지 그린.

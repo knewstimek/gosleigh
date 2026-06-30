@@ -859,10 +859,111 @@ type RuleRangeMeld struct{ batchRule }
 
 func NewRuleRangeMeld(group string) *RuleRangeMeld {
 	r := &RuleRangeMeld{}
-	// RuleRangeMeld::applyOp -- ruleaction.cc.
-	// known mismatch: CircleRange pullBack/intersect/union translation is not ported.
-	r.batchRule = newKnownMismatchBatchRule(group, "rangemeld", []OpCode{CPUI_BOOL_OR, CPUI_BOOL_AND}, func(g string) Rule { return NewRuleRangeMeld(g) })
+	// RuleRangeMeld::applyOp -- ruleaction.cc:1357.
+	r.batchRule = newBatchRule(group, "rangemeld", []OpCode{CPUI_BOOL_OR, CPUI_BOOL_AND}, r.apply, func(g string) Rule { return NewRuleRangeMeld(g) })
 	return r
+}
+
+// RuleRangeMeld::applyOp -- ruleaction.cc:1357. Merge two same-variable range
+// conditions (V==c, V!=c, V s< c, c s< V, ...) joined by BOOL_AND/BOOL_OR into a
+// single comparison by intersecting/unioning their CircleRanges and translating
+// the result back to one comparison op.
+func (r *RuleRangeMeld) apply(op *PcodeOp, data *Funcdata) int {
+	vn1 := op.Input(0)
+	if !vn1.IsWritten() {
+		return 0
+	}
+	vn2 := op.Input(1)
+	if !vn2.IsWritten() {
+		return 0
+	}
+	sub1 := vn1.Def()
+	if !sub1.IsBoolOutput() {
+		return 0
+	}
+	sub2 := vn2.Def()
+	if !sub2.IsBoolOutput() {
+		return 0
+	}
+
+	range1 := newCircleRangeBoolean(true)
+	var markup *Varnode
+	a1 := range1.pullBack(sub1, &markup, false)
+	if a1 == nil {
+		return 0
+	}
+	range2 := newCircleRangeBoolean(true)
+	a2 := range2.pullBack(sub2, &markup, false)
+	if a2 == nil {
+		return 0
+	}
+	if sub1.Code() == CPUI_BOOL_NEGATE { // Extra pull-back if the last step is a '!'
+		if !a1.IsWritten() {
+			return 0
+		}
+		a1 = range1.pullBack(a1.Def(), &markup, false)
+		if a1 == nil {
+			return 0
+		}
+	}
+	if sub2.Code() == CPUI_BOOL_NEGATE {
+		if !a2.IsWritten() {
+			return 0
+		}
+		a2 = range2.pullBack(a2.Def(), &markup, false)
+		if a2 == nil {
+			return 0
+		}
+	}
+	if !functionalEquality(a1, a2) {
+		if a2.Size() == a1.Size() {
+			return 0
+		}
+		if a1.Size() < a2.Size() && a2.IsWritten() {
+			a2 = range2.pullBack(a2.Def(), &markup, false)
+		} else if a1.IsWritten() {
+			a1 = range1.pullBack(a1.Def(), &markup, false)
+		}
+		if a1 != a2 {
+			return 0
+		}
+	}
+	if a1 == nil || !a1.IsHeritageKnown() {
+		return 0
+	}
+
+	var restype int
+	if op.Code() == CPUI_BOOL_AND {
+		restype = range1.intersect(range2)
+	} else {
+		restype = range1.circleUnion(range2)
+	}
+
+	if restype == 0 {
+		opc, resc, resslot, tr := range1.translate2Op()
+		restype = tr
+		if tr == 0 {
+			newConst := data.NewConstant(a1.Size(), resc)
+			data.OpSetOpcode(op, opc)
+			data.OpSetInput(op, a1, 1-resslot)
+			data.OpSetInput(op, newConst, resslot)
+			return 1
+		}
+	}
+
+	if restype == 2 {
+		return 0 // Cannot represent
+	}
+	if restype == 1 { // Pieces cover everything, condition is always true
+		data.OpSetOpcode(op, CPUI_COPY)
+		data.OpRemoveInput(op, 1)
+		data.OpSetInput(op, data.NewConstant(1, 1), 0)
+	} else if restype == 3 { // Nothing left in intersection, condition is always false
+		data.OpSetOpcode(op, CPUI_COPY)
+		data.OpRemoveInput(op, 1)
+		data.OpSetInput(op, data.NewConstant(1, 0), 0)
+	}
+	return 1
 }
 
 type RuleFloatRange struct{ batchRule }
