@@ -519,7 +519,32 @@ func (s *printCState) collectSymbols() {
 			}
 			locals = append(locals, rep)
 		}
-		sort.Slice(params, func(i, j int) bool { return CompareLocDef(params[i], params[j]) < 0 })
+		// Parameters are ordered by ABI slot index, not by storage address:
+		// register arguments come first in calling-convention order (RDI,RSI,RDX,..
+		// / x0,x1,..), then stack arguments by ascending frame offset. For x86-64
+		// SysV the register offset order is the INVERSE of the argument order
+		// (RDI=0x38 is arg0, RSI=0x30 is arg1), so a raw address sort would emit
+		// the signature reversed (param_2, param_1). C++ parity: FuncProto iterates
+		// parameters by ParamList slot index (ParamEntry order), not by address.
+		// regParamSlotBase keeps stack params after all register params (register
+		// ABI indices are small: 0..5 for SysV) while preserving stack offset order.
+		const regParamSlotBase = 1 << 20
+		paramSortKey := func(vn *Varnode) int {
+			if sl != nil && sl.model != nil && isRegisterSpace(vn) {
+				if idx, ok := sl.model.IsRegParam(vn.Offset()); ok {
+					return idx
+				}
+			}
+			// Stack params sort after register params, in ascending frame offset.
+			return regParamSlotBase + int(vn.Offset()&0xffff)
+		}
+		sort.Slice(params, func(i, j int) bool {
+			ki, kj := paramSortKey(params[i]), paramSortKey(params[j])
+			if ki != kj {
+				return ki < kj
+			}
+			return CompareLocDef(params[i], params[j]) < 0
+		})
 		sort.Slice(locals, func(i, j int) bool { return CompareLocDef(locals[i], locals[j]) < 0 })
 		s.params = dedupVarnodes(params)
 		s.locals = dedupVarnodes(locals)
