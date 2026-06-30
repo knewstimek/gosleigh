@@ -67,11 +67,27 @@ return-value가 아니라 루프 본체 렌더링:
      BuildFromVarnodes의 offset별 재분리가 이 over-merge를 가렸음(#2 수정이 노출). **(수정완료, f66a2b5)**
      스택 심볼 addrtied 부여(scopelocal_ext.go RestructureVarnode)로 스택 로컬은 addrtied 가드로 보호되나,
      **레지스터는 merge 그룹 내에서 생성돼 심볼 sync를 안 거쳐 addrtied 미적용** -> 레지스터 over-merge 잔존.
-- **다음 세션 진입점**: #3 cover-fidelity가 핵심. `pkg/pcode/highvariable.go Cover.Rebuild`/`merge.go
-  computeHighIntersection`이 루프 back-edge 너머 레지스터 live range를 제대로 안 잡음. **broad/위험**(전
-  골든 cover 의존, H8 CoverBlock.Empty가 최고 영향이었음 -- gcd 회귀 주의). cover 고치면 #2(BuildFromVarnodes
-  재사용) 재적용 -> counted_loop 5/5 기대. **진단 재현**: buildGcd 패턴 + counted_loop 바이트
-  (tree_goldens_diag_test.go:64)로 트리 SSA 떠서 `register:0x0`/`register:0x4` High 동일성 확인.
+- **추가 규명 (SSA-버전 레벨, SETHIGH/BYTYPE action-tagged 계측)**: 문제는 **루프 본문 register:0x4(INT_ADD
+  출력)가 여러 SSA 버전으로 존재**한다는 것. 한 버전은 local_c phi 입력으로 MergeMarker가 stack:fff4(local_c)와
+  병합(정상), 다른 버전(snapshot)은 출력에 `uVar2 = local_c + local_8`로 렌더(= gcd iVar1 snapshot과 같은
+  H8-debt-1 loop-snapshot 머신이 counted_loop에선 write-back으로 통합 안 됨). 직접 블로커 2개:
+  1. **BuildFromVarnodes 훔침(#2)**: 병합된 register:0x4가 inputprototype의 BuildFromVarnodes가 stack:fff4를
+     훔쳐 orphan -> uVar2. (#2 reuse가 직접 수정이나 #3-blob 노출.)
+  2. **mergeByDatatype over-merge**: ActionMergeType(production은 미실행, 트리만 = C++ universalAction과 일치)가
+     stack:fff4/fff8 + 레지스터들을 한 blob으로 병합. addrtied 가드가 막아야 하나 **stack varnode가 addrtied
+     아님**. 근본: `syncVarnodeFlags`(funcdata.go:586)는 C++ "addrtied can be cleared but not set" 의미로
+     **addrtied를 set 못 함** -- C++은 varnode 생성 시 상속, Gosleigh의 merge-그룹 COPY는 미상속. #3(심볼
+     addrtied 부여)도 sync가 set 못 해 varnode에 전파 안 됨(실측 -- ActionMappedLocalSync 재실행 실험도 실패).
+- **다음 세션 진입점 (둘 중 택1, 둘 다 H8-debt-1 broad/위험, gcd 회귀 주의)**:
+  (A) **addrtied 상속**: stack-space varnode 생성/COPY-trim 시 addrtied 상속(mergeAddrTied 등) 또는 merge
+      가드에서 spacebase varnode를 inherently-tied 취급 -> mergeByDatatype over-merge 차단. 단 레지스터
+      snapshot(uVar2)이 stack과 anchor되기 전 먼저 over-merge되므로 stack 가드만으론 부족할 수 있음.
+  (B) **loop-snapshot 통합**: register:0x4 snapshot 버전을 phi-input 버전(=local_c)과 통합(mergeAdjacentCopies
+      /trimOpOutput 경로 점검) -> write-back 렌더. gcd의 trimOpOutput이 한 방향만 처리(step3b) -- 누산기
+      케이스 확장 필요.
+  cover/snapshot 정리 후 #2(BuildFromVarnodes 재사용) 재적용 -> counted_loop 5/5 기대.
+- **진단 재현**: buildGcd 패턴 + counted_loop 바이트(tree_goldens_diag_test.go:64), MERGE_DBG 계측(이번
+  세션 제거됨)으로 SETHIGH action-tagged + BYTYPE 로그 -> register/stack High 이동 추적.
 - **수정 대상 Go 파일**: `pkg/pcode/highvariable.go`(Cover.Rebuild/getCover), `pkg/pcode/merge.go`
   (computeHighIntersection/highBlockIntersection), `pkg/pcode/scopelocal.go`(#2 BuildFromVarnodes 재사용).
   ForLoops(for-fold)는 병합 풀리면 자동 따라올 가능성(production은 같은 SSA로 for-fold 성공).
