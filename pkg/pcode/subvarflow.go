@@ -237,12 +237,52 @@ func (sf *SubvariableFlow) tryCallPull(op *PcodeOp, rvn *subvariableFlowReplaceV
 }
 
 // SubvariableFlow::tryReturnPull -- subflow.cc.
+//
+// Determine if the given subgraph variable can act as the return value for the
+// given RETURN op. If the output is not locked, create a parameter PatchRecord so
+// the RETURN takes the smaller logical value. The logical size is propagated to
+// every other RETURN so the function keeps a single return-value type. This is
+// what trims the x86-64 RAX(8)=ZEXT(EAX) artifact down to a plain int return.
 func (sf *SubvariableFlow) tryReturnPull(op *PcodeOp, rvn *subvariableFlowReplaceVarnode, slot int) bool {
-	// TODO known mismatch: return-value classification is not yet ported to Gosleigh.
-	_ = op
-	_ = rvn
-	_ = slot
-	return false
+	if slot == 0 {
+		return false // Don't deal with actual return address container
+	}
+	if fp := sf.fd.GetFuncProto(); fp != nil && fp.IsOutputLocked() {
+		return false
+	}
+	if !sf.aggressive {
+		if (rvn.vn.Consumed() &^ rvn.mask) != 0 { // Something outside the mask is consumed
+			return false
+		}
+	}
+
+	if !sf.returnsTraversed {
+		// Propagate the logical size to any other return variables so the function
+		// still has a single return value type.
+		for _, retop := range sf.fd.GetPcodeOpBank().AllOps() {
+			if retop == nil || retop.IsDead() || retop.Code() != CPUI_RETURN {
+				continue
+			}
+			if retop.HaltType() != 0 { // Artificial halt
+				continue
+			}
+			retvn := retop.Input(slot)
+			rep, inworklist := sf.setReplacement(retvn, rvn.mask)
+			if rep == nil {
+				return false
+			}
+			if inworklist {
+				sf.worklist = append(sf.worklist, rep)
+			} else if retvn != nil && retvn.IsConstant() && retop != op {
+				// Trace won't revisit this RETURN, so generate the patch now.
+				sf.addTerminalPatchSameOp(retop, rep, slot)
+			}
+		}
+		sf.returnsTraversed = true
+	}
+
+	sf.addTerminalPatchSameOp(op, rvn, slot)
+	return true
 }
 
 // SubvariableFlow::tryCallReturnPush -- subflow.cc.
