@@ -47,15 +47,18 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   같은 5개 골든을 동일 출력하나 별도 경로. 두 경로가 공존.
 - **트리 골든 커버리지(2026-06-30 확장, TestTreeGoldensDiag 8케이스)**: x86-32 골든 9개 중 **7/8 트리 통과**
   (gcd/abs_val/classify2/counted_loop/sum_list/multiply/add3). 잔여:
-  - **classify_sign MISMATCH (boolean De Morgan 갭)**: golden `else if (param_3 < 1)`을 트리는 `else if
-    (param_3 == 0 && param_3 < 0)`로 렌더. SSA(ACCUM_CASE=classify_sign): 트리 blk2가
-    `BOOL_AND(INT_EQUAL(p,0), INT_SLESS(p,0))`(= `ZF && SF`, 의미상 틀림 -- jg not-taken은 `ZF||SF`=`p<=0`),
-    production blk2는 `INT_SLESS(p,1)`(= `p<=0` 올바른 collapse). 즉 트리가 jg(`!ZF && SF==OF`) flag식의
-    negation/De Morgan을 잘못 처리(AND 유지, operand negation 누락)해 단순화 실패. production은 flag식을
-    INT_SLESSEQUAL->INT_SLESS(.,1)로 collapse. 원인 후보: CBRANCH negate/opFlipCondition De Morgan(BOOL_AND
-    부정 시 BOOL_OR로 분배) 또는 RuleSborrow/RuleThreeWayCompare 계열 flag-collapse 룰 미발화/순서. production
-    전용 ActionFoldFlagConditions(flag rename shim)/ActionSeedSignedOps(타입 seed)는 boolean 구조 무관 -- 원인 아님.
-    별개 subsystem(boolean 단순화 + 분기 정규화), step3b RuleCondNegate와 같은 계열.
+  - **classify_sign MISMATCH (잔여 = RuleRangeMeld 미구현)**: golden `else if (param_3 < 1)`. 두 단계로 규명됨:
+    - **(수정완료) De Morgan connective flip 버그**: raw jg = `BOOL_AND(BOOL_NEGATE(ZF), INT_EQUAL(OF,SF))`.
+      분기 반전 시 `getBooleanFlipOpcode`가 BOOL_AND/BOOL_OR를 미처리(ok=false)해 opFlipInPlaceExecute가 swap
+      코드 도달 전 skip -> operand만 뒤집히고 connective는 AND 유지 -> `(p==0)&&(p<0)`(모순) 렌더. 수정:
+      `getBooleanFlipOpcode`에 BOOL_AND/BOOL_OR -> (CPUI_MAX, true) 추가(prefer_complement.go, C++
+      opFlipInPlaceExecute parity). 이제 `(p==0)||(p<0)`(=p<=0, 의미상 정확) 렌더. 전 패키지 그린.
+    - **(잔여) BOOL_OR comparison-merge 미구현**: 트리 잔여 `BOOL_OR(INT_EQUAL(p,0), INT_SLESS(p,0))`를
+      golden은 `INT_SLESS(p,1)`(= `p<=0` 단일 비교)로 collapse. 이 동일-변수 비교 병합은 `RuleRangeMeld`
+      (rules_ghidra_port.go:858)가 담당하나 **newKnownMismatchBatchRule stub(미구현)** -- "CircleRange
+      pullBack/intersect/union 미포팅". 트리는 BOOL_OR 잔존, golden은 단일 비교. 다음 = RuleRangeMeld 포팅
+      (CircleRange interval, ruleaction.cc:1341 RuleRangeMeld + circlerange.cc) 또는 동일-변수-동일-상수
+      2-비교 병합 targeted subset. production은 다른 순서로 단일 비교를 일찍 형성해 BOOL_OR 미형성(회피).
   - **complex_max**: 바이트 미보유 + instruction-overlap 경고 골든(`/* WARNING: ...overlaps */`), 별도 처리.
 - **작업 순서**:
   1. classify_sign De Morgan/flag-collapse 갭 수정(트리 8/8 -> production 골든 전체 검증).
