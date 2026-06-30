@@ -464,35 +464,6 @@ func (r *RuleSLessEqual2Constant) apply(op *PcodeOp, data *Funcdata) int {
 	return 1
 }
 
-type RuleLessNotEqual struct{ batchRule }
-
-func NewRuleLessNotEqual(group string) *RuleLessNotEqual {
-	r := &RuleLessNotEqual{}
-	r.batchRule = newBatchRule(group, "lessnotequal", []OpCode{CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL}, r.apply, func(g string) Rule { return NewRuleLessNotEqual(g) })
-	return r
-}
-
-func (r *RuleLessNotEqual) apply(op *PcodeOp, data *Funcdata) int {
-	for slot := 0; slot < 2; slot++ {
-		flag, ok := boolConst(op.Input(1 - slot))
-		if !ok || !isBoolLike(op.Input(slot)) {
-			continue
-		}
-		switch {
-		case op.Code() == CPUI_INT_NOTEQUAL && !flag:
-			return rewriteToCopy(data, op, op.Input(slot))
-		case op.Code() == CPUI_INT_EQUAL && flag:
-			return rewriteToCopy(data, op, op.Input(slot))
-		case op.Code() == CPUI_INT_NOTEQUAL && flag:
-			rewriteOp(data, op, CPUI_BOOL_NEGATE, op.Input(slot))
-			return 1
-		case op.Code() == CPUI_INT_EQUAL && !flag:
-			rewriteOp(data, op, CPUI_BOOL_NEGATE, op.Input(slot))
-			return 1
-		}
-	}
-	return 0
-}
 
 type RuleThreeWayCompare struct{ batchRule }
 
@@ -1129,7 +1100,7 @@ var batchCMiscRuleFactories = []batchCMiscRuleFactory{
 	func(group string) Rule { return NewRuleShiftCompare(group) },
 	func(group string) Rule { return NewRuleLessOne(group) },
 	func(group string) Rule { return NewRuleLessEqual(group) },
-	func(group string) Rule { return NewRuleLessNotEqual(group) },
+	func(group string) Rule { return NewRuleBooleanNegate(group) },
 	func(group string) Rule { return NewRuleThreeWayCompare(group) },
 	func(group string) Rule { return NewRuleXorSwap(group) },
 	func(group string) Rule { return NewRuleLzcountShiftBool(group) },

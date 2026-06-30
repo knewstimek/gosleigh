@@ -1307,12 +1307,12 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	actprop.AddRule(NewRuleCondNegate("analysis"))
 	actprop.AddRule(NewRuleBoolNegate("analysis"))
 	actprop.AddRule(NewRuleLessEqual("analysis"))
-	actprop.AddRule(NewRuleLessNotEqual("analysis"))
 	// Faithful port of C++ RuleLessNotEqual (ruleaction.cc:2310):
-	// BOOL_AND((s)<=, !=) -> (s)<. The tree's NewRuleLessNotEqual above is a
-	// different (bool-constant) simplification; without this the x86 JG/JLE flag
-	// reconstruction for a variable-vs-variable signed compare stays as the
-	// un-collapsed BOOL_AND(NOTEQUAL,SLESSEQUAL) (e.g. sum_to_n loop condition).
+	// BOOL_AND((s)<=, !=) -> (s)<. Without this the x86 JG/JLE flag reconstruction
+	// for a variable-vs-variable signed compare stays as the un-collapsed
+	// BOOL_AND(NOTEQUAL,SLESSEQUAL) (e.g. sum_to_n loop condition).
+	// (NewRuleBooleanNegate above already covers the bool-vs-constant case that
+	// the misnamed RuleLessNotEqual duplicate used to handle.)
 	actprop.AddRule(NewRuleLessNotEqualBoolAnd("analysis"))
 	actprop.AddRule(NewRuleLessOne("analysis"))
 	actprop.AddRule(NewRuleRangeMeld("analysis"))
