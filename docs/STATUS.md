@@ -45,10 +45,21 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 `db.BuildUniversalAction(nil) + SetCurrent("decompile").Perform(fd)` 경로로 대체.
 - **현상**: production은 여전히 41-call 손정렬(decompile.go). 트리(runTreeGhidra 패턴, tree_goldens_diag_test.go:18)는
   같은 5개 골든을 동일 출력하나 별도 경로. 두 경로가 공존.
+- **트리 골든 커버리지(2026-06-30 확장, TestTreeGoldensDiag 8케이스)**: x86-32 골든 9개 중 **7/8 트리 통과**
+  (gcd/abs_val/classify2/counted_loop/sum_list/multiply/add3). 잔여:
+  - **classify_sign MISMATCH (boolean De Morgan 갭)**: golden `else if (param_3 < 1)`을 트리는 `else if
+    (param_3 == 0 && param_3 < 0)`로 렌더. SSA(ACCUM_CASE=classify_sign): 트리 blk2가
+    `BOOL_AND(INT_EQUAL(p,0), INT_SLESS(p,0))`(= `ZF && SF`, 의미상 틀림 -- jg not-taken은 `ZF||SF`=`p<=0`),
+    production blk2는 `INT_SLESS(p,1)`(= `p<=0` 올바른 collapse). 즉 트리가 jg(`!ZF && SF==OF`) flag식의
+    negation/De Morgan을 잘못 처리(AND 유지, operand negation 누락)해 단순화 실패. production은 flag식을
+    INT_SLESSEQUAL->INT_SLESS(.,1)로 collapse. 원인 후보: CBRANCH negate/opFlipCondition De Morgan(BOOL_AND
+    부정 시 BOOL_OR로 분배) 또는 RuleSborrow/RuleThreeWayCompare 계열 flag-collapse 룰 미발화/순서. production
+    전용 ActionFoldFlagConditions(flag rename shim)/ActionSeedSignedOps(타입 seed)는 boolean 구조 무관 -- 원인 아님.
+    별개 subsystem(boolean 단순화 + 분기 정규화), step3b RuleCondNegate와 같은 계열.
+  - **complex_max**: 바이트 미보유 + instruction-overlap 경고 골든(`/* WARNING: ...overlaps */`), 별도 처리.
 - **작업 순서**:
-  1. 트리를 11개 production 골든(x86-32 11개 = MSVC corpus) **전부**에 돌려 mismatch 목록 확보(현재 검증은
-     5개만). `TestTreeGoldensDiag` 케이스를 production 골든 전체로 확장.
-  2. mismatch 골든별로 트리 갭 규명(누산기/cover/explicit류 잔여 가능). 5개는 통과 확인됨.
+  1. classify_sign De Morgan/flag-collapse 갭 수정(트리 8/8 -> production 골든 전체 검증).
+  2. 11개 production 골든 전부 트리로 검증(아직 일부만). mismatch 골든별 규명.
   3. 전부 통과하면 `bridge.Decompile`을 트리 호출로 교체(또는 옵션 플래그). `TestMSVC*`가 트리 경로로 그린이면
      41-call subset 제거.
 - **성공 기준**: production `TestMSVC*` 전부 트리 경로로 그린 + 41-call subset(decompile.go) 제거.
