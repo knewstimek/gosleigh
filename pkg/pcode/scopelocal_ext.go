@@ -573,6 +573,23 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 		// C++ parity: varmap.cc ScopeLocal::markUnaliased
 		_ = aliasyes
 	}
+	// Re-stamp existing stack Varnodes with their (just-built) SymbolEntry flags --
+	// chiefly addrtied. The Varnodes were created by StackPtrFlow before any symbol
+	// existed, so setVarnodeProperties at their creation time found nothing. Now that
+	// the entries exist, stamp them so addrtied is set BEFORE the speculative type-merge
+	// (mergeByDatatype) runs in the merge group; its addr-tied guard needs the flag to
+	// keep distinct stack locals apart. C++ sets these properties at Varnode creation
+	// because its default scope already carries the entries; Gosleigh builds the stack
+	// scope lazily, so it re-stamps here. setVarnodeProperties is idempotent (skips
+	// already-mapped Varnodes), so repeated mainloop passes do not oscillate.
+	for _, vn := range fd.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.IsFree() || vn.Space() == nil {
+			continue
+		}
+		if isStackSpace(vn, sl.model) {
+			fd.setVarnodeProperties(vn)
+		}
+	}
 	// overlapProblems == false because the per-offset grouping cannot
 	// produce overlaps by construction.
 	return false
