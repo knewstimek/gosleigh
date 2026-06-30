@@ -9,6 +9,7 @@
 *.dll
 *.so
 *.dylib
+*.obj
 
 # Go module
 /vendor/
