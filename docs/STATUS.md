@@ -75,14 +75,31 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 >     (ruleaction.cc:2957)의 중복이었다. 삭제 + batchC는 NewRuleBooleanNegate로 교체 + actprop 중복 등록 제거.
 >
 > **남은 4개 = 전부 deep 서브시스템 블로커 (휴리스틱 금지 규칙상 보류, 전용 세션 필요):**
->   - **타입 추론 누수 (max3/sum_array/grid_score/process 공통)**: register param TYPE_INT 시드
->     (scopelocal.go:182)가 `local = COPY param`으로 addrtied 스택 로컬에 전파 -> `int` vs golden `undefined4`.
->     **결정적 관찰**: process는 `local_18 = param_3`인데 `int`, max3는 `local_18 = param_1`인데 `undefined4`
->     (동일 패턴 다른 결과). 차이는 process local_18이 iVar1(=`*(int*)`deref 강한 int)도 받기 때문. 즉 Ghidra
->     타입 전파가 SSA 버전/op별로 갈린다. 우리 ActionInferTypes(action_infertypes.go)는 단순화 버전(buildLocalTypes
->     +ActionSeedSignedOps heuristic)이라 재현 불가. **충실 해결 = Ghidra buildLocaltypes/getLocalType
->     (varnode.cc:900)/propagateOneType/TypeOp::propagateType 전체 포팅** -> ActionInferTypes 재작성. 10/10+
->     production 회귀 위험 크므로 테스트 가드된 전용 세션.
+>   - **타입 누수 (max3/sum_array/grid_score/process 공통) -- 근본 메커니즘 규명됨(2026-07-01 후반)**:
+>     증상은 `int local_N` vs golden `undefined4 local_N`. **결정적 관찰**: process는 `local_18 = param_3`인데
+>     `int`, max3는 `local_18 = param_1`인데 `undefined4`(동일 패턴 다른 결과; process local_18은 iVar1=
+>     `*(int*)`deref 강한 int도 받음). **근본은 타입 전파가 아니라 "선언 타입 소스"다**:
+>       - Ghidra `PrintC::emitVarDecl`(printc.cc:2634)는 로컬 선언 타입을 **`sym->getType()`(Symbol 타입)**으로
+>         낸다. 추론된 varnode 타입이 아니다.
+>       - 그 Symbol 타입은 `MapState::gatherVarnodes`(varmap.cc:1124)가 ScopeLocal restructure 시점의
+>         `vn->getType()`들을 `RangeHint::merge`(varmap.cc:259, isConstAbsorbable/preferred로 UNKNOWN vs INT
+>         선택)로 합쳐 만든다. weak-int(param COPY)만 받은 로컬은 undefined4로, strong-int(deref) 받은 로컬은
+>         int으로 굳는다.
+>       - **우리 갭**: (a) `emitLocalDeclarations`(printc.go:1127)가 `vn.TypeDefFacing()`(누수된 최종 varnode
+>         타입)으로 선언. (b) 우리 ScopeLocal(scopelocal.go:345)은 로컬 HV 타입을 **FLOAT만** 세팅, 비-float은
+>         nil로 방치 -> 잡을 symbol 타입 자체가 없음.
+>     **충실 해결 = (1) ScopeLocal에 RangeHint 타입 머지 포팅해 per-local symbol 타입 캡처(restructure 타이밍의
+>     varnode 타입 기준) + (2) emitVarDecl을 symbol 타입에서 선언.** 주의: 반쪽만(선언 소스만) 바꾸면 sum_list
+>     (golden `int local_8`)/counted_loop가 깨진다 -> symbol 타입 캡처가 먼저 정확해야 함. varmap 포팅이 부분적
+>     이라 ScopeLocal/restructure 타이밍 정합 필요 = 테스트 가드된 전용 세션. (ActionInferTypes 전체 재작성은
+>     불필요 -- varnode 추론은 그대로 두고 선언 타입 경로만 충실화.)
+>     **추가 단서(다음 세션 검증 우선)**: Ghidra max3의 local_18은 varnode 타입 자체가 undefined4로 보인다
+>     (symbol뿐 아니라). 우리 SSA는 `INT_SLESS(stack:local_18, param_3)`로 addrtied 스택 var를 **직접** 읽어
+>     getLocalType이 INT_SLESS의 metain=TYPE_INT를 주워 int이 된다. Ghidra는 addrtied-merge의 snipReads/
+>     copyTrim(merge.cc:443/trimOpInput)으로 비교 전에 local_18을 unique temp로 복사해 읽을 가능성이 크다 ->
+>     그러면 local_18(addrtied)의 read 집합에 INT_SLESS가 없어 getLocalType=undefined4. 즉 선언-소스 수정과
+>     별개로 **copyTrim read-snip 정합**이 진짜 근본일 수 있음. 다음 세션은 Ghidra 12 실측(TYPEPROP_DEBUG 또는
+>     SSA 덤프)으로 local_18 varnode 타입과 비교 op의 입력(직접 vs temp)을 먼저 확인할 것.
 >   - **데이터모델 타입명 (sum_array/grid_score/process 시그니처)**: `long param_1` vs golden `longlong`.
 >     Win x64는 LLP64(long=4, longlong=8)인데 normalizedBaseType(printc.go:1177)이 8바이트 INT를 "long"으로
 >     하드코딩(LP64). cspec `<data_organization><long_size=4/><long_long_size=8/>`는 이미 파싱되나 printc까지
