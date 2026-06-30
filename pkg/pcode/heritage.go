@@ -374,6 +374,12 @@ func (h *Heritage) visitIncr(qnodeIdx, vnodeIdx int32) {
 func (h *Heritage) Collect(addr address.Address, size int32) (reads, writes, inputs []*Varnode) {
 	vns := h.fd.VarnodesByRange(addr, size)
 	for _, vn := range vns {
+		// Skip write-masked Varnodes: these are the small original reads/writes
+		// that normalizeReadSize/normalizeWriteSize replaced with full-range pieces.
+		// C++ parity: heritage.cc Heritage::collect (the !vn->isWriteMask() guard).
+		if vn.HasAddlFlags(VarnodeWriteMask) {
+			continue
+		}
 		if vn.IsInput() {
 			inputs = append(inputs, vn)
 		} else if vn.IsWritten() {
@@ -383,6 +389,156 @@ func (h *Heritage) Collect(addr address.Address, size int32) (reads, writes, inp
 		}
 	}
 	return
+}
+
+// normalizeReadSize replaces a read Varnode smaller than the heritage range with a
+// SUBPIECE of a new full-range Varnode. The original (small) read keeps its reading
+// op but is redefined as SUBPIECE(big, overlap) and write-masked; the returned
+// full-size Varnode is the new free read that participates in renaming. This keeps
+// every read in a range at the range size so SSA renaming (offset-keyed) does not
+// collide a sub-register read (EAX) with its containing super-register def (RAX).
+// C++ parity: heritage.cc Heritage::normalizeReadSize.
+func (h *Heritage) normalizeReadSize(vn *Varnode, op *PcodeOp, addr address.Address, size int32) *Varnode {
+	newop := h.fd.NewOp(2, op.Addr())
+	h.fd.OpSetOpcode(newop, CPUI_SUBPIECE)
+	vn1 := h.fd.NewVarnode(size, addr)
+	overlap := vn.OverlapAddr(addr, size)
+	if overlap < 0 {
+		overlap = 0
+	}
+	vn2 := h.fd.NewConstant(int32(addr.Space.AddrSize), uint64(overlap))
+	h.fd.OpSetInput(newop, vn1, 0)
+	h.fd.OpSetInput(newop, vn2, 1)
+	h.fd.OpSetOutput(newop, vn) // old vn is no longer a free read
+	vn.SetAddlFlags(VarnodeWriteMask)
+	h.fd.OpInsertBefore(newop, op)
+	return vn1 // new free read of uniform size
+}
+
+// normalizeWriteSize replaces a written Varnode smaller than the heritage range with
+// a full-range Varnode built by concatenating (CPUI_PIECE) the original value with
+// freshly read pieces covering the rest of the range. The original (small) write
+// keeps its defining op but is write-masked; the returned full-size Varnode is the
+// new write that participates in renaming. C++ parity: heritage.cc
+// Heritage::normalizeWriteSize (CALL-effect newIndirectCreation path unported --
+// callers skip CALL-defined writes).
+func (h *Heritage) normalizeWriteSize(vn *Varnode, addr address.Address, size int32) *Varnode {
+	def := vn.Def()
+	overlap := vn.OverlapAddr(addr, size)
+	if overlap < 0 {
+		overlap = 0
+	}
+	mostsigsize := size - (int32(overlap) + vn.Size())
+	addrSize := int32(addr.Space.AddrSize)
+	bigEndian := addr.Space.BigEndian
+
+	var mostvn, leastvn, midvn, bigout *Varnode
+
+	if mostsigsize != 0 {
+		pieceaddr := addr
+		if !bigEndian {
+			pieceaddr.Offset += uint64(int32(overlap) + vn.Size())
+		}
+		newop := h.fd.NewOp(2, def.Addr())
+		mostvn = h.fd.NewVarnodeOut(mostsigsize, pieceaddr, newop)
+		big := h.fd.NewVarnode(size, addr) // new full-range read for the missing piece
+		big.SetActiveHeritage()
+		h.fd.OpSetOpcode(newop, CPUI_SUBPIECE)
+		h.fd.OpSetInput(newop, big, 0)
+		h.fd.OpSetInput(newop, h.fd.NewConstant(addrSize, uint64(int32(overlap)+vn.Size())), 1)
+		h.fd.OpInsertBefore(newop, def)
+	}
+	if overlap != 0 {
+		pieceaddr := addr
+		if bigEndian {
+			pieceaddr.Offset += uint64(size - int32(overlap))
+		}
+		newop := h.fd.NewOp(2, def.Addr())
+		leastvn = h.fd.NewVarnodeOut(int32(overlap), pieceaddr, newop)
+		big := h.fd.NewVarnode(size, addr)
+		big.SetActiveHeritage()
+		h.fd.OpSetOpcode(newop, CPUI_SUBPIECE)
+		h.fd.OpSetInput(newop, big, 0)
+		h.fd.OpSetInput(newop, h.fd.NewConstant(addrSize, 0), 1)
+		h.fd.OpInsertBefore(newop, def)
+	}
+	if overlap != 0 {
+		newop := h.fd.NewOp(2, def.Addr())
+		midAddr := addr
+		if bigEndian {
+			midAddr = vn.Addr()
+		}
+		midvn = h.fd.NewVarnodeOut(int32(overlap)+vn.Size(), midAddr, newop)
+		h.fd.OpSetOpcode(newop, CPUI_PIECE)
+		h.fd.OpSetInput(newop, vn, 0)      // most significant part
+		h.fd.OpSetInput(newop, leastvn, 1) // least significant
+		h.fd.OpInsertAfter(newop, def)
+	} else {
+		midvn = vn
+	}
+	if mostsigsize != 0 {
+		newop := h.fd.NewOp(2, def.Addr())
+		bigout = h.fd.NewVarnodeOut(size, addr, newop)
+		h.fd.OpSetOpcode(newop, CPUI_PIECE)
+		h.fd.OpSetInput(newop, mostvn, 0)
+		h.fd.OpSetInput(newop, midvn, 1)
+		h.fd.OpInsertAfter(newop, midvn.Def())
+	} else {
+		bigout = midvn
+	}
+	vn.SetAddlFlags(VarnodeWriteMask)
+	return bigout // replace small write with full-range write
+}
+
+// normalizeRange brings every sub-range read/write in [addr,addr+size) up to the
+// range size (via SUBPIECE/PIECE), so SSA renaming sees uniform-size participants.
+// Returns the updated read/write lists with small Varnodes replaced by their
+// full-range pieces. C++ parity: the read/write normalization loops in
+// Heritage::guard (heritage.cc 1164-1182).
+func (h *Heritage) normalizeRange(addr address.Address, size int32, reads, writes []*Varnode) ([]*Varnode, []*Varnode) {
+	needNorm := false
+	for _, vn := range reads {
+		if vn.Size() < size {
+			needNorm = true
+			break
+		}
+	}
+	if !needNorm {
+		for _, vn := range writes {
+			if vn.Size() < size {
+				needNorm = true
+				break
+			}
+		}
+	}
+	if !needNorm {
+		return reads, writes
+	}
+	newReads := make([]*Varnode, 0, len(reads))
+	for _, vn := range reads {
+		if vn.Size() < size {
+			op := vn.LoneDescend()
+			if op == nil {
+				newReads = append(newReads, vn)
+				continue
+			}
+			vn = h.normalizeReadSize(vn, op, addr, size)
+		}
+		newReads = append(newReads, vn)
+	}
+	newWrites := make([]*Varnode, 0, len(writes))
+	for _, vn := range writes {
+		if vn.Size() < size {
+			if def := vn.Def(); def == nil || def.IsCall() {
+				// CALL-effect newIndirectCreation path is not ported; leave as-is.
+				newWrites = append(newWrites, vn)
+				continue
+			}
+			vn = h.normalizeWriteSize(vn, addr, size)
+		}
+		newWrites = append(newWrites, vn)
+	}
+	return newReads, newWrites
 }
 
 // ---------------------------------------------------------------------------
@@ -748,10 +904,14 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 					if len(subR)+len(subW)+len(subI) == 0 {
 						continue
 					}
+					subR, subW = h.normalizeRange(subAddr, curSize, subR, subW)
 					h.placeMultiequals(graph, subAddr, curSize, subR, subW, subI)
 					h.Rename(graph, subAddr, curSize)
 				}
 			} else {
+				// Bring sub-register reads/writes (EAX inside RAX) up to the range size
+				// so renaming does not collide them on their shared start offset.
+				reads, writes = h.normalizeRange(task.Addr, task.Size, reads, writes)
 				h.placeMultiequals(graph, task.Addr, task.Size, reads, writes, inputs)
 				h.Rename(graph, task.Addr, task.Size)
 			}
