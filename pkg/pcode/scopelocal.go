@@ -278,11 +278,41 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 	// absolute value of the signed offset, e.g. 0xfffffff4 (-12) -> "local_c".
 	// C++ parity: ScopeLocal uses SymbolEntry addresses; Ghidra names are set by
 	// ScopeLocal::buildFromVarnodes via Symbol::buildName using the frame offset.
+	// claimedHigh tracks which existing HighVariables have already been adopted by
+	// an earlier offset group in this pass, so two distinct stack offsets never
+	// collapse into one variable if a prior merge over-merged them.
+	claimedHigh := make(map[*HighVariable]bool)
 	for _, g := range localList {
 		name := localHexName(g.offset)
-		hv := NewHighVariable(name)
+		// Reuse the existing HighVariable the stack varnodes already belong to,
+		// rather than creating a fresh one and re-adding only the stack varnodes.
+		// By this point Heritage/merge (mergeAddrTied + mergeMarker) has coalesced
+		// all SSA versions at this address into one HighVariable -- and crucially
+		// also pulled in any register-backed value that flows through the loop phi
+		// (e.g. the INT_ADD accumulator on the back-edge). Creating a new high and
+		// stealing only the stack instances would orphan those register instances,
+		// rendering the loop body as a dead temp (uVar2 = local_c + local_8) instead
+		// of a write-back (local_c = local_c + local_8). C++ ActionInputPrototype
+		// never recreates HighVariables; it only maps varnodes to Symbols and the
+		// name is derived from the symbol. We approximate by naming the merged high.
+		var hv *HighVariable
 		for _, vn := range g.varnodes {
-			hv.AddInstance(vn)
+			if h := vn.High(); h != nil && !claimedHigh[h] {
+				hv = h
+				break
+			}
+		}
+		if hv == nil {
+			// No reusable high (pre-merge call, or all candidate highs already
+			// claimed by another offset -- the latter guards against over-merge).
+			hv = NewHighVariable(name)
+		}
+		hv.SetName(name)
+		claimedHigh[hv] = true
+		for _, vn := range g.varnodes {
+			if vn.High() != hv {
+				hv.AddInstance(vn)
+			}
 			sl.localByVn[vn] = hv
 			// Locals are also address-tied (identified by frame address, not SSA number).
 			// C++ parity: same as stack params above.

@@ -13,25 +13,21 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   본체. #1 게이트 = 트리를 프로덕션 경로로 만들어 41-call subset을 대체(= H8-debt-2). **현재 트리 x86-32
   골든 3/5 byte-identical(gcd/abs_val/classify2).**
 
-## 현재 상태 (2026-06-30 세션 종료, master `d265c2a`, 전 패키지 그린)
+## 현재 상태 (2026-06-30 세션 진행, 전 패키지 그린)
 
-**H8-debt-2 step4 완료 -- AncestorRealistic 포팅 + 트리 return-value 복구로 골든 1/5 -> 3/5.** 값 반환
-함수가 트리에서 void + dead-code로 렌더되던 공통 블로커 해소(상세 CHANGELOG 2026-06-30 step4). 이후
-counted_loop/sum_list 갭(루프 누산기 dead temp)을 액션 단위로 완전 규명, faithful 선행수정 2개 적용
-(ActionOutputPrototype AddInstance 제거 + 스택 심볼 addrtied) -- 남은 블로커는 cover-fidelity(아래 다음작업 1).
-- **AncestorRealistic 충실 포팅**(`ancestor_realistic.go`, C++ funcdata_varnode.cc:2016-2256): 반환
-  varnode 조상이 realistic한지 backward stack-DFS로 판정(solid movement vs unaffected/killedbycall/
-  bare-input). gcd param_3(bare input)=void, abs_val -param_3(solid NEG)=int.
-- **트리 guardReturns 배선**(`action_guardreturns.go` ActionGuardReturns, once-per-func): production의
-  ApplyGuardReturnsLive(격리 heritage 패스)를 트리 mainloop 안 ActionReturnRecovery 직전에 1회 호출.
-  RETURN에 반환 레지스터를 엮어 본문 살림.
-- **ActionReturnRecovery 게이트 + once-per-func**: markActive를 AncestorRealistic.execute AND
-  ancestorOpUse 둘 다 통과로 제한(coreaction.go:1207). flags=0이면 active return 시 매 pass 재빌드로
-  mainloop hang -> once-per-func(guardReturns 직후 1회 빌드 = C++ fullyChecked 수렴 재현).
-- **propagateConstant nil-parent 가드**(condexe.go): guardReturns 트랜지언트의 detached op skip.
+**트리 x86-32 골든 4/5 byte-identical (gcd/abs_val/classify2/counted_loop).** 이번 세션에 counted_loop의
+루프 본문 dead-temp 블로커를 충실히 해소하고 트리에 ActionForLoops를 배선해 for-fold를 살림. sum_list만 잔여.
+- **루프 누산기 dead-temp 근본 해소**(scopelocal.go BuildFromVarnodes): 이전 세션의 "loop-snapshot/trimOpOutput
+  누산기 미통합" 가설은 **오진**이었음. 실제 근본 = merge 이후 ActionInputPrototype(coreaction.go:986)이
+  BuildFromVarnodes를 호출 -> local 루프가 새 high를 만들어 stack varnode만 훔쳐 병합된 register(누산기/카운터)를
+  orphan(uVar2)으로 남김. C++ ActionInputPrototype::apply는 high를 재생성하지 않음. 수정 = 새 high 생성 대신
+  **기존 병합 high 재사용 + SetName**(claimedHigh 가드로 over-merge 폴백). counted_loop 두 루프변수 write-back 복구.
+  상세 CHANGELOG 2026-06-30.
+- **트리 ActionForLoops 배선**(action.go FinalStructure 직후): C++은 for-fold를 print 시점에 하므로 universalAction에
+  없음. Gosleigh는 ActionForLoops(production이 마지막에 호출하는 것과 동일)로 모델링 -> 트리 터미널 액션으로 추가.
+  counted_loop `while`->`for` 성립.
 
-step3b(gcd 루프 회전) 완료분은 그대로 유효. 회귀 가드: `TestUniversalActionTreeGcdGolden` +
-production `TestMSVC*` 전부 그린. production은 ActionDirectWrite 미실행이라 게이트 미적용(트리 전용).
+회귀 가드: `TestUniversalActionTreeGcdGolden` + production `TestMSVC*` + 전 패키지 그린.
 
 ---
 
