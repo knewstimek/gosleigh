@@ -73,17 +73,69 @@ func (t *HighIntersectTest) UpdateHigh(h *HighVariable) {
 	}
 }
 
-// MoveIntersectTests removes all cached entries that reference old so that
-// the caller may safely merge old into merged.
-// C++ parity: HighIntersectTest::moveIntersectTests
+// MoveIntersectTests updates the cache when `old` is about to be merged into `merged`.
+// It re-keys old's intersecting (true) tests onto merged, purges all of old's tests, and
+// -- critically -- deletes merged's cached non-intersecting (false) tests with any High X
+// UNLESS old also had a false test with X. After absorbing old, merged's Cover grows, so a
+// previously cached "merged does not intersect X" may be stale (merged can now intersect X
+// through old's Cover); dropping those forces recomputation. A merged-vs-X false test stays
+// valid only when old also did not intersect X. Without this, a stale false test (e.g. a
+// stack local tested before its loop-body register definition joined it) lets a later
+// speculative type-merge collapse two distinct loop variables.
+// C++ parity: HighIntersectTest::moveIntersectTests (variable.cc:1091).
 func (t *HighIntersectTest) MoveIntersectTests(merged, old *HighVariable) {
 	if merged == old {
 		return
 	}
+	// Gather old's tests: marked = Highs old did NOT intersect; yesinter = Highs it did.
+	marked := make(map[*HighVariable]struct{})
+	var yesinter []*HighVariable
+	for key, val := range t.cache {
+		var b *HighVariable
+		switch {
+		case key.a == old:
+			b = key.b
+		case key.b == old:
+			b = key.a
+		default:
+			continue
+		}
+		if b == merged {
+			continue
+		}
+		if val {
+			yesinter = append(yesinter, b)
+		} else {
+			marked[b] = struct{}{}
+		}
+	}
+	// Purge all of old's tests.
 	for key := range t.cache {
 		if key.a == old || key.b == old {
 			delete(t.cache, key)
 		}
+	}
+	// Drop merged's now-stale false tests (kept only where old also did not intersect).
+	for key, val := range t.cache {
+		if val {
+			continue
+		}
+		var b *HighVariable
+		switch {
+		case key.a == merged:
+			b = key.b
+		case key.b == merged:
+			b = key.a
+		default:
+			continue
+		}
+		if _, ok := marked[b]; !ok {
+			delete(t.cache, key)
+		}
+	}
+	// merged now intersects everything old intersected.
+	for _, b := range yesinter {
+		t.cache[canonicalPair(merged, b)] = true
 	}
 }
 
