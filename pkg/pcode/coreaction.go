@@ -1165,7 +1165,15 @@ var _ Action = (*ActionReturnRecovery)(nil)
 // C++ parity: coreaction.hh ActionReturnRecovery::ActionReturnRecovery
 func NewActionReturnRecovery(group string) *ActionReturnRecovery {
 	act := &ActionReturnRecovery{}
-	act.ActionBase = NewActionBase(act, 0, "returnrecovery", group)
+	// Once-per-func: this ad-hoc port rediscovers return trials by scanning RETURN
+	// inputs and rebuilds the output each call, so running every mainloop pass would
+	// re-fire buildReturnOutput indefinitely (count++ never settles -> mainloop never
+	// converges once a real return value is wired). The faithful C++ ActionReturnRecovery
+	// instead converges via the multi-pass ParamActive protocol (finishPass ->
+	// markFullyChecked -> buildReturnOutput once -> clearActiveOutput). We approximate
+	// that single-build convergence by building exactly once, after ActionGuardReturns
+	// (also once-per-func, immediately prior) has wired the return register.
+	act.ActionBase = NewActionBase(act, ActionRuleOncePerFunc, "returnrecovery", group)
 	return act
 }
 
