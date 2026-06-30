@@ -66,11 +66,11 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ## 다음 작업 (우선순위)
 
-> **활성 작업(2026-07-01): 갭1+갭3 완료 -- x64 corpus add4 byte-identical MATCH (1/8).**
-> 갭1(반환 크기 narrowing: ClearActiveOutput + tryReturnPull) + 갭3(heritage normalizeRead/WriteSize ->
-> sub-register widening 해소 + printc param reclaim + dead RAX-ZEXT 정리)로 add4가 Ghidra와 완전 일치
-> (`int add4(int param_1..4){return param_1+param_2+param_3+param_4;}`). 전 회귀 그린(10/10 트리 + production).
-> 다음 = poly4 괄호 precedence, max3/sum_to_n(stack frame+갭2b). 아래 #2 갭3 항목 참조. 이하 갭1 기록 보존:
+> **활성 작업(2026-07-01): x64 corpus add4 + poly4 byte-identical MATCH (2/8). 사용자 1차 목표 달성.**
+> 갭1(반환 narrowing: ClearActiveOutput + tryReturnPull) + 갭3(heritage normalizeRead/WriteSize sub-register
+> widening 해소 + printc param reclaim + dead RAX-ZEXT 정리) + 괄호 precedence(PrintLanguage::parentheses
+> 충실 포팅)로 add4/poly4 완전 일치. 전 회귀 그린(10/10 트리 + production). 다음 = max3/sum_to_n(stack frame +
+> 갭2b home-slot). 아래 #2 갭3 항목 참조. 이하 갭1 기록 보존:
 > 핸드오프 분석(ActionReturnRecovery/assumedOutputExtension/updateOutputTypes)은 **오진이었음**: deriveOutputMap/
 > fillinMap은 출력 trial을 좁히지 않는다(assumedExtension는 CALL-output 전용). x64 반환 narrowing의 실제 충실
 > 경로는 **(1) ActionReturnRecovery가 buildReturnOutput 후 `clearActiveOutput`(coreaction.cc:1951)** ->
@@ -169,9 +169,13 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
     param 식별 parity). (b) **dead RAX-ZEXT**: subvar 반환 trim 후 dead `uVar1=ZEXT(EAX_return)`가 stale
     consume로 in-loop deadcode를 통과 -> actcleanup 후 ActionDeadCode 추가(C++엔 없으나 normalize 잔여 정리 =
     Ghidra 출력과 일치; 더 깊은 fix는 in-loop 정리). **corpus 1/8 MATCH(add4).**
-  - **[다음: poly4 괄호 precedence]** poly4 GOT `param_1*param_2+param_3-param_4` vs WANT
-    `(param_1*param_2+param_3)-param_4` -- 수학적 동일, Ghidra가 좌측 결합 sub에 괄호 추가. printc 연산자
-    precedence/parens 렌더 갭(별도). 그 다음 max3/sum_to_n 등(stack frame + 갭2b home-slot).
+  - **[poly4 MATCH 달성(2026-07-01)]**: 괄호 precedence를 Ghidra `PrintLanguage::parentheses`
+    (printlanguage.cc:278-287)에 충실 포팅 -- equal precedence면 **부모==자식 동일 associative 연산자**일 때만
+    무괄호(그 외 괄호). `-`는 non-associative라 `(a+b)-c`/`(a-b)-c` 괄호. ExprFragment에 op 필드 추가 +
+    BinaryExpr.binaryChildString. associative = `* + & ^ |`(C++ OpToken). **corpus 2/8 MATCH(add4+poly4).**
+    10/10 트리 + 전 패키지 무회귀.
+  - **[다음: max3/sum_to_n 등]** 나머지 6개는 stack frame(local 변수) + 갭2b(home-slot reg param 루프 통합) +
+    switch/포인터/나눗셈. max3/sum_to_n부터(stack frame은 갭2a 완료라 부분 동작).
 
 ### 3. [저우선] 정리
 - consume-DeadCode broader corpus 검증 후 `GOSL_DESCENDANT_DC` fallback + 레거시 descendant-count 루프 제거.
