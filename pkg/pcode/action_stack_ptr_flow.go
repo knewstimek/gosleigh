@@ -128,96 +128,48 @@ func (a *ActionStackPtrFlow) Apply(data *Funcdata) int {
 		}
 	}
 
+	// Pointer width from the detected stack-pointer/frame varnode (RSP=8 on x64,
+	// EBP/ESP=4 on x86-32). Drives the synthetic stack space width and the local
+	// offset encoding below.
+	ptrSize := fpVn.Size()
+	if ptrSize <= 0 {
+		ptrSize = 4
+	}
+
 	// Step 2: ensure a stack address space exists.
-	stackSpace := a.resolveStackSpace(data)
+	stackSpace := a.resolveStackSpace(data, ptrSize)
 
-	// stackOffset computes the normalised stack-space offset from a frame-relative
-	// constant. push_delta is negative (e.g. -4 for PUSH EBP on x86-32), so
-	// [FP+8] → offset 4 (first parameter), [FP-4] → 0xFFFFFFFC (first local).
-	stackOffsetFor := func(accessConst *Varnode) (uint64, bool) {
-		accessSigned := signExtendConst(accessConst)
-		stackOffset := accessSigned + pushDelta
-		// Encode as uint64. Negative locals wrap as large unsigned values which
-		// IsLocalOffset() treats as frame-negative slot addresses.
-		if stackOffset < 0 {
-			// Sign-extend to 32-bit then zero-extend to 64-bit: matches Ghidra
-			// ScopeLocal offset encoding for local variables on x86-32.
-			return uint64(uint32(stackOffset)), true
-		}
-		return uint64(stackOffset), true
-	}
+	// Build the stack-pointer offset map from the detected base (fpVn at
+	// entry-relative offset pushDelta) so that every stack-pointer-derived
+	// varnode -- including ones produced by `sub rsp,N` after the base -- is
+	// classified at its correct entry-relative offset. This replaces the prior
+	// single-base FP matching and adds x64 frame support.
+	offMap := buildStackOffsetMap(data, fpVn, pushDelta)
 
-	// resolveConst resolves a varnode to a constant, following one level of
-	// COPY(const) indirection. Sleigh often emits offsets as COPY(const) into a
-	// unique-space temp rather than as direct constants in the INT_ADD operand.
-	resolveConst := func(vn *Varnode) *Varnode {
-		if vn == nil {
-			return nil
+	// stackAddrOffset returns the encoded stack-space offset for a LOAD/STORE
+	// address operand, or false if the address is not stack-pointer-relative.
+	// Handles both a direct mapped base ([rsp]) and INT_ADD(base, const) ([rsp+k]),
+	// with the constant either direct or via COPY(const).
+	stackAddrOffset := func(addrVn *Varnode) (uint64, bool) {
+		if d, ok := offMap[addrVn]; ok {
+			return encodeStackSlotOffset(d, ptrSize), true
 		}
-		if vn.IsConstant() {
-			return vn
-		}
-		// One-level COPY(const) through unique space.
-		cpOp := definedBy(vn, CPUI_COPY)
-		if cpOp != nil && cpOp.NumInput() > 0 && cpOp.Input(0) != nil && cpOp.Input(0).IsConstant() {
-			return cpOp.Input(0)
-		}
-		return nil
-	}
-
-	// tracesFP returns true if vn is fpVn directly, or is a MULTIEQUAL phi
-	// whose non-self inputs all resolve to fpVn (self-referential phis arise when
-	// Heritage runs before ActionStackPtrFlow and EBP is not written in the loop
-	// body, producing phi_ebp = MULTIEQUAL(EBP_1, phi_ebp_self)).
-	// This is needed because Heritage's task-split refinement may create a phi
-	// for EBP at the loop header, renaming EBP reads to phi_ebp instead of fpVn.
-	tracesFP := func(vn *Varnode) bool {
-		if vn == fpVn {
-			return true
-		}
-		phi := definedBy(vn, CPUI_MULTIEQUAL)
-		if phi == nil {
-			return false
-		}
-		for i := 0; i < phi.NumInput(); i++ {
-			inp := phi.Input(i)
-			if inp == nil {
-				return false
-			}
-			if inp == vn {
-				continue // self-reference is OK
-			}
-			if inp != fpVn {
-				return false
-			}
-		}
-		return true
-	}
-
-	// isFPAdd returns true when addrVn is defined by INT_ADD(FP, const) or
-	// INT_ADD(const, FP), where the constant may be direct or via COPY(const).
-	// Sleigh x86 typically emits frame-relative addresses as:
-	//   unique_tmp = COPY(const_offset)   ; separate COPY for the displacement
-	//   addr_tmp   = INT_ADD(EBP, unique_tmp)
-	// so we follow one COPY indirection when the direct operand is not a constant.
-	// tracesFP handles the case where Heritage renamed EBP reads to a phi node.
-	isFPAdd := func(addrVn *Varnode) (*Varnode, bool) {
 		addOp := definedBy(addrVn, CPUI_INT_ADD)
 		if addOp == nil || addOp.NumInput() < 2 {
-			return nil, false
+			return 0, false
 		}
 		in0, in1 := addOp.Input(0), addOp.Input(1)
-		if tracesFP(in0) {
-			if c := resolveConst(in1); c != nil {
-				return c, true
+		if d, ok := offMap[in0]; ok {
+			if c := resolveConstVarnode(in1); c != nil {
+				return encodeStackSlotOffset(d+signExtendConst(c), ptrSize), true
 			}
 		}
-		if tracesFP(in1) {
-			if c := resolveConst(in0); c != nil {
-				return c, true
+		if d, ok := offMap[in1]; ok {
+			if c := resolveConstVarnode(in0); c != nil {
+				return encodeStackSlotOffset(d+signExtendConst(c), ptrSize), true
 			}
 		}
-		return nil, false
+		return 0, false
 	}
 
 	changed := 0
@@ -248,11 +200,7 @@ func (a *ActionStackPtrFlow) Apply(data *Funcdata) int {
 		if ptrVn == nil || valVn == nil {
 			continue
 		}
-		accessConst, ok := isFPAdd(ptrVn)
-		if !ok {
-			continue
-		}
-		off, ok := stackOffsetFor(accessConst)
+		off, ok := stackAddrOffset(ptrVn)
 		if !ok {
 			continue
 		}
@@ -320,11 +268,7 @@ func (a *ActionStackPtrFlow) Apply(data *Funcdata) int {
 		if addrVn == nil {
 			continue
 		}
-		accessConst, ok := isFPAdd(addrVn)
-		if !ok {
-			continue
-		}
-		off, ok := stackOffsetFor(accessConst)
+		off, ok := stackAddrOffset(addrVn)
 		if !ok {
 			continue
 		}
@@ -365,7 +309,7 @@ func (a *ActionStackPtrFlow) Apply(data *Funcdata) int {
 
 // resolveStackSpace returns an existing stack address space if one is already
 // present in the varnode bank, otherwise creates a fresh synthetic space.
-func (a *ActionStackPtrFlow) resolveStackSpace(data *Funcdata) *address.Space {
+func (a *ActionStackPtrFlow) resolveStackSpace(data *Funcdata, ptrSize int32) *address.Space {
 	if a.createdStackSpace != nil {
 		return a.createdStackSpace
 	}
@@ -384,11 +328,16 @@ func (a *ActionStackPtrFlow) resolveStackSpace(data *Funcdata) *address.Space {
 		}
 	}
 	// No existing stack space: create one with an index above all real spaces.
+	// AddrSize follows the architecture pointer width (8 on x64, 4 on x86-32) so
+	// the local/parameter offset threshold is computed against the right sign bit.
+	if ptrSize <= 0 {
+		ptrSize = 4
+	}
 	return &address.Space{
 		Name:     "stack",
 		Kind:     address.SpaceKindStack,
 		Index:    maxIdx + 1,
-		AddrSize: 4,
+		AddrSize: uint8(ptrSize),
 		WordSize: 1,
 	}
 }
@@ -517,6 +466,133 @@ func findFramePointerDef(data *Funcdata) (*Varnode, int64, bool) {
 		}
 	}
 	return nil, 0, false
+}
+
+// resolveConstVarnode resolves a varnode to a constant varnode, following one
+// level of COPY(const) indirection. Sleigh often materializes a displacement as
+// COPY(const) into a unique temp rather than as a direct constant operand.
+func resolveConstVarnode(vn *Varnode) *Varnode {
+	if vn == nil {
+		return nil
+	}
+	if vn.IsConstant() {
+		return vn
+	}
+	if cp := definedBy(vn, CPUI_COPY); cp != nil && cp.NumInput() > 0 &&
+		cp.Input(0) != nil && cp.Input(0).IsConstant() {
+		return cp.Input(0)
+	}
+	return nil
+}
+
+// buildStackOffsetMap propagates the entry-relative stack-pointer offset from a
+// seed varnode (the detected frame base, at entry-SP-relative offset seedDelta)
+// through COPY / INT_ADD(base,const) / INT_SUB(base,const) / MULTIEQUAL chains.
+// The result maps each stack-pointer-derived varnode to its byte offset relative
+// to the function-entry stack pointer.
+//
+// This generalizes both the x86-32 EBP frame (single base = EBP at delta -4) and
+// the x64 RSP frame (rsp_input at 0 plus rsp_after = INT_SUB(rsp_input, framesize)
+// at -framesize): MSVC x64 /Od spills register params before `sub rsp,N` (base =
+// rsp_input) and accesses locals/params after it (base = rsp_after), so a single
+// (base,delta) pair cannot describe both -- the map can.
+//
+// C++ parity: ActionStackPtrFlow propagates the stack pointer through arbitrary
+// transforms via a TrackedSet; this is the const-offset subset of that.
+func buildStackOffsetMap(data *Funcdata, seedVn *Varnode, seedDelta int64) map[*Varnode]int64 {
+	m := map[*Varnode]int64{seedVn: seedDelta}
+	for changed := true; changed; {
+		changed = false
+		for _, vn := range data.GetVarnodeBank().AllVarnodes() {
+			if vn == nil {
+				continue
+			}
+			if _, done := m[vn]; done {
+				continue
+			}
+			op := vn.Def()
+			if op == nil {
+				continue
+			}
+			switch op.Code() {
+			case CPUI_COPY:
+				if op.NumInput() > 0 {
+					if d, ok := m[op.Input(0)]; ok {
+						m[vn] = d
+						changed = true
+					}
+				}
+			case CPUI_INT_ADD:
+				if op.NumInput() >= 2 {
+					in0, in1 := op.Input(0), op.Input(1)
+					if d, ok := m[in0]; ok {
+						if c := resolveConstVarnode(in1); c != nil {
+							m[vn] = d + signExtendConst(c)
+							changed = true
+						}
+					} else if d, ok := m[in1]; ok {
+						if c := resolveConstVarnode(in0); c != nil {
+							m[vn] = d + signExtendConst(c)
+							changed = true
+						}
+					}
+				}
+			case CPUI_INT_SUB:
+				// Only base - const (base in operand 0): stack pointer decrement.
+				if op.NumInput() >= 2 {
+					if d, ok := m[op.Input(0)]; ok {
+						if c := resolveConstVarnode(op.Input(1)); c != nil {
+							m[vn] = d - signExtendConst(c)
+							changed = true
+						}
+					}
+				}
+			case CPUI_MULTIEQUAL:
+				// A phi resolves to a stack offset only when every non-self input
+				// is already mapped to the SAME offset (loop-carried SP that is not
+				// re-adjusted in the body).
+				off, agree, any := int64(0), true, false
+				for i := 0; i < op.NumInput(); i++ {
+					inp := op.Input(i)
+					if inp == nil || inp == vn {
+						continue
+					}
+					d, ok := m[inp]
+					if !ok {
+						agree = false
+						break
+					}
+					if !any {
+						off, any = d, true
+					} else if d != off {
+						agree = false
+						break
+					}
+				}
+				if agree && any {
+					m[vn] = off
+					changed = true
+				}
+			}
+		}
+	}
+	return m
+}
+
+// encodeStackSlotOffset encodes an entry-relative signed stack offset into the
+// uint64 stack-space offset ScopeLocal expects: small positive values stay as-is
+// (parameter area); negative values (locals below the entry SP) wrap to a large
+// unsigned value of the architecture pointer width, matching Ghidra's ScopeLocal
+// local-offset encoding. The width matters because ScopeLocal's local/param
+// threshold is the sign bit of the pointer width (0x80000000 for 4-byte pointers,
+// 0x8000000000000000 for 8-byte): a 32-bit wrap on x64 (0xFFFFFFE8) falls below
+// the 64-bit threshold and is misclassified as a parameter, not a local.
+func encodeStackSlotOffset(signed int64, ptrSize int32) uint64 {
+	if signed < 0 && ptrSize <= 4 {
+		return uint64(uint32(signed))
+	}
+	// 8-byte pointers (and the non-negative case) use the full 64-bit value.
+	return uint64(signed)
 }
 
 // signExtendConst interprets a constant varnode's raw offset as a signed integer
