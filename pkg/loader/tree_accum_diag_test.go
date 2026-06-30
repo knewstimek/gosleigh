@@ -22,6 +22,10 @@ func TestTreeAccumDiag(t *testing.T) {
 	}
 	// counted_loop bytes (same as tree_goldens_diag_test.go:64).
 	prog := []byte{0x55, 0x8B, 0xEC, 0x83, 0xEC, 0x08, 0xC7, 0x45, 0xF8, 0x00, 0x00, 0x00, 0x00, 0xC7, 0x45, 0xFC, 0x00, 0x00, 0x00, 0x00, 0xEB, 0x09, 0x8B, 0x45, 0xFC, 0x83, 0xC0, 0x01, 0x89, 0x45, 0xFC, 0x83, 0x7D, 0xFC, 0x05, 0x7D, 0x0B, 0x8B, 0x4D, 0xF8, 0x03, 0x4D, 0xFC, 0x89, 0x4D, 0xF8, 0xEB, 0xE6, 0x8B, 0x45, 0xF8, 0x8B, 0xE5, 0x5D, 0xC3}
+	if os.Getenv("ACCUM_CASE") == "sum_list" {
+		// sum_list bytes (same as tree_goldens_diag_test.go:65).
+		prog = []byte{0x55, 0x8B, 0xEC, 0x51, 0xC7, 0x45, 0xFC, 0x00, 0x00, 0x00, 0x00, 0x83, 0x7D, 0x08, 0x00, 0x74, 0x16, 0x8B, 0x45, 0x08, 0x8B, 0x4D, 0xFC, 0x03, 0x08, 0x89, 0x4D, 0xFC, 0x8B, 0x55, 0x08, 0x8B, 0x42, 0x04, 0x89, 0x45, 0x08, 0xEB, 0xE4, 0x8B, 0x45, 0xFC, 0x8B, 0xE5, 0x5D, 0xC3}
+	}
 
 	dir := "."
 	slaPath := dir + "/../sla/testdata/x86-packed.sla"
@@ -79,6 +83,69 @@ func TestTreeAccumDiag(t *testing.T) {
 		}
 		groups[key] = append(groups[key], vn)
 	}
+	// Dump all alive ops (including any detached from basic blocks) to locate
+	// definitions of varnodes referenced but not shown in the block walk.
+	var ab strings.Builder
+	ab.WriteString("=== ALIVE OPS ===\n")
+	for _, op := range fd.GetPcodeOpBank().AliveOps() {
+		par := "detached"
+		if op.Parent() != nil {
+			par = fmt.Sprintf("blk%d", op.Parent().Index())
+		}
+		ab.WriteString("  [" + par + "] ")
+		if out := op.Output(); out != nil {
+			ab.WriteString(vnHi(out) + " = ")
+		}
+		ab.WriteString(op.Code().String())
+		for s := 0; s < op.NumInput(); s++ {
+			ab.WriteString(" " + vnHi(op.Input(s)))
+		}
+		flags := ""
+		if op.HasFlag(pcode.PcodeOpNonPrinting) {
+			flags += " NONPRINT"
+		}
+		ab.WriteString(flags + "\n")
+	}
+	t.Logf("%s", ab.String())
+
+	// Production dump for comparison: fresh build + bridge.Decompile (mutates fd
+	// in place), then dump alive ops.
+	if os.Getenv("PROD_DUMP") != "" {
+		engine2, base2, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+		if err != nil {
+			t.Fatalf("Build prod: %v", err)
+		}
+		result2, err := bridge.Build(engine2, bridge.BuildConfig{Name: "entry", Entry: base2, MaxInstructions: 60})
+		if err != nil {
+			t.Fatalf("bridge.Build prod: %v", err)
+		}
+		_, err = bridge.Decompile(engine2, result2, bridge.DecompileConfig{GhidraFormat: true, ProcessEntryName: "processEntry", GhostParams: 2})
+		if err != nil {
+			t.Fatalf("Decompile prod: %v", err)
+		}
+		var pb strings.Builder
+		pb.WriteString("=== PRODUCTION ALIVE OPS ===\n")
+		for _, op := range result2.Funcdata.GetPcodeOpBank().AliveOps() {
+			par := "detached"
+			if op.Parent() != nil {
+				par = fmt.Sprintf("blk%d", op.Parent().Index())
+			}
+			pb.WriteString("  [" + par + "] ")
+			if out := op.Output(); out != nil {
+				pb.WriteString(vnHi(out) + " = ")
+			}
+			pb.WriteString(op.Code().String())
+			for s := 0; s < op.NumInput(); s++ {
+				pb.WriteString(" " + vnHi(op.Input(s)))
+			}
+			if op.HasFlag(pcode.PcodeOpNonPrinting) {
+				pb.WriteString(" NONPRINT")
+			}
+			pb.WriteString("\n")
+		}
+		t.Logf("%s", pb.String())
+	}
+
 	sort.Strings(order)
 	var hb strings.Builder
 	hb.WriteString("=== HIGH GROUPS: counted_loop tree ===\n")

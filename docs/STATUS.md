@@ -33,75 +33,37 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 다음 작업 (우선순위)
 
-### 1. [최우선, 대형] 트리 counted_loop/sum_list -- 스택 로컬 누산기 phi 병합 + for-loop fold
+### 1. [최우선] 트리 sum_list -- 포인터-iterate PTRADD 체인 explicit 마킹 + for-fold
 
-트리 골든 2/5 잔여. **반환값은 이미 복구됨**(int, `return local_c`/`return local_8`). 남은 갭은
-return-value가 아니라 루프 본체 렌더링:
-- **현상 (counted_loop, TREE_DIAG GOT vs golden)**:
-  - GOT: `while (local_8 < 5) { uVar2 = local_c + local_8; uVar1 = local_8 + 1; }` -- 본문 갱신이 dead
-    temp(uVar1/uVar2)로 새고 루프 변수 local_c/local_8에 write-back 안됨(루프-carried 스택 로컬 phi
-    back-edge 미병합). 또한 `while`(golden은 `for`).
-  - WANT: `for (local_8 = 0; local_8 < 5; local_8 = local_8 + 1) { local_c = local_c + local_8; }`.
-- **현상 (sum_list)**: 유사 for-fold 미인식 + 변수 하나가 `return`으로 오명명(naming 충돌).
-- **핵심 단서**: counted_loop_x86_32/sum_list_x86_32 **둘 다 production 골든**이고 production은 통과
-  (msvc_diag_test.go:294 등, for 루프 정상). 즉 production 경로는 스택-로컬 누산기를 올바로 병합 +
-  for-fold함. 트리만 못함.
-- **완전 규명 (이번 세션, SETHIGH/MergeOp/BYTYPE 계측으로 액션 단위 추적)**: op 구조는 트리/production
-  byte-identical. 차이는 **HighVariable 병합/네이밍** 하나. 루프 본문 레지스터 결과(register:0x4=누산기,
-  register:0x0=카운터)가 트리에서 스택 로컬(local_c/local_8)과 분리돼 dead temp(uVar1/uVar2)로 렌더.
-  3중 체인으로 규명:
-  1. **(수정완료, master f66a2b5)** `ActionOutputPrototype`가 `hv.AddInstance(firstRet)`로 반환 varnode를
-     병합 High에서 훔침 -> C++ updateOutputTypes는 타입만 갱신(coreaction.cc:4776). 제거함.
-  2. **(미적용, cover 수정 후 재적용)** `ScopeLocal.BuildFromVarnodes`(scopelocal.go local 루프)가
-     `NewHighVariable("local_c")` + AddInstance로 스택 varnode를 **새 High로 훔침** -> register는 같은 병합
-     High에 있으나 g.varnodes(offset별 스택 SSA)에 없어 누락. 수정안 = 새 High 생성 대신 그룹 varnode의
-     **기존 병합 High 재사용 + SetName**(register 따라옴). **단 #3 cover 수정 없이 적용하면 corruption**
-     (아래 #3의 over-merge된 High를 재사용해 local_c/local_8 합쳐짐).
-  3. **(미수정, H8-debt-1 cover-fidelity = parked)** `mergeByDatatype`(ActionMergeType)가 register:0x0과
-     register:0x4(루프 back-edge 너머 simultaneously-live)를 **over-merge** -> `HighIntersectTest`의 cover
-     intersection이 이 두 레지스터의 live range 겹침을 **미검출**(loop-carried Cover gap). 이전엔
-     BuildFromVarnodes의 offset별 재분리가 이 over-merge를 가렸음(#2 수정이 노출). **(수정완료, f66a2b5)**
-     스택 심볼 addrtied 부여(scopelocal_ext.go RestructureVarnode)로 스택 로컬은 addrtied 가드로 보호되나,
-     **레지스터는 merge 그룹 내에서 생성돼 심볼 sync를 안 거쳐 addrtied 미적용** -> 레지스터 over-merge 잔존.
-- **추가 규명 (SSA-버전 레벨, SETHIGH/BYTYPE action-tagged 계측)**: 문제는 **루프 본문 register:0x4(INT_ADD
-  출력)가 여러 SSA 버전으로 존재**한다는 것. 한 버전은 local_c phi 입력으로 MergeMarker가 stack:fff4(local_c)와
-  병합(정상), 다른 버전(snapshot)은 출력에 `uVar2 = local_c + local_8`로 렌더(= gcd iVar1 snapshot과 같은
-  H8-debt-1 loop-snapshot 머신이 counted_loop에선 write-back으로 통합 안 됨). 직접 블로커 2개:
-  1. **BuildFromVarnodes 훔침(#2)**: 병합된 register:0x4가 inputprototype의 BuildFromVarnodes가 stack:fff4를
-     훔쳐 orphan -> uVar2. (#2 reuse가 직접 수정이나 #3-blob 노출.)
-  2. **mergeByDatatype over-merge**: ActionMergeType(production은 미실행, 트리만 = C++ universalAction과 일치)가
-     stack:fff4/fff8 + 레지스터들을 한 blob으로 병합. addrtied 가드가 막아야 하나 **stack varnode가 addrtied
-     아님**. 근본: `syncVarnodeFlags`(funcdata.go:586)는 C++ "addrtied can be cleared but not set" 의미로
-     **addrtied를 set 못 함** -- C++은 varnode 생성 시 상속, Gosleigh의 merge-그룹 COPY는 미상속. #3(심볼
-     addrtied 부여)도 sync가 set 못 해 varnode에 전파 안 됨(실측 -- ActionMappedLocalSync 재실행 실험도 실패).
-- **이번 세션 추가 수정 (전부 충실 C++ parity, green, master `d265c2a`)**:
-  - **setVarnodeProperties 포팅**(44f6e80): NewVarnode/NewVarnodeOut가 생성 시 local-scope SymbolEntry
-    flags(addrtied)를 stamp. + RestructureVarnode가 기존 stack varnode를 re-stamp. -> 두 스택 로컬
-    (stack:fff4/fff8)이 addrtied가 돼 mergeByDatatype blob에서 빠짐(stack over-merge 해결, 실측).
-  - **moveIntersectTests 충실 포팅**(d265c2a): 병합 survivor의 stale `false` 캐시 무효화(C++ variable.cc:
-    1091). cover 정확 계산 시 stale-false로 인한 over-merge 방지(잠재 선행수정).
-  - OutputPrototype AddInstance 제거 + 스택 심볼 addrtied(f66a2b5).
-- **남은 단 하나의 블로커 (정밀 규명, 최심층)**: 루프 본문 누산기 INT_ADD 출력 `register:0x4`가 스택
-  로컬 `local_c`와 **통합 안 됨**. SSA: `local_cT = MULTIEQUAL register:0x4#uVar2 unique#uVar2`(phi 출력
-  =local_c, 입력=uVar2 별도) -> printer가 `uVar2 = local_c + local_8`(dead). MergeMarker가 phi 입력
-  register:0x4를 출력 stack:fff4와 병합했다가(mergerequired SETHIGH 확인) 다른 register:0x4 SSA 버전이
-  uVar2로 남음 = **gcd iVar1과 같은 loop-snapshot(trimOpOutput) 머신이 누산기 케이스에서 snapshot 버전을
-  로컬과 통합 못 함**. 여러 register:0x4 SSA 버전 중 어느 게 phi 입력/snapshot인지 + MergeOp의 phi-trim이
-  왜 입력을 trim하는지가 핵심.
-- **다음 세션 진입점**: `merge.go MergeOp`(phi 입력/출력 trim 결정, Phase 2 cover) + `trimOpOutput`(snapshot
-  생성, gcd는 loop-cond phi만 처리 -- 누산기 non-cond phi로 확장). gcd 회귀 주의(loop-snapshot 공유). 정렬
-  후 #2(BuildFromVarnodes 재사용) 재적용 -> counted_loop 5/5 기대.
-- **진단 재현**: buildGcd 패턴 + counted_loop 바이트(tree_goldens_diag_test.go:64). MERGE_DBG 계측(SETHIGH
-  action-tagged + ISECT/CACHE-HIT + cover-block dump, 이번 세션 제거됨)으로 register:0x4의 여러 SSA 버전
-  High 이동 추적. dumpSSA(GCD_DUMP=1)로 phi 구조 확인.
-- **수정 대상 Go 파일**: `pkg/pcode/highvariable.go`(Cover.Rebuild/getCover), `pkg/pcode/merge.go`
-  (computeHighIntersection/highBlockIntersection), `pkg/pcode/scopelocal.go`(#2 BuildFromVarnodes 재사용).
-  ForLoops(for-fold)는 병합 풀리면 자동 따라올 가능성(production은 같은 SSA로 for-fold 성공).
+트리 골든 **4/5**(gcd/abs_val/classify2/counted_loop). sum_list 1개만 잔여. counted_loop의 누산기 dead-temp는
+이번 세션에 해소됨(BuildFromVarnodes 병합-high 재사용 + ActionForLoops 배선, 상세 CHANGELOG 2026-06-30).
+- **현상 (sum_list, TREE_DIAG)**: 본문 write-back은 정상(`local_8 = local_8 + *param_3`, `param_3 = (int *)
+  param_3[1]`). 차이는 (1) `while`(golden은 `for`), (2) stray `int *uVar3;` phantom 선언(본문 미사용).
+- **정밀 규명 (ACCUM_CASE=sum_list + PROD_DUMP 계측, tree_accum_diag_test.go)**: iterate 주소 계산 체인이
+  트리/production에서 다르게 wiring됨.
+  - production: `PTRADD(param_3,1,4)`(detached) -> `COPY 0x6600`(detached, unnamed) -> `LOAD 0x6600`(blk3) ->
+    `CAST`(NONPRINT) -> param_3. PTRADD/COPY 모두 **single-use chain = implied/unnamed**.
+  - tree: copy-prop이 LOAD 주소를 COPY 출력(0x6600) 대신 **PTRADD 출력(0x87325)으로 직접 당김** -> PTRADD
+    출력이 2-use(LOAD + 이제 dead가 된 COPY) -> **MarkExplicit이 explicit 표시 + NameVars가 uVar3 명명**. dead
+    COPY는 detached라 DeadCode가 안 지움(detached op 미처리).
+  - **for-fold 거부 지점**: `testIterateForm`(action_forloops.go:181) DFS가 iterate(CAST)->LOAD->PTRADD 출력
+    uVar3에서 truncate. uVar3가 explicit+multi-use(NumDescend>1)라 walk 중단(action_forloops.go:257) ->
+    loopDef(param_3 phi) high에 도달 못 함 -> false -> while 유지. production은 PTRADD가 implied라 DFS가
+    param_3까지 도달.
+- **근본**: copy-prop이 LOAD 주소를 PTRADD로 bypass해 PTRADD 출력 use-count를 2로 만들고(=explicit), 죽은
+  COPY가 detached라 정리 안 됨. golden(Ghidra)은 PTRADD를 inline(`param_3[1]`)하므로 트리의 explicit 마킹이
+  오답. 후보 수정: (a) RulePropagateCopy가 LOAD 주소 COPY를 bypass하지 않게(또는 bypass 후 dead COPY 제거),
+  (b) detached dead COPY를 use-count/MarkExplicit에서 제외, (c) production처럼 RulePtrArith late 순서. (a)/(b)는
+  gcd 회귀 위험 있는 copy-prop/MarkExplicit 공유 영역 -- 작은 단위 검증 필수.
+- **진단 재현**: `ACCUM_DIAG=1 ACCUM_CASE=sum_list PROD_DUMP=1 go test ./pkg/loader -run TestTreeAccumDiag -v`
+  (tree_accum_diag_test.go: SSA + alive-ops(detached 표시) + high 그룹 + production 대조 덤프).
+- **수정 대상 Go 파일**: `pkg/pcode/ruleaction*.go`(RulePropagateCopy), `pkg/pcode/coreaction.go`(MarkExplicit
+  use-count), `pkg/pcode/action_forloops.go`(testIterateForm).
 - **성공 기준**: `TestTreeGoldensDiag` 5/5 byte-identical. 정렬되면 decompile.go 41-call subset을 트리로
   교체(미션 #1 게이트 완료).
 
-**주의(step4 교훈)**: 트리에 반환값/누산기를 엮으면 once-per-func vs flags=0 오등록으로 mainloop hang이
-재발하기 쉬움. 새 액션 추가/flags 변경 시 `TestTreeGoldensDiag`를 `-timeout 60s`로 감싸 hang 조기 검출.
+**주의(step4 교훈)**: 트리에 액션 추가/flags 변경 시 `TestTreeGoldensDiag`를 `-timeout 60s`로 감싸 hang 조기
+검출. copy-prop/MarkExplicit 수정 시 production `TestMSVC*` 전체 회귀 필수(공유 코드).
 
 ### 2. [대형] breadth + x64/ARM 실함수
 
