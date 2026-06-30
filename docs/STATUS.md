@@ -13,10 +13,12 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   본체. #1 게이트 = 트리를 프로덕션 경로로 만들어 41-call subset을 대체(= H8-debt-2). **현재 트리 x86-32
   골든 3/5 byte-identical(gcd/abs_val/classify2).**
 
-## 현재 상태 (2026-06-30 세션 종료, master `75b98b7`, 전 패키지 그린)
+## 현재 상태 (2026-06-30 세션 종료, master `f66a2b5`, 전 패키지 그린)
 
 **H8-debt-2 step4 완료 -- AncestorRealistic 포팅 + 트리 return-value 복구로 골든 1/5 -> 3/5.** 값 반환
-함수가 트리에서 void + dead-code로 렌더되던 공통 블로커 해소(상세 CHANGELOG 2026-06-30 step4).
+함수가 트리에서 void + dead-code로 렌더되던 공통 블로커 해소(상세 CHANGELOG 2026-06-30 step4). 이후
+counted_loop/sum_list 갭(루프 누산기 dead temp)을 액션 단위로 완전 규명, faithful 선행수정 2개 적용
+(ActionOutputPrototype AddInstance 제거 + 스택 심볼 addrtied) -- 남은 블로커는 cover-fidelity(아래 다음작업 1).
 - **AncestorRealistic 충실 포팅**(`ancestor_realistic.go`, C++ funcdata_varnode.cc:2016-2256): 반환
   varnode 조상이 realistic한지 backward stack-DFS로 판정(solid movement vs unaffected/killedbycall/
   bare-input). gcd param_3(bare input)=void, abs_val -param_3(solid NEG)=int.
@@ -48,27 +50,31 @@ return-value가 아니라 루프 본체 렌더링:
 - **핵심 단서**: counted_loop_x86_32/sum_list_x86_32 **둘 다 production 골든**이고 production은 통과
   (msvc_diag_test.go:294 등, for 루프 정상). 즉 production 경로는 스택-로컬 누산기를 올바로 병합 +
   for-fold함. 트리만 못함.
-- **SSA 레벨 규명 (이번 세션 실측, counted_loop 트리 vs production SSA 대조)**: **op 구조는 byte-identical**.
-  같은 블록/같은 MULTIEQUAL/같은 INT_ADD. 차이는 **순수 HighVariable 병합(naming)** 하나뿐:
-  - 트리 block3: `register:0x4[4]#uVar2 = INT_ADD stack:0xfffffff4#local_cT stack:0xfffffff8#local_8T`
-    block4: `register:0x0[4]#uVar1 = INT_ADD stack:0xfffffff8#local_8T const:0x1` -- 루프 본문 결과가
-    **별도 HighVariable(uVar1/uVar2)** -> printer가 `uVar2 = local_c + local_8`(dead, write-back X).
-  - production block3: `register:0x4[4]#local_c = INT_ADD ...` block4: `register:0x0[4]#local_8 = INT_ADD ...`
-    -- 루프 본문 레지스터 결과가 **스택 로컬과 같은 HighVariable(local_c/local_8)** -> `local_c = local_c +
-    local_8`(write-back) + for-fold 인식.
-  - 즉 **루프 back-edge 레지스터 정의(register:0x4/0x0)를 스택 로컬 HighVariable(local_c/local_8,
-    stack:0xfffffff4/0xfffffff8)로 병합하는 merge를 트리가 빠뜨림**. 트리에 merge 액션은 전부 존재
-    (action.go:1423-1435 MergeRequired/MergeCopy/DominantCopy/MergeAdjacent/MergeType 등)하므로, 누락이
-    아니라 **트리에서 그 merge의 cover/mergeTest가 실패하거나 once-per-func/flags 오등록으로 한 번만
-    돌고 마는 류**(step3b 패턴) 의심. 어느 merge 액션이 production에서 register<->stack을 잇는지
-    (MergeMarker/MergeAdjacent/mergeAddrTied 후보) 먼저 격리할 것.
-- **진단 도구**: `GCD_DUMP=1 TREE_DIAG=1`로 SSA 대조. counted_loop용 임시 테스트는 이번 세션에 제거됨 --
-  필요시 buildGcd 패턴 + counted_loop 바이트(tree_goldens_diag_test.go:64)로 재작성(트리: BuildUniversalAction
-  +SetCurrent("decompile").Perform, production: bridge.Decompile, 둘 다 dumpSSA). `TestProductionStagesDiag`
-  (production 단계별), 트리 출력은 `TestTreeGoldensDiag`.
-- **수정 대상 Go 파일**: `pkg/pcode/merge.go`(mergeMarker/mergeAdjacent/mergeTest/cover) + 트리 파이프라인
-  merge 액션 flags/등록(`pkg/pcode/action.go:1423-1435`). ForLoops(for-fold)는 병합이 풀리면 자동 따라올
-  가능성 높음(production은 같은 SSA로 for-fold 성공) -- 병합 먼저.
+- **완전 규명 (이번 세션, SETHIGH/MergeOp/BYTYPE 계측으로 액션 단위 추적)**: op 구조는 트리/production
+  byte-identical. 차이는 **HighVariable 병합/네이밍** 하나. 루프 본문 레지스터 결과(register:0x4=누산기,
+  register:0x0=카운터)가 트리에서 스택 로컬(local_c/local_8)과 분리돼 dead temp(uVar1/uVar2)로 렌더.
+  3중 체인으로 규명:
+  1. **(수정완료, master f66a2b5)** `ActionOutputPrototype`가 `hv.AddInstance(firstRet)`로 반환 varnode를
+     병합 High에서 훔침 -> C++ updateOutputTypes는 타입만 갱신(coreaction.cc:4776). 제거함.
+  2. **(미적용, cover 수정 후 재적용)** `ScopeLocal.BuildFromVarnodes`(scopelocal.go local 루프)가
+     `NewHighVariable("local_c")` + AddInstance로 스택 varnode를 **새 High로 훔침** -> register는 같은 병합
+     High에 있으나 g.varnodes(offset별 스택 SSA)에 없어 누락. 수정안 = 새 High 생성 대신 그룹 varnode의
+     **기존 병합 High 재사용 + SetName**(register 따라옴). **단 #3 cover 수정 없이 적용하면 corruption**
+     (아래 #3의 over-merge된 High를 재사용해 local_c/local_8 합쳐짐).
+  3. **(미수정, H8-debt-1 cover-fidelity = parked)** `mergeByDatatype`(ActionMergeType)가 register:0x0과
+     register:0x4(루프 back-edge 너머 simultaneously-live)를 **over-merge** -> `HighIntersectTest`의 cover
+     intersection이 이 두 레지스터의 live range 겹침을 **미검출**(loop-carried Cover gap). 이전엔
+     BuildFromVarnodes의 offset별 재분리가 이 over-merge를 가렸음(#2 수정이 노출). **(수정완료, f66a2b5)**
+     스택 심볼 addrtied 부여(scopelocal_ext.go RestructureVarnode)로 스택 로컬은 addrtied 가드로 보호되나,
+     **레지스터는 merge 그룹 내에서 생성돼 심볼 sync를 안 거쳐 addrtied 미적용** -> 레지스터 over-merge 잔존.
+- **다음 세션 진입점**: #3 cover-fidelity가 핵심. `pkg/pcode/highvariable.go Cover.Rebuild`/`merge.go
+  computeHighIntersection`이 루프 back-edge 너머 레지스터 live range를 제대로 안 잡음. **broad/위험**(전
+  골든 cover 의존, H8 CoverBlock.Empty가 최고 영향이었음 -- gcd 회귀 주의). cover 고치면 #2(BuildFromVarnodes
+  재사용) 재적용 -> counted_loop 5/5 기대. **진단 재현**: buildGcd 패턴 + counted_loop 바이트
+  (tree_goldens_diag_test.go:64)로 트리 SSA 떠서 `register:0x0`/`register:0x4` High 동일성 확인.
+- **수정 대상 Go 파일**: `pkg/pcode/highvariable.go`(Cover.Rebuild/getCover), `pkg/pcode/merge.go`
+  (computeHighIntersection/highBlockIntersection), `pkg/pcode/scopelocal.go`(#2 BuildFromVarnodes 재사용).
+  ForLoops(for-fold)는 병합 풀리면 자동 따라올 가능성(production은 같은 SSA로 for-fold 성공).
 - **성공 기준**: `TestTreeGoldensDiag` 5/5 byte-identical. 정렬되면 decompile.go 41-call subset을 트리로
   교체(미션 #1 게이트 완료).
 
