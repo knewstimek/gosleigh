@@ -15,10 +15,20 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 현재 상태 (2026-06-30 세션 진행, 전 패키지 그린)
 
-**트리 전체 골든 맵 8/10 byte-identical** (`TestTreeFullGoldenMap`). **x86-32 8/8 전부 MATCH**(gcd/abs_val/
-classify2/classify_sign/counted_loop/sum_list/multiply/add3; complex_max 바이트 미보유로 미테스트). 잔여 MISMATCH 2개는
-x64_add_ret/aarch64_add_ret(register-param 트리 미배선 -- 아래 갭 지도). 이번 세션 = **RuleRangeMeld 충실 포팅으로
-classify_sign 완성**(x86-32 7/8 -> 8/8):
+**트리 전체 골든 맵 9/10 byte-identical** (`TestTreeFullGoldenMap`). **x86-32 8/8 + aarch64_add_ret 전부 MATCH**.
+잔여 MISMATCH 1개 = x64_add_ret(processEntry 모드 in_RDI 네이밍, 아래 갭 지도). 이번 세션 = **트리 default
+ProtoModel을 cspec 구동 arch-aware로 교체 -> aarch64 register-param 복구**(8/10 -> 9/10):
+- **근본(전 세션 추적 검증됨)**: `bridge.go buildDefaultModel`이 `NewProtoModelFromCspec(cspec, nil, nil)`(regLookup=nil
+  -> RegParamOffsets 미설정) + `WithReturnReg(sp.Index, 0, 4)`(x86 EAX 하드코딩)이라 x64/aarch64에서 scopelocal.go:110
+  게이트 미발동. `runTreeCase`도 CspecPath 미전달(CspecData=nil).
+- **수정**: (1) buildDefaultModel arch-aware -- regLookup(`xr.RegisterByName`) 전달로 cspec IntegerRegParams ->
+  RegParamOffsets 채움 + 반환 레지스터를 cspec `<output>` 첫 정수 register(EAX/RAX/x0)에서 자연 폭으로 유도. cspec nil이면
+  기존 EAX(0,4) fallback. (2) cspec.go: AArch64 `storage="float"/"hiddenret"` 속성 파싱 + isIntegerRegPentry/
+  IntegerReturnReg. (3) tree_fullmap_diag_test.go: cspecRel 추가 + CspecPath 배선, AARCH64.cspec를 testdata로 복사.
+- **결과**: aarch64_add_ret void 붕괴 -> `long entry(long param_1,long param_2)` MATCH. x64는 register 복구 +
+  long 반환 작동(아래 잔여).
+
+직전 단계 = **RuleRangeMeld 충실 포팅으로 classify_sign 완성**(x86-32 7/8 -> 8/8):
 - **RuleRangeMeld 실구현**(rules_ghidra_port.go + 신규 circlerange.go): 기존 stub(미구현)을 Ghidra CircleRange
   subset 충실 포팅으로 교체. `BOOL_OR(INT_EQUAL(p,0), INT_SLESS(p,0))` -> `INT_SLESS(p,1)` collapse가 정상 작동
   (`else if (param_3 < 1)` golden 일치). CircleRange.pullBack/pullBackUnary/pullBackBinary/intersect/circleUnion/
@@ -60,49 +70,37 @@ classify_sign 완성**(x86-32 7/8 -> 8/8):
 손정렬, 트리는 별도 경로로 공존.
 
 #### 트리 전체 골든 갭 지도 (2026-06-30, `TestTreeFullGoldenMap` TREE_MAP=1, 10 testable)
-**8/10 byte-identical.** 트리가 모든 골든에 동일 출력하는지의 전체 지도:
+**9/10 byte-identical.** 트리가 모든 골든에 동일 출력하는지의 전체 지도:
 - **x86-32 (8/9 가용, 8 MATCH = 전부)**: gcd/abs_val/classify2/classify_sign/counted_loop/sum_list/multiply/add3 =
   MATCH. complex_max = 바이트 미보유(instruction-overlap 골든) -> 미테스트.
-- **x64_add_ret = MISMATCH (register-param 갭)**: GOT `undefined8 ... { return local_31 + local_30; }` vs WANT
-  `long ... { long in_RDI; long in_RSI; return in_RDI + in_RSI; }`. 두 갭: (a) **입력 레지스터(RDI/RSI)가
-  `in_RDI`/`in_RSI`가 아닌 `local_31`/`local_30`(스택 로컬)로 오분류** -- 트리가 register 입력을 input-register로
-  네이밍 안 함, (b) **반환타입 `undefined8` vs `long`** -- signed-long 추론 안 됨. 본문 계산 자체는 됨.
-- **aarch64_add_ret = MISMATCH (완전 붕괴)**: GOT `void entry(void) { return; }` vs WANT
-  `long entry(long param_1,long param_2) { return param_1 + param_2; }`. 레지스터 파라미터(X0/X1) + 반환값
-  복구가 트리에서 **전혀 안 됨** -> 본문이 dead-code로 전소. (production 부분 파이프라인 테스트는 시그니처 복구됨
-  -> 트리 전용 미배선.)
-- **핵심 결론**: 트리는 x86-32(스택 기반 param/local)엔 견고하나, **register-param 아키텍처(x64 SysV RDI/RSI,
-  ARM X0/X1)의 (1) 레지스터-파라미터 복구, (2) input-register 네이밍(in_RDI), (3) signed-long 타입 추론이 트리
-  파이프라인에 미배선**. 이게 미션 명시 목표(x64 register param 실함수)의 직접 블로커. production decompile.go는
-  ApplyCallingConvention + ScopeLocal RegParam 경로로 일부 처리하나 트리의 ActionDefaultParams/PrototypeTypes/
-  RestructureVarnode 경로엔 register-param 인식이 빠짐(또는 stackparam 전용). 단 이 골든들도 tiny -- 실제 x64/ARM
-  함수는 훨씬 큰 갭.
+- **aarch64_add_ret = MATCH (이번 세션 해결)**: cspec 구동 arch-aware ProtoModel로 x0/x1 register-param 복구 +
+  x0 반환 -> `long entry(long param_1,long param_2) { return param_1 + param_2; }`. (non-processEntry 경로.)
+- **x64_add_ret = MISMATCH (processEntry in_RDI 갭, 유일 잔여)**: GOT
+  `long processEntry entry(undefined4 param_1,undefined4 param_2,long param_3,long param_4) { return param_4 + param_3; }`
+  vs WANT `long processEntry entry(void) { long in_RSI; long in_RDI; return in_RDI + in_RSI; }`. register-param 복구
+  자체는 동작(RDI/RSI를 long으로 잡음, 반환 long 추론 OK). 갭은 **processEntry(entry-point) 모드 의미**: golden은
+  void 프로토타입 + live-on-entry 레지스터를 `in_RDI`/`in_RSI` 로컬로 렌더. 트리는 이를 param_3/param_4로 복구.
+- **핵심 결론**: 트리의 register-param 복구/반환 추론 인프라는 cspec 구동으로 동작 확정(aarch64 MATCH가 증명).
+  유일 잔여는 미션의 register-param 코어가 아니라 entry-point(processEntry) 전용 렌더링 디테일.
 - **다음 우선순위 (갭 지도 기반)**:
-  1. **[최우선 잔여] x64/ARM register-param** -- **root cause 규명됨(2026-06-30, 코드 근거). 인프라는 이미 존재/동작
-     증명됨; 문제는 트리 proto model의 x86-32 하드코딩**:
-     - **증명된 레퍼런스**: `loader_test.go TestAARCH64SimpleFunction`(L2372, setup L2413-2456, PASS)는 register-param을
-       완벽 복구 -> `long entry(long param_1, long param_2) { return param_1+param_2; }`. 방법 =
-       `NewProtoModelFromCspec(cspec, stackSpace, nil)` + `WithReturnReg(idx, 16384, 8)`(X0) +
-       `WithRegParams([]uint64{16384,16392})` + `ApplyCallingConvention` + `ApplyGuardReturnsLive`. 즉 ScopeLocal/
-       RegParamOffsets/타입추론 인프라는 전부 동작한다. **"미포팅"이 아님.**
-     - **현상**: 트리가 x64_add_ret를 `undefined8 { return local_31 + local_30; }`(WANT `long ... in_RDI/in_RSI`),
-       aarch64_add_ret를 `void entry(void){return;}`(WANT `long entry(long,long)`)로 출력.
-     - **근본(코드 확인)**: 트리가 쓰는 `bridge.go:192 buildDefaultModel`이 위 모범 답안과 달리 x86-32 하드코딩:
-       (a) RegParamOffsets 미설정 -- `NewProtoModelFromCspec(cspec, nil, nil)`로 regLookup=nil(protomodel.go:139는
-       regLookup!=nil일 때만 채움) + `runTreeCase`가 CspecPath 미전달이라 cspec도 nil(early-return).
-       (b) `WithReturnReg(sp.Index, 0, 4)` = **x86 EAX 하드코딩**. x64 RAX(0,8)/aarch64 X0(16384,8)에 틀림
-       (decompile.go:80도 동일 하드코딩 -- 둘 다 x86 전용).
-       => scopelocal.go:110 `len(RegParamOffsets)>0` 게이트 미발동 + 반환 레지스터 오설정 -> 본문/반환 복구 실패.
-     - **수정 대상 Go 파일**: `pkg/bridge/bridge.go`(buildDefaultModel을 arch-aware로: regLookup 전달 + ReturnReg를
-       cspec default-proto return location에서 유도, EAX 하드코딩 제거), `pkg/loader/tree_fullmap_diag_test.go`
-       (runTreeCase가 cspecRel 추가 + CspecPath 전달). 그 다음 잔여: x64 `in_RDI`는 processEntry 모드의 live-on-entry
-       레지스터 네이밍(별도 경로), signed-long 반환은 배선 후 재측정.
-     - **C++ 참조**: Architecture return-location/PrototypeModel 구성(Architecture::setPrimitiveMethods,
-       prototype.cc/cspec), ScopeLocal::BuildFromVarnodes(scopelocal.go), ActionDefaultParams(coreaction.cc),
-       register trial(paramactive.go:904), input-register 네이밍(printc/Varnode naming).
-     - **성공 기준**: `TREE_MAP=1 ... TestTreeFullGoldenMap`에서 x64_add_ret/aarch64_add_ret MATCH -> 8/10 -> 10/10.
-       먼저 aarch64 void 붕괴(모범 답안과 동일 경로 도달부터). 진단 1단계 = 트리 case proto model의 RegParamOffsets/
-       ReturnReg 덤프로 가설 검증. **회귀**: production `TestMSVC*` + `TestAArch64`/`TestX8664`(모범 답안) 유지.
+  1. **[잔여] x64 processEntry in_RDI 네이밍 (별도 경로)** -- register-param 코어는 끝남. 이 골든은
+     entry-point(void 프로토타입) 스타일이라 register를 param이 아닌 live-on-entry로 렌더해야 함:
+     - **현상**: 트리가 x64_add_ret를
+       `long processEntry entry(undefined4 param_1,undefined4 param_2,long param_3,long param_4){return param_4+param_3;}`
+       (WANT `long processEntry entry(void){ long in_RSI; long in_RDI; return in_RDI+in_RSI;}`)로 출력.
+     - **근본(2개, 같은 뿌리)**: processEntry 모드에서 (a) register-param 복구가 **억제되어야** 함(프로토타입 void) --
+       현재 RegParamOffsets 게이트가 RDI/RSI를 param으로 복구. (b) 복구 안 된 live-on-entry 입력 레지스터는
+       `in_<reg>` 로 네이밍되어야 함 -- **printc 미구현**(`isSpecialInputRegister`는 pc/sp/lr/xzr/nzcv만 처리,
+       일반 입력 레지스터 `in_RDI` 네이밍 경로 없음). 단순히 RegParamOffsets를 비우면 수정 전 `local_31`(스택 로컬 오분류)로
+       회귀하므로 (b) 구현이 필수.
+     - **수정 대상 Go 파일**: (a) entry-point void 프로토타입 플래그를 bridge.BuildConfig -> buildDefaultModel에
+       플럼(processEntry 케이스에서 RegParamOffsets 미설정, 반환 레지스터는 유지해 long 반환 복구). aarch64는
+       non-processEntry라 무영향. (b) `pkg/pcode/printc.go`에 live-on-entry 입력 레지스터 `in_<reg>` 네이밍 추가
+       (param/local로 분류 안 된 isInput register varnode). C++ 참조: Ghidra Varnode 기본 네이밍 `in_<register>`,
+       PrintLanguage::printVarnode / Funcdata 입력 레지스터 명명.
+     - **성공 기준**: `TREE_MAP=1 ... TestTreeFullGoldenMap`에서 x64_add_ret MATCH -> 9/10 -> 10/10.
+       **회귀**: x86-32 8/8 + aarch64_add_ret MATCH 유지 + production `TestMSVC*` + `TestAARCH64SimpleFunction`/
+       `TestX8664` 유지.
   2. 정렬되면 production 골든 전체 그린 확인 후 decompile.go subset 제거.
   - **(완료) classify_sign = RuleRangeMeld 포팅**: golden `else if (param_3 < 1)`. 트리 `BOOL_OR(INT_EQUAL(p,0),
     INT_SLESS(p,0))`를 RuleRangeMeld가 `INT_SLESS(p,1)`로 collapse. 두 수정으로 완성:
@@ -145,8 +143,9 @@ classify_sign 완성**(x86-32 7/8 -> 8/8):
 - **H8-debt-2** 트리 프로덕션화: step1(proto 배선)+step2(incremental heritage)+step3a(early stack heritage)+
   step3b-1(충실 ReturnSplit)+step3b(루프 회전, gcd byte-identical)+step4(AncestorRealistic + return-value 복구,
   1/5->3/5)+step5(누산기 BuildFromVarnodes high 재사용 + ActionForLoops 배선 + detached dead COPY 정리,
-  3/5->5/5 byte-identical)+step6(De Morgan flip + **RuleRangeMeld CircleRange 포팅 = x86-32 8/8, 전체 8/10**).
-  다음 = x64/ARM register-param 트리 배선 후 production 경로를 트리로 교체. (진행 중)
+  3/5->5/5 byte-identical)+step6(De Morgan flip + **RuleRangeMeld CircleRange 포팅 = x86-32 8/8, 전체 8/10**)+
+  step7(**cspec 구동 arch-aware default ProtoModel -> aarch64 register-param 복구 = 전체 9/10**).
+  다음 = x64 processEntry in_RDI 네이밍(별도 경로) 후 production 경로를 트리로 교체. (진행 중)
 - **H9** ActionSetCasts: 분석-time CPUI_CAST 삽입 라이브, render-time assignCastStr 제거. (완료 2026-06-29)
 - 기타 미시작: struct/union 타입 복구, switch statement, 대부분 opcode resolution(PARITY_AUDIT), BatchC 품질.
 

@@ -184,21 +184,46 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 }
 
 // buildDefaultModel constructs the architecture evaluation prototype model the
-// universal-action tree attaches to a function without a locked prototype. It
-// mirrors the model the hand-ordered decompile driver builds (decompile.go:
-// NewProtoModelFromCspec + WithEffectOffsets + WithReturnReg) except the
-// StackSpace, which ActionStackPtrFlow resolves during the run.
-// C++ parity: Architecture::defaultfp construction.
+// universal-action tree attaches to a function without a locked prototype. It is
+// arch-aware: register parameter offsets and the integer return register are
+// derived from the parsed cspec so register-based ABIs (x86-64 SysV RDI/RSI...,
+// AArch64 x0/x1...) recover register parameters and the return value, not just
+// x86-32 stack ABIs. StackSpace is left nil; ActionStackPtrFlow resolves it
+// during the run.
+//
+// When cspec is nil (cspec-less builds, e.g. the gcd tree regression guard) the
+// RegParamOffsets stay empty and the return register falls back to x86 EAX
+// (register space, offset 0, size 4), preserving the prior behavior exactly.
+//
+// C++ parity: Architecture::defaultfp / PrototypeModel construction from cspec.
 func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdata) *pcode.ProtoModel {
-	model := pcode.NewProtoModelFromCspec(cspec, nil, nil)
 	xr := engine.XRefs()
+	// regLookup resolves register names to their register-space byte offset so
+	// NewProtoModelFromCspec can populate RegParamOffsets from the cspec's
+	// IntegerRegParams(). For x86-32 cdecl IntegerRegParams() is empty, so this is
+	// a no-op and RegParamOffsets stays nil -- identical to prior behavior.
+	regLookup := func(name string) (uint64, bool) {
+		_, off, _, ok := xr.RegisterByName(name)
+		return off, ok
+	}
+	model := pcode.NewProtoModelFromCspec(cspec, nil, regLookup)
 	model.WithEffectOffsets(func(name string) (uint64, int32, bool) {
 		_, off, sz, ok := xr.RegisterByName(name)
 		return off, int32(sz), ok
 	})
-	// Resolve the integer return register space (x86 EAX: register space, offset 0,
-	// size 4) so guardReturns can wire the return value. Mirrors decompile.go's
-	// regSpaceIdx scan. The offset/size match the production driver's WithReturnReg.
+
+	// Wire the integer return register from the cspec default-proto <output> block
+	// (EAX / RAX / x0 by arch) so guardReturns can recover the return value at the
+	// correct location and width. Falls back to the x86 EAX scan below when no
+	// cspec return register is available.
+	if retName := cspec.IntegerReturnReg(); retName != "" {
+		// Use the register's natural width (RegisterByName size) so the return slot
+		// matches RAX (8) / EAX (4) / x0 (8) without per-arch hardcoding.
+		if si, off, sz, ok := xr.RegisterByName(retName); ok {
+			model.WithReturnReg(int(si), off, int32(sz))
+			return model
+		}
+	}
 	for _, vn := range fd.GetVarnodeBank().AllVarnodes() {
 		if vn == nil || vn.Space() == nil {
 			continue
