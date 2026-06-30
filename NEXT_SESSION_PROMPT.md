@@ -37,26 +37,32 @@ add4 반환 타입은 `int`로 정확하나 본문이 여전히 캐스트 도배
 - GOT: `int add4(...) { unsigned long long uVar3; uVar3 = (unsigned long long)(unsigned int)iVar2; return (int)((unsigned long long)(unsigned int)(... p1 + ... p2) + p3) + p4); }`
 - WANT: `int add4(...) { return param_1 + param_2 + param_3 + param_4; }`
 
-### 근본 (이번 세션 진단 완료)
+### 근본 (이번 세션 정밀 규명 완료 -- 핵심)
 - **raw p-code는 정상**: `add eax,x` = 4바이트 `EAX[4] = INT_ADD(EAX[4], x[4])` + `RAX[8] = ZEXT(EAX[4])`
   (상위 클리어). 중간 RAX ZEXT는 전부 dead(아무도 8바이트 RAX를 안 읽음, 최종 반환만 읽음)여야 함.
-- **그런데 최종 IR은 add가 8바이트 RAX를 읽음**: `iVar1[4] = INT_ADD(uVar6[8]=ZEXT, param_3[4])` 식 혼합 크기.
-  즉 heritage normalization/copy-prop이 `add eax`의 EAX(4) read를 RAX(8)=ZEXT로 **넓힘** -> 중간 ZEXT가 live화.
-- **그래서 `RuleSubvarZext.DoTrace`가 중간 ZEXT에서 `pullcount=0`으로 실패**(체인이 RETURN/terminal 미도달 --
-  4바이트 add 출력이 terminal로 끊김). traceForward/Backward 자체는 실패 안 함(계측 확인). clean IR(미widening)
-  이면 중간 ZEXT가 dead라 deadcode가 제거하고 최종 ZEXT만 tryReturnPull로 trim -> WANT 형태.
+- **범인 = `refinedSubTaskSize`(heritage.go:630)**: task 시작 offset의 **max** varnode 크기를 반환. offset 0에
+  EAX(4)+RAX(8) 오버랩 시 maxSz=8=size -> **분할 안 함** -> EAX(4) read가 [0,8) 8바이트 phi에 rename되어
+  8바이트로 넓혀짐(`iVar1[4]=INT_ADD(uVar6[8]=ZEXT, ...)` 혼합 크기) -> 중간 ZEXT live화.
+- **그래서 `RuleSubvarZext.DoTrace`가 중간 ZEXT에서 pullcount=0 실패**(반환 ZEXT trim은 outer만 벗김; 내부 add가
+  8바이트 RAX 읽음). traceForward/Backward 자체는 정상(계측 확인).
+- **C++ 정답**: `Heritage::refinement`(heritage.cc, buildRefinement)이 **모든 varnode 경계(0,4,8)에서 분할** ->
+  [0,4)+[4,8). EAX read는 size 4 유지(미넓힘), RAX(8) ZEXT write만 `normalizeWriteSize`로 PIECE 분할(상위
+  [4,8)는 dead). clean IR이면 중간 ZEXT가 dead -> deadcode 제거, 최종 ZEXT만 tryReturnPull로 trim -> WANT.
 
-### 조사 대상 (다음 세션)
-- **heritage가 sub-register read를 8바이트로 넓히는 지점**: `pkg/pcode/heritage.go` `normalizeReadSize` /
-  disjoint cover 계산. register offset 0 범위가 RAX(8) write(ZEXT) 때문에 8바이트로 잡혀 EAX(4) read가 RAX(8)로
-  정규화되는지 확인. C++ `Heritage::guard`/`normalizeReadSize`(heritage.cc:1156~)와 대조.
-- 또는 copy propagation이 EAX read를 RAX=ZEXT def로 포워딩하는지(rules_copy.go).
-- **subvar/typeop은 근본 아님** -- subvar는 widening의 결과를 못 푸는 것일 뿐. widening을 막거나 Ghidra와
-  동일하게 만드는 게 핵심.
+### 수정 대상 (다음 세션 -- 코어 heritage, 고위험)
+- **`Heritage::refinement` 충실 포팅**: heritage.go의 `refinedSubTaskSize` simplified 분할(max varnode 크기)을
+  C++ buildRefinement(모든 varnode start+size 경계 마킹 -> 경계마다 split)로 교체.
+- **`normalizeReadSize`(heritage.cc:382) 포팅**: range size보다 작은 read varnode를 `SUBPIECE(big[size], overlap)`로
+  재정의. (현재 미포팅 -- heritage.go Guard가 안 부름.)
+- **`normalizeWriteSize`(heritage.cc:416) 포팅**: range size보다 작은 write를 PIECE로 빈 조각 채워 size 맞춤.
+- heritage.go 728-758 task 루프 + Guard(846)에 read/write normalize 배선. 현재 주석이 "no PIECE/SUBPIECE physical
+  splits"로 생략 명시 -- 그걸 되살리는 작업.
+- **회귀 필수(전 아키텍처 영향)**: x86-32은 sub-register(AX/AL) 함수에서 영향 가능 -> 10/10 트리 + 전 production
+  `TestMSVC*` 반드시. 작은 단위 + 매 단계 전 스위트.
 
 ### 진단 도구 (재작성 필요 -- 이번 세션 임시 test는 정리함)
-corpus 함수를 트리로 빌드 후 (1) alive-op stream을 nzm+con 포함 덤프, (2) RuleSubvarZext.DoTrace 실패를
-pullcount=0 vs setReplacement nil로 구분. add4(스택프레임 없는 최단)부터.
+corpus 함수를 트리로 빌드 후 alive-op stream을 nzm+con 포함 덤프(add4부터). `INT_ADD`가 8바이트 RAX 피연산자를
+읽으면 widening 발생 확인. 수정 후 4바이트 add + dead 중간 ZEXT 제거 확인.
 
 ### 성공 기준
 - `X64_CORPUS=1 go test ./pkg/loader/ -run TestX64CorpusGoldenMap -v`: **add4/poly4가 MATCH로 flip**.

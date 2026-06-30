@@ -149,18 +149,22 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
   - **[갭2b: 루프 home-slot 통합]** Windows x64는 register param(RCX/RDX..)을 home slot([rsp+8/0x10/..])에
     spill. max3는 본문 param 사용이 param_1..3로 통합되나, sum_to_n 루프 조건의 home-slot read는 param_1로
     통합 안 되고 uVar1로 남음(루프 back-edge 횡단). 별도.
-  - **[갭3: 내부 ZEXT 프로모션 체인 미붕괴] 갭1 후 잔여 메인 블로커(다음 세션)**: 갭1으로 반환 타입은
-    `int`이나 본문 산술이 `(unsigned long long)(unsigned int)(...)` 캐스트 도배 + dead `uVar3` 잔존.
-    **근본(진단 완료)**: raw p-code는 정상(`add eax` = 4바이트 INT_ADD + `RAX=ZEXT(EAX)` 상위 클리어, 중간
-    ZEXT는 전부 dead여야 함). 그런데 heritage normalization/copy-prop이 `add eax`의 EAX(4) 피연산자 read를
-    RAX(8)=ZEXT로 **넓혀서**(`iVar1[4]=INT_ADD(uVar6[8],param_3[4])` 식 혼합 크기) 중간 ZEXT를 live로 만듦.
-    그 결과 `RuleSubvarZext.DoTrace`가 중간 ZEXT에서 **pullcount=0으로 실패**(체인이 terminal/RETURN에 미도달
-    -- 4바이트 add 출력이 terminal로 끊김). clean IR(미widening)이면 중간 ZEXT가 dead라 제거되고 최종 ZEXT만
-    tryReturnPull로 trim돼 `int add4{return p1+p2+p3+p4;}` 됨. **조사 대상: heritage가 sub-register read를
-    8바이트로 넓히는 지점**(normalizeReadSize/disjoint cover) 또는 copy-prop 포워딩. subvar/typeop 아님.
-    진단 도구: corpus 빌드 후 RETURN 입력/alive-op nzm+con 덤프(이번 세션 임시 test로 확인, 필요시 재작성).
-  - **다음 단계**: 갭3(heritage sub-register widening) 규명이 add4/poly4 MATCH의 마지막 관문. 갭1 두 수정은
-    그대로 유지(충실 + 무회귀). 실함수 골든 파이프라인(`testdata/x64_corpus/`)으로 수정->재측정 루프.
+  - **[갭3: heritage refinement 미포팅 -- sub-register read 넓힘] 근본 정밀 규명 완료(2026-07-01), 다음 세션 메인**:
+    갭1으로 반환 타입은 `int`이나 본문이 `(unsigned long long)(unsigned int)(...)` 캐스트 도배 + dead `uVar3`.
+    **근본**: `refinedSubTaskSize`(heritage.go:630)가 task 시작 offset의 **max** varnode 크기를 사용 ->
+    EAX(4)+RAX(8) 오버랩 시 maxSz=8=size라 **분할 안 함** -> EAX(4) read가 [0,8) 8바이트 phi에 rename되어
+    8바이트로 넓혀짐 -> 중간 `RAX=ZEXT(EAX)`가 live화. 그 결과 `RuleSubvarZext.DoTrace`가 중간 ZEXT에서
+    pullcount=0 실패(반환 ZEXT trim은 outer만 벗기고 내부 add가 8바이트 RAX 읽음). C++ `Heritage::refinement`
+    (heritage.cc, buildRefinement)은 **모든 varnode 경계(0,4,8)에서 분할** -> [0,4)+[4,8), EAX read는 size 4
+    유지(미넓힘), RAX(8) ZEXT write만 `normalizeWriteSize`(PIECE)로 분할(상위 [4,8)는 dead). raw p-code는 정상
+    (`add eax`=4바이트 INT_ADD + `RAX=ZEXT(EAX)`). heritage가 깨끗이 분할하면 중간 ZEXT가 dead->제거되고
+    최종 ZEXT만 tryReturnPull로 trim -> `int add4{return p1+p2+p3+p4;}`.
+    **수정 = `Heritage::refinement` + `normalizeReadSize`(heritage.cc:382, SUBPIECE) + `normalizeWriteSize`
+    (heritage.cc:416, PIECE) 충실 포팅.** 현재 heritage.go 주석이 "no PIECE/SUBPIECE physical splits"로 생략을
+    명시(refinedSubTaskSize는 그 simplified stand-in). **코어 heritage 변경 -> 전 아키텍처 영향(x86-32 sub-reg
+    AX/AL 등) = 고위험. 10/10 트리 + production 회귀 필수, 작은 단위.** 검증: X64_CORPUS add4/poly4 MATCH.
+  - **다음 단계**: 갭3 = heritage refinement/normalizeRead·WriteSize 충실 포팅(전용 세션). 갭1 두 수정은 유지
+    (충실 + 무회귀, 커밋 c5fc308). 실함수 골든 파이프라인(`testdata/x64_corpus/`)으로 수정->재측정.
 
 ### 3. [저우선] 정리
 - consume-DeadCode broader corpus 검증 후 `GOSL_DESCENDANT_DC` fallback + 레거시 descendant-count 루프 제거.
