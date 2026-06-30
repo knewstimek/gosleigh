@@ -15,9 +15,10 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 현재 상태 (2026-06-30 세션 진행, 전 패키지 그린)
 
-**트리 x86-32 골든 5/5 byte-identical (gcd/abs_val/classify2/counted_loop/sum_list).** universal-action
-트리가 5개 x86-32 골든을 모두 Ghidra와 동일하게 출력 -> 미션 #1 게이트(트리가 손정렬 41-call subset 대체)의
-실증 완료에 근접. 이번 세션 3개 충실 수정으로 3/5 -> 5/5:
+**트리 전체 골든 맵 7/10 byte-identical** (`TestTreeFullGoldenMap`). x86-32 7/8(gcd/abs_val/classify2/
+counted_loop/sum_list/multiply/add3 MATCH; classify_sign은 의미상 정확하나 RuleRangeMeld 미구현으로 byte 차이;
+complex_max 바이트 미보유). x64_add_ret/aarch64_add_ret MISMATCH(register-param 트리 미배선 -- 아래 갭 지도).
+이번 세션 4개 충실 수정으로 x86-32 3/5 -> 7/8 + register-param 갭 지도 작성:
 - **루프 누산기 dead-temp 근본 해소**(scopelocal.go BuildFromVarnodes): 이전 세션의 "loop-snapshot/trimOpOutput
   누산기 미통합" 가설은 **오진**이었음. 실제 근본 = merge 이후 ActionInputPrototype(coreaction.go:986)이
   BuildFromVarnodes를 호출 -> local 루프가 새 high를 만들어 stack varnode만 훔쳐 병합된 register(누산기/카운터)를
@@ -31,6 +32,11 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   bypass해 COPY가 dead 되나, 트리 oppool 이후 dead-code 미실행으로 잔존 -> PTRADD 2-use -> explicit uVar3 선언 +
   for-fold 거부. 수정 = propagation이 detached COPY를 dead로 만들면 즉시 OpDestroy(C++ dead-code 등가, detached
   한정으로 gcd snapshot 무회귀). 상세 CHANGELOG 2026-06-30.
+- **De Morgan connective flip 버그 수정**(rules: prefer_complement.go getBooleanFlipOpcode): 분기 반전 시
+  `getBooleanFlipOpcode`가 BOOL_AND/BOOL_OR를 미처리(ok=false) -> opFlipInPlaceExecute가 AND<->OR swap 코드에
+  도달 전 skip -> operand만 뒤집히고 connective는 AND 유지 = De Morgan 위반(classify_sign이 `(p==0)&&(p<0)`
+  모순 렌더). `(CPUI_MAX,true)` sentinel 추가로 swap 살림(C++ opFlipInPlaceExecute parity). classify_sign이
+  의미상 정확(`(p==0)||(p<0)`)해짐. **모든 BOOL_AND/BOOL_OR 분기 조건에 영향하는 correctness 수정.**
 
 회귀 가드: `TestUniversalActionTreeGcdGolden` + production `TestMSVC*` + 전 패키지 그린.
 
