@@ -66,8 +66,34 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ## 다음 작업 (우선순위)
 
-> **활성 작업(2026-07-01 후반): x64 corpus 3/8 MATCH (add4 + poly4 + sum_to_n).** sum_to_n flip은 세 충실
-> 수정으로 달성:
+> **활성 작업(2026-07-01 후반): x64 corpus 4/8 MATCH (add4 + poly4 + sum_to_n + classify).** 이번 세션 5 커밋:
+>   - **classify flip**: 상수 radix를 Ghidra `mostNaturalBase`(printlanguage.cc:735) + `push_integer`
+>     (printc.cc:1395-1399) 충실 포팅. renderConstant fallback이 `<10?dec:hex`였던 걸 `<=10?dec` + 그 외
+>     `mostNaturalBase(val)`로 교체 -> `100/200/..`가 `0x64/0xc8` 대신 십진수. (printc.go renderConstant +
+>     printlanguage.go mostNaturalBase 신규.)
+>   - **네이밍 해저드 제거**: rules_misc.go의 misnamed `RuleLessNotEqual`은 사실 C++ `RuleBooleanNegate`
+>     (ruleaction.cc:2957)의 중복이었다. 삭제 + batchC는 NewRuleBooleanNegate로 교체 + actprop 중복 등록 제거.
+>
+> **남은 4개 = 전부 deep 서브시스템 블로커 (휴리스틱 금지 규칙상 보류, 전용 세션 필요):**
+>   - **타입 추론 누수 (max3/sum_array/grid_score/process 공통)**: register param TYPE_INT 시드
+>     (scopelocal.go:182)가 `local = COPY param`으로 addrtied 스택 로컬에 전파 -> `int` vs golden `undefined4`.
+>     **결정적 관찰**: process는 `local_18 = param_3`인데 `int`, max3는 `local_18 = param_1`인데 `undefined4`
+>     (동일 패턴 다른 결과). 차이는 process local_18이 iVar1(=`*(int*)`deref 강한 int)도 받기 때문. 즉 Ghidra
+>     타입 전파가 SSA 버전/op별로 갈린다. 우리 ActionInferTypes(action_infertypes.go)는 단순화 버전(buildLocalTypes
+>     +ActionSeedSignedOps heuristic)이라 재현 불가. **충실 해결 = Ghidra buildLocaltypes/getLocalType
+>     (varnode.cc:900)/propagateOneType/TypeOp::propagateType 전체 포팅** -> ActionInferTypes 재작성. 10/10+
+>     production 회귀 위험 크므로 테스트 가드된 전용 세션.
+>   - **데이터모델 타입명 (sum_array/grid_score/process 시그니처)**: `long param_1` vs golden `longlong`.
+>     Win x64는 LLP64(long=4, longlong=8)인데 normalizedBaseType(printc.go:1177)이 8바이트 INT를 "long"으로
+>     하드코딩(LP64). cspec `<data_organization><long_size=4/><long_long_size=8/>`는 이미 파싱되나 printc까지
+>     threading 안 됨. aarch64/Linux x64(LP64)는 "long" 유지해야 하므로 data-org를 cspec->funcdata->printc로
+>     배선 필요. (타입 누수와 독립이나 단독으론 flip 안 됨.)
+>   - **SEXT-as-cast + 여분 괄호 (sum_array)**: `(longlong)local_18` vs `SEXT(local_18)` + `*(int *)x` vs
+>     `*((int *)x)`. 캐스트명은 위 데이터모델 의존. 괄호는 printc deref-cast precedence(contained).
+>   - **스택 프레임 미복구 (grid_score/process)**: 중첩 루프 + 다수 local의 RSP 프레임을 gap2a가 못 잡아
+>     `uVar2=(int*)(uVar3-0x18)` 쓰레기 + 포인터 인덱싱으로 오복구. 별도 deep 작업. process는 나눗셈 렌더도.
+>
+> sum_to_n flip은 세 충실 수정으로 달성:
 >   1. **OpInsertEnd flow-break 분기**(funcdata.go): C++ `Funcdata::opInsertEnd`(funcdata_op.cc:435)는 블록이
 >      이미 branch terminator로 끝나면 그 앞에 삽입한다. 우리는 단순 append라 addrtied merge용 COPY가 CBRANCH
 >      뒤로 갔다 -> 조건/선행 statement 깨짐. (max3의 `if (param_1 < param_2)` 복구.)
