@@ -5,6 +5,33 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-2 step4-후속 -- counted_loop 누산기 갭 딥다이브 (merge/cover/addrtied 진짜 버그 5개 충실 수정)
+step4(트리 1/5->3/5) 후 남은 counted_loop/sum_list(루프 본문 누산기가 dead temp `uVar2`로 렌더)를 SSA-버전
+레벨까지 해부해 진짜 C++ parity 버그 5개를 잡음. 골든 숫자는 3/5 유지지만 **스택 로컬 over-merge라는 한 층을
+실제로 뚫음**(stack:fff4/fff8이 더는 한 덩어리로 안 합쳐짐). 전 패키지 그린, gcd/production 무회귀.
+- **ActionOutputPrototype AddInstance 도둑질 제거**(f66a2b5): C++ ActionOutputPrototype::apply(coreaction.cc:
+  4776)는 updateOutputTypes로 출력 **타입만** 갱신하나 Go는 `hv.AddInstance(firstRet)`로 반환 varnode를
+  병합 High에서 훔쳐, 루프-누산기 반환에서 register를 local과 분리. 제거(SetInternal과 동일하게 타입만).
+- **스택 심볼 addrtied**(f66a2b5): RestructureVarnode가 stack-slot 심볼에 addrtied 미부여
+  (database.cc ScopeInternal::buildFrom은 usepoint 무제한 entry에 addrtied). 부여. 단 syncVarnodeFlags가
+  C++ "addrtied는 clear만, set 불가" 의미라 varnode엔 전파 안 됨 -> 아래 setVarnodeProperties로 해결.
+- **Funcdata::setVarnodeProperties 포팅**(44f6e80): C++(funcdata_varnode.cc:25)은 varnode 생성 시
+  localmap에서 SymbolEntry 조회해 addrtied를 stamp(Varnode::setSymbolProperties, setFlags 무제한). Go의
+  NewVarnode/NewVarnodeOut가 이걸 안 해 심볼 생성 후 만들어진 stack COPY가 addrtied 미상속. 포팅 +
+  RestructureVarnode가 기존 stack varnode를 re-stamp(StackPtrFlow가 심볼 전에 만든 것). **결과: 두 스택
+  로컬이 addrtied가 돼 mergeByDatatype의 addr-tied 가드가 작동, stack over-merge 소멸(MERGE_DBG 실측).**
+- **HighIntersectTest::moveIntersectTests 충실 포팅**(d265c2a): Go는 흡수된 High의 캐시만 지우고 survivor의
+  stale `false`는 안 지움. survivor가 흡수로 cover가 커지면 "X와 안 겹침" 캐시가 stale. C++(variable.cc:1091)은
+  survivor의 false 테스트를 (흡수 High도 X와 false였던 경우만 빼고) 삭제 + 흡수 High의 true 테스트를 survivor로
+  re-key. 충실 포팅(잠재 선행수정).
+- **남은 단일 블로커(정밀)**: 루프 본문 누산기 INT_ADD 출력 register:0x4가 스택 로컬 local_c와 통합 안 됨
+  (`local_cT = MULTIEQUAL register:0x4#uVar2 ...`, phi 출력=local_c, 입력=uVar2 별도). gcd iVar1과 같은
+  loop-snapshot/trimOpOutput 머신이 누산기(non-cond phi)에서 snapshot을 로컬과 통합 못 함. 다음: MergeOp
+  phi-trim + trimOpOutput 누산기 확장(gcd 회귀 위험).
+- C++ 참조: funcdata_varnode.cc setVarnodeProperties(25)/syncVarnodesWithSymbol(949), varnode.cc
+  setSymbolProperties(410), variable.cc moveIntersectTests(1091), merge.cc mergeByDatatype(359)/merge(1565),
+  coreaction.cc ActionOutputPrototype::apply(4776).
+
 ### 2026-06-30: H8-debt-2 step4 -- AncestorRealistic 포팅 + 트리 return-value 복구 (트리 골든 1/5 -> 3/5)
 트리 x86-32 골든이 1/5 -> **3/5 byte-identical**(abs_val/classify2 신규 MATCH + 기존 gcd). 값 반환
 함수가 트리에서 void + dead-code로 렌더되던 공통 블로커를 해소. 미션 #1 게이트 핵심 전진. 전 패키지 그린,
