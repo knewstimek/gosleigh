@@ -5,6 +5,23 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-2 -- De Morgan 분기반전 수정 + 트리 전체 골든 갭 지도 (멀티아치 7/10)
+5/5 후 breadth 확장(x86-32 8개 + x64 + aarch64 = 10 testable)으로 트리 전체 갭 지도 작성. classify_sign에서
+진짜 De Morgan 버그를 잡아 의미 정확성 확보. 전 패키지 그린.
+- **De Morgan connective flip 수정**(prefer_complement.go getBooleanFlipOpcode): `getBooleanFlipOpcode`가
+  CPUI_BOOL_AND/CPUI_BOOL_OR를 미처리해 `(CPUI_MAX,false,false)`(ok=false) 반환 -> opFlipInPlaceExecute의
+  `if !ok { continue }`가 AND<->OR swap 코드(`case flipOpc==CPUI_MAX`) 도달 전 skip. 즉 De Morgan connective
+  flip이 unreachable 죽은 코드. 분기 반전 시 operand는 뒤집히나 connective AND 유지 -> `!(a!=0 && a>=0)`가
+  `(a==0 && a<0)`(모순)로 잘못 렌더(classify_sign). `(CPUI_MAX,false,true)` 반환으로 swap 분기 활성화.
+  C++ parity: funcdata_op.cc opFlipInPlaceExecute가 BOOL_AND/BOOL_OR를 뒤집음. **모든 BOOL_AND/BOOL_OR 분기
+  조건에 영향하는 correctness 수정.** classify_sign `(p==0)&&(p<0)`(모순) -> `(p==0)||(p<0)`(=p<=0, 정확).
+- **트리 전체 골든 갭 지도**(TestTreeFullGoldenMap, TREE_MAP=1): **7/10 byte-identical**. x86-32 7/8(classify_sign만
+  잔여=RuleRangeMeld stub), complex_max 바이트 미보유. **x64_add_ret MISMATCH**: 입력 레지스터 RDI/RSI가
+  in_RDI 아닌 local_31/local_30 오분류 + 반환 undefined8 vs long. **aarch64_add_ret 완전 붕괴**: void entry(void)
+  -- register-param + 반환값 복구 트리 미배선. 결론: 트리는 x86-32(스택)엔 견고하나 register-param 아키(x64/ARM)
+  복구가 트리 전용 미배선 = 미션 x64 register param 목표의 직접 블로커.
+- C++ 참조: funcdata_op.cc opFlipInPlaceExecute(BOOL_AND/BOOL_OR), ruleaction.cc RuleRangeMeld(1341), circlerange.cc.
+
 ### 2026-06-30: H8-debt-2 -- 트리 x86-32 골든 5/5 byte-identical (sum_list -- detached dead COPY 정리)
 트리 universal-action 파이프라인이 **5개 x86-32 골든(gcd/abs_val/classify2/counted_loop/sum_list)을 전부
 byte-identical** 출력. 미션 #1 게이트(트리가 손정렬 41-call subset 대체)의 결정적 전진. 전 패키지 그린,
