@@ -66,10 +66,11 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ## 다음 작업 (우선순위)
 
-> **활성 작업(2026-07-01 진행): 갭1(반환 크기) + 갭3 프로모션 체인 핵심 해결. 잔여 = param_1 naming.**
-> 갭3 = heritage rename offset-key 충돌로 EAX read가 RAX(8)로 넓혀지던 것 -> normalizeRead/WriteSize 포팅으로
-> corpus add4/poly4 깨끗한 4바이트 산술. 잔여: param_1(accumulator) subvar input-trim으로 이름 상실 + dead temp.
-> 아래 #2 갭3 항목 참조. 이하 갭1 기록 보존:
+> **활성 작업(2026-07-01): 갭1+갭3 완료 -- x64 corpus add4 byte-identical MATCH (1/8).**
+> 갭1(반환 크기 narrowing: ClearActiveOutput + tryReturnPull) + 갭3(heritage normalizeRead/WriteSize ->
+> sub-register widening 해소 + printc param reclaim + dead RAX-ZEXT 정리)로 add4가 Ghidra와 완전 일치
+> (`int add4(int param_1..4){return param_1+param_2+param_3+param_4;}`). 전 회귀 그린(10/10 트리 + production).
+> 다음 = poly4 괄호 precedence, max3/sum_to_n(stack frame+갭2b). 아래 #2 갭3 항목 참조. 이하 갭1 기록 보존:
 > 핸드오프 분석(ActionReturnRecovery/assumedOutputExtension/updateOutputTypes)은 **오진이었음**: deriveOutputMap/
 > fillinMap은 출력 trial을 좁히지 않는다(assumedExtension는 CALL-output 전용). x64 반환 narrowing의 실제 충실
 > 경로는 **(1) ActionReturnRecovery가 buildReturnOutput 후 `clearActiveOutput`(coreaction.cc:1951)** ->
@@ -161,13 +162,16 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
     **결과: corpus add4/poly4가 깨끗한 4바이트 산술**(`return iVar2 + ...`, `(unsigned long long)(unsigned int)`
     체인 소멸). 10/10 트리 + production + 전 패키지 무회귀. (CALL-effect newIndirectCreation 경로 미포팅 --
     CALL-def write는 skip. refineInput/refinement boundary-split도 미포팅 -- 현 corpus는 normalize만으로 충분.)
-  - **[갭3 잔여: param_1 naming + dead temp] 다음 단계**: normalize 후 add4가 아직 MATCH 아님 -- (a) param_1(RCX
-    accumulator: 본문에서 read+write 둘 다)이 subvar에 RCX(8)->ECX(4) input으로 trim되며 param_1 이름 상실
-    (`uVar2`로 렌더; param_2/3/4는 read-only라 정상). subvar setReplacement의 input trim(IsInput && mask&1 &&
-    bitsize>=8 허용)이 param storage를 trim -> param-naming/lock과 상호작용. (b) dead `uVar1=ZEXT(...)` +
-    self-COPY 잔존 -> 최종 deadcode 패스 부재. **조사: subvar의 param-input trim을 Ghidra처럼 막거나(lock),
-    param naming이 sub-register offset 매칭하게.** 갭2b(home-slot)와도 인접.
-  - **다음 단계**: 갭3 잔여(param_1 naming) 해결이 add4/poly4 MATCH 관문. normalize 포팅은 유지(충실+무회귀).
+  - **[갭3 완료 -- add4 MATCH 달성(2026-07-01)]**: 두 후속 수정으로 add4가 byte-identical:
+    (a) **param_1 naming**: accumulator param(RCX read+write)은 RCX(8) ZEXT write로 range 8바이트 ->
+    normalize가 8바이트 input 생성 -> subvar가 ECX(4)로 trim하며 param HV 소멸. printc에 비-entry register
+    input reclaim(live input at RegParam offset, 이름 param_ 아니면 param 재분류 -- C++ ScopeLocal의 주소 기반
+    param 식별 parity). (b) **dead RAX-ZEXT**: subvar 반환 trim 후 dead `uVar1=ZEXT(EAX_return)`가 stale
+    consume로 in-loop deadcode를 통과 -> actcleanup 후 ActionDeadCode 추가(C++엔 없으나 normalize 잔여 정리 =
+    Ghidra 출력과 일치; 더 깊은 fix는 in-loop 정리). **corpus 1/8 MATCH(add4).**
+  - **[다음: poly4 괄호 precedence]** poly4 GOT `param_1*param_2+param_3-param_4` vs WANT
+    `(param_1*param_2+param_3)-param_4` -- 수학적 동일, Ghidra가 좌측 결합 sub에 괄호 추가. printc 연산자
+    precedence/parens 렌더 갭(별도). 그 다음 max3/sum_to_n 등(stack frame + 갭2b home-slot).
 
 ### 3. [저우선] 정리
 - consume-DeadCode broader corpus 검증 후 `GOSL_DESCENDANT_DC` fallback + 레거시 descendant-count 루프 제거.
