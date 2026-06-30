@@ -15,17 +15,22 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 현재 상태 (2026-06-30 세션 진행, 전 패키지 그린)
 
-**트리 x86-32 골든 4/5 byte-identical (gcd/abs_val/classify2/counted_loop).** 이번 세션에 counted_loop의
-루프 본문 dead-temp 블로커를 충실히 해소하고 트리에 ActionForLoops를 배선해 for-fold를 살림. sum_list만 잔여.
+**트리 x86-32 골든 5/5 byte-identical (gcd/abs_val/classify2/counted_loop/sum_list).** universal-action
+트리가 5개 x86-32 골든을 모두 Ghidra와 동일하게 출력 -> 미션 #1 게이트(트리가 손정렬 41-call subset 대체)의
+실증 완료에 근접. 이번 세션 3개 충실 수정으로 3/5 -> 5/5:
 - **루프 누산기 dead-temp 근본 해소**(scopelocal.go BuildFromVarnodes): 이전 세션의 "loop-snapshot/trimOpOutput
   누산기 미통합" 가설은 **오진**이었음. 실제 근본 = merge 이후 ActionInputPrototype(coreaction.go:986)이
   BuildFromVarnodes를 호출 -> local 루프가 새 high를 만들어 stack varnode만 훔쳐 병합된 register(누산기/카운터)를
   orphan(uVar2)으로 남김. C++ ActionInputPrototype::apply는 high를 재생성하지 않음. 수정 = 새 high 생성 대신
   **기존 병합 high 재사용 + SetName**(claimedHigh 가드로 over-merge 폴백). counted_loop 두 루프변수 write-back 복구.
-  상세 CHANGELOG 2026-06-30.
 - **트리 ActionForLoops 배선**(action.go FinalStructure 직후): C++은 for-fold를 print 시점에 하므로 universalAction에
   없음. Gosleigh는 ActionForLoops(production이 마지막에 호출하는 것과 동일)로 모델링 -> 트리 터미널 액션으로 추가.
-  counted_loop `while`->`for` 성립.
+  `while`->`for` 성립.
+- **detached dead COPY 정리**(rules_copy.go RulePropagateCopy): sum_list 포인터-iterate(`param_3=(int*)param_3[1]`)의
+  주소 PTRADD/COPY가 AddTreeState.buildTree에서 detached-alive로 생성됨(인라인 표현식). copy-prop이 LOAD을 PTRADD로
+  bypass해 COPY가 dead 되나, 트리 oppool 이후 dead-code 미실행으로 잔존 -> PTRADD 2-use -> explicit uVar3 선언 +
+  for-fold 거부. 수정 = propagation이 detached COPY를 dead로 만들면 즉시 OpDestroy(C++ dead-code 등가, detached
+  한정으로 gcd snapshot 무회귀). 상세 CHANGELOG 2026-06-30.
 
 회귀 가드: `TestUniversalActionTreeGcdGolden` + production `TestMSVC*` + 전 패키지 그린.
 
@@ -33,37 +38,24 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 다음 작업 (우선순위)
 
-### 1. [최우선] 트리 sum_list -- 포인터-iterate PTRADD 체인 explicit 마킹 + for-fold
+### 1. [최우선] 미션 #1 게이트 완료 -- production 경로(bridge.Decompile)를 universal-action 트리로 교체
 
-트리 골든 **4/5**(gcd/abs_val/classify2/counted_loop). sum_list 1개만 잔여. counted_loop의 누산기 dead-temp는
-이번 세션에 해소됨(BuildFromVarnodes 병합-high 재사용 + ActionForLoops 배선, 상세 CHANGELOG 2026-06-30).
-- **현상 (sum_list, TREE_DIAG)**: 본문 write-back은 정상(`local_8 = local_8 + *param_3`, `param_3 = (int *)
-  param_3[1]`). 차이는 (1) `while`(golden은 `for`), (2) stray `int *uVar3;` phantom 선언(본문 미사용).
-- **정밀 규명 (ACCUM_CASE=sum_list + PROD_DUMP 계측, tree_accum_diag_test.go)**: iterate 주소 계산 체인이
-  트리/production에서 다르게 wiring됨.
-  - production: `PTRADD(param_3,1,4)`(detached) -> `COPY 0x6600`(detached, unnamed) -> `LOAD 0x6600`(blk3) ->
-    `CAST`(NONPRINT) -> param_3. PTRADD/COPY 모두 **single-use chain = implied/unnamed**.
-  - tree: copy-prop이 LOAD 주소를 COPY 출력(0x6600) 대신 **PTRADD 출력(0x87325)으로 직접 당김** -> PTRADD
-    출력이 2-use(LOAD + 이제 dead가 된 COPY) -> **MarkExplicit이 explicit 표시 + NameVars가 uVar3 명명**. dead
-    COPY는 detached라 DeadCode가 안 지움(detached op 미처리).
-  - **for-fold 거부 지점**: `testIterateForm`(action_forloops.go:181) DFS가 iterate(CAST)->LOAD->PTRADD 출력
-    uVar3에서 truncate. uVar3가 explicit+multi-use(NumDescend>1)라 walk 중단(action_forloops.go:257) ->
-    loopDef(param_3 phi) high에 도달 못 함 -> false -> while 유지. production은 PTRADD가 implied라 DFS가
-    param_3까지 도달.
-- **근본**: copy-prop이 LOAD 주소를 PTRADD로 bypass해 PTRADD 출력 use-count를 2로 만들고(=explicit), 죽은
-  COPY가 detached라 정리 안 됨. golden(Ghidra)은 PTRADD를 inline(`param_3[1]`)하므로 트리의 explicit 마킹이
-  오답. 후보 수정: (a) RulePropagateCopy가 LOAD 주소 COPY를 bypass하지 않게(또는 bypass 후 dead COPY 제거),
-  (b) detached dead COPY를 use-count/MarkExplicit에서 제외, (c) production처럼 RulePtrArith late 순서. (a)/(b)는
-  gcd 회귀 위험 있는 copy-prop/MarkExplicit 공유 영역 -- 작은 단위 검증 필수.
-- **진단 재현**: `ACCUM_DIAG=1 ACCUM_CASE=sum_list PROD_DUMP=1 go test ./pkg/loader -run TestTreeAccumDiag -v`
-  (tree_accum_diag_test.go: SSA + alive-ops(detached 표시) + high 그룹 + production 대조 덤프).
-- **수정 대상 Go 파일**: `pkg/pcode/ruleaction*.go`(RulePropagateCopy), `pkg/pcode/coreaction.go`(MarkExplicit
-  use-count), `pkg/pcode/action_forloops.go`(testIterateForm).
-- **성공 기준**: `TestTreeGoldensDiag` 5/5 byte-identical. 정렬되면 decompile.go 41-call subset을 트리로
-  교체(미션 #1 게이트 완료).
-
-**주의(step4 교훈)**: 트리에 액션 추가/flags 변경 시 `TestTreeGoldensDiag`를 `-timeout 60s`로 감싸 hang 조기
-검출. copy-prop/MarkExplicit 수정 시 production `TestMSVC*` 전체 회귀 필수(공유 코드).
+트리 x86-32 골든 **5/5 byte-identical** 달성으로 "트리가 임의 함수를 golden과 동일 출력" 실증이 5개 함수에서
+완료됨. 이제 #1 게이트의 실제 교체 작업이 남음: `bridge.Decompile`(decompile.go)의 손정렬 41-call subset을
+`db.BuildUniversalAction(nil) + SetCurrent("decompile").Perform(fd)` 경로로 대체.
+- **현상**: production은 여전히 41-call 손정렬(decompile.go). 트리(runTreeGhidra 패턴, tree_goldens_diag_test.go:18)는
+  같은 5개 골든을 동일 출력하나 별도 경로. 두 경로가 공존.
+- **작업 순서**:
+  1. 트리를 11개 production 골든(x86-32 11개 = MSVC corpus) **전부**에 돌려 mismatch 목록 확보(현재 검증은
+     5개만). `TestTreeGoldensDiag` 케이스를 production 골든 전체로 확장.
+  2. mismatch 골든별로 트리 갭 규명(누산기/cover/explicit류 잔여 가능). 5개는 통과 확인됨.
+  3. 전부 통과하면 `bridge.Decompile`을 트리 호출로 교체(또는 옵션 플래그). `TestMSVC*`가 트리 경로로 그린이면
+     41-call subset 제거.
+- **성공 기준**: production `TestMSVC*` 전부 트리 경로로 그린 + 41-call subset(decompile.go) 제거.
+- **주의**: 트리에 액션 추가/flags 변경 시 `TestTreeGoldensDiag`를 `-timeout 60s`로 감싸 hang 조기 검출.
+  copy-prop/merge/MarkExplicit 등 공유 코드 수정 시 production `TestMSVC*` 전수 회귀 필수.
+- **진단 도구**: `tree_accum_diag_test.go`(ACCUM_DIAG=1, ACCUM_CASE=<name>, PROD_DUMP=1) -- 트리 SSA + alive-ops
+  (detached 표시) + high 그룹 + production 대조 덤프. 누산기/포인터-iterate류 갭 재현에 사용.
 
 ### 2. [대형] breadth + x64/ARM 실함수
 
@@ -88,8 +80,9 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 - **H8** gcd_x86_32 golden parity(production). (완료 2026-06-29)
 - **H8-debt-1** TrimJoinblockMultiequals 제거 -> 충실 mergeOp trimOpOutput(merge.cc:759-760). (완료 2026-06-30)
 - **H8-debt-2** 트리 프로덕션화: step1(proto 배선)+step2(incremental heritage)+step3a(early stack heritage)+
-  step3b-1(충실 ReturnSplit)+step3b(루프 회전, gcd byte-identical)+**step4(AncestorRealistic + return-value
-  복구, 골든 1/5->3/5)**. 다음 = 위 "다음 작업 1"(누산기 phi + for-fold). (진행 중)
+  step3b-1(충실 ReturnSplit)+step3b(루프 회전, gcd byte-identical)+step4(AncestorRealistic + return-value 복구,
+  1/5->3/5)+**step5(누산기 BuildFromVarnodes high 재사용 + ActionForLoops 배선 + detached dead COPY 정리,
+  3/5->5/5 byte-identical)**. 다음 = 위 "다음 작업 1"(production 경로를 트리로 교체). (진행 중)
 - **H9** ActionSetCasts: 분석-time CPUI_CAST 삽입 라이브, render-time assignCastStr 제거. (완료 2026-06-29)
 - 기타 미시작: struct/union 타입 복구, switch statement, 대부분 opcode resolution(PARITY_AUDIT), BatchC 품질.
 
