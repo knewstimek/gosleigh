@@ -119,20 +119,30 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
   (`testdata/x64_corpus/`: MSVC `cl /c /Od` -> COFF obj -> Ghidra 12 헤드리스 Java postScript
   `GenGoldens.java` -> `x64_goldens.json`). **Windows x64 ABI**(RCX/RDX/R8/R9, `x86-64-win.cspec`).
   8개 실함수(add4/poly4/max3/sum_to_n/sum_array/classify/grid_score/process: 다인자/중첩루프/포인터/switch/
-  나눗셈). 갭 맵 `TestX64CorpusGoldenMap`(X64_CORPUS=1). **현재 0/8**. 코드 근거 갭 분류:
+  나눗셈). 갭 맵 `TestX64CorpusGoldenMap`(X64_CORPUS=1). 코드 근거 갭 분류 + 진행:
   - **register-param 복구는 작동**: add4/poly4가 RCX/RDX/R8/R9 -> param_1..4 정확 복구.
-  - **[갭1: 반환 크기 추론, 전 함수]** 함수는 EAX(4바이트 `int`) 반환인데 트리가 RAX(8바이트)로 고정 ->
-    `unsigned long long` + promotion 캐스트 도배. 원인: buildDefaultModel이 반환 레지스터를 자연 폭(RAX=8)으로
-    설정. Ghidra는 실제 write 폭(EAX=4)으로 좁힘. C++ 참조: Heritage::characterizeReturnOutput /
-    ActionOutputPrototype output trial(이미 일부 포팅 = heritage.go guardReturns).
-  - **[갭2: RSP-relative 스택 프레임, locals 함수]** x86-32은 EBP 프레임이라 OK였으나 x64 /Od는 프레임포인터
-    없는 RSP-relative -> 스택 locals를 포인터 deref(`uVar7[10]`)로 오복구(max3/sum_to_n/sum_array/grid_score/
-    process 붕괴). ActionStackPtrFlow가 RSP-relative(EBP 부재) 미처리 추정 -> coreaction.cc ActionStackPtrFlow/
-    stackvars.cc 재확인 필요.
-  - **[갭3: promotion 캐스트]** 4바이트 산술에 `(unsigned long long)(unsigned int)` 연쇄 -- 갭1 + sign/width
-    캐스트 처리에서 파생(ActionSetCasts/typeop).
-  - **다음 단계 후보**: 갭1(반환 크기)이 가장 보편적 + add4/poly4를 match로 flip 가능성 높음 -> 먼저 착수 권장.
-    갭2(RSP 프레임)는 별도 큰 작업. 실함수 골든 파이프라인이 갖춰졌으니 갭 수정 -> 재측정 루프 가능.
+  - **[갭2a: RSP-relative 스택 프레임] 완료(2026-07-01)**: x64 /Od는 프레임포인터 없는 RSP-relative(`sub rsp,N`
+    후 rsp_new=INT_SUB(rsp_input,N) 기준). 기존 ActionStackPtrFlow가 base=input register만 인식해 rsp_new를
+    놓쳐 스택 locals를 `uVar7[10]` 포인터 deref로 오복구. 수정: buildStackOffsetMap(SP 오프셋 전파) +
+    encodeStackSlotOffset(포인터 폭 wrap). max3/sum_to_n이 `uVar7[10]` -> 3 params + local_18/local_14
+    복구로 개선. x86-32(EBP, 수학적 동일) 무회귀.
+  - **[갭1: 반환 크기 추론, 전 함수] 미완 -- faithful 포팅 필요**: 함수는 EAX(4바이트 `int`) 반환인데 트리가
+    RAX(8바이트) 고정 -> `unsigned long long`/`undefined8` + ZEXT/promotion 캐스트 도배. x86-32은 EAX 폭=int
+    폭이라 안 걸림. **휴리스틱 금지(원본 C++ parity)**: 충실 경로 = `ActionReturnRecovery::apply`
+    (coreaction.cc:1909) -- output ParamActive 트라이얼 + AncestorRealistic(output use) + `finishPass`/
+    `markFullyChecked` -> `FuncProto::deriveOutputMap` -> `ProtoModel::assumedOutputExtension`(ZEXT 인식해
+    출력 폭 좁힘) -> `buildReturnOutput`(retop 입력 재구성). 출력 타입은 `ActionOutputPrototype::apply`
+    (coreaction.cc:4776) -> `FuncProto::updateOutputTypes`(triallist[0]의 addr+High 타입). Gosleigh의
+    `ActionActiveReturn`은 현재 no-op stub -> 이 서브시스템(ParamActive output trial + deriveOutputMap +
+    assumedOutputExtension)을 충실 포팅해야 함. **다함수 포팅 + 전 함수 반환 와이어링 변경 -> 회귀 위험 큼,
+    전용 세션 권장.** 대상 Go: paramactive.go(ApplyGuardReturnsLive/ParamActive), funcproto.go, protomodel.go.
+  - **[갭2b: 루프 home-slot 통합]** Windows x64는 register param(RCX/RDX..)을 home slot([rsp+8/0x10/..])에
+    spill. max3는 본문 param 사용이 param_1..3로 통합되나, sum_to_n 루프 조건의 home-slot read는 param_1로
+    통합 안 되고 uVar1로 남음(루프 back-edge 횡단). 별도.
+  - **[갭3: promotion 캐스트]** 4바이트 산술의 `(unsigned long long)(unsigned int)`/`ZEXT` 연쇄 -- 갭1에서
+    파생, 갭1 해결 후 재측정.
+  - **다음 단계**: 갭1(반환 크기) faithful 포팅이 가장 보편적(전 함수 + 갭3 연쇄 해소). 단 전용 세션 필요.
+    실함수 골든 파이프라인(`testdata/x64_corpus/`)이 갖춰져 갭 수정 -> 재측정 루프 가능.
 
 ### 3. [저우선] 정리
 - consume-DeadCode broader corpus 검증 후 `GOSL_DESCENDANT_DC` fallback + 레거시 descendant-count 루프 제거.
