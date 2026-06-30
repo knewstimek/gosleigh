@@ -626,10 +626,39 @@ func (fd *Funcdata) RemoveBranch(*BlockBasic, int) {
 // C++ parity: funcdata_varnode.cc
 // ---------------------------------------------------------------------------
 
+// setVarnodeProperties stamps a freshly created Varnode with the boolean flags of
+// the local-scope SymbolEntry that covers its storage (mapped, addrtied, ...). This
+// is how a Varnode created at a mapped stack-slot address inherits addrtied: the
+// flag is set unconditionally at creation, whereas SyncVarnodesWithSymbols can only
+// CLEAR addrtied later (funcdata_varnode.cc:1078-1081). Without this, stack Varnodes
+// created during the merge group (trim COPYs, phi outputs) -- after the symbols exist
+// but never re-created by the mainloop -- stay non-addrtied, so mergeByDatatype's
+// addr-tied guard cannot keep two distinct stack locals (and the registers merged into
+// each) apart. Early in the pipeline the scope has no entries yet, so this is a no-op
+// (matching C++, where queryProperties finds nothing before symbols are built).
+// C++ parity: Funcdata::setVarnodeProperties (funcdata_varnode.cc:25) ->
+// Varnode::setSymbolProperties (setFlags(entry->getAllFlags() & ~typelock)).
+func (fd *Funcdata) setVarnodeProperties(vn *Varnode) {
+	if vn == nil || vn.IsMapped() || vn.Space() == nil {
+		return
+	}
+	sl := fd.scopeLocal
+	if sl == nil {
+		return
+	}
+	entry := sl.FindOverlap(vn.Addr(), vn.Size())
+	if entry == nil {
+		return
+	}
+	vn.SetFlags(entry.AllFlags() &^ VarnodeTypeLock)
+}
+
 // NewVarnode creates a free Varnode.
 // C++ parity: Funcdata::newVarnode
 func (fd *Funcdata) NewVarnode(size int32, loc address.Address) *Varnode {
-	return fd.vbank.Create(size, loc)
+	vn := fd.vbank.Create(size, loc)
+	fd.setVarnodeProperties(vn)
+	return vn
 }
 
 // NewVarnodeOut creates a Varnode as the defined output of an op.
@@ -637,6 +666,7 @@ func (fd *Funcdata) NewVarnode(size int32, loc address.Address) *Varnode {
 func (fd *Funcdata) NewVarnodeOut(size int32, loc address.Address, op *PcodeOp) *Varnode {
 	vn := fd.vbank.CreateDef(size, loc, op)
 	op.SetOutput(vn)
+	fd.setVarnodeProperties(vn)
 	return vn
 }
 
