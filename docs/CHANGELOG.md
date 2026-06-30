@@ -5,6 +5,26 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-2 -- 트리 x86-32 골든 5/5 byte-identical (sum_list -- detached dead COPY 정리)
+트리 universal-action 파이프라인이 **5개 x86-32 골든(gcd/abs_val/classify2/counted_loop/sum_list)을 전부
+byte-identical** 출력. 미션 #1 게이트(트리가 손정렬 41-call subset 대체)의 결정적 전진. 전 패키지 그린,
+production(`TestMSVC*`) 무회귀.
+- **근본 (sum_list 포인터-iterate)**: `param_3 = (int *)param_3[1]` iterate의 주소 계산이 트리에서 잘못
+  렌더(phantom `int *uVar3;` 선언 + `while` 유지). AddTreeState.buildTree(addtreestate.go)는 PTRADD/COPY를
+  `NewOpBefore`로 만드는데 이 함수는 OpMarkAlive만 하고 **블록에 삽입하지 않음**(detached-alive = 인라인 렌더용
+  implied 표현식 op, production도 동일). 원래 LOAD은 COPY 출력(원본 addr temp)을 읽음. RulePropagateCopy가
+  LOAD 주소를 COPY 너머 PTRADD 출력으로 propagate(C++ RulePropagateCopy::applyOp ruleaction.cc:3946과 동일)
+  -> COPY가 dead. C++은 이 dead COPY를 dead-code가 제거하나, Gosleigh는 (a) COPY가 detached-alive라 OpDestroy
+  대상이나 (b) universal-action 트리에서 이 oppool propagation 이후 ActionDeadCode가 다시 안 돌아 잔존.
+  잔존 dead COPY가 PTRADD 출력을 2-descendant로 유지 -> MarkExplicit이 explicit + NameVars가 uVar3 명명 ->
+  선언 + for-fold 거부(testIterateForm이 explicit multi-use 노드에서 truncate).
+- **수정**(rules_copy.go RulePropagateCopy): propagation이 detached COPY를 dead로 만들면 즉시 OpDestroy(C++
+  dead-code가 in-block COPY에 해주는 정리를 eager하게). detached COPY로 한정(addrtied/persist 제외) -- in-block
+  스냅샷(gcd loop-head trimOpOutput COPY)은 일반 dead-code에 위임해 gcd 무회귀. PTRADD가 single-use ->
+  implied/inline(`param_3[1]`) -> uVar3 선언 소멸 + for-fold DFS가 param_3 도달.
+- C++ 참조: ruleaction.cc RulePropagateCopy::applyOp(3946), addtreestate.cc AddTreeState::buildTree,
+  block.cc BlockWhileDo::testIterateForm.
+
 ### 2026-06-30: H8-debt-2 -- 루프 누산기 dead-temp 근본 해소 (BuildFromVarnodes가 병합 high를 훔치던 버그)
 counted_loop/sum_list의 루프 본문이 dead temp(`uVar2 = local_c + local_8`)로 새던 블로커를 충실히 잡음.
 이전 세션의 "loop-snapshot 누산기 미통합" 가설(trimOpOutput 확장 필요)은 **오진**이었음 -- 계측으로
