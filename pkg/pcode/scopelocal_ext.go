@@ -552,6 +552,15 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 		dt := types.GetBase(sz, TYPE_UNKNOWN, "")
 		name := sl.buildVariableName(s.addr, address.Address{}, dt)
 		sym := NewSymbol(name, dt)
+		// Stack slots are address-tied: identified by frame address, not SSA number,
+		// and valid across the whole function (no usepoint limitation). The symbol must
+		// carry addrtied so SyncVarnodesWithSymbols propagates it to the slot's Varnodes
+		// BEFORE the speculative type-merge (ActionMergeType/mergeByDatatype) runs --
+		// otherwise mergeTestRequired's addr-tied guard cannot tell two distinct stack
+		// locals apart and merges them (and the registers merged into each) into one
+		// HighVariable. C++ parity: database.cc ScopeInternal::buildFrom sets
+		// symbol->flags |= Varnode::addrtied for entries without a usepoint limitation.
+		sym.SetFlags(VarnodeAddrTied)
 		entry := NewSymbolEntry(sym, 0, s.addr, sz, 0)
 		sym.attachEntry(entry)
 		ext.entries = append(ext.entries, entry)
