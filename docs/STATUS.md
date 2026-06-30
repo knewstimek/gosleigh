@@ -11,60 +11,57 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   함수 코퍼스일 뿐 -- 실제 임의 함수(struct/union/switch/jumptable/미포팅 opcode)는 미완.
 - **Tree (`ActionDatabase.BuildUniversalAction`, 250 action/rule = 진짜 Ghidra 파이프라인)**: 이게 미션의
   본체. #1 게이트 = 트리를 프로덕션 경로로 만들어 41-call subset을 대체(= H8-debt-2). **현재 트리 x86-32
-  골든 1/5 byte-identical(gcd만).**
+  골든 3/5 byte-identical(gcd/abs_val/classify2).**
 
-## 현재 상태 (2026-06-30 세션 종료, master `da76e07`, 전 패키지 그린)
+## 현재 상태 (2026-06-30 세션 종료, master `75b98b7`, 전 패키지 그린)
 
-**H8-debt-2 step3b 완료 -- universal 트리가 gcd를 golden과 byte-identical 출력.** do-while->while 루프
-회전을 막던 5개 C++ parity 버그를 잡음(상세 CHANGELOG 2026-06-30 step3b COMPLETE). 근본 패턴 = "C++
-flags=0 액션을 once-per-func로 오등록 + 동명 임포스터 rule + BlockCopy edge-forward 누락" 클러스터. 전부
-production-safe(트리 전용; production은 .Apply 직접 호출로 액션 프레임워크 밖).
-1. `RuleCondNegate` 임포스터 -> 충실 포팅(CBRANCH+boolean_flip -> BOOL_NEGATE+clear).
-2. `ActionNodeJoin`/`ActionNormalizeBranches` once-per-func -> flags=0(매 mainloop pass 재실행).
-3. **`BlockBasic.NegateCondition`이 소스 기본블록 edge 미swap** (핵심) -> C++ BlockCopy::negateCondition
-   (block.hh:534)처럼 srcDelegate edge도 swap. collapse가 entry를 loop와 정렬 -> NodeJoin join -> while.
-4. 트리 풀이 잘못된 `RulePushMulti`(arithmetic 트리거) -> 충실 `RulePushMultiME`(MULTIEQUAL). 조건 인라인.
-5. `ActionInferTypes` once-per-func -> flags=0. 스냅샷 타입(undefined4 uVar1 -> int iVar1).
+**H8-debt-2 step4 완료 -- AncestorRealistic 포팅 + 트리 return-value 복구로 골든 1/5 -> 3/5.** 값 반환
+함수가 트리에서 void + dead-code로 렌더되던 공통 블로커 해소(상세 CHANGELOG 2026-06-30 step4).
+- **AncestorRealistic 충실 포팅**(`ancestor_realistic.go`, C++ funcdata_varnode.cc:2016-2256): 반환
+  varnode 조상이 realistic한지 backward stack-DFS로 판정(solid movement vs unaffected/killedbycall/
+  bare-input). gcd param_3(bare input)=void, abs_val -param_3(solid NEG)=int.
+- **트리 guardReturns 배선**(`action_guardreturns.go` ActionGuardReturns, once-per-func): production의
+  ApplyGuardReturnsLive(격리 heritage 패스)를 트리 mainloop 안 ActionReturnRecovery 직전에 1회 호출.
+  RETURN에 반환 레지스터를 엮어 본문 살림.
+- **ActionReturnRecovery 게이트 + once-per-func**: markActive를 AncestorRealistic.execute AND
+  ancestorOpUse 둘 다 통과로 제한(coreaction.go:1207). flags=0이면 active return 시 매 pass 재빌드로
+  mainloop hang -> once-per-func(guardReturns 직후 1회 빌드 = C++ fullyChecked 수렴 재현).
+- **propagateConstant nil-parent 가드**(condexe.go): guardReturns 트랜지언트의 detached op skip.
 
-회귀 가드 `TestUniversalActionTreeGcdGolden`(일반 스위트). 진단 `TestTreeGoldensDiag`(TREE_DIAG=1).
+step3b(gcd 루프 회전) 완료분은 그대로 유효. 회귀 가드: `TestUniversalActionTreeGcdGolden` +
+production `TestMSVC*` 전부 그린. production은 ActionDirectWrite 미실행이라 게이트 미적용(트리 전용).
 
 ---
 
 ## 다음 작업 (우선순위)
 
-### 1. [최우선, 대형] 트리 return-value 복구 -- 나머지 골든의 공통 블로커
+### 1. [최우선, 대형] 트리 counted_loop/sum_list -- 스택 로컬 누산기 phi 병합 + for-loop fold
 
-트리 x86-32 골든 4/5 실패의 **공통 근본**. 값 반환 함수(abs_val/counted_loop/sum_list/classify2,
-전부 EBP-프레임 + 스택 로컬)가 트리에서 `void` + 값 계산 dead-code 제거로 렌더.
+트리 골든 2/5 잔여. **반환값은 이미 복구됨**(int, `return local_c`/`return local_8`). 남은 갭은
+return-value가 아니라 루프 본체 렌더링:
+- **현상 (counted_loop, TREE_DIAG GOT vs golden)**:
+  - GOT: `while (local_8 < 5) { uVar2 = local_c + local_8; uVar1 = local_8 + 1; }` -- 본문 갱신이 dead
+    temp(uVar1/uVar2)로 새고 루프 변수 local_c/local_8에 write-back 안됨(루프-carried 스택 로컬 phi
+    back-edge 미병합). 또한 `while`(golden은 `for`).
+  - WANT: `for (local_8 = 0; local_8 < 5; local_8 = local_8 + 1) { local_c = local_c + local_8; }`.
+- **현상 (sum_list)**: 유사 for-fold 미인식 + 변수 하나가 `return`으로 오명명(naming 충돌).
+- **핵심 단서**: counted_loop_x86_32/sum_list_x86_32 **둘 다 production 골든**이고 production은 통과
+  (msvc_diag_test.go:294 등, for 루프 정상). 즉 production 경로는 스택-로컬 누산기 phi를 올바로 병합 +
+  for-fold함. 트리만 못함 -> step3b 방법론(트리 vs production SSA 대조)이 그대로 적용 가능.
+- **C++ 참조 / 수정 후보**: 루프-carried 변수 merge는 `merge.cc`(MergeOp/trimOpOutput) + ForLoops 인식은
+  `blockaction.cc ActionForLoops`(`tryMarkForLoop`). step3b가 gcd 루프 snapshot을 trimOpOutput으로 잡은
+  것처럼, 스택 로컬 누산기의 back-edge MULTIEQUAL이 트리에서 어떤 once-per-func 오등록/merge 누락으로
+  dead temp로 새는지 의심.
+- **진단 도구**: `GCD_DUMP=1 TREE_DIAG=1 go test ./pkg/loader/ -run TestTreeOutputDiag`(트리 vs production
+  SSA 대조 -- 단 현재 gcd 전용, counted_loop용으로 확장 필요) + `TestProductionStagesDiag`(production
+  단계별 blockShape). 트리 출력은 `TestTreeGoldensDiag`(TREE_DIAG=1).
+- **수정 대상 Go 파일**: `pkg/pcode/merge.go`(누산기 phi), `pkg/pcode/blockaction*.go`/ForLoops, 트리
+  파이프라인 액션 flags/등록(`pkg/pcode/action.go`).
+- **성공 기준**: `TestTreeGoldensDiag` 5/5 byte-identical. 정렬되면 decompile.go 41-call subset을 트리로
+  교체(미션 #1 게이트 완료).
 
-**규명된 메커니즘 (이번 세션 실측 확정)**:
-- 트리 `Heritage.Heritage`(heritage.go:728~)가 guardCalls만 호출하고 **guardReturns 미호출**(C++
-  Heritage::heritage -> guard()는 guardCalls+guardReturns 둘 다, heritage.cc).
-- **naive하게 guardReturns만 추가하면 실패**(실험으로 확인 후 되돌림): (a) gcd가 `int ... return param_3;`로
-  깨짐(void여야 함) + iVar1 스냅샷도 깨짐, (b) sum_list가 ActionConditionalConst.propagateConstant에서 nil
-  deref. 이유 둘:
-  1. **void/실제 판정이 틀림**: 트리는 ActionReturnRecovery(coreaction.go:1183)를 가지나 void/실제 판정을
-     간이 `ancestorOpUseReturn`(funcproto.go:591, onlyReturnUse 기반)으로 함. C++는 **AncestorRealistic**
-     (funcdata_varnode.cc, ~200줄 stack-DFS 백워드 dataflow + "solid movement" 휴리스틱). gcd의 param_3는
-     루프 통과 파라미터(solid movement 없음)라 Ghidra가 void로 판정하나, 간이 판정은 "사용된 반환"으로 오판.
-     **선행 의존 플래그 미구현**: `isUnaffected`/`isDirectWrite`/`isKilledByCall`/`isIncidentalCopy`/
-     `isIndirectCreation`/`isReturnAddress` (Mark/Persist는 있음).
-  2. **격리 필요**: guardReturns를 main heritage 루프에 넣으면 루프 스냅샷(trimOpOutput)까지 망가짐.
-     production은 별도 heritage 패스 `ApplyGuardReturnsLive`(paramactive.go:826, BuildADT + 재마킹 + Rename,
-     return 범위만)로 격리해 우회.
-- 함수 자기 반환 담당 액션: **ActionReturnRecovery**(C++ coreaction.cc:1909, mainloop) +
-  **ActionOutputPrototype**(5747, post-mainloop). ActionActiveReturn(1774)은 CALL 출력(다른 함수 반환)이라
-  무관.
-
-**진입점(다음 세션)**: C++ `funcdata_varnode.cc AncestorRealistic::execute/enterNode/uponPop`(2016-2260) +
-`funcdata.hh:656` State 정의 먼저 읽기 -> 선행 Varnode 플래그 구현(+이를 설정하는 ActionDirectWrite 등
-확인) -> `ancestorOpUseReturn`을 AncestorRealistic 충실 포팅으로 교체(production도 사용 = 회귀 위험 큼,
-전 골든 회귀 필수) -> 트리에 격리 guardReturns 통합 -> `TestTreeGoldensDiag`로 한 골든씩 검증.
-**성공 기준**: `TestTreeGoldensDiag` 5/5 byte-identical.
-
-전략 메모: return-value 외 잔여 트리 갭(실측) = for-loop fold 미인식(counted_loop while->for), 스택
-로컬 누산기. 한 골든씩 production 경로(작동)와 대조해 step3b처럼 flags/임포스터/edge-forward 류 우선 의심.
-정렬되면 decompile.go 41-call subset을 트리로 교체(미션 #1 게이트 완료).
+**주의(step4 교훈)**: 트리에 반환값/누산기를 엮으면 once-per-func vs flags=0 오등록으로 mainloop hang이
+재발하기 쉬움. 새 액션 추가/flags 변경 시 `TestTreeGoldensDiag`를 `-timeout 60s`로 감싸 hang 조기 검출.
 
 ### 2. [대형] breadth + x64/ARM 실함수
 
@@ -89,7 +86,8 @@ production-safe(트리 전용; production은 .Apply 직접 호출로 액션 프�
 - **H8** gcd_x86_32 golden parity(production). (완료 2026-06-29)
 - **H8-debt-1** TrimJoinblockMultiequals 제거 -> 충실 mergeOp trimOpOutput(merge.cc:759-760). (완료 2026-06-30)
 - **H8-debt-2** 트리 프로덕션화: step1(proto 배선)+step2(incremental heritage)+step3a(early stack heritage)+
-  step3b-1(충실 ReturnSplit)+**step3b(루프 회전, gcd byte-identical)**. 다음 = 위 "다음 작업 1". (진행 중)
+  step3b-1(충실 ReturnSplit)+step3b(루프 회전, gcd byte-identical)+**step4(AncestorRealistic + return-value
+  복구, 골든 1/5->3/5)**. 다음 = 위 "다음 작업 1"(누산기 phi + for-fold). (진행 중)
 - **H9** ActionSetCasts: 분석-time CPUI_CAST 삽입 라이브, render-time assignCastStr 제거. (완료 2026-06-29)
 - 기타 미시작: struct/union 타입 복구, switch statement, 대부분 opcode resolution(PARITY_AUDIT), BatchC 품질.
 
@@ -103,6 +101,6 @@ production 모두 같은 action impl을 공유하므로 트리 수정 시 produc
 - `tree_output_diag_test.go` (TREE_DIAG=1): `TestTreeOutputDiag`(트리 gcd C 출력 + proto/scopelocal,
   GCD_DUMP=1 시 트리/production SSA 대조), `TestProductionStagesDiag`(production 단계별 blockShape).
 - `tree_goldens_diag_test.go` (TREE_DIAG=1): `TestTreeGoldensDiag` -- 트리를 5개 x86-32 골든에 돌려
-  match/mismatch + diff 보고(현재 1/5).
+  match/mismatch + diff 보고(현재 3/5: gcd/abs_val/classify2).
 - 회귀 가드(일반 스위트): `TestUniversalActionTreeGcdGolden`(트리 gcd byte-identical),
   `TestUniversalActionTreeConverges`(트리 수렴), `TestMSVC*`(production 골든).

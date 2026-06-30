@@ -5,6 +5,45 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-2 step4 -- AncestorRealistic 포팅 + 트리 return-value 복구 (트리 골든 1/5 -> 3/5)
+트리 x86-32 골든이 1/5 -> **3/5 byte-identical**(abs_val/classify2 신규 MATCH + 기존 gcd). 값 반환
+함수가 트리에서 void + dead-code로 렌더되던 공통 블로커를 해소. 미션 #1 게이트 핵심 전진. 전 패키지 그린,
+production 무영향.
+- **AncestorRealistic 충실 포팅**(`ancestor_realistic.go`): C++ funcdata_varnode.cc:2016-2256 +
+  funcdata.hh:656 State를 그대로 옮긴 backward stack-DFS. 반환 varnode의 조상이 realistic한지(solid
+  movement vs unaffected/killedbycall/bare-input pass-through)를 enterNode/uponPop/checkConditionalExe/
+  execute로 판정. 선행 플래그(IsDirectWrite/IsUnaffected/IsIncidentalCopy/IsStoreUnmapped 등)는 대부분
+  이미 존재, 누락 접근자 3개(op.IsIncidentalCopy/op.IsStoreUnmapped/vn.IsIncidentalCopy)만 추가.
+- **트리 guardReturns 배선**(`action_guardreturns.go` ActionGuardReturns, once-per-func): production
+  드라이버가 heritage/stack 해석 직후 1회 호출하는 ApplyGuardReturnsLive(격리 heritage 패스, return
+  범위만 BuildADT+Rename)를 트리 파이프라인 안에서 재현. mainloop의 ActionReturnRecovery 직전 배치.
+  트리 모델은 buildDefaultModel이 WithReturnReg를, ActionPrototypeTypes가 active output을 이미 설치하므로
+  guardReturns가 발화. 이게 RETURN에 반환 레지스터를 엮어 본문을 살림(consume-bit DeadCode 보존).
+- **ActionReturnRecovery에 AncestorRealistic 게이트**: trial markActive를 execute(realistic) AND
+  ancestorOpUse(active use) 둘 다 통과 시로 제한(C++ ActionReturnRecovery::apply 충실). gcd의 param_3는
+  bare input(루프 통과)이라 execute 실패 -> void 유지. abs_val의 -param_3는 solid NEG -> 성공 -> int.
+- **수렴 버그 -> once-per-func**: guardReturns가 반환값을 엮자 abs_val/classify2가 mainloop hang.
+  진단(processOp histogram: 22 op이 15만+회 처리, 룰 fire 0) = ActionReturnRecovery(flags=0)가 active
+  return이 있으면 매 pass buildReturnOutput+count++ -> repeat-group 수렴 불가. C++는 multi-pass
+  ParamActive(finishPass->markFullyChecked->build 1회->clearActiveOutput)로 수렴하나 이 ad-hoc 포팅은
+  매번 RETURN 입력 스캔 재발견+재빌드. -> ActionReturnRecovery를 once-per-func로(guardReturns 직후 1회
+  빌드 = single-build 수렴 재현). hang 해소.
+- **propagateConstant nil-parent 가드**(condexe.go): guardReturns 트랜지언트가 잠시 "모든 op은 parent를
+  가진다" 불변식을 깨 ConditionalConst에서 nil deref. 위쪽 MULTIEQUAL nil-parent 가드와 동일하게 detached
+  op skip(CFG 밖이라 dominate 불가).
+- **회귀 가드**: 기존 `TestUniversalActionTreeGcdGolden`(gcd void byte-identical) + production
+  `TestMSVC*` 전부 그린. production은 decompile.go가 ActionDirectWrite를 안 돌려 param이 directwrite가
+  아니므로 production applyReturnRecovery 판정은 ancestorOpUse 단독 유지(AncestorRealistic 게이트는 트리
+  전용 -- 트리는 mainloop에 ActionDirectWrite 있음). production 무회귀 확인 후 게이트를 production에
+  적용하지 않음.
+- **남은 갭(트리 2/5)**: counted_loop/sum_list는 반환값은 복구됐으나(int, return local_c/local_8)
+  for-loop fold 미인식(while로 렌더) + 루프-carried 스택 로컬 누산기 phi 미병합(본문 갱신이 dead temp
+  uVar1/uVar2로 새고 local_c/local_8에 write-back 안됨) + sum_list 변수명 "return" 충돌. 둘 다 production
+  골든이고 production은 통과 -> 트리 vs production SSA 대조(dumpSSA/TestProductionStagesDiag)로 localize
+  가능. 별개 다운스트림 영역(step3b류 merge/snapshot 갭 가능).
+- C++ 참조: funcdata_varnode.cc AncestorRealistic(2016-2256), funcdata.hh State(656-725), coreaction.cc
+  ActionReturnRecovery::apply(1909-1956), heritage.cc guardReturns.
+
 ### 2026-06-30: H8-debt-2 step3b COMPLETE -- universal 트리가 gcd를 golden과 byte-identical 출력 (루프 회전 완성)
 이전 step3b 항목(아래)에서 edge-정렬 블로커로 정밀화한 뒤, 5개 parity 버그를 모두 잡아 **트리가 gcd를
 golden과 완전히 동일**하게 출력. 미션 #1 게이트의 결정적 전진(트리가 손정렬 41-call subset 없이 정확한
