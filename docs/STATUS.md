@@ -46,17 +46,29 @@ return-value가 아니라 루프 본체 렌더링:
   - WANT: `for (local_8 = 0; local_8 < 5; local_8 = local_8 + 1) { local_c = local_c + local_8; }`.
 - **현상 (sum_list)**: 유사 for-fold 미인식 + 변수 하나가 `return`으로 오명명(naming 충돌).
 - **핵심 단서**: counted_loop_x86_32/sum_list_x86_32 **둘 다 production 골든**이고 production은 통과
-  (msvc_diag_test.go:294 등, for 루프 정상). 즉 production 경로는 스택-로컬 누산기 phi를 올바로 병합 +
-  for-fold함. 트리만 못함 -> step3b 방법론(트리 vs production SSA 대조)이 그대로 적용 가능.
-- **C++ 참조 / 수정 후보**: 루프-carried 변수 merge는 `merge.cc`(MergeOp/trimOpOutput) + ForLoops 인식은
-  `blockaction.cc ActionForLoops`(`tryMarkForLoop`). step3b가 gcd 루프 snapshot을 trimOpOutput으로 잡은
-  것처럼, 스택 로컬 누산기의 back-edge MULTIEQUAL이 트리에서 어떤 once-per-func 오등록/merge 누락으로
-  dead temp로 새는지 의심.
-- **진단 도구**: `GCD_DUMP=1 TREE_DIAG=1 go test ./pkg/loader/ -run TestTreeOutputDiag`(트리 vs production
-  SSA 대조 -- 단 현재 gcd 전용, counted_loop용으로 확장 필요) + `TestProductionStagesDiag`(production
-  단계별 blockShape). 트리 출력은 `TestTreeGoldensDiag`(TREE_DIAG=1).
-- **수정 대상 Go 파일**: `pkg/pcode/merge.go`(누산기 phi), `pkg/pcode/blockaction*.go`/ForLoops, 트리
-  파이프라인 액션 flags/등록(`pkg/pcode/action.go`).
+  (msvc_diag_test.go:294 등, for 루프 정상). 즉 production 경로는 스택-로컬 누산기를 올바로 병합 +
+  for-fold함. 트리만 못함.
+- **SSA 레벨 규명 (이번 세션 실측, counted_loop 트리 vs production SSA 대조)**: **op 구조는 byte-identical**.
+  같은 블록/같은 MULTIEQUAL/같은 INT_ADD. 차이는 **순수 HighVariable 병합(naming)** 하나뿐:
+  - 트리 block3: `register:0x4[4]#uVar2 = INT_ADD stack:0xfffffff4#local_cT stack:0xfffffff8#local_8T`
+    block4: `register:0x0[4]#uVar1 = INT_ADD stack:0xfffffff8#local_8T const:0x1` -- 루프 본문 결과가
+    **별도 HighVariable(uVar1/uVar2)** -> printer가 `uVar2 = local_c + local_8`(dead, write-back X).
+  - production block3: `register:0x4[4]#local_c = INT_ADD ...` block4: `register:0x0[4]#local_8 = INT_ADD ...`
+    -- 루프 본문 레지스터 결과가 **스택 로컬과 같은 HighVariable(local_c/local_8)** -> `local_c = local_c +
+    local_8`(write-back) + for-fold 인식.
+  - 즉 **루프 back-edge 레지스터 정의(register:0x4/0x0)를 스택 로컬 HighVariable(local_c/local_8,
+    stack:0xfffffff4/0xfffffff8)로 병합하는 merge를 트리가 빠뜨림**. 트리에 merge 액션은 전부 존재
+    (action.go:1423-1435 MergeRequired/MergeCopy/DominantCopy/MergeAdjacent/MergeType 등)하므로, 누락이
+    아니라 **트리에서 그 merge의 cover/mergeTest가 실패하거나 once-per-func/flags 오등록으로 한 번만
+    돌고 마는 류**(step3b 패턴) 의심. 어느 merge 액션이 production에서 register<->stack을 잇는지
+    (MergeMarker/MergeAdjacent/mergeAddrTied 후보) 먼저 격리할 것.
+- **진단 도구**: `GCD_DUMP=1 TREE_DIAG=1`로 SSA 대조. counted_loop용 임시 테스트는 이번 세션에 제거됨 --
+  필요시 buildGcd 패턴 + counted_loop 바이트(tree_goldens_diag_test.go:64)로 재작성(트리: BuildUniversalAction
+  +SetCurrent("decompile").Perform, production: bridge.Decompile, 둘 다 dumpSSA). `TestProductionStagesDiag`
+  (production 단계별), 트리 출력은 `TestTreeGoldensDiag`.
+- **수정 대상 Go 파일**: `pkg/pcode/merge.go`(mergeMarker/mergeAdjacent/mergeTest/cover) + 트리 파이프라인
+  merge 액션 flags/등록(`pkg/pcode/action.go:1423-1435`). ForLoops(for-fold)는 병합이 풀리면 자동 따라올
+  가능성 높음(production은 같은 SSA로 for-fold 성공) -- 병합 먼저.
 - **성공 기준**: `TestTreeGoldensDiag` 5/5 byte-identical. 정렬되면 decompile.go 41-call subset을 트리로
   교체(미션 #1 게이트 완료).
 
