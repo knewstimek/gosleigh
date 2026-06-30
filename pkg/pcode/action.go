@@ -1440,6 +1440,14 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	act.AddAction(NewActionNameVars("merge"))
 	act.AddAction(NewActionSetCasts("casts"))
 	act.AddAction(NewActionFinalStructure("blockrecovery"))
+	// ActionForLoops folds while-do blocks into for-loops. In C++ this transform
+	// happens at print time (BlockWhileDo::finalTransform in block.cc), so it is not
+	// a member of universalAction; Gosleigh models it as a terminal once-per-func
+	// action (the same one the production driver runs last). It must follow
+	// FinalStructure (needs the final BlockWhileDo tree), SetCasts (for-iterate ops
+	// may carry an inserted CAST), and the merge/naming phase (tryMarkForLoop's
+	// cross-variable COPY rejection inspects post-merge HighVariables).
+	act.AddAction(NewActionForLoops("analysis"))
 	act.AddAction(NewActionPrototypeWarnings("protorecovery"))
 	act.AddAction(NewActionStop("base"))
 

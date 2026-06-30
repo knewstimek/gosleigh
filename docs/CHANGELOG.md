@@ -5,6 +5,27 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-2 -- 루프 누산기 dead-temp 근본 해소 (BuildFromVarnodes가 병합 high를 훔치던 버그)
+counted_loop/sum_list의 루프 본문이 dead temp(`uVar2 = local_c + local_8`)로 새던 블로커를 충실히 잡음.
+이전 세션의 "loop-snapshot 누산기 미통합" 가설(trimOpOutput 확장 필요)은 **오진**이었음 -- 계측으로
+실제 경로를 추적해 진짜 원인을 규명. counted_loop의 두 루프변수 write-back이 모두 정상 복구됨
+(`local_c = local_c + local_8`, `local_8 = local_8 + 1`). gcd/abs_val/classify2 무회귀, 전 패키지 그린.
+- **오진 정정**: register:0x0(counter)/register:0x4(accumulator)가 mergeByDatatype에 over-merge된다고 봤으나,
+  High 그룹 덤프 결과 둘은 **분리**돼 있었음(이전 세션 addrtied 수정으로 해소됨). 또 mergeMarker(MergeOp)는
+  phi 입력 register를 stack local high에 **정상 병합**함(MERGE_DBG 계측: phase2 allOK, phase3 MERGE 확인).
+- **진짜 근본**: merge 이후 실행되는 `ActionInputPrototype.Apply`(coreaction.go:986)가 `BuildFromVarnodes`를
+  호출 -> local 루프(scopelocal.go:281)가 `NewHighVariable("local_c")` + AddInstance로 stack varnode를 **새 high로
+  훔쳐**, 병합 high에 들어있던 register:0x4를 orphan(uVar2)으로 남김. C++ `ActionInputPrototype::apply`
+  (coreaction.cc:4718)는 HighVariable을 **재생성하지 않음** -- 입력 param trial resolve + updateInputTypes만 하고
+  local high는 안 건드림(이름은 Symbol에서 파생). Go의 high 재생성이 비충실.
+- **수정**(scopelocal.go BuildFromVarnodes local 루프): 새 high 생성 대신 그룹 stack varnode가 **이미 속한 병합
+  high를 재사용 + SetName**. claimedHigh 가드로 두 offset이 한 high를 공유(over-merge)하면 새 high로 폴백해
+  변수 붕괴 방지. register-backed 누산기/카운터가 stack local에 따라옴 -> write-back 렌더.
+- **남은 갭(counted_loop/sum_list 공통)**: 이제 둘 다 의미 정확, 유일 차이는 **for-loop fold**(`while`->`for`).
+  sum_list는 추가로 stray `int *uVar3;` 미사용 선언. production은 for-fold 동작(골든 통과) -> 트리만 미적용.
+- C++ 참조: coreaction.cc ActionInputPrototype::apply(4718)/ActionOutputPrototype::apply(4776),
+  merge.cc mergeMarker(889)/mergeOp(719).
+
 ### 2026-06-30: H8-debt-2 step4-후속 -- counted_loop 누산기 갭 딥다이브 (merge/cover/addrtied 진짜 버그 5개 충실 수정)
 step4(트리 1/5->3/5) 후 남은 counted_loop/sum_list(루프 본문 누산기가 dead temp `uVar2`로 렌더)를 SSA-버전
 레벨까지 해부해 진짜 C++ parity 버그 5개를 잡음. 골든 숫자는 3/5 유지지만 **스택 로컬 over-merge라는 한 층을
