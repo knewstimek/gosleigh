@@ -5,6 +5,32 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-06-30: H8-debt-2 -- x64 processEntry in_RDI (entry-point void proto + irregular input 네이밍) = 멀티아치 10/10
+유일 잔여 x64_add_ret를 닫아 **트리 전체 골든 맵 10/10 byte-identical** 달성. entry-point(processEntry) 함수의
+register 인자를 param이 아닌 live-on-entry `in_<reg>`로 렌더 + void 프로토타입. x86-32 8/8 + aarch64 무회귀,
+production `TestMSVC*`/`TestAARCH64SimpleFunction`/`TestX8664` 무회귀, 전 패키지 그린.
+- **현상**: x64_add_ret GOT `entry(undefined4 p1,p2,long p3,long p4){return p4+p3;}` vs WANT
+  `long processEntry entry(void){ long in_RSI; long in_RDI; return in_RDI+in_RSI;}`. 갭 = entry-point 의미:
+  golden은 void 프로토타입 + register 인자를 `in_RDI`/`in_RSI`로, 트리는 param_3/param_4로 복구.
+- **근본(2개, 같은 뿌리, 코드 추적)**: processEntry는 스택 컨벤션이라 register 인자가 param 슬롯(index)을 안 받음.
+  (a) 트리는 RegParamOffsets 게이트로 RDI/RSI를 param 복구. (b) 미복구 register 입력의 `in_<reg>` 네이밍이
+  printc에 미구현(`isSpecialInputRegister`는 pc/sp/lr만). 추가로 반환 타입 `undefined8` = RDI/RSI 미시드 시
+  InferTypes가 long 추론 실패.
+- **수정 1 -- EntryPoint 모델 플래그**(protomodel.go ProtoModel.EntryPoint + bridge.go BuildConfig.EntryPoint):
+  buildDefaultModel이 entryPoint를 모델에 전파. RegParamOffsets는 **유지**(인자 레지스터 식별용).
+- **수정 2 -- scopelocal regparam 분리**(scopelocal.go BuildFromVarnodes): EntryPoint면 regParamSlots 수집 +
+  **타입 시드(TYPE_INT)는 유지**하되 **param HighVariable 생성 + fp.AddParam만 스킵**. 타입 시드 유지로
+  ActionInferTypes가 RDI/RSI -> ADD -> 반환을 long으로 추론(undefined8 해소). regParamCount=0(스택 param은 0부터).
+- **수정 3 -- printc in_<reg> 네이밍**(printc.go FuncProto 경로, HV 디스패치 직전): EntryPoint && input &&
+  register space && IsRegParam(offset) && live 인 varnode를 `in_<regname>`로 네이밍 + locals 선언. HV 디스패치
+  전에 둬서 machine-generated HV로 인한 `local_<createindex>` 폴백을 차단. EntryPoint 게이트로 aarch64
+  (non-processEntry, x0/x1 정상 param 복구) 무영향 -- 이 게이트 없으면 aarch64 param이 in_x0로 오네이밍됨(회귀).
+  C++ 참조: ScopeInternal::buildVariableName database.cc:2470 (input && index<0 -> "in_" + regname).
+- **수정 4 -- runTreeCase**(tree_fullmap_diag_test.go): procEntry != "" 케이스에 BuildConfig.EntryPoint=true
+  (SetProcessEntry 프린트 어노테이션과 짝).
+- **무회귀 근거**: in_ 네이밍은 EntryPoint && IsRegParam(arg 레지스터)로 이중 게이트 -- x86-32(인자 레지스터 없음)/
+  aarch64(non-entry) 미발동, frame/callee-saved 레지스터 제외. production decompile.go는 EntryPoint 미설정(기본 false).
+
 ### 2026-06-30: H8-debt-2 -- 트리 default ProtoModel arch-aware 화 (cspec 구동), aarch64 register-param 복구 = 멀티아치 9/10
 트리가 쓰는 default ProtoModel을 x86-32 하드코딩에서 cspec 구동 arch-aware로 교체. register-param 아키텍처
 (x86-64 SysV, AArch64 AAPCS64)의 (1) 레지스터 파라미터 복구, (2) signed-long 반환 타입, (3) 반환값 복구가 트리

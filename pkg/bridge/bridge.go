@@ -22,6 +22,12 @@ type BuildConfig struct {
 	// (e.g. from DWARF or a PE import table) without changing the internal
 	// name used for address resolution.
 	SymbolName string
+	// EntryPoint marks the function as a program entry point decompiled under
+	// the stack-based processEntry convention: register argument slots are not
+	// recovered as parameters (live-on-entry argument registers render as
+	// in_<reg>). Set this alongside PrintC.SetProcessEntry for the matching
+	// signature annotation. C++ parity: entry points use the processEntry CC.
+	EntryPoint bool
 }
 
 type Result struct {
@@ -178,7 +184,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// (ActionStackPtrFlow resolves it during the run, then ScopeLocal restructure
 	// maps the stack varnodes). Additive: the decompile driver replaces the proto
 	// via its own ApplyCallingConvention so production output is unaffected.
-	fd.SetDefaultModel(buildDefaultModel(engine, result.CspecData, fd))
+	fd.SetDefaultModel(buildDefaultModel(engine, result.CspecData, fd, cfg.EntryPoint))
 
 	return result, nil
 }
@@ -196,7 +202,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 // (register space, offset 0, size 4), preserving the prior behavior exactly.
 //
 // C++ parity: Architecture::defaultfp / PrototypeModel construction from cspec.
-func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdata) *pcode.ProtoModel {
+func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdata, entryPoint bool) *pcode.ProtoModel {
 	xr := engine.XRefs()
 	// regLookup resolves register names to their register-space byte offset so
 	// NewProtoModelFromCspec can populate RegParamOffsets from the cspec's
@@ -207,6 +213,10 @@ func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Fun
 		return off, ok
 	}
 	model := pcode.NewProtoModelFromCspec(cspec, nil, regLookup)
+	// Entry-point functions use the stack-based processEntry convention: register
+	// argument slots stay known (RegParamOffsets) but are not recovered as named
+	// parameters, so live-on-entry argument registers render as in_<reg>.
+	model.EntryPoint = entryPoint
 	model.WithEffectOffsets(func(name string) (uint64, int32, bool) {
 		_, off, sz, ok := xr.RegisterByName(name)
 		return off, int32(sz), ok

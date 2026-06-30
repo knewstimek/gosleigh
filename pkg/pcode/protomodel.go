@@ -67,6 +67,18 @@ type ProtoModel struct {
 	// Nil/empty for x86-32 (stack-only ABI); populated for x86-64 and similar ABIs.
 	RegParamOffsets map[uint64]int
 
+	// EntryPoint marks an entry-point function decompiled under the stack-based
+	// processEntry convention. When set, register argument slots (RegParamOffsets)
+	// are NOT recovered as named parameters: an entry point conventionally takes
+	// no register C parameters, so a live-on-entry argument register read becomes
+	// an irregular input rendered as in_<reg> instead of param_N. RegParamOffsets
+	// stays populated so the renderer can still recognize which input registers
+	// are argument registers (vs frame/callee-saved) when assigning in_<reg> names.
+	// C++ parity: an entry point gets the stack-only processEntry PrototypeModel,
+	// so register args get no parameter index -> ScopeInternal::buildVariableName
+	// (database.cc:2470) emits in_<regname> for index<0 inputs.
+	EntryPoint bool
+
 	// PointerSize is the pointer size in bytes from the cspec data_organization.
 	// 0 means unset; treat as 4.
 	PointerSize int
