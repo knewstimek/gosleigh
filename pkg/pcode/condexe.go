@@ -1069,7 +1069,13 @@ func (ctx *condConstContext) propagateConstant(points []constPoint) int {
 			if !point.blockIsDom {
 				continue
 			}
-			if constBlock.Dominates(&op.Parent().FlowBlock) {
+			// A detached op (no parent block) is not in the CFG and cannot be
+			// dominated; skip it, mirroring the MULTIEQUAL nil-parent guard above.
+			opParent := op.Parent()
+			if opParent == nil {
+				continue
+			}
+			if constBlock.Dominates(&opParent.FlowBlock) {
 				if constVn == nil {
 					constVn = data.NewConstant(varVn.Size(), point.value)
 				}
