@@ -156,14 +156,22 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 	// C++ parity: Ghidra infers param types from the ABI model (ParameterSymbol);
 	// Ghidra defaults to signed integer for register params (e.g. AArch64 X0 -> long).
 	// TYPE_INT produces "int" (4 bytes) or "long" (8 bytes) via normalizedBaseType.
+	// Entry-point functions (processEntry stack convention) keep the argument
+	// register types seeded -- so ActionInferTypes still propagates a concrete
+	// "long"/"int" width into the body -- but do NOT recover them as named
+	// parameters: the renderer emits in_<reg> for these live-on-entry inputs.
+	// Hence register args contribute 0 to the stack-parameter base index here.
+	// C++ parity: an entry point gets the stack-only processEntry PrototypeModel,
+	// so register args get no parameter index (index<0 -> in_<reg>).
+	entryPoint := sl.model.EntryPoint
 	regParamCount := len(regParamSlots)
+	if entryPoint {
+		regParamCount = 0
+	}
 	for _, slot := range regParamSlots {
-		name := GetParamName(slot.idx)
-		hv := NewHighVariable(name)
-		hv.AddInstance(slot.vn)
-		sl.paramByVn[slot.vn] = hv
 		// Seed a concrete signed type onto the varnode so normalizedBaseType
-		// renders it as "int" / "long" (not "undefined%d").
+		// renders it as "int" / "long" (not "undefined%d"). Done for entry-point
+		// inputs too so the in_<reg> declaration and the return type infer "long".
 		// C++ parity: Ghidra uses TYPE_INT for register params when no explicit
 		// type is known from the prototype; "long" = 8-byte signed on LP64.
 		if slot.vn.Type() == nil {
@@ -173,6 +181,13 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 			}
 			SetVarnodeType(slot.vn, sharedTypeFactory.GetBase(int32(sz), TYPE_INT, ""))
 		}
+		if entryPoint {
+			continue
+		}
+		name := GetParamName(slot.idx)
+		hv := NewHighVariable(name)
+		hv.AddInstance(slot.vn)
+		sl.paramByVn[slot.vn] = hv
 		if fp != nil {
 			fp.AddParam(hv)
 		}

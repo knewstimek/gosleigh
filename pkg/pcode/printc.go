@@ -292,6 +292,34 @@ func (s *printCState) collectSymbols() {
 			if vn == nil || vn.IsConstant() || vn.IsAnnotation() {
 				continue
 			}
+			// Irregular input register: a live-on-entry argument register that was
+			// read but not recovered as a parameter (entry-point functions under the
+			// stack-based processEntry convention). Ghidra names these in_<regname>
+			// and declares them as locals. This is handled before the HighVariable
+			// dispatch because such inputs carry a machine-generated HV that would
+			// otherwise leave them unnamed (rendered as local_<createindex>). The
+			// model's RegParamOffsets gate restricts this to argument registers, so
+			// frame and callee-saved registers are still skipped.
+			// C++ parity: ScopeInternal::buildVariableName (database.cc:2470) -- an
+			// input varnode with no parameter index (index<0) -> "in_" + regname.
+			if vn.IsInput() && sl != nil && sl.model != nil && sl.model.EntryPoint &&
+				isRegisterSpace(vn) && vn.NumDescend() > 0 {
+				if _, isArg := sl.model.IsRegParam(vn.Offset()); isArg {
+					key := fmt.Sprintf("%d:%d:%d", vn.Space().Index, vn.Offset(), vn.Size())
+					if rn := regNameByLoc[key]; rn != "" {
+						s.names[vn] = "in_" + rn
+						if vn.Type() == nil {
+							sz := vn.Size()
+							if sz <= 0 {
+								sz = 4
+							}
+							SetVarnodeType(vn, sharedTypeFactory.GetBase(int32(sz), TYPE_INT, ""))
+						}
+						locals = append(locals, vn)
+						continue
+					}
+				}
+			}
 			// Classify via ScopeLocal/HighVariable assignment.
 			if hv := vn.High(); hv != nil {
 				name := hv.Name()

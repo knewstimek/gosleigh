@@ -51,6 +51,12 @@ func runTreeCase(t *testing.T, dir string, c treeMapCase) (string, bool) {
 	if c.cspecRel != "" {
 		cfg.CspecPath = filepath.Join(dir, c.cspecRel)
 	}
+	// processEntry cases are entry-point functions (stack convention): register
+	// argument slots are not recovered as params -- live-on-entry argument
+	// registers render as in_<reg>. Mirrors PrintC.SetProcessEntry below.
+	if c.procEntry != "" {
+		cfg.EntryPoint = true
+	}
 	result, err := bridge.Build(engine, cfg)
 	if err != nil {
 		t.Logf("[%s] BRIDGE-ERR: %v", c.name, err)
