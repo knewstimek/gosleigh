@@ -70,7 +70,7 @@ func TestInferTypesCopyChain(t *testing.T) {
 	hv0.SetType(ptrType)
 	hv0.AddInstance(vn0)
 
-	action := NewActionInferTypes("test")
+	action := NewActionInferTypesLegacy("test")
 	action.Apply(fd)
 
 	// vn2 should have received the pointer type through the COPY chain.
@@ -114,7 +114,7 @@ func TestInferTypesLoadDereference(t *testing.T) {
 	hv.SetType(ptrType)
 	hv.AddInstance(addrVn)
 
-	action := NewActionInferTypes("test")
+	action := NewActionInferTypesLegacy("test")
 	action.Apply(fd)
 
 	outType := outVn.Type()
@@ -158,7 +158,7 @@ func TestInferTypesIntAddPointer(t *testing.T) {
 	hv.SetType(ptrType)
 	hv.AddInstance(ptrVn)
 
-	action := NewActionInferTypes("test")
+	action := NewActionInferTypesLegacy("test")
 	action.Apply(fd)
 
 	outType := outVn.Type()
@@ -203,7 +203,7 @@ func TestInferTypesConvergence(t *testing.T) {
 	hv.SetType(intType)
 	hv.AddInstance(vns[0])
 
-	action := NewActionInferTypes("test")
+	action := NewActionInferTypesLegacy("test")
 	result := action.Apply(fd)
 
 	// Should have propagated and returned 1 (modified).

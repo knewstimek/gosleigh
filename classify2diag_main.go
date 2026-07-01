@@ -41,7 +41,7 @@ func main() {
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionPreferComplement("analysis").Apply(result.Funcdata)
