@@ -26,7 +26,21 @@ type ActionDeadCode struct {
 
 func NewActionDeadCode(group string) *ActionDeadCode {
 	a := &ActionDeadCode{}
-	a.ActionBase = NewActionBase(a, ActionRuleOncePerFunc, "deadcode", group)
+	// flags=0: re-run every repeat of the enclosing action group, matching C++
+	// ActionDeadCode (coreaction.hh:560 `Action(0,"deadcode",g)`), which the
+	// actmainloop registers as an ordinary repeat member (coreaction.cc:5514).
+	// A prior OncePerFunc simplification made this pass run only once per group,
+	// so an op that becomes dead LATER in the loop (e.g. the residual
+	// RAX = ZEXT(EAX_return) orphaned when subvariable flow retargets the RETURN
+	// to the narrow value) was never cleaned inside the type-recovery loop. That
+	// stale ZEXT kept feeding a UINT input-local into its operand's getLocalType,
+	// flooding unsigned types onto loop accumulators/parameters. Running every
+	// pass (as C++ does) removes the orphan before the next InferTypes sweep.
+	// ActionDeadCode is monotonic (only removes ops), so re-running cannot loop
+	// forever. Its embedded applyReturnRecovery call likewise now runs every
+	// pass, matching C++ ActionReturnRecovery also being a flags=0 actmainloop
+	// member (coreaction.cc:5511).
+	a.ActionBase = NewActionBase(a, 0, "deadcode", group)
 	return a
 }
 
