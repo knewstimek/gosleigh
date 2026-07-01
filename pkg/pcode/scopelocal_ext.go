@@ -541,15 +541,26 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 	})
 
 	types := sharedTypeFactory
+	// Gather the reconciled (RangeHint::preferred) committed data-type for each
+	// stack offset from the live Varnodes, once. C++ parity: MapState::gatherVarnodes
+	// + ScopeLocal::restructure merge loop (varmap.cc:1124/1294). The type is read
+	// from vn.Type() at this call, so the snapshot follows the surrounding
+	// mainloop timing (ActionInferTypes reports no data-flow change, so the last
+	// restructure sees the pre-typeprop committed type -- the type-leak mechanism).
+	slotTypes := mapStateStackTypes(fd, sl)
 	for _, s := range ordered {
-		// The data-type choice here intentionally matches the default
-		// fallback that BuildFromVarnodes uses for untyped stack slots.
-		// TODO: propagate the reconciled RangeHint type once MapState is ported.
 		sz := s.size
 		if sz <= 0 {
 			sz = 4
 		}
-		dt := types.GetBase(sz, TYPE_UNKNOWN, "")
+		// Symbol type = reconciled committed type for this offset, or a sized
+		// undefined when no active-write hint was gathered (C++ default unknown).
+		var dt Datatype
+		if h := slotTypes[s.addr.Offset]; h != nil && h.typ != nil {
+			dt = h.typ
+		} else {
+			dt = types.GetBase(sz, TYPE_UNKNOWN, "")
+		}
 		name := sl.buildVariableName(s.addr, address.Address{}, dt)
 		sym := NewSymbol(name, dt)
 		// Stack slots are address-tied: identified by frame address, not SSA number,
