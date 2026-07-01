@@ -152,7 +152,7 @@ func TestProductionStagesDiag(t *testing.T) {
 	pcode.NewMerge(fd).MergeMarker()
 	t.Logf("after BatchA + DeadCode + MergeMarker #2: %s", blockShape(fd))
 	pcode.NewActionSeedSignedOps("analysis").Apply(fd)
-	pcode.NewActionInferTypes("analysis").Apply(fd)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(fd)
 	pcode.NewActionMergeRequired("analysis").Apply(fd)
 	t.Logf("after InferTypes + MergeRequired: %s", blockShape(fd))
 	pcode.NewActionNormalizeBranches("analysis").Apply(fd)

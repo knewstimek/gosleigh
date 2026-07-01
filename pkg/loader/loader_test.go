@@ -281,7 +281,7 @@ func TestX86CountedLoop(t *testing.T) {
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -362,7 +362,7 @@ func TestX86IfElse(t *testing.T) {
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -505,7 +505,7 @@ func TestX86MultiplyFunction(t *testing.T) {
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -671,7 +671,7 @@ func TestX86Add3Function(t *testing.T) {
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -1071,7 +1071,7 @@ func TestX86ClassifySignFunction(t *testing.T) {
 	// Seed signed types on inputs of signed opcodes, then propagate through COPY/MULTIEQUAL.
 	// This makes constant varnodes (e.g. 0xffffffff) inherit TYPE_INT so PrintC emits -1.
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 	// Normalize if-else condition direction to match Ghidra's preferComplement pass.
@@ -1262,7 +1262,7 @@ func TestX86SwitchFunction(t *testing.T) {
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -1343,7 +1343,7 @@ func TestX86StructAccessFunction(t *testing.T) {
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -1426,7 +1426,7 @@ func TestX86ArrayIndexFunction(t *testing.T) {
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -2141,7 +2141,7 @@ func TestX86StructFieldAccess(t *testing.T) {
 	}
 
 	// Run ActionInferTypes to propagate the pointer type through the SSA graph.
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
@@ -2248,7 +2248,7 @@ func TestX86ArrayIndexAccess(t *testing.T) {
 	}
 
 	// Run ActionInferTypes to propagate the array pointer type.
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
@@ -2451,7 +2451,7 @@ func TestAARCH64SimpleFunction(t *testing.T) {
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -2558,7 +2558,7 @@ func TestX86ClassifySignGoldenProcessEntry(t *testing.T) {
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionPreferComplement("analysis").Apply(result.Funcdata)
@@ -2662,7 +2662,7 @@ func TestX86MultiplyGoldenProcessEntry(t *testing.T) {
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 
@@ -2753,7 +2753,7 @@ func TestX86Add3GoldenProcessEntry(t *testing.T) {
 	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
 	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
 	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
 

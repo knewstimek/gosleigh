@@ -94,7 +94,7 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 	pcode.NewActionDeadCode("analysis").Apply(fd)
 	pcode.NewMerge(fd).MergeMarker()
 	pcode.NewActionSeedSignedOps("analysis").Apply(fd)
-	pcode.NewActionInferTypes("analysis").Apply(fd)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(fd)
 	// Run MergeRequired before NodeJoin so addr-tied snipReads COPYs are in place
 	// before conditional-join phi creation, matching Ghidra's merge phase order.
 	pcode.NewActionMergeRequired("analysis").Apply(fd)
@@ -133,7 +133,7 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 	pcode.NewActionCopyMarker("analysis").Apply(fd)
 	// Re-infer types so trim COPYs created after the first InferTypes pass (the
 	// loop-head snapshot) propagate their source type and name as iVar, not uVar.
-	pcode.NewActionInferTypes("analysis").Apply(fd)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(fd)
 	// Enable type recovery so the pointer-arithmetic rules (RulePtrArith) activate,
 	// then re-run RulePtrArith now that final types are known to form PTRADD from
 	// pointer INT_ADD. C++ parity: ActionStartTypes precedes the actprop pointer

@@ -249,7 +249,7 @@ func runPipeline(t *testing.T, prog []byte, name string) string {
 	// by re-running MergeMarker after BatchA propagation completes.
 	pcode.NewMerge(result.Funcdata).MergeMarker()
 	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypes("analysis").Apply(result.Funcdata)
+	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
 	// H8: run MergeRequired before NodeJoin so addr-tied snipReads COPYs are in
 	// place before conditional-join phi creation. This matches Ghidra's merge
 	// phase order more closely and removes the raw-stack/trim-COPY split.
