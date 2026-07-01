@@ -343,6 +343,34 @@ func (sl *ScopeLocal) EntryForVarnode(vn *Varnode) *SymbolEntry {
 	return sl.ext().vnMap[vn]
 }
 
+// FindEntryAt returns the stack SymbolEntry whose address matches addr (same
+// space and starting offset), preferring an exact size match. RestructureVarnode
+// builds entries per stack slot but does not populate vnMap, so this address
+// lookup is how printc resolves a stack Varnode to its Symbol.
+// C++ parity: ScopeInternal::findOverlap / SymbolEntry lookup by address.
+func (sl *ScopeLocal) FindEntryAt(addr address.Address, size int32) *SymbolEntry {
+	if sl == nil {
+		return nil
+	}
+	var fallback *SymbolEntry
+	for _, e := range sl.ext().entries {
+		if e == nil {
+			continue
+		}
+		ea := e.Addr()
+		if ea.Space != addr.Space || ea.Offset != addr.Offset {
+			continue
+		}
+		if e.Size() == size {
+			return e
+		}
+		if fallback == nil {
+			fallback = e
+		}
+	}
+	return fallback
+}
+
 // AddTypeRecommendation appends a data-type hint for the given address.
 // C++ parity: ScopeLocal::addTypeRecommendation
 func (sl *ScopeLocal) AddTypeRecommendation(addr address.Address, dt Datatype) {

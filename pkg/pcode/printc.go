@@ -1123,6 +1123,8 @@ func (s *printCState) emitLocalDeclarations() {
 		var dt Datatype
 		if !vn.Space().IsUnique() && s.returnOnlyLocs[varnodeLocKey(vn)] {
 			dt = sharedTypeFactory.GetBase(int32(vn.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", vn.Size()))
+		} else if st := s.stackSymbolType(vn); st != nil {
+			dt = st
 		} else {
 			dt = s.normalizeTypeForDecl(vn.TypeDefFacing())
 		}
@@ -1131,6 +1133,35 @@ func (s *printCState) emitLocalDeclarations() {
 			s.lang.Token(decl)
 		})
 	}
+}
+
+// stackSymbolType returns the declaration data-type for a stack Varnode taken
+// from its ScopeLocal SymbolEntry (built by RestructureVarnode from the committed
+// Varnode types via RangeHint), or nil when the Varnode does not map to a stack
+// Symbol. A TYPE_UNKNOWN symbol renders as undefined<size>, matching Ghidra's
+// undefined stack locals. This is the STEP 4 declaration source: the symbol type
+// is snapshotted at restructure time, so it does not leak the later-propagated
+// Varnode type. C++ parity: PrintC::emitVarDecl uses sym->getType().
+func (s *printCState) stackSymbolType(vn *Varnode) Datatype {
+	if vn == nil || vn.Space() == nil || vn.Space().IsUnique() || s.fd == nil {
+		return nil
+	}
+	sl := s.fd.GetScopeLocal()
+	if sl == nil {
+		return nil
+	}
+	e := sl.FindEntryAt(vn.Addr(), int32(vn.Size()))
+	if e == nil || e.Symbol() == nil {
+		return nil
+	}
+	st := e.Symbol().Type()
+	if st == nil {
+		return nil
+	}
+	if st.Metatype() == TYPE_UNKNOWN {
+		return sharedTypeFactory.GetBase(int32(vn.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", vn.Size()))
+	}
+	return s.normalizeTypeForDecl(st)
 }
 
 func (s *printCState) normalizeTypeForDecl(dt Datatype) Datatype {
