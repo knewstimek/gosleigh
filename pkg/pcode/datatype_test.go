@@ -282,3 +282,33 @@ func TestTypeFactoryInterning(t *testing.T) {
 		t.Fatalf("Intern() did not canonicalize nested dependencies")
 	}
 }
+
+func TestTypeOrder(t *testing.T) {
+	int4 := NewBase(4, TYPE_INT, "int4")
+	uint4 := NewBase(4, TYPE_UINT, "uint4")
+	int8 := NewBase(8, TYPE_INT, "int8")
+	unknown4 := NewBase(4, TYPE_UNKNOWN, "undefined4")
+
+	// Same pointer orders 0.
+	if got := TypeOrder(int4, int4); got != 0 {
+		t.Fatalf("TypeOrder(int4,int4)=%d, want 0", got)
+	}
+	// int4 (SUB_INT_PLAIN=17) is more specific than unknown4 (SUB_UNKNOWN=21).
+	if got := TypeOrder(int4, unknown4); got >= 0 {
+		t.Fatalf("TypeOrder(int4,unknown4)=%d, want <0 (int4 wins)", got)
+	}
+	if got := TypeOrder(unknown4, int4); got <= 0 {
+		t.Fatalf("TypeOrder(unknown4,int4)=%d, want >0", got)
+	}
+	// Same submeta: larger size wins (int8 more specific than int4).
+	if got := TypeOrder(int4, int8); got <= 0 {
+		t.Fatalf("TypeOrder(int4,int8)=%d, want >0 (int8 wins)", got)
+	}
+	if got := TypeOrder(int8, int4); got >= 0 {
+		t.Fatalf("TypeOrder(int8,int4)=%d, want <0", got)
+	}
+	// uint4 (SUB_UINT_PLAIN=16) is more specific than int4 (SUB_INT_PLAIN=17).
+	if got := TypeOrder(uint4, int4); got >= 0 {
+		t.Fatalf("TypeOrder(uint4,int4)=%d, want <0 (uint4 wins)", got)
+	}
+}

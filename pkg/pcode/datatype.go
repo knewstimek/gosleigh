@@ -482,6 +482,34 @@ func (p *PointerRel) ByteOffset() int32 { return p.offset }
 // C++ parity: TypePointer::getWordSize.
 func (p *PointerRel) WordSize() uint32 { return p.wordSize }
 
+// TypeOrder orders two data-types for the type propagation algorithm.
+// Bigger types come earlier; more specific types come earlier.
+// C++ parity: Datatype::typeOrder (type.hh:295) which forwards to
+// Datatype::compare(op,10) (type.cc:216-222): identical pointers order 0;
+// otherwise submeta ascending (lower submeta = more specific = earlier),
+// then size descending (larger size = earlier). A negative result means a
+// is more specific / larger than b.
+//
+// This models the base Datatype::compare only. Pointer/Array/Struct override
+// compare with additional recursive levels; the primitive leaf types that the
+// type-propagation sweep touches never descend past the base comparison, so the
+// override levels are intentionally not ported here.
+func TypeOrder(a, b Datatype) int {
+	if a == b {
+		return 0
+	}
+	if a.SubMeta() != b.SubMeta() {
+		if a.SubMeta() < b.SubMeta() {
+			return -1
+		}
+		return 1
+	}
+	if a.Size() != b.Size() {
+		return int(b.Size() - a.Size())
+	}
+	return 0
+}
+
 func subMetaForMetatype(meta metatype) subMetatype {
 	if int(meta) >= len(base2sub) {
 		return SUB_UNKNOWN
