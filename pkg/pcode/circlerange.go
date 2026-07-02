@@ -796,6 +796,18 @@ func newCircleRangeBounds(lft, rgt uint64, size, stp int32) circleRange {
 	}
 }
 
+// newCircleRangeSingle builds a range holding the single value val over a
+// size-byte domain with step 1.
+// C++ parity: CircleRange::CircleRange(uintb val,int4 size) (rangeutil.cc:205).
+func newCircleRangeSingle(val uint64, size int32) circleRange {
+	m := maskForSize(size)
+	return circleRange{left: val, right: (val + 1) & m, mask: m, step: 1, isempty: false}
+}
+
+// isEmpty reports whether the range holds no values.
+// C++ parity: CircleRange::isEmpty (rangeutil.hh:71).
+func (r *circleRange) isEmpty() bool { return r.isempty }
+
 // setRange assigns explicit boundaries in place.
 // C++ parity: CircleRange::setRange(uintb,uintb,int4,int4) (rangeutil.cc:219).
 func (r *circleRange) setRange(lft, rgt uint64, size, stp int32) {
