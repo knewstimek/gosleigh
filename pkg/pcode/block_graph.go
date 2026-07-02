@@ -69,6 +69,26 @@ func (bg *BlockGraph) RemoveBlock(bl *FlowBlock) {
 	bl.parent = nil
 }
 
+// removeFromFlow removes bl from the flow of the graph, rewiring each of bl's
+// predecessors' edges (that pointed at bl) to bl's successor. Intended for a
+// block with at most one out-edge (do-nothing / unreachable removal). Loop-edge
+// information is not preserved. bl's own edges are all severed.
+// C++ parity: block.cc BlockGraph::removeFromFlow (block.cc:1545)
+func (bg *BlockGraph) removeFromFlow(bl *FlowBlock) {
+	for bl.SizeOut() > 0 {
+		bbout := bl.OutEdge(bl.SizeOut() - 1).Point
+		bl.RemoveOutEdge(bl.SizeOut() - 1)
+		for bl.SizeIn() > 0 {
+			bbin := bl.InEdge(0).Point
+			// bl->intothis[0].reverse_index: the predecessor's out-edge slot
+			// that currently targets bl. Retarget it to bbout, which severs
+			// bl's in-edge 0 (advancing the loop).
+			revIdx := bl.InEdge(0).ReverseIndex
+			bbin.ReplaceOutEdge(revIdx, bbout)
+		}
+	}
+}
+
 // SpliceBlock removes bl from the graph, connecting bl's single predecessor
 // directly to bl's single successor. bl must have exactly one in-edge and
 // one out-edge (i.e. it is a passthrough block).

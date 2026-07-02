@@ -708,10 +708,7 @@ func (fd *Funcdata) RemoveUnreachableBlocks(bool, bool) bool {
 	return false
 }
 
-// RemoveDoNothingBlock removes a do-nothing block.
-// C++ parity: funcdata.hh Funcdata::removeDoNothingBlock
-func (fd *Funcdata) RemoveDoNothingBlock(*BlockBasic) {
-}
+// RemoveDoNothingBlock is implemented in funcdata_donothing.go.
 
 // RemoveBranch removes a branch from the given basic block.
 // C++ parity: funcdata.hh Funcdata::removeBranch

@@ -589,10 +589,33 @@ func (a *ActionDoNothing) Clone(groups ActionGroupList) Action {
 	return NewActionDoNothing(a.GetGroup())
 }
 
-// Apply is a scaffolded no-op because the block-removal helpers are not yet ported.
-// C++ parity: coreaction.cc ActionDoNothing::apply
+// Apply removes the first do-nothing (marker-only) basic block it finds. A
+// self-looping do-nothing block is flagged (and warned about) rather than
+// removed; any other removable block is collapsed to its single successor.
+// After a removal it increments count and returns so the mainloop re-runs.
+// C++ parity: coreaction.cc ActionDoNothing::apply (coreaction.cc:3473)
 func (a *ActionDoNothing) Apply(data *Funcdata) int {
-	_ = data
+	graph := data.GetBasicBlocks()
+	if graph == nil {
+		return 0
+	}
+	for i := 0; i < graph.GetSize(); i++ {
+		bb := asBasic(graph.GetBlock(i))
+		if bb == nil || !bb.IsDoNothing() {
+			continue
+		}
+		if bb.SizeOut() == 1 && bb.OutEdge(0).Point == &bb.FlowBlock { // infinite loop
+			if !bb.IsDonothingLoop() {
+				bb.SetDonothingLoop()
+				// C++ emits data.warning("Do nothing block with infinite loop");
+				// the Go pipeline has no warning sink yet, so just flag it.
+			}
+		} else if bb.UnblockedMulti(0) {
+			data.RemoveDoNothingBlock(bb)
+			a.count++
+			return 0
+		}
+	}
 	return 0
 }
 
