@@ -5,6 +5,51 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-03: H-dispatch Component 1 -- FlowInfo::truncateIndirectJump 충실 포팅 (jump-table 실패 폴백)
+breadth 디스커버리(바로 아래 항목, master `5276375`)에서 매핑된 dispatch(dense switch) 갭의 첫 조각을
+닫았다. Ghidra의 raw-flow jump-table 복구 드라이버와 그 실패 폴백을 포팅해, 복구 불가능한 BRANCHIND를
+CALLIND 콜사이트 + artificial return으로 강등한다(`FlowInfo::generateOps` -> `recoverJumpTables` ->
+`truncateIndirectJump` 대응). 이전에는 모든 BRANCHIND가 raw `goto *(...)`로 남아 있었는데, 이는 Ghidra가
+절대 출력하지 않는 형태다. master `a02b1a6`.
+
+- **신규 `pkg/pcode/flow_jumptable.go`(+222)**:
+  - `Funcdata.ArtificialHalt`(flow.cc:592, `FlowInfo::artificialHalt`)
+  - `Funcdata.OpMarkHalt`(funcdata_op.cc:37, `Funcdata::opMarkHalt`)
+  - `Funcdata.RecoverJumpTables`(flow.cc:1427/785, 구동 드라이버 + `generateOps` 순회 루프)
+  - `Funcdata.recoverJumpTable`(funcdata_block.cc:639, `JumpTable.RecoverAddresses`로 실제 복구를 먼저
+    시도하고 실패 시에만 모드 진입)
+  - `Funcdata.linkJumpTable`(funcdata_block.cc:426)
+  - `Funcdata.setupCallindSpecs`(flow.cc:704)
+  - `Funcdata.TruncateIndirectJump`(flow.cc:727, 4개 RecoveryMode 분기 전부)
+  - 부속: `FuncProto` `badJumpTable`/`noReturn` 플래그(fspec.hh), 갓 강등된 CALLIND를 추적하는 lazy
+    `Funcdata.rebuildCallSpecs`. 드라이버는 `bridge.Build`의 block structuring 직후, universal-action
+    트리 이전에 배선(Ghidra의 pre-Action `generateOps` 순서 대응).
+- **충실성**: 무조건 truncate가 아니다 -- 기존 jumptable 머신러리(`RecoverAddresses`)로 복구를 먼저
+  실제 시도하고, 실패했을 때만 truncate한다. 향후 reloc 인식 로더가 복구를 성공시키면 테이블이 그대로
+  보존되는 구조. 현재 단일 `.text` 하네스에서는 항상 복구 실패(테이블 주소 에뮬레이션에 필요한
+  reloc/.rdata 부재, BRANCHIND 부모 블록에 out-edge 없음) -- **Ghidra 자신도 동일 입력에서
+  `fail_normal`로 떨어지는 이유와 정확히 같다.**
+- **dispatch 결과**: `goto *(...)`는 제거됐다(CALLIND + artificial RETURN 강등). 그러나 완전한
+  `uVar1 = (*(code*)(...))(); return uVar1;` 렌더까지는 아직 아니다 -- 별개의 기존 갭(project-wide)이
+  여전히 막고 있다: **IOP-space 인코딩 미포팅**(INDIRECT input(1)이 cause-ref를 못 갖고 rename
+  same-time 조정도 없음, heritage.cc:2506-2517)으로 CALLIND 타깃(RAX)이 유실돼 `(*0)()`로 렌더되고,
+  거기에 reloc 주소상수 + printc 타입명(uint/undefined8) 갭이 더해진다.
+- **게이트**: `TREE_MAP=1 TestTreeFullGoldenMap` 10/10, `X64_CORPUS=1 TestX64CorpusGoldenMap` 7/8
+  (process만 기존 MISMATCH 유지, 무회귀), `X64_BREADTH=1 TestX64BreadthGoldenMap` dist_sq/sum2d MATCH
+  유지, production `TestMSVC*`/`TestAARCH64*`/`TestX8664*`/`TestX64RegParam*` PASS, `go build` 클린,
+  `go test ./...` 클린(symbols_test 3건 missing-.exe 기존과 동일 제외).
+- **전략 확정(사용자 합의)**: bare `.obj` 위 dispatch는 Ghidra 자신도 복구 실패하므로 parity 타깃은
+  CALLIND 폴백이다. "진짜 switch 복구로 Ghidra를 능가할 수 있는가"라는 질문의 답은 원리상 가능하나
+  (1) `jumptable.go`(1671줄, 이미 포팅됨)가 실전 미검증이고 (2) 엔진 우위가 아니라 로딩 정책 차이일
+  뿐이며(Ghidra도 full image면 복구) (3) 골든 없이는 검증 불가라 parity 규칙 위반이다. **올바른 경로는
+  track B** -- Ghidra도 switch를 복구하는 full 링크 x64 `.exe` 코퍼스로 새 골든을 만들어
+  `jumptable.go` 구동 드라이버(이번 커밋의 `RecoverJumpTables` 성공 경로)를 실검증하고, 그 switch
+  골든과 MATCH시키는 것.
+- C++ 참조: `flow.cc:592`(artificialHalt), `flow.cc:704`(setupCallindSpecs), `flow.cc:727`
+  (truncateIndirectJump), `flow.cc:785/1427`(recoverJumpTables 구동), `funcdata_block.cc:426`
+  (linkJumpTable)/`:639`(recoverJumpTable attempt-then-fallback), `funcdata_op.cc:37`(opMarkHalt),
+  `heritage.cc:2506-2517`(INDIRECT same-time rename, 다음 블로커).
+
 ### 2026-07-03: H8-debt-2 Step3(bespoke ActionStackPtrFlow 은퇴) + breadth 디스커버리(struct/2d/switch 갭 맵)
 H8-debt-2 본체(트리를 production 경로로, master `eadd9c0`) + process gap1/ActionDoNothing 직후 이어진
 세션. 두 가지를 완료했다: (A) 레거시 테스트 하네스를 트리 경로로 이전하고 bespoke `ActionStackPtrFlow`를
