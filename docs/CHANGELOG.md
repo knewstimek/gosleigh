@@ -5,6 +5,21 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-02: sum_array x64 MATCH (6/8) -- 데이터모델 long/longlong + printc 잔차 2건
+type-leak 완료 후 sum_array의 유일 잔차(시그니처 `long` vs golden `longlong`)를 닫고 본문 잔차 2건 해소. 3커밋.
+- **데이터모델 8바이트 int 이름**(cspec.go/protomodel.go/printc.go): Win x64는 LLP64(long=4/longlong=8)라 8바이트
+  signed = `longlong`, LP64(aarch64/Linux x64)는 `long`. cspec `<data_organization><long_size>`를 파싱해
+  ProtoModel.LongSize -> printc normalizedBaseType으로 배선(기존 8바이트 INT="long" 하드코딩 제거). C++ parity:
+  TypeFactory::setupSizes/sizeOfLong. LP64 기본값 8이라 aarch64/x86-32 무회귀.
+- **8바이트 상수 LL 접미사 제거**(printc.go renderConstant): `4LL` -> `4`. C++ push_integer(printc.cc:1354)는
+  `sizeSuffix`를 `vn->isLongPrint()`일 때만 붙이고, 그건 CastStrategyC(cast.cc:103)의 shift-피연산자 int-promotion
+  회피 케이스에서만 세팅됨(미모델) -> 기본 무접미사.
+- **cast==unary precedence로 여분 괄호 제거**(printlanguage.go): `*((int *)x)` -> `*(int *)x`. ExprPrecCast를
+  ExprPrecUnary와 동급 alias. C++ parity: PrintC::dereference/typecast OpToken 둘 다 precedence 62(printc.cc:34-35),
+  PrintLanguage::parentheses가 unary_prefix 부모 아래 presurround(cast) 자식을 동급에서 무괄호.
+- **회귀 0**: x64 6/8(sum_array 추가), tree 10/10, production TestMSVC*/pcode/bridge green. 남은 2개 =
+  grid_score/process(스택프레임 미복구 + step5 ActionDoNothing).
+
 ### 2026-07-02: TYPE-LEAK 충실 포팅 -> x64 corpus 5/8 (max3 신규 MATCH), tree 10/10 유지
 `int local_N` vs golden `undefined4 local_N` 미스매치(max3/sum_to_n/sum_array/grid_score 공통)의 근본을
 규명하고 충실 포팅. master `be0999c` 머지(7커밋). 팀 작업(Fable 심층 C++ 규명 + 변형 corpus 3라운드 실측 +
