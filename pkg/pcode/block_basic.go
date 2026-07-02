@@ -151,6 +151,50 @@ func (bb *BlockBasic) LastOp() *PcodeOp {
 // EmptyOp returns true if there are no ops.
 func (bb *BlockBasic) EmptyOp() bool { return len(bb.opSlice()) == 0 }
 
+// NoInterveningStatement reports whether this block creates no value usable
+// outside the block. Computing a value for a BRANCHIND/CBRANCH and copying
+// values is allowed; any value used outside the block, a write to an
+// addressable location, or a CALL/STORE causes it to return false. Used by
+// foldInOneGuard to confirm the switch block is safe to fold a guard into.
+// C++ parity: block.cc BlockBasic::noInterveningStatement (block.cc:2712).
+func (bb *BlockBasic) NoInterveningStatement() bool {
+	for _, bop := range bb.opSlice() {
+		if bop.IsMarker() {
+			continue
+		}
+		if bop.IsBranch() {
+			continue
+		}
+		if bop.EvalType()&PcodeOpSpecial != 0 {
+			if bop.IsCall() {
+				return false
+			}
+			opc := bop.Code()
+			if opc == CPUI_STORE || opc == CPUI_NEW {
+				return false
+			}
+		} else {
+			opc := bop.Code()
+			if opc == CPUI_COPY || opc == CPUI_SUBPIECE {
+				continue
+			}
+		}
+		outvn := bop.Output()
+		if outvn == nil {
+			continue
+		}
+		if outvn.IsAddrTied() {
+			return false
+		}
+		for _, op := range outvn.DescendIter() {
+			if op.Parent() != bb {
+				return false
+			}
+		}
+	}
+	return true
+}
+
 // NumOps returns the number of ops.
 func (bb *BlockBasic) NumOps() int { return len(bb.opSlice()) }
 

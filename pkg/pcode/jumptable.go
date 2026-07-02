@@ -62,6 +62,11 @@ var JumptableThunkError = errors.New("jumptable looks like a thunk")
 // C++ parity: jumptable.cc LowlevelError raises in JumpTable::recoverAddresses
 var JumptableRecoveryError = errors.New("jumptable recovery failure")
 
+// errBadSwitchNorm reports that a switch normalization op could not be
+// reverse-emulated during label recovery. C++ parity: the EvaluationError
+// path in JumpBasic::buildLabels / backup2Switch (jumptable.cc:503).
+var errBadSwitchNorm = errors.New("bad switch normalization op")
+
 // -----------------------------------------------------------------------
 // LoadTable
 // -----------------------------------------------------------------------
@@ -210,15 +215,28 @@ func (pm *PathMeld) Meld(_ []*PcodeOp) {
 	// path switches without this.
 }
 
-// MarkPaths walks back from startVarnode and toggles a mark bit on every
-// PcodeOp reachable through the common Varnodes.
-// C++ parity: jumptable.cc PathMeld::markPaths
-//
-// TODO: depends on PcodeOp mark flags being wired into the rest of the
-// switch recovery pipeline; no caller exists yet in Go.
-func (pm *PathMeld) MarkPaths(_ bool, _ int) {
-	// TODO mismatch: PathMeld::markPaths not yet needed; added as stub
-	// to match the C++ API surface.
+// MarkPaths (un)marks every PcodeOp up to the one rooted at startVarnode.
+// The starting Varnode, common to all paths, is given by index; all PcodeOps
+// up to the final BRANCHIND are (un)marked via the PcodeOpMark flag.
+// C++ parity: jumptable.cc PathMeld::markPaths (jumptable.cc:1000).
+func (pm *PathMeld) MarkPaths(val bool, startVarnode int) {
+	startOp := -1
+	for i := len(pm.opMeld) - 1; i >= 0; i-- {
+		if pm.opMeld[i].rootVn == startVarnode {
+			startOp = i
+			break
+		}
+	}
+	if startOp < 0 {
+		return
+	}
+	for i := 0; i <= startOp; i++ {
+		if val {
+			pm.opMeld[i].op.SetFlag(PcodeOpMark)
+		} else {
+			pm.opMeld[i].op.ClearFlag(PcodeOpMark)
+		}
+	}
 }
 
 // -----------------------------------------------------------------------
@@ -690,46 +708,144 @@ func (m *JumpBasic) BuildAddresses(fd *Funcdata, indop *PcodeOp, addressTable *[
 }
 
 // FindUnnormalized walks the PathMeld chain of common Varnodes to recover
-// the "user-visible" switch variable (as opposed to the normalized form).
-// C++ parity: jumptable.cc JumpBasic::findUnnormalized
-//
-// TODO mismatch: requires PathMeld population by findDeterminingVarnodes
-// which is not yet functional.
-func (m *JumpBasic) FindUnnormalized(_, _, _ uint32) {
+// the "user-visible" switch variable (switchvn) from the normalized form
+// (normalvn), backing up through a bounded number of add/sub and extension
+// normalization ops so long as the intermediate value flows only into the
+// model. C++ parity: jumptable.cc JumpBasic::findUnnormalized (jumptable.cc:1479).
+func (m *JumpBasic) FindUnnormalized(maxaddsub, _, maxext uint32) {
 	if m.PathMeld.NumCommonVarnode() == 0 {
 		return
 	}
-	m.NormalVn = m.PathMeld.Varnode(m.VarnodeIndex)
+	i := m.VarnodeIndex
+	m.NormalVn = m.PathMeld.Varnode(i)
+	i++
 	m.SwitchVn = m.NormalVn
+	m.markModel(true)
+
+	countaddsub := uint32(0)
+	countext := uint32(0)
+	var normop *PcodeOp
+	for i < m.PathMeld.NumCommonVarnode() {
+		if !m.flowsOnlyToModel(m.SwitchVn, normop) { // Switch variable should only flow into model
+			break
+		}
+		testvn := m.PathMeld.Varnode(i)
+		if !m.SwitchVn.IsWritten() {
+			break
+		}
+		normop = m.SwitchVn.Def()
+		j := 0
+		for ; j < normop.NumInput(); j++ {
+			if normop.Input(j) == testvn {
+				break
+			}
+		}
+		if j == normop.NumInput() {
+			break
+		}
+		switch normop.Code() {
+		case CPUI_INT_ADD, CPUI_INT_SUB:
+			countaddsub++
+			if countaddsub > maxaddsub {
+				break
+			}
+			if !normop.Input(1 - j).IsConstant() {
+				break
+			}
+			m.SwitchVn = testvn
+		case CPUI_INT_ZEXT, CPUI_INT_SEXT:
+			countext++
+			if countext > maxext {
+				break
+			}
+			m.SwitchVn = testvn
+		}
+		if m.SwitchVn != testvn {
+			break
+		}
+		i++
+	}
+	m.markModel(false)
 }
 
-// BuildLabels materialises the case label values.
-// C++ parity: jumptable.cc JumpBasic::buildLabels
+// BuildLabels materialises the case label values by reverse-emulating each
+// value the original (normalized) range takes back to the user-visible switch
+// value. C++ parity: jumptable.cc JumpBasic::buildLabels (jumptable.cc:1523).
 //
-// TODO mismatch: requires CircleRange reverse walking for label inversion.
-func (m *JumpBasic) BuildLabels(_ *Funcdata, addressTable []address.Address, labels *[]uint64, _ JumpModel) {
+// The fd.warning calls of the C++ path (needswarning=1/2) are omitted because
+// Funcdata warnings are not modelled; they do not affect the emitted C. When
+// the reverse emulation cannot recover a value (non-trivial normalization, see
+// backup2Switch), the label is JumpValueNoLabel exactly as in the C++ catch arm.
+func (m *JumpBasic) BuildLabels(fd *Funcdata, addressTable []address.Address, labels *[]uint64, orig JumpModel) {
 	*labels = (*labels)[:0]
-	for i := range addressTable {
-		*labels = append(*labels, uint64(i))
+	var origrange *JumpValuesRange
+	if jb, ok := orig.(*JumpBasic); ok {
+		origrange = jb.GetValueRange()
+	}
+	if origrange == nil {
+		origrange = m.Range
+	}
+	if origrange == nil {
+		return
+	}
+	notdone := origrange.InitializeForReading()
+	for notdone {
+		val := origrange.Value()
+		var switchval uint64
+		if origrange.IsReversible() { // If the current value is reversible
+			sv, err := m.backup2Switch(fd, val, m.NormalVn, m.SwitchVn)
+			if err != nil {
+				switchval = JumpValueNoLabel
+			} else {
+				switchval = sv
+			}
+		} else {
+			switchval = JumpValueNoLabel // If can't reverse, hopefully this is the default or exit
+		}
+		*labels = append(*labels, switchval)
+		// The address table may have been truncated by the sanity check.
+		if len(*labels) >= len(addressTable) {
+			break
+		}
+		notdone = origrange.Next()
+	}
+	for len(*labels) < len(addressTable) {
+		*labels = append(*labels, JumpValueNoLabel)
 	}
 }
 
-// FoldInNormalization removes the normalisation ops from the data flow so
-// the BRANCHIND appears to consume the switch variable directly.
-// C++ parity: jumptable.cc JumpBasic::foldInNormalization
-//
-// TODO mismatch: requires Funcdata.opSetInput / opUnlink primitives to be
-// audited for JumpTable usage. Returns the switch variable if recovered
-// or nil otherwise.
-func (m *JumpBasic) FoldInNormalization(_ *Funcdata, _ *PcodeOp) *Varnode {
+// FoldInNormalization sets the BRANCHIND input to be the unnormalized switch
+// variable, so all the intervening code to calculate the final address is
+// eliminated as dead. C++ parity: jumptable.cc JumpBasic::foldInNormalization
+// (jumptable.cc:1563).
+func (m *JumpBasic) FoldInNormalization(fd *Funcdata, indop *PcodeOp) *Varnode {
+	if m.SwitchVn == nil || indop == nil {
+		return nil
+	}
+	fd.OpSetInput(indop, m.SwitchVn, 0)
 	return m.SwitchVn
 }
 
-// FoldInGuards removes the guard branches from the CFG.
-// C++ parity: jumptable.cc JumpBasic::foldInGuards
-//
-// TODO mismatch: requires foldInOneGuard which in turn drops CBRANCHes.
-func (m *JumpBasic) FoldInGuards(_ *Funcdata, _ *JumpTable) bool { return false }
+// FoldInGuards removes each still-live guard CBRANCH from the CFG, folding it
+// into the switch's default edge. C++ parity: jumptable.cc
+// JumpBasic::foldInGuards (jumptable.cc:1572).
+func (m *JumpBasic) FoldInGuards(fd *Funcdata, jump *JumpTable) bool {
+	change := false
+	for _, guard := range m.SelectGuards {
+		cbranch := guard.GetBranch()
+		if cbranch == nil { // Already normalized
+			continue
+		}
+		if cbranch.IsDead() {
+			guard.Clear()
+			continue
+		}
+		if m.foldInOneGuard(fd, guard, jump) {
+			change = true
+		}
+	}
+	return change
+}
 
 // SanityCheck asks the model to prune obviously-bad addresses.
 // C++ parity: jumptable.cc JumpBasic::sanityCheck
@@ -1648,26 +1764,43 @@ func (jt *JumpTable) SetOverride(addrTable []address.Address, normAddr address.A
 	jt.jmodel = ov
 }
 
-// MatchModel attempts to recover the case labels now that the address
-// table has been produced. C++ parity: jumptable.cc JumpTable::matchModel
+// MatchModel re-recovers the model against the current Funcdata. The address
+// table was recovered earlier on a flow-copy (partial) Funcdata whose Varnodes
+// and ops are foreign to the final instance; the old model is moved aside as
+// origModel (kept for label reverse-emulation) and a fresh model is recovered
+// so findUnnormalized / foldInNormalization / foldInGuards operate on live ops.
+// C++ parity: jumptable.cc JumpTable::matchModel (jumptable.cc:2700).
 //
-// TODO mismatch: full matchModel depends on JumpBasic.findUnnormalized
-// being real; until then we just ensure the model has a table size and
-// leave label/unnormalized recovery to the follow-up batch.
+// Known simplification: the tablesize-mismatch handling (multistage restart /
+// warning) is not ported; the current corpus recovers a matching model.
 func (jt *JumpTable) MatchModel(fd *Funcdata) {
-	if jt.jmodel == nil {
-		jt.RecoverModel(fd)
+	if !jt.IsRecovered() {
+		return // C++ throws LowlevelError
 	}
+	if jt.jmodel != nil {
+		if !jt.jmodel.IsOverride() {
+			jt.saveModel()
+		} else {
+			jt.clearSavedModel()
+		}
+	}
+	jt.RecoverModel(fd) // Create a current instance of the model
 }
 
-// RecoverLabels builds case labels from the current model.
-// C++ parity: jumptable.cc JumpTable::recoverLabels
+// RecoverLabels builds case labels from the current model, reverse-emulating
+// each value the original range took to its user-visible switch value.
+// C++ parity: jumptable.cc JumpTable::recoverLabels (jumptable.cc:2731).
 func (jt *JumpTable) RecoverLabels(fd *Funcdata) {
 	if jt.jmodel == nil {
 		return
 	}
 	jt.jmodel.FindUnnormalized(jt.maxAddSub, jt.maxLeftRight, jt.maxExt)
-	jt.jmodel.BuildLabels(fd, jt.addressTable, &jt.label, jt.jmodel)
+	orig := jt.jmodel
+	if jt.origModel != nil && jt.origModel.TableSize() != 0 {
+		orig = jt.origModel
+	}
+	jt.jmodel.BuildLabels(fd, jt.addressTable, &jt.label, orig)
+	jt.clearSavedModel()
 }
 
 // CheckForMultistage reports whether this table still needs another

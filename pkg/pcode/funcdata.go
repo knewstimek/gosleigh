@@ -1242,6 +1242,33 @@ func (fd *Funcdata) StructureReset() {
 	fd.SetStructureGraph(NewBlockGraph())
 }
 
+// PushBranch moves a control-flow edge from one block to another. It is used to
+// eliminate a switch guard artifact: the guard's non-switch edge is turned from
+// a conditional into an unconditional branch and re-pointed at the BRANCHIND
+// block, which absorbs it as an additional (default) switch destination.
+// C++ parity: Funcdata::pushBranch (funcdata_block.cc:403).
+func (fd *Funcdata) PushBranch(bb *BlockBasic, slot int, bbnew *BlockBasic) {
+	cbranch := bb.LastOp()
+	if cbranch == nil || cbranch.Code() != CPUI_CBRANCH || bb.SizeOut() != 2 {
+		// C++ throws LowlevelError; the callers (foldInOneGuard) already
+		// verified sizeOut==2 and a CBRANCH tail, so this is defensive.
+		return
+	}
+	indop := bbnew.LastOp()
+	if indop == nil || indop.Code() != CPUI_BRANCHIND {
+		return
+	}
+	// Turn the conditional branch into an unconditional branch.
+	fd.OpRemoveInput(cbranch, 1) // Remove the conditional variable
+	fd.OpSetOpcode(cbranch, CPUI_BRANCH)
+	bg := fd.GetBasicBlocks()
+	if bg != nil {
+		bg.MoveOutEdge(&bb.FlowBlock, slot, &bbnew.FlowBlock)
+	}
+	// The indirect branch handles its new incoming edge implicitly.
+	fd.StructureReset()
+}
+
 // NodeJoinCreateBlock creates a new basic block (joinblock) that merges two
 // conditional blocks with identical branch targets (exita and exitb).
 // One edge from each of block1/block2 to exita and exitb is removed, and the
