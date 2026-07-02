@@ -19,11 +19,18 @@ const (
 	ExprPrecShift
 	ExprPrecAdd
 	ExprPrecMultiply
-	ExprPrecCast
 	ExprPrecUnary
 	ExprPrecPostfix
 	ExprPrecPrimary
 )
+
+// ExprPrecCast aliases ExprPrecUnary: a C cast binds at the same precedence as the
+// unary prefix operators (* & ! ~ prefix +/-), so e.g. *(int *)x needs no
+// parentheses around the cast. C++ parity: PrintC::dereference and PrintC::typecast
+// OpTokens both use precedence 62 (printc.cc:34-35); PrintLanguage::parentheses
+// (printlanguage.cc) returns false for a presurround (cast) operand under a
+// unary_prefix parent at equal precedence.
+const ExprPrecCast = ExprPrecUnary
 
 type ExprAssociativity uint8
 
