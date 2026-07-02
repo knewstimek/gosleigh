@@ -15,12 +15,14 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 현재 상태 (2026-06-30 세션 진행, 전 패키지 그린)
 
-**(2026-07-03 갱신, master `8d007b5`)** 트리 스택프레임 복구는 2026-07-02 완료된 Ghidra 충실 spacebase 경로
+**(2026-07-03 갱신, master `c4d85ea`)** 트리 스택프레임 복구는 2026-07-02 완료된 Ghidra 충실 spacebase 경로
 (Funcdata.Spacebase + RuleLoadVarnode/RuleStoreVarnode + RuleAddMultCollapse/RuleCollapseConstants 오프셋
-누적) 그대로 유지. 2026-07-03에 grid_score 선언순서가 추가로 완료돼 x64 corpus **7/8** MATCH(process만 잔여).
-진짜 근본은 printc 선언-대표(representative) 선택이 loc_tree 순서에 의존하던 포팅 버그였음(아래 완료 블록 및
-CHANGELOG 2026-07-03 참고). production `bridge.Decompile`은 구조적으로 분리돼 기존 bespoke ActionStackPtrFlow를
-그대로 사용.
+누적) 그대로 유지. 2026-07-03 전반에 grid_score 선언순서가 완료돼 x64 corpus 6/8 -> **7/8** MATCH(진짜 근본은
+printc 선언-대표(representative) 선택이 loc_tree 순서에 의존하던 포팅 버그). 이어진 세션에서 process gap1
+(포인터-파라미터 배열 deref)을 닫고 `ActionDoNothing`/`RemoveDoNothingBlock`을 충실 포팅했으나, x64 corpus는
+**7/8**로 불변(process는 여전히 MISMATCH -- 잔여 3갭이 return-recovery/type-snapshot/merge/structuring
+파이프라인으로 수렴하는 deep-debt로 확정, H8-debt-2와 묶임). production `bridge.Decompile`은 구조적으로 분리돼
+기존 bespoke ActionStackPtrFlow를 그대로 사용. 상세는 아래 완료 블록 및 CHANGELOG 2026-07-03 참고.
 
 **트리 전체 골든 맵 10/10 byte-identical** (`TestTreeFullGoldenMap`). **x86-32 8/8 + x64_add_ret + aarch64_add_ret
 전부 MATCH**(complex_max는 바이트 미보유로 미테스트). 트리가 register-param 아키텍처(x86-64 SysV, AArch64 AAPCS64,
@@ -115,25 +117,63 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 > `TestMSVC*`/`TestAARCH64*`/`TestX8664*`/`TestX64RegParam*` 전부 PASS, `go test ./...` 클린.
 > **process는 별개 근본 확정**(grid_score와 "공통 근본" 추정은 반증) -- 상세는 아래 미시작 참고.
 
-### 미시작: process 잔여 기능 갭 (grid_score 완료, 별개 근본 확정, 2026-07-03)
-- **현상**: grid_score는 2026-07-03 완료(선언순서, master `8d007b5`, 위 완료 블록 및 CHANGELOG 참고). process는
-  여전히 `TestX64CorpusGoldenMap` MISMATCH(반환타입 `ulonglong` vs golden `int` 등). grid_score와 "공통 근본"
-  추정은 ACTTRACE 실측으로 반증됐음(위 완료 블록 참고) -- process 근본은 별개 4건:
-  - (1) **undefined4 diamond 타입누수**: 근본 = `ActionDoNothing`/`RemoveDoNothingBlock` 미포팅.
-  - (2) **포인터-파라미터 배열 deref 누락**: golden `iVar1 = *(int*)(param_1+(longlong)local_14*4)`
-    (param_1[i], heap access)를 우리는 통째 누락 -- iVar1 미초기화 read, 실제 correctness 갭.
-  - (3) **64비트 signed division 반환 타입 렌더링 누락**: golden `ulonglong ...(longlong)local_c/
-    (longlong)local_10 & 0xffffffff`.
-  - (4) **단축평가 `&&` + comma 연산자 조건 구조화 누락**: golden은 short-circuit 구조, 우리는 if/else-if/else.
-- **C++ 참조**:
-  - (1) `coreaction.cc:3473-3497`(ActionDoNothing), `funcdata_block.cc:327`(RemoveDoNothingBlock). Go 스텁:
-    `coreaction.go:592`(ActionDoNothing), `funcdata.go:614`(RemoveDoNothingBlock).
-  - (2)(3)(4)는 아직 C++ 원본 대응 함수 미조사(다음 세션 조사부터).
-- **수정 대상 Go 파일**: (1) `pkg/pcode/coreaction.go`(ActionDoNothing 실구현), `pkg/pcode/funcdata.go`
-  (RemoveDoNothingBlock 실구현). (2)(3)(4)는 조사 필요 -- 포인터 처리 rule(`rules_*`), `printc.go`
-  (나눗셈/조건 렌더링) 후보.
-- **성공 기준**: `X64_CORPUS=1 TestX64CorpusGoldenMap`에서 process MATCH(현재 7/8 -> 8/8) +
-  `TREE_MAP=1 TestTreeFullGoldenMap` 10/10 무회귀 + production `TestMSVC*` 무회귀.
+> **2026-07-03 완료(이어진 세션): process gap1(포인터-파라미터 배열 deref, master `7a7b203`) +
+> `ActionDoNothing`/`RemoveDoNothingBlock` 충실 포팅(master `c4d85ea`).**
+> **gap1**: golden `iVar1 = *(int *)(param_1 + (longlong)local_14 * 4);` 누락(iVar1 미초기화 read, 실
+> correctness 버그)을 `pkg/pcode/printc.go` emitOps 수정으로 해소. 근본은 emitOps의 unique-space 출력
+> blanket 억제(예외=named MULTIEQUAL 단독 consumer뿐)였다 -- Ghidra `PrintC::emitBlockBasic`(printc.cc:2836)는
+> `isImplied()`로만 억제하지 unique-space 여부로 억제하지 않는다. 수정: 억제 가드에 `out.IsExplicit() &&
+> out.NumDescend()>0` 예외(충실 프록시 -- `ActionMarkExplicit`은 `ActionDeadCode` 이후 실행돼 print 시점의
+> 실제 explicit def는 항상 live descendant를 가짐, coreaction.cc:3244/3252). KNOWN-GAP: faithful-stack
+> ActionDeadCode를 통과해 잔존하는 `sub rsp,0x18` 프레임 COPY가 있으면 여전히 샐 수 있음(후속 deadcode 정리
+> 과제).
+> **ActionDoNothing**: 이전 no-op 스텁이던 `ActionDoNothing.Apply`(coreaction.go:594)/`RemoveDoNothingBlock`
+> (funcdata.go:713)을 C++ 그대로 포팅(coreaction.cc:3473-3497, funcdata_block.cc:84/177/233/254/327,
+> block.cc:2534/2578/2596) -- 신규 `pkg/pcode/funcdata_donothing.go` + `block_basic.go` 술어.
+> **A/B 결과(결정적, gap34-invest 반증)**: 액션이 실제 발화(classify/grid_score/process에서 do-nothing 블록
+> 제거)하지만 골든 출력은 전부 byte-identical 유지 -- grid_score/classify/max3/sum_array undefined4 MATCH
+> 그대로(무회귀), process도 변화 없음(&& 미렌더 + undefined 유지). "do-nothing 제거가 gap3/gap4의 공통
+> 근본"이라는 gap34-invest 가설은 실측으로 반증됐다. 커밋은 유지(충실 포팅 + 무회귀 + H8-debt-2 선행 인프라).
+> **검증**: `TREE_MAP=1 TestTreeFullGoldenMap` 10/10, `X64_CORPUS=1 TestX64CorpusGoldenMap` 7/8(카운트
+> 불변), production `TestMSVC*`/`TestAARCH64*`/`TestX8664*`/`TestX64RegParam*` PASS, `go test ./...` 클린.
+> **process 잔여 3갭의 진짜 근본은 gap34-v2 재규명으로 확정됐고 deep-debt로 재분류됨** -- 아래 미시작 참고.
+
+### 미시작: process 잔여 3갭 (deep-debt, 트리 액션 내부 부채 -- H8-debt-2 배선교체로 자동 해소 안 됨)
+- **완료로 이동**: gap1(포인터-파라미터 배열 deref)과 ActionDoNothing/RemoveDoNothingBlock 포팅은
+  2026-07-03(이어진 세션) 완료 -- 바로 위 완료 블록 및 CHANGELOG 2026-07-03 참고.
+- **현상**: process는 여전히 `TestX64CorpusGoldenMap` MISMATCH. gap34-v2 재규명(실제 MSVC 디스어셈블 +
+  Ghidra golden ground-truth 대조)으로 확정: process 트리 출력은 코스메틱 차이가 아니라 의미적으로 붕괴돼
+  있다 -- count++가 범위 밖 가드 안(정답은 범위 안)에 있고, 범위 안 v(local_18)는 미초기화, 로드 대입문이
+  드롭돼 있었다(gap1로 그 중 하나는 닫힘).
+  - **gap2(64비트 signed division 반환 렌더링)**: golden `ulonglong ...(longlong)local_c/(longlong)local_10 &
+    0xffffffff`. 진짜 근본(구현 시도는 미커밋, gcd 회귀로 기각) = 과축소 주체 `RuleSubCommute`
+    (rules_ext.go:225). Go의 `RuleSubvarZext`(return narrowing)가 ZEXT를 RuleSubCommute의 overlap 체크 전에
+    제거해 순서가 이탈한다. 충실 SEXT 가드 포팅 시 gcd가 회귀함(packed .sla가 dividend를 INT_OR로
+    인코딩하는데 Ghidra는 INT_SEXT로 처리 -- `RuleOrSextForm` 미정규화). return-recovery/type-snapshot
+    타이밍과 얽혀 있음.
+  - **gap3(단축평가 `&&` + comma 연산자 조건 구조화)**: 진짜 근본은 RuleBlockOr/comma가 아니다(RuleBlockOr는
+    발화하나 이미 붕괴된 그래프 위에서 오극성으로 발화, condexe는 process에서 애초 미발화). 실체 = 비대칭
+    clamp의 단일-스토어 블록(v=hi)이 sibling count 블록으로 오폴딩(블록구조화 collapse 또는 RuleStoreVarnode
+    heritage 결함).
+  - **gap4(undefined 타입 누수)**: 진짜 근본은 스냅샷 타이밍이 아니다. MSVC eax 스크래치 임시가 스택-로컬로
+    미접힘(Merge/copyprop parity 갭).
+- **결론**: 3갭 전부 return-recovery/type-snapshot/merge/structuring 파이프라인 재작업으로 수렴한다 --
+  독립 픽스로 안 닫힌다. **단 H8-debt-2(production을 트리 경로로 교체)가 process를 자동으로 고치지는 않는다**
+  -- x64 corpus는 이미 트리 경로(`BuildUniversalAction+Perform`)로 돌아서 process가 이미 트리 위에서 발현
+  중이다(H8-scope 실측). 즉 H8-debt-2의 배선교체는 process 무관이고, process 3갭은 트리 액션 내부의
+  merge/copyprop/blockstructure/snapshot deep-parity 부채로 배선교체 이후에도 별도로 남는다. H8-debt-2와의
+  관계는 "같은 서브시스템을 건드린다"는 수렴이지 "배선교체로 해소"가 아니다. 별도 세션으로 gap2/gap3/gap4를
+  독립 시도하지 말 것(gap2 SEXT 가드 시도가 gcd 회귀로 기각된 전례 있음). process는 코퍼스 중 유일하게
+  3-way clamp + count + 64비트 나눗셈 + early-return이 eax를 공유하는 특이 케이스다.
+- **C++ 참조**: gap2 = `rules_ext.go:225`(RuleSubCommute, Go 측) 및 대응 C++ RuleSubvarZext/RuleOrSextForm
+  (정확한 C++ 라인은 다음 세션 재확인 필요). gap3/gap4는 return-recovery/merge/structuring 파이프라인 포괄
+  조사 필요(진입점: `ActionReturnRecovery`(coreaction.cc), `Merge`(merge.cc), block 구조화 rule군).
+- **수정 대상 Go 파일**: `pkg/pcode/rules_ext.go`(RuleSubCommute/RuleSubvarZext 순서), `pkg/pcode/
+  coreaction.go`(ActionReturnRecovery), `pkg/pcode/merge.go`, 구조화 rule(`pkg/pcode/rules_*.go`,
+  `block_*.go`). H8-debt-2(`bridge.Decompile` -> 트리 교체) 작업 중 병행 조사.
+- **성공 기준**: `X64_CORPUS=1 TestX64CorpusGoldenMap`에서 process MATCH(7/8 -> 8/8) +
+  `TREE_MAP=1 TestTreeFullGoldenMap` 10/10 무회귀 + production `TestMSVC*` 무회귀. 단 H8-debt-2 완료 전
+  단독 달성을 목표로 삼지 않는다(deep-debt로 재분류됨).
 - **known-gap(별도, 낮은 우선순위)**: const space가 여전히 0xFFFF(Ghidra는 const이 loc_tree 맨 앞 index 0,
   우리는 맨 뒤) -- 현 corpus 무해(실측), const=0 이관은 별도 세션. `HighVariable::remove`(variable.cc:515)
   미포팅 = 인스턴스 수명 갭의 근본(printc.go collectSymbols의 live-제한이 국소 보정, 2026-07-03 참고). 완전
