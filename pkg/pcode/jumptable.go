@@ -228,52 +228,52 @@ func (pm *PathMeld) MarkPaths(_ bool, _ int) {
 // GuardRecord describes a CBRANCH that constrains the range of a candidate
 // switch variable on the path reaching the BRANCHIND.
 // C++ parity: jumptable.hh GuardRecord
-//
-// The Range field normally holds a rangeutil.hh CircleRange, but CircleRange
-// has not been ported to Go yet. The field is typed as RawCircleRange, a
-// stub that stores the range bounds as raw uintb values so downstream code
-// can read them once CircleRange lands.
 type GuardRecord struct {
-	CBranch        *PcodeOp // the CBRANCH whose taken-path reaches the switch
-	ReadOp         *PcodeOp // the immediate PcodeOp causing the restriction
-	Vn             *Varnode // the Varnode being restricted
-	BaseVn         *Varnode // value being (quasi)copied into Vn
-	IndPath        int32    // which CBRANCH out-edge reaches the switch
-	BitsPreserved  int32    // number of low bits copied (others are zero)
-	Range          RawCircleRange
-	Unrolled       bool // guarding CBRANCH duplicated across multiple blocks
+	CBranch       *PcodeOp    // the CBRANCH whose taken-path reaches the switch
+	ReadOp        *PcodeOp    // the immediate PcodeOp causing the restriction
+	Vn            *Varnode    // the Varnode being restricted
+	BaseVn        *Varnode    // earliest Varnode quasi-copied into Vn
+	IndPath       int32       // which CBRANCH out-edge reaches the switch
+	BitsPreserved int32       // number of low bits preserved by the quasi-copy
+	Range         circleRange // range of values causing the switch path
+	Unrolled      bool        // guarding CBRANCH duplicated across multiple blocks
 }
 
-// RawCircleRange is a placeholder for rangeutil.hh CircleRange. It holds
-// minimal inclusive bounds so guard records can round-trip through the
-// JumpTable container until the real CircleRange port lands.
-// C++ parity: rangeutil.hh CircleRange (not yet ported)
-//
-// TODO mismatch: CircleRange supports wrap-around arcs, step counting, and
-// pullBackOp bit-width arithmetic. RawCircleRange captures none of that.
-type RawCircleRange struct {
-	Min  uint64
-	Max  uint64
-	Mask uint64
-	Step uint32
-}
-
-// NewGuardRecord builds a GuardRecord with the given fields.
-// C++ parity: jumptable.cc GuardRecord::GuardRecord
-func NewGuardRecord(bOp, rOp *PcodeOp, path int32, rng RawCircleRange, vn *Varnode, unrolled bool) *GuardRecord {
+// NewGuardRecord builds a GuardRecord, computing the quasi-copy source of vn.
+// C++ parity: jumptable.cc GuardRecord::GuardRecord (jumptable.cc:613).
+func NewGuardRecord(bOp, rOp *PcodeOp, path int32, rng circleRange, vn *Varnode, unrolled bool) *GuardRecord {
+	baseVn, bitsPreserved := guardQuasiCopy(vn)
 	return &GuardRecord{
-		CBranch:  bOp,
-		ReadOp:   rOp,
-		IndPath:  path,
-		Range:    rng,
-		Vn:       vn,
-		Unrolled: unrolled,
+		CBranch:       bOp,
+		ReadOp:        rOp,
+		IndPath:       path,
+		Range:         rng,
+		Vn:            vn,
+		BaseVn:        baseVn,
+		BitsPreserved: bitsPreserved,
+		Unrolled:      unrolled,
 	}
 }
 
 // IsUnrolled reports whether the guarding CBRANCH is duplicated across
 // multiple blocks. C++ parity: jumptable.hh GuardRecord::isUnrolled
 func (g *GuardRecord) IsUnrolled() bool { return g.Unrolled }
+
+// GetRange returns the range of values that cause the switch path to be taken.
+// C++ parity: jumptable.hh GuardRecord::getRange
+func (g *GuardRecord) GetRange() circleRange { return g.Range }
+
+// GetBranch returns the guarding CBRANCH (nil once cleared).
+// C++ parity: jumptable.hh GuardRecord::getBranch
+func (g *GuardRecord) GetBranch() *PcodeOp { return g.CBranch }
+
+// GetReadOp returns the PcodeOp immediately reading the restricted Varnode.
+// C++ parity: jumptable.hh GuardRecord::getReadOp
+func (g *GuardRecord) GetReadOp() *PcodeOp { return g.ReadOp }
+
+// GetPath returns the stored path to the indirect block.
+// C++ parity: jumptable.hh GuardRecord::getPath
+func (g *GuardRecord) GetPath() int32 { return g.IndPath }
 
 // Clear marks the guard as unused (the clear-by-null pattern from C++).
 // C++ parity: jumptable.hh GuardRecord::clear
@@ -619,31 +619,34 @@ func (m *JumpBasic) GetPathMeld() *PathMeld { return &m.PathMeld }
 func (m *JumpBasic) GetValueRange() *JumpValuesRange { return m.Range }
 
 // RecoverModel walks back from indop to identify the normalized switch
-// variable and the guards that constrain it.
-// C++ parity: jumptable.cc JumpBasic::recoverModel
+// variable and the guards that constrain it. There must be a straight-line
+// calculation from a switch variable to the BRANCHIND address, with the
+// variable restricted to a small range by one or more guard CBRANCHs.
+// C++ parity: jumptable.cc JumpBasic::recoverModel (jumptable.cc:1435).
 //
-// TODO mismatch: findDeterminingVarnodes + findNormalized +
-// markFoldableGuards require PathMeld.meld, CircleRange pull-back
-// arithmetic, and CBRANCH guard analysis which are not yet ported.
-// The method currently returns false so the outer JumpTable falls back
-// to the trivial path.
-func (m *JumpBasic) RecoverModel(_ *Funcdata, indop *PcodeOp, _ uint32, _ uint32) bool {
+// Requires an SSA'd (heritage'd) Funcdata: findDeterminingVarnodes back-walks
+// the BRANCHIND input's def chain. On the pre-heritage live flow the input is a
+// fresh, unwritten read, so the PathMeld collapses to a single node with a full
+// range and getSize > maxtablesize forces a false return (trivial-model
+// fallback). See flow_jumptable.go for the driver-timing note.
+func (m *JumpBasic) RecoverModel(fd *Funcdata, indop *PcodeOp, matchsize uint32, maxtablesize uint32) bool {
 	if indop == nil || indop.NumInput() == 0 {
 		return false
 	}
-	// Seed the PathMeld with the BRANCHIND input so downstream code
-	// that only needs the entry Varnode still functions.
-	m.PathMeld.SetSingle(indop, indop.Input(0))
 	m.Range = NewJumpValuesRange()
-	return false
+	m.findDeterminingVarnodes(indop, 0)
+	m.findNormalized(fd, indop.Parent(), -1, matchsize, maxtablesize)
+	if m.Range.Size() > uint64(maxtablesize) {
+		return false
+	}
+	m.markFoldableGuards()
+	return true
 }
 
-// BuildAddresses is the emulation step that turns normalized switch
-// values into actual target addresses.
-// C++ parity: jumptable.cc JumpBasic::buildAddresses
-//
-// TODO mismatch: depends on EmulateFunction.EmulatePath, which is a stub.
-func (m *JumpBasic) BuildAddresses(fd *Funcdata, _ *PcodeOp, addressTable *[]address.Address,
+// BuildAddresses emulates the recovered range, one switch value at a time,
+// through the PathMeld computation to produce each target address.
+// C++ parity: jumptable.cc JumpBasic::buildAddresses (jumptable.cc:1451).
+func (m *JumpBasic) BuildAddresses(fd *Funcdata, indop *PcodeOp, addressTable *[]address.Address,
 	loadPoints *[]LoadTable, loadCounts *[]int32) {
 	*addressTable = (*addressTable)[:0]
 	if m.Range == nil {
@@ -651,15 +654,34 @@ func (m *JumpBasic) BuildAddresses(fd *Funcdata, _ *PcodeOp, addressTable *[]add
 	}
 	emul := NewEmulateFunction(fd)
 	emul.SetLoadCollect(loadPoints)
+
+	// funcptr_align pointer alignment (Architecture::funcptr_align) is not
+	// modelled in Gosleigh yet; x86/x86-64 use 0 (no alignment), so the mask is
+	// all-ones. When a target architecture with a non-zero alignment lands, the
+	// low bits should be cleared here.
+	mask := ^uint64(0)
+	var spc *address.Space
+	var wordSize uint64 = 1
+	if indop != nil {
+		spc = indop.Addr().Space
+		if spc != nil && spc.WordSize > 0 {
+			wordSize = uint64(spc.WordSize)
+		}
+	}
+
 	notDone := m.Range.InitializeForReading()
 	for notDone {
-		_, err := emul.EmulatePath(m.Range.Value(), &m.PathMeld, m.Range.StartOp(), m.Range.StartVarnode())
+		val := m.Range.Value()
+		addr, err := emul.EmulatePath(val, &m.PathMeld, m.Range.StartOp(), m.Range.StartVarnode())
 		if err != nil {
-			// Stub emulator: stop so we report an empty table and the
-			// outer JumpTable falls through to the trivial path.
+			// Emulation failed (e.g. no load image): report a partial table so
+			// the outer JumpTable fails the sanity check and falls back.
 			return
 		}
-		// Real path would append the resulting address here.
+		// AddrSpace::addressToByte scales a word-addressed result to bytes.
+		addr *= wordSize
+		addr &= mask
+		*addressTable = append(*addressTable, address.Address{Space: spc, Offset: addr})
 		if loadCounts != nil && loadPoints != nil {
 			*loadCounts = append(*loadCounts, int32(len(*loadPoints)))
 		}
