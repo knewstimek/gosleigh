@@ -237,6 +237,7 @@ func (b *EngineBuilder) Build() (*sla.Engine, address.Address, error) {
 		Backend: sla.EngineBackendAdapter{
 			LoadMatchInput: backend.PayloadLoader(sla.BackendPayloadConfig{}),
 			Commits:        backend.CommitHooks(),
+			LoadImage:      backend.LoadInstructionBytes,
 		},
 	})
 	if err != nil {

@@ -23,6 +23,10 @@ type EngineBackendAdapter struct {
 	Resolve        ResolveHooks
 	ResolveHandles ResolveHandlesHooks
 	Commits        ApplyCommitsHooks
+	// LoadImage reads raw image bytes at a virtual address (LoadImage::loadFill
+	// in pull form). It is used by downstream jump-table address emulation to
+	// read section-mapped table entries. nil means no image bytes are available.
+	LoadImage func(addr address.Address, size int) ([]byte, bool, error)
 }
 
 // EngineConfig wires the high-level one-instruction translation entry point.
@@ -64,6 +68,16 @@ type Engine struct {
 	// xrefs is the optional runtime cross-reference table (BuildXrefs output).
 	// nil means no xref data is available; callers must not panic on nil.
 	xrefs *XRefs
+}
+
+// LoadImageBytes reads size raw image bytes at addr through the backend adapter
+// (LoadImage::loadFill boundary in pull form). It returns ok=false when no
+// image bytes are available (no hook installed, or the address is unmapped).
+func (e *Engine) LoadImageBytes(addr address.Address, size int) ([]byte, bool, error) {
+	if e == nil || e.backend.LoadImage == nil {
+		return nil, false, nil
+	}
+	return e.backend.LoadImage(addr, size)
 }
 
 // FindInstructionRootSubtable mirrors SleighBase::decode() root lookup from sleighbase.cc:

@@ -19,6 +19,7 @@ package pcode
 import (
 	"errors"
 	"fmt"
+	"math/bits"
 	"sort"
 
 	"gosleigh/pkg/address"
@@ -282,17 +283,22 @@ func (g *GuardRecord) Clear() { g.CBranch = nil }
 // EmulateFunction (stub)
 // -----------------------------------------------------------------------
 
-// EmulateFunction is the light-weight emulator used by JumpBasic to walk
-// a jump-table computation. The real port will require porting
-// emulateutil.hh EmulatePcodeOp + its opcode dispatch table; that is its
-// own keystone and out of scope for this batch.
-// C++ parity: jumptable.hh EmulateFunction
-//
-// TODO mismatch: EmulatePath is a stub; it always reports "not supported"
-// so JumpBasic::buildAddresses cannot produce a real address table yet.
+// EmulateFunction is the light-weight emulator used by JumpBasic to walk a
+// jump-table computation: it flows a single switch value through the p-code
+// ops on the meld path to the final BRANCHIND input. It merges Ghidra's
+// EmulatePcodeOp (single-op execution over a local varnode value map) and
+// EmulateFunction (path stepping + load-point collection); the opcode dispatch
+// and per-op execution live in emulate.go.
+// C++ parity: emulateutil.hh EmulatePcodeOp + jumptable.hh EmulateFunction.
 type EmulateFunction struct {
 	fd         *Funcdata
 	loadPoints *[]LoadTable
+	// varnodeMap holds emulated values for tree Varnodes. Within a syntax tree
+	// a memory location is just a label, so values cannot be keyed by address.
+	// C++ parity: EmulateFunction::varnodeMap.
+	varnodeMap map[*Varnode]uint64
+	currentOp  *PcodeOp // op currently being executed
+	lastOp     *PcodeOp // previously executed op (for MULTIEQUAL edge selection)
 }
 
 // NewEmulateFunction creates an emulator tied to fd.
@@ -304,16 +310,6 @@ func NewEmulateFunction(fd *Funcdata) *EmulateFunction {
 // SetLoadCollect attaches (or detaches) a LoadTable sink.
 // C++ parity: jumptable.hh EmulateFunction::setLoadCollect
 func (e *EmulateFunction) SetLoadCollect(dst *[]LoadTable) { e.loadPoints = dst }
-
-// EmulatePath computes the resulting target address for the given switch
-// variable value by stepping through the common-path ops in pathMeld.
-// C++ parity: jumptable.cc EmulateFunction::emulatePath
-//
-// TODO mismatch: requires EmulatePcodeOp port. Returns an error so callers
-// fall back to the empty address table.
-func (e *EmulateFunction) EmulatePath(_ uint64, _ *PathMeld, _ *PcodeOp, _ *Varnode) (uint64, error) {
-	return 0, fmt.Errorf("%w: EmulateFunction not yet ported", JumptableRecoveryError)
-}
 
 // -----------------------------------------------------------------------
 // JumpValues / JumpValuesRange
@@ -344,16 +340,23 @@ type JumpValues interface {
 // CircleRange. It is the common case used by JumpBasic.
 // C++ parity: jumptable.hh JumpValuesRange
 type JumpValuesRange struct {
-	Range   RawCircleRange
-	NormVn  *Varnode
+	Range      circleRange
+	NormVn     *Varnode
 	StartOpPtr *PcodeOp
-	cur     uint64
-	hasCur  bool
+	cur        uint64
+}
+
+// NewJumpValuesRange constructs an iterator whose range starts out empty. The
+// empty seed mirrors the C++ default-constructed CircleRange (isempty=true);
+// without it the Go zero-value circleRange would be a non-empty, step-0 range
+// and getSize would divide by zero.
+func NewJumpValuesRange() *JumpValuesRange {
+	return &JumpValuesRange{Range: circleRange{isempty: true}}
 }
 
 // SetRange assigns the normalized range.
 // C++ parity: jumptable.hh JumpValuesRange::setRange
-func (jv *JumpValuesRange) SetRange(r RawCircleRange) { jv.Range = r }
+func (jv *JumpValuesRange) SetRange(r circleRange) { jv.Range = r }
 
 // SetStartVn assigns the normalized switch Varnode.
 // C++ parity: jumptable.hh JumpValuesRange::setStartVn
@@ -363,62 +366,45 @@ func (jv *JumpValuesRange) SetStartVn(vn *Varnode) { jv.NormVn = vn }
 // C++ parity: jumptable.hh JumpValuesRange::setStartOp
 func (jv *JumpValuesRange) SetStartOp(op *PcodeOp) { jv.StartOpPtr = op }
 
-// Truncate is a no-op until CircleRange is ported.
-// C++ parity: jumptable.cc JumpValuesRange::truncate
-func (jv *JumpValuesRange) Truncate(_ int32) {
-	// TODO mismatch: needs CircleRange.limit
+// Truncate shortens the range so it holds exactly nm elements, preserving the
+// start value and step. C++ parity: jumptable.cc JumpValuesRange::truncate.
+func (jv *JumpValuesRange) Truncate(nm int32) {
+	rangeSize := int32(64 - bits.LeadingZeros64(jv.Range.getMask()))
+	rangeSize >>= 3
+	left := jv.Range.getMin()
+	step := jv.Range.getStep()
+	right := (left + uint64(step)*uint64(nm)) & jv.Range.getMask()
+	jv.Range.setRange(left, right, rangeSize, int32(step))
 }
 
-// Size returns the number of reachable values. Currently only handles the
-// closed-interval case [Min, Max].
+// Size returns the number of reachable values.
 // C++ parity: jumptable.cc JumpValuesRange::getSize
 func (jv *JumpValuesRange) Size() uint64 {
-	if jv.Range.Step == 0 {
-		return 0
-	}
-	if jv.Range.Max < jv.Range.Min {
-		return 0
-	}
-	return (jv.Range.Max-jv.Range.Min)/uint64(jv.Range.Step) + 1
+	return jv.Range.getSize()
 }
 
 // Contains tests whether v is inside the current range.
 // C++ parity: jumptable.cc JumpValuesRange::contains
 func (jv *JumpValuesRange) Contains(v uint64) bool {
-	if v < jv.Range.Min || v > jv.Range.Max {
-		return false
-	}
-	if jv.Range.Step == 0 {
-		return false
-	}
-	return (v-jv.Range.Min)%uint64(jv.Range.Step) == 0
+	return jv.Range.contains(v)
 }
 
 // InitializeForReading starts an iteration over the range.
 // C++ parity: jumptable.cc JumpValuesRange::initializeForReading
 func (jv *JumpValuesRange) InitializeForReading() bool {
-	if jv.Size() == 0 {
-		jv.hasCur = false
+	if jv.Range.getSize() == 0 {
 		return false
 	}
-	jv.cur = jv.Range.Min
-	jv.hasCur = true
+	jv.cur = jv.Range.getMin()
 	return true
 }
 
-// Next advances the iterator.
+// Next advances the iterator, returning false once the end is reached.
 // C++ parity: jumptable.cc JumpValuesRange::next
 func (jv *JumpValuesRange) Next() bool {
-	if !jv.hasCur || jv.Range.Step == 0 {
-		return false
-	}
-	next := jv.cur + uint64(jv.Range.Step)
-	if next > jv.Range.Max {
-		jv.hasCur = false
-		return false
-	}
+	next, ok := jv.Range.getNext(jv.cur)
 	jv.cur = next
-	return true
+	return ok
 }
 
 // Value returns the current iterator value.
@@ -648,7 +634,7 @@ func (m *JumpBasic) RecoverModel(_ *Funcdata, indop *PcodeOp, _ uint32, _ uint32
 	// Seed the PathMeld with the BRANCHIND input so downstream code
 	// that only needs the entry Varnode still functions.
 	m.PathMeld.SetSingle(indop, indop.Input(0))
-	m.Range = &JumpValuesRange{}
+	m.Range = NewJumpValuesRange()
 	return false
 }
 

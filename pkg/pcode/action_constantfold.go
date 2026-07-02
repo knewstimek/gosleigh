@@ -166,7 +166,7 @@ func evalConstOp(op *PcodeOp) (uint64, bool) {
 			return 0, false
 		}
 		inSize := foldedSize(op.Input(0))
-		return evalBinary(op.Code(), a, b, inSize), true
+		return evalBinary(op.Code(), a, b, inSize, constFoldOutSize(op)), true
 
 	// --- unary ops ---
 	case CPUI_INT_ZEXT, CPUI_INT_SEXT,
@@ -181,9 +181,19 @@ func evalConstOp(op *PcodeOp) (uint64, bool) {
 			return 0, false
 		}
 		inSize := foldedSize(op.Input(0))
-		return evalUnary(op.Code(), a, inSize), true
+		return evalUnary(op.Code(), a, inSize, constFoldOutSize(op)), true
 	}
 	return 0, false
+}
+
+// constFoldOutSize returns the output size of op for evaluation, defaulting to
+// 1 when the op has no output (evalConstOp is only reached with a non-nil
+// output, so the fallback is defensive).
+func constFoldOutSize(op *PcodeOp) int32 {
+	if o := op.Output(); o != nil {
+		return o.Size()
+	}
+	return 1
 }
 
 // foldedConstantValue returns the constant value of vn, following a chain of
@@ -230,9 +240,15 @@ func foldedSize(vn *Varnode) int32 {
 }
 
 // evalBinary evaluates a binary constant op.
-// inSize is the size of the input operands (needed for signed comparisons).
-// C++ parity: typeop.cc TypeOpBinary::evaluateBinary
-func evalBinary(code OpCode, a, b uint64, inSize int32) uint64 {
+// inSize is the size of input 0 (needed for signed comparisons and shift sign
+// fills); outSize is the output size (needed for shift / SUBPIECE / PIECE
+// truncation). The arithmetic and comparison cases ignore outSize and are
+// byte-identical to before its addition; the constant-fold caller still masks
+// the result to the output size, so appending the outSize-dependent shift /
+// SUBPIECE / PIECE cases here does not change any previously supported op.
+// C++ parity: typeop.cc TypeOpBinary::evaluateBinary / opbehavior.cc
+// OpBehaviorInt*::evaluateBinary.
+func evalBinary(code OpCode, a, b uint64, inSize, outSize int32) uint64 {
 	switch code {
 	case CPUI_INT_ADD:
 		return a + b
@@ -276,21 +292,70 @@ func evalBinary(code OpCode, a, b uint64, inSize int32) uint64 {
 		return boolToUint64(a != 0 && b != 0)
 	case CPUI_BOOL_OR:
 		return boolToUint64(a != 0 || b != 0)
+	case CPUI_INT_LEFT:
+		// C++ parity: OpBehaviorIntLeft::evaluateBinary (opbehavior.cc:412).
+		if b >= uint64(outSize)*8 {
+			return 0
+		}
+		return (a << b) & maskForSize(outSize)
+	case CPUI_INT_RIGHT:
+		// C++ parity: OpBehaviorIntRight::evaluateBinary (opbehavior.cc:433).
+		if b >= uint64(outSize)*8 {
+			return 0
+		}
+		return (a & maskForSize(outSize)) >> b
+	case CPUI_INT_SRIGHT:
+		// C++ parity: OpBehaviorIntSright::evaluateBinary (opbehavior.cc:455).
+		if b >= 8*uint64(outSize) {
+			if signbitNegative(a, inSize) {
+				return maskForSize(outSize)
+			}
+			return 0
+		}
+		if signbitNegative(a, inSize) {
+			res := a >> b
+			m := maskForSize(inSize)
+			m = (m >> b) ^ m
+			return res | m
+		}
+		return a >> b
+	case CPUI_SUBPIECE:
+		// C++ parity: OpBehaviorSubpiece::evaluateBinary (opbehavior.cc:760).
+		// b is the truncation byte offset. sizeof(uintb)==8.
+		if b >= 8 {
+			return 0
+		}
+		return (a >> (b * 8)) & maskForSize(outSize)
+	case CPUI_PIECE:
+		// C++ parity: OpBehaviorPiece::evaluateBinary (opbehavior.cc:753).
+		// inSize is the size of the high piece (input 0); the low piece b is
+		// concatenated below it.
+		return (a << (uint64(outSize-inSize) * 8)) | b
 	}
 	return 0
 }
 
 // evalUnary evaluates a unary constant op.
-// inSize is the size of the input operand.
-// C++ parity: typeop.cc TypeOpUnary::evaluateUnary
-func evalUnary(code OpCode, a uint64, inSize int32) uint64 {
+// inSize is the size of the input operand; outSize is the output size. Only
+// SEXT consumes outSize (masking the sign extension to the output width, per
+// C++ OpBehaviorIntSext); every other case is byte-identical to before and the
+// constant-fold caller still masks the result, so the SEXT change is idempotent
+// there (the low outSize bits are unchanged). CPUI_COPY is added for the
+// emulator's executeUnary path (constant folding never routes COPY here).
+// C++ parity: typeop.cc TypeOpUnary::evaluateUnary / opbehavior.cc
+// OpBehaviorInt*::evaluateUnary.
+func evalUnary(code OpCode, a uint64, inSize, outSize int32) uint64 {
 	switch code {
+	case CPUI_COPY:
+		// C++ parity: OpBehaviorCopy::evaluateUnary returns the input.
+		return a
 	case CPUI_INT_ZEXT:
 		// Zero-extend: value is already unsigned, no sign bits to extend.
 		return a
 	case CPUI_INT_SEXT:
-		// Sign-extend to 64 bits; output is sign-extended from inSize.
-		return uint64(signedVal(a, inSize))
+		// Sign-extend from inSize, then mask to the output width.
+		// C++ parity: sign_extend(in1,sizein,sizeout) (opbehavior.cc:267).
+		return truncateToSize(uint64(signedVal(a, inSize)), outSize)
 	case CPUI_INT_2COMP:
 		return -a
 	case CPUI_INT_NEGATE:

@@ -98,6 +98,16 @@ type Funcdata struct {
 	// passed through the BUILTIN_STRINGDATA CALLOTHER; values are the raw
 	// payload plus the element data-type.
 	internalStrings map[uint64]internalStringEntry
+
+	// imageReader is the load-image read hook used by EmulateFunction during
+	// jump-table address emulation (getLoadImageValue). It returns the raw
+	// little-endian value of sz bytes at addr. In Ghidra this is
+	// glb->loader->loadFill (emulateutil.cc:36); Gosleigh has no Architecture
+	// glb, so bridge.Build installs a closure over the section-mapped backend.
+	// A nil hook means image reads are unsupported and LOAD emulation fails,
+	// preserving the pre-B2 behavior for callers (e.g. production) that never
+	// set it. C++ parity: LoadImage::loadFill boundary.
+	imageReader func(addr address.Address, sz int) (uint64, error)
 }
 
 // internalStringEntry mirrors the per-address registry entry the C++
@@ -143,6 +153,17 @@ func (fd *Funcdata) SetFlag(f uint32)             { fd.flags |= f }
 func (fd *Funcdata) ClearFlag(f uint32)           { fd.flags &^= f }
 func (fd *Funcdata) GetVarnodeBank() *VarnodeBank { return &fd.vbank }
 func (fd *Funcdata) GetPcodeOpBank() *PcodeOpBank { return &fd.obank }
+
+// SetImageReader installs the load-image read hook used by jump-table address
+// emulation. See the imageReader field comment for parity notes.
+func (fd *Funcdata) SetImageReader(r func(addr address.Address, sz int) (uint64, error)) {
+	fd.imageReader = r
+}
+
+// ImageReader returns the installed load-image read hook, or nil.
+func (fd *Funcdata) ImageReader() func(addr address.Address, sz int) (uint64, error) {
+	return fd.imageReader
+}
 
 // GetFuncProto returns the calling convention prototype, or nil if not set.
 // C++ parity: Funcdata::getFuncProto
