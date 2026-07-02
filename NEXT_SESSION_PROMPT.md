@@ -1,86 +1,82 @@
-# 다음 세션 프롬프트 (2026-07-02 작성)
+# 다음 세션 프롬프트 (2026-07-02 작성, master `5bf90f9`)
 
 ## THE mission (절대 잊지 말 것)
 Ghidra C++ 디컴파일러 엔진을 Go로 **byte-identical** 포팅. 실제 .sla(x86/x64/ARM) 로드해 임의 실제 함수를
-Ghidra와 같은 C 출력까지. **x64 실함수(register param RCX/RDX) 성공이 명시 목표.**
+Ghidra와 같은 C 출력까지. x64 실함수(register param RCX/RDX) 성공이 명시 목표.
 
 ## 핵심 규칙 (반드시 지킬 것)
 **원본 C++ parity 최우선. 추정/근사/휴리스틱 절대 금지.** `ghidra-ref/`의 동작을 재해석하지 말고 원본 C++를
-다시 읽어 그대로 포팅한다. **golden이 통과해도 C++과 다르게 동작하면(unfaithful) 되돌린다** -- 이번 세션
-RulePtrFlow 사례가 그 예(green이었지만 오역이라 dormant로 재수정). "green golden != 충실."
+다시 읽어 그대로 포팅한다. **golden이 통과해도 C++과 다르게 동작하면(unfaithful) 되돌린다.** 이번 세션에서
+문서의 "Fix A/B"(스택 인식을 heritage 이전으로 이동 / def-use walk 패치)가 **오진**으로 판명돼 폐기됐다 --
+Ghidra의 실제 메커니즘을 다시 읽어 맞춘 것이 정답이었다.
 
-## 현재 상태 (master `59d11ad`, PUSHED, 전 패키지 그린)
-- **트리 전체 골든 맵 10/10 byte-identical** (`TestTreeFullGoldenMap`, TREE_MAP=1).
-- **x64 breadth corpus 6/8 MATCH** (`TestX64CorpusGoldenMap`, X64_CORPUS=1): add4/poly4/max3/sum_to_n/sum_array/classify.
-  남은 2 = **grid_score, process** (둘 다 스택프레임 미복구).
-- production `TestMSVC*` 무변경(faithful ActionInferTypes는 tree 전용, bridge/production은 legacy 격리).
+## 현재 상태 (master `5bf90f9`, 커밋 5개 **미푸시**, 전 패키지 그린)
+- 트리 전체 골든 맵 **10/10** byte-identical(`TestTreeFullGoldenMap`, TREE_MAP=1).
+- x64 breadth corpus **6/8** MATCH(`TestX64CorpusGoldenMap`, X64_CORPUS=1): add4/poly4/max3/sum_to_n/sum_array/classify.
+- production `TestMSVC*`/`TestAARCH64*`/`TestX8664*`/`TestX64RegParam*` 전부 pass. `go test ./...` 클린
+  (pkg/loader symbols_test 3건 missing-.exe 사전실패는 무시 -- untracked fixture).
 
-## 2026-07-02 완료 (이번 세션, 13 커밋 -- 건드리지 말 것, 충실+무회귀)
-1. **TYPE-LEAK 충실 포팅**(7커밋): `int local_N` vs golden `undefined4 local_N` 근본 규명 + 포팅 -> max3 MATCH.
-   - 근본 = **심볼 스냅샷 타이밍**(전파 strength 아님, 그 가설은 반증됨): 로컬 선언 타입 = 마지막
-     `ActionRestructureVarnode`의 committed varnode 타입 스냅샷. `ActionInferTypes`가 count 미보고
-     (coreaction.cc:5422)라 순수 타입 커밋으로는 restructure 추가 pass 없음. no-diamond(counted_loop/max3/
-     sum_to_n)는 fullloop iter-2가 1 pass 수렴 -> 마지막 restructure가 pre-typeprop TYPE_UNKNOWN 스냅샷 ->
-     undefined4. diamond(else 분기, process)는 `ActionDoNothing`이 marker-only 블록 제거(count+1) -> iter-2
-     2 pass -> pass2 restructure가 커밋 후 int -> int.
-   - fixes: TypeOrder(datatype.go) / faithful ActionInferTypes tree 전용(action_infertypes.go, production은
-     action_infertypes_legacy.go) / **ActionDeadCode flags=0**(uint-flood 근본: in-loop DeadCode 매 pass
-     재실행으로 orphan `RAX=ZEXT(EAX)` 제거, coreaction.hh:560) / RangeHint symbol 타입(rangehint.go) /
-     decl-from-symbol(printc.go) / **RulePtrFlow dormant**(오역 수정: hasTruncations 게이트로 non-truncated
-     아키텍처에서 미발화, ruleaction.cc:9068).
-2. **sum_array 데이터모델/printc**(3커밋): x64 6/8.
-   - 데이터모델: cspec `<data_organization><long_size>` -> ProtoModel.LongSize -> printc normalizedBaseType.
-     8바이트 signed = LLP64(Win x64) "longlong" / LP64 "long". (TypeFactory::sizeOfLong parity.)
-   - printc 잔차: 8바이트 상수 LL 접미사 제거(`4LL`->`4`, push_integer isLongPrint parity) + cast==unary
-     precedence(`*((int*)x)`->`*(int*)x`, dereference/typecast OpToken 둘 다 62, printc.cc:34-35).
+## 이번 세션 완료 (건드리지 말 것, 충실+검증완료)
+**grid_score/process 스택프레임 복구 = DONE.** bespoke가 raw pointer 쓰레기(`(int*)(lVar1-24)`)로 실패하던
+두 함수의 스택 프레임을 Ghidra 충실 spacebase 경로로 완전 복구(감독관이 실제 출력으로 검증).
+- 근본: Ghidra `Funcdata::spacebase`(funcdata.cc:230-269)가 모든 RSP 계열 varnode(input/sub-result/phi)에
+  spacebase 마킹 -> 이미 충실 포팅돼 있던 `RuleLoadVarnode`/`RuleStoreVarnode`가 `[rsp+k]`를 스택 varnode로
+  변환. `sub rsp,N` 오프셋 누적 = RuleSub2Add+RuleCollapseConstants+RuleAddMultCollapse(ruleaction.cc:4113-4182).
+  x86-32 EBP도 같은 경로(RulePropagateCopy가 `MOV EBP,ESP`를 인라인 -> `[EBP+k]`=`[ESP_input+k]`).
+- 커밋: `602dde8`(flag-gated) -> `c87debe`(플립: 트리 기본값, 플래그 제거) -> `721cac8`(docs) ->
+  `425acb1`(markExplicitUnsigned: grid_score `& 1U`, cast.cc:38-71 충실 포팅, H9 leftover 해소) -> `5bf90f9`(docs).
+- **구조 분리**: 충실 경로는 universal-action 트리 기본값. production `bridge.Decompile`(41-call subset)은
+  ActionSpacebase/RuleLoadVarnode를 안 돌리므로 bespoke `ActionStackPtrFlow`를 그대로 유지. bespoke 완전
+  은퇴는 트리가 production 경로가 될 때(H8-debt-2).
 
-## 다음 작업 [최우선] -- grid_score/process 스택프레임 복구 (x64 6/8 -> 증가)
+## 다음 작업 (아래 3개 중 택1, 전부 비스택 -- 사용자 steer)
 
-### 진단 완료 (2026-07-02, GOSLEIGH_SPF_DEBUG 계측)
-- **현상**: grid_score/process가 `stackOffsets=[]`(스택 로컬 전면 미복구) -> `uVar2=(int*)(uVar3-0x18)` +
-  `uVar2[N]` 쓰레기. golden은 스택 로컬 + 정상 파라미터.
-- **근본**: seed(RSP) 탐지는 성공. 실패는 `stackAddrOffset()`가 in-loop 접근 `INT_ADD(const, register:0x20/8W)`
-  의 rsp base를 못 잡음. 두 원인: (1) 중첩루프 rsp phi cycle(상호참조 MULTIEQUAL -> buildStackOffsetMap
-  action_stack_ptr_flow.go:550-575의 "모든 non-self 입력 매핑+동일offset" 규칙이 cycle에서 영구 미해결),
-  (2) free rsp read(주소 INT_ADD의 rsp 입력이 def 없는 free varnode, def-use walk 도달 불가). grid_score/
-  process 같은 근본.
-- **C++ 대비 갭**: Ghidra는 RSP를 spacebase(pspec `<stackpointer>`)로 선언, 스택 접근 인식을 **heritage
-  이전** raw p-code(`INT_ADD(RSP_input,const)`, phi/free 없음)에서 수행. `ActionStackPtrFlow::apply`
-  (coreaction.cc:482)는 clog/extrapop 정리만. 우리는 bespoke def-use 전파를 **heritage 이후 1회**
-  (action.go:1361 actstackstall) 실행 -> 파편화된 rsp라 단순 CFG만 커버. 코드 주석도 인지
-  (action_stack_ptr_flow.go:222-224, heritage.go:936-937).
+### 옵션 1 [권장, 두 문제 동시 해결 가능] grid_score decl-order = process 타입누수의 공통 근본
+- **현상**: grid_score 유일 잔여 diff = 선언 순서(golden은 `int iVar1;`를 스택 로컬보다 먼저; 우리는 스택 로컬
+  먼저). 정렬 규칙 자체는 충실(SymbolEntry addr=(space idx,offset); printc.cc:2650 / CompareLocDef
+  varnode_bank.go:57).
+- **진짜 근본(grid7 확정)**: `pkg/bridge/bridge.go registerSpaceByIndex`가 stack space Index=maxIdx+1로
+  잡는데 maxIdx가 const space(index 65535)까지 스캔 -> `65535+1` **uint16 overflow -> stack index 0**(최저)
+  -> 스택 로컬이 전부 앞으로 정렬. Ghidra는 stack space가 高 index.
+- **얽힘(고위험, 이게 본체)**: overflow만 고쳐 stack index를 높이면 grid_score 순서는 맞으나 counted_loop가
+  `undefined4->int`(타입+순서), sum_to_n/sum_array 깨짐(X64 4/8, tree 9/10). stack space의 loc_tree 위치가
+  `RestructureVarnode`/`ActionInferTypes` 심볼 스냅샷 타이밍(이 세션 초반 TYPE-LEAK 기계)과 order-dependent.
+  이 type-snapshot loc_tree-order 의존성이 **process의 diamond 타입누수(undefined4) 근본과 동일**로 추정 ->
+  한 번 풀면 둘 다 해결 가능성.
+- **수정 대상 Go**: `bridge.go registerSpaceByIndex`(overflow: const space 제외) + `scopelocal.go`/`rangehint.go`
+  의 RestructureVarnode/mapStateStackTypes loc_tree-order 의존성(상단 TYPE-LEAK 진단 섹션 참조).
+- **성공 기준**: `X64_CORPUS=1 TestX64CorpusGoldenMap` grid_score MATCH(6/8->7/8) + `TREE_MAP=1` 10/10 무회귀
+  (counted_loop/sum_to_n/sum_array 무회귀가 관건) + production 무회귀.
+- **주의**: print-time "레지스터 임시를 스택 앞에 재정렬"은 heuristic이라 금지. fresh worktree + 전 매트릭스 가드.
 
-### 수정안 (docs/STATUS.md `### 미시작`에 전문)
-- **A (정석 parity, 고위험)**: 스택 접근 인식을 heritage 이전으로 이동. raw INT_ADD(RSP_input,const) 변환 후
-  stack space heritage(StackSlots/HeritageRange 기존). SP 무변화라 base가 전부 RSP_input const-chain ->
-  전파 자명. 단 SSA 없는 SP 값추적 필요 + **파이프라인 순서 변경 = x86-32 EBP 회귀 위험 큼**.
-- **B (타겟, 부분)**: buildStackOffsetMap phi-cycle 강화. process free-read는 이걸로 못 풀어 결국 A 성격 필요.
-- **권장 진행**: A를 fresh 세션에서 **worktree 격리 + 전 매트릭스 가드**로. TREE_MAP 10/10(x86-32 EBP 무회귀)
-  최우선.
+### 옵션 2 process 나머지 기능 (큰 별개, correctness)
+- 포인터-파라미터 배열 deref 누락: golden `iVar1 = *(int*)(param_1+(longlong)local_14*4)`(param_1[i], heap)를
+  우리는 통째 누락 -> iVar1 미초기화 read(실제 correctness 갭). RulePtrArith/포인터-파라미터 배열 인덱스 복구.
+- 64비트 signed division 반환 타입: golden `ulonglong ...(longlong)local_c/(longlong)local_10 & 0xffffffff`.
+- 단축평가 `&&` + comma 연산자 조건 구조화(golden) vs 우리 if/else-if/else.
+- 성공 기준: `X64_CORPUS` process MATCH(6/8->증가). 각 항목 C++ 원본 대응 미조사 -> 조사부터.
 
-### 대상 파일 / 성공 기준
-- Go: `pkg/pcode/action_stack_ptr_flow.go`(buildStackOffsetMap/stackAddrOffset), `pkg/pcode/action.go`(파이프
-  라인 순서 :1179 heritage / :1361 actstackstall), heritage/StackSlots 경로.
-- C++: coreaction.cc ActionStackPtrFlow(:482), heritage/spacebase 경로, pspec `<stackpointer>`.
-- 성공 기준: `X64_CORPUS=1 TestX64CorpusGoldenMap`에서 grid_score/process 스택 로컬 복구(6/8 증가) +
-  `TREE_MAP=1 TestTreeFullGoldenMap` 10/10 유지. process는 스택 외 나눗셈 렌더 + 8바이트 ulonglong return
-  잔차 별도(스택 복구 후 재평가). step5 `ActionDoNothing`(현재 no-op 스텁 coreaction.go:594)은 스택 복구 후.
+### 옵션 3 [미션 #1 게이트] H8-debt-2: tree를 production 경로로
+- 트리 스택복구가 이제 충실+우수하므로 `bridge.Decompile`의 41-call subset을 `db.BuildUniversalAction+Perform`
+  으로 교체 시도. 성공 시 bespoke `ActionStackPtrFlow` 완전 은퇴 가능. production cspec/EntryPoint 배선을
+  트리와 맞춰야 함(decompile.go 자체 cdecl 모델). 큰 별도 작업.
 
 ## 회귀 가드 (매 수정마다 필수)
 - `TREE_MAP=1 go test ./pkg/loader/ -run TestTreeFullGoldenMap` (10/10 유지 -- x86-32 회귀 극도 주의)
 - `X64_CORPUS=1 go test ./pkg/loader/ -run TestX64CorpusGoldenMap -v` (6/8 유지/증가)
 - `go test ./pkg/loader/ -run 'TestMSVC|TestAARCH64|TestX8664|TestX64RegParam'`
-- `go test ./...` (pkg/loader의 symbols_test 3건 missing-.exe 사전실패는 무시 -- untracked fixture)
-
-## 참고 문서
-- `docs/STATUS.md`(스택프레임 미시작 전문), `docs/CHANGELOG.md`(2026-07-02 두 항목), 메모리 `project_gosleigh`.
-- C++: coreaction.cc(ActionInferTypes:5385/ActionDeadCode:3473/ActionStackPtrFlow:482), varmap.cc(gatherVarnodes
-  :1124/isReadActive:1088), ruleaction.cc(RulePtrFlow:9058/RulePtrArith:6662), printc.cc(push_integer:1354/
-  OpToken:34), heritage.cc.
+- `go test ./...` (symbols_test 3건 missing-.exe 무시)
 
 ## 방법론 (이번 세션 검증됨)
-- 팀 모델: 심층 C++ 규명 + 실측(변형 corpus / SSA ACTTRACE / decomp_dbg) + 구현을 서브에이전트로 나누되,
-  감독관이 **각 fix의 C++ 근거를 직접 스팟체크**하고 게이트 전 승인. green이어도 unfaithful이면 기각.
-- 서브에이전트는 Opus 권장(sonnet 품질 낮음). 529 과부하 시 감독관이 인계 가능.
-- 디버그 asset: TracerScout가 빌드한 `decomp_dbg.exe`(CPUI_DEBUG=TYPEPROP+OPACTION_DEBUG)가 scratchpad에
-  있었으나 세션 워크트리 정리로 사라졌을 수 있음 -- 필요시 재빌드(cpp/ 복사 + `-DCPUI_DEBUG` + BFD 4파일 제외).
+- 팀 모델: 어려운 근본 규명은 fable, 구현/진단은 Opus 서브에이전트(worktree 격리), 각 fix의 C++ 근거를
+  감독관이 직접 스팟체크하고 게이트 전 승인. green이어도 unfaithful이면 기각. 고위험 변경은 worktree +
+  env 플래그 A/B 토글 -> parity 확인 후 플립 -> 플래그 제거 순.
+
+## 참고 문서
+- `docs/STATUS.md`(미시작 전문), `docs/CHANGELOG.md`(2026-07-02 항목), 메모리 `project_gosleigh`.
+- C++: funcdata.cc(spacebase:230-269), ruleaction.cc(RuleLoadVarnode:4193-4361, RuleAddMultCollapse:4113-4182,
+  correctSpacebase:4193-4204), cast.cc(markExplicitUnsigned:38-71), variable.cc(getNameRepresentative:456-511),
+  varmap.cc(gatherVarnodes/RangeHint), printc.cc(emitScopeVarDecls:2650, push_integer:1425).
+- Go 스택 경로: pkg/pcode/funcdata.go(Spacebase), pkg/address/space.go(spacebase infra), pkg/bridge/bridge.go
+  (buildFaithfulStackSpace/bindLoadStoreSpaces/registerSpaceByIndex), pkg/pcode/rules_loadstore.go,
+  rules_arith.go(RuleAddMultCollapse), action_name_vars.go(getNameRepresentative), cast.go(markExplicitUnsigned).
