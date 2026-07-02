@@ -67,12 +67,10 @@ type RuleCollapseConstants struct{ batchRule }
 
 func NewRuleCollapseConstants(group string) *RuleCollapseConstants {
 	r := &RuleCollapseConstants{}
-	// RuleCollapseConstants::applyOp -- ruleaction.cc:3874. Faithful subset gated
-	// behind the increment flag: folds a binary op whose inputs are both constant
-	// into a COPY of the resulting constant. Scoped to INT_ADD/INT_MULT (the ops
-	// the stack-base offset accumulation needs -- notably INT_MULT(N,-1) -> -N
-	// produced by RuleSub2Add). When the flag is off apply returns 0, so this is
-	// behaviorally identical to the prior no-op stub.
+	// RuleCollapseConstants::applyOp -- ruleaction.cc:3874. Faithful subset: folds
+	// a binary op whose inputs are both constant into a COPY of the resulting
+	// constant. Scoped to INT_ADD/INT_MULT (the ops the stack-base offset
+	// accumulation needs -- notably INT_MULT(N,-1) -> -N produced by RuleSub2Add).
 	// known mismatch: the full op::collapse over all collapsible opcodes,
 	// architecture constant-space folding, and constant-symbol propagation are
 	// not ported.
@@ -82,9 +80,6 @@ func NewRuleCollapseConstants(group string) *RuleCollapseConstants {
 
 // RuleCollapseConstants::applyOp -- ruleaction.cc:3874 (gated subset).
 func (r *RuleCollapseConstants) apply(op *PcodeOp, data *Funcdata) int {
-	if !faithfulStackEnabled() {
-		return 0
-	}
 	if op.Output() == nil || op.NumInput() != 2 {
 		return 0
 	}
