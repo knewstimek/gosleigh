@@ -5,6 +5,48 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-03: grid_score 선언순서 완료 -- stack space index overflow + getNameRepresentative 포팅 (x64 corpus 7/8)
+이전 세션이 남긴 "얽힘" 가설(stack space index 변경이 RestructureVarnode/ActionInferTypes 타입-스냅샷 타이밍에
+영향)을 ACTTRACE 실측으로 반증하고, 진짜 근본(printc 선언-대표 선택의 loc_tree 의존 포팅 버그)을 규명해 해소.
+master `8d007b5`. grid_score의 유일 잔여 diff(선언 순서)가 닫혀 x64 corpus 6/8 -> **7/8**.
+- **기존 가설 반증**: stack idx 0 vs high로 ACTTRACE를 대조한 결과 counted_loop의 counted-action 트레이스가
+  바이트 동일 -- pass 수/스냅샷 타이밍 불변. 타입 추론은 typeOrder 단조하강 fixpoint + count 미증가라 순서
+  무관. 기존 "stack index 변경이 type-snapshot 타이밍과 얽혀있다"는 진단은 오진이었음.
+- **진짜 근본**: `pkg/pcode/printc.go`의 `collectSymbols`가 named HighVariable의 선언 대표(representative)를
+  loc_tree first-wins로 골라서, stack space index가 바뀌면 rep가 stack/register 인스턴스 사이로 뒤집히고
+  선언 순서 + 선언 타입 소스가 같이 이동했다. Ghidra는 대표를 `HighVariable::getNameRepresentative`
+  (variable.cc:492, compareName variable.cc:456)로 골라 인스턴스 순서 무관이다. 선언은 scope 심볼맵 주소순
+  으로 방출된다(`emitScopeVarDecls` printc.cc:2650).
+- **수정 1 -- stack space index overflow**(`pkg/bridge/bridge.go registerSpaceByIndex`): maxIdx 스캔에서
+  const space를 포함해서 우리 const space(Index=0xFFFF)가 `maxIdx+1`을 uint16 overflow시켜 stack space가
+  index 0(최저)으로 떨어졌다. Ghidra는 const을 index 0 고정(translate.cc:362)하고 spacebase/stack은 로드 시
+  실공간 위에 append한다(architecture.cc:563 `addSpacebase` = `numSpaces()`). const space를 maxIdx 스캔에서
+  제외해 stack이 실제 높은 index를 받도록 수정.
+- **수정 2 -- getNameRepresentative 포팅**(`pkg/pcode/printc.go collectSymbols` + 신규 `pkg/pcode/
+  action_name_vars.go highNameRepresentativeLive`): named HV 선언 대표를 loc_tree-order 무관
+  `getNameRepresentative`(compareName 기반)로 재선택. live 제한이 필요한 이유: C++
+  `HighVariable::getNameRepresentative`가 스캔하는 `hv->inst`는 `HighVariable::remove`(variable.cc:515)가
+  Varnode 파괴 시 dead member를 즉시 퍼지해서 항상 live만 담는다. Gosleigh는 `remove`를 포팅하지 않아 dead
+  인스턴스가 잔존할 수 있고, unfiltered 스캔이 dead 인스턴스를 rep로 고를 수 있다(34개 골든 중 sum_list 1건
+  실측: Def==nil, bank 비멤버). live(bank 멤버십) 제한으로 C++ `inst` 불변식을 국소 재현. (검토했던
+  `s.names[rep]=name` 직접 바인딩 workaround는 live 제한으로 대체되어 불필요해져 제거.)
+- **결과**: `X64_CORPUS=1 TestX64CorpusGoldenMap` grid_score 신규 MATCH(6/8 -> **7/8**, process만 잔여).
+  `TREE_MAP=1 TestTreeFullGoldenMap` 10/10 byte-identical 무회귀. production `TestMSVC*`/`TestAARCH64*`/
+  `TestX8664*`/`TestX64RegParam*` 전부 PASS. `go test ./...` 클린.
+- **process = 별개 근본 확정**: grid_score와 "공통 근본" 추정은 반증됨. process는 여전히
+  `TestX64CorpusGoldenMap` MISMATCH(반환타입 `ulonglong` vs golden `int` 등). 근본 별개: (1) undefined4
+  diamond 타입누수 = `ActionDoNothing`/`RemoveDoNothingBlock` 미포팅(coreaction.cc:3473-3497,
+  funcdata_block.cc:327; Go 스텁 coreaction.go:592/funcdata.go:614), (2) 포인터-파라미터 배열 deref
+  `*(int*)(param_1+(longlong)local_14*4)` 누락(heap access, correctness 갭), (3) 64비트 signed division
+  반환 렌더링, (4) 단축평가 `&&` + comma 연산자 조건 구조화. 전부 기지의 독립 항목(상세는 `docs/STATUS.md`
+  미시작 참고).
+- **남은 리스크/known-gap**: const space가 여전히 0xFFFF(Ghidra는 const이 loc_tree 맨 앞 index 0, 우리는
+  맨 뒤) -- 현 corpus 무해(실측), const=0 이관은 별도 세션. `HighVariable::remove`(variable.cc:515) 미포팅 =
+  인스턴스 수명 갭의 근본. live-제한은 국소 보정이고 완전 해소는 remove 포팅(후속 과제).
+- C++ 참조: `translate.cc:362`(const space index 0 고정), `architecture.cc:563`(addSpacebase numSpaces()),
+  `variable.cc:456-511`(HighVariable::getNameRepresentative/compareName), `variable.cc:515`
+  (HighVariable::remove), `printc.cc:2650`(emitScopeVarDecls).
+
 ### 2026-07-02: grid_score/process 스택프레임 복구 -- 충실 spacebase 경로 (x64 corpus 프레임 갭 해소)
 이전 진단("heritage 이전으로 스택 인식 이동" Fix A / "def-use walk 패치" Fix B)을 폐기하고 Ghidra의 실제 스택
 인식 경로를 그대로 포팅. master `c87debe`(이전 flag-gated 구현 `602dde8`). grid_score/process의

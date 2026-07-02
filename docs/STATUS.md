@@ -15,11 +15,12 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 현재 상태 (2026-06-30 세션 진행, 전 패키지 그린)
 
-**(2026-07-02 갱신, master `c87debe`)** 트리 스택프레임 복구가 Ghidra 충실 spacebase 경로(Funcdata.Spacebase +
-RuleLoadVarnode/RuleStoreVarnode + RuleAddMultCollapse/RuleCollapseConstants 오프셋 누적)로 기본 전환. x64
-corpus 6/8 MATCH -- grid_score/process 스택 로컬이 복구됐고(과거 `stackOffsets=[]` 해소), 두 함수는 스택과
-무관한 follow-on 사유로 여전히 MISMATCH(아래 미시작 참고). production `bridge.Decompile`은 구조적으로 분리돼
-기존 bespoke ActionStackPtrFlow를 그대로 사용.
+**(2026-07-03 갱신, master `8d007b5`)** 트리 스택프레임 복구는 2026-07-02 완료된 Ghidra 충실 spacebase 경로
+(Funcdata.Spacebase + RuleLoadVarnode/RuleStoreVarnode + RuleAddMultCollapse/RuleCollapseConstants 오프셋
+누적) 그대로 유지. 2026-07-03에 grid_score 선언순서가 추가로 완료돼 x64 corpus **7/8** MATCH(process만 잔여).
+진짜 근본은 printc 선언-대표(representative) 선택이 loc_tree 순서에 의존하던 포팅 버그였음(아래 완료 블록 및
+CHANGELOG 2026-07-03 참고). production `bridge.Decompile`은 구조적으로 분리돼 기존 bespoke ActionStackPtrFlow를
+그대로 사용.
 
 **트리 전체 골든 맵 10/10 byte-identical** (`TestTreeFullGoldenMap`). **x86-32 8/8 + x64_add_ret + aarch64_add_ret
 전부 MATCH**(complex_max는 바이트 미보유로 미테스트). 트리가 register-param 아키텍처(x86-64 SysV, AArch64 AAPCS64,
@@ -92,35 +93,51 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 > **검증(감독관 실행)**: `TREE_MAP=1 TestTreeFullGoldenMap` 10/10, `X64_CORPUS=1 TestX64CorpusGoldenMap` 6/8,
 > production `TestMSVC*`/`TestAARCH64*`/`TestX8664*`/`TestX64RegParam*` 전부 PASS, `go test ./...` 클린.
 
-### 미시작: grid_score/process 잔여 mismatch (스택프레임 복구 후 follow-on, 2026-07-02)
-- **현상**: master `c87debe`로 스택프레임은 복구됐으나 grid_score/process는 여전히 `TestX64CorpusGoldenMap`
-  MISMATCH(스택 문제 아님, 별도 사유):
-  - **grid_score(선언 순서 1건 남음)**: golden은 `int iVar1;`(레지스터/unique 임시)를 스택 로컬보다 먼저
-    선언, 우리는 스택 로컬을 먼저. 정렬 규칙 자체는 충실(양쪽 다 SymbolEntry storage addr = (space index,
-    offset) 순; Ghidra PrintC::emitScopeVarDecls printc.cc:2650, 우리 `CompareLocDef` varnode_bank.go:57).
-    **진짜 근본(2026-07-02 grid7 확정)**: `bridge.go registerSpaceByIndex`가 stack space Index = maxIdx+1로
-    잡는데 maxIdx가 const space(index 65535)까지 스캔 -> `65535+1` **uint16 overflow -> stack index 0**(최저)
-    -> 스택 로컬이 전부 앞으로 정렬. Ghidra는 stack space가 processor/unique 뒤 高 index라 레지스터/unique
-    임시가 먼저. merge 표현 문제 아님(register-tied로 바꿔도 register idx 4 > stack idx 0이라 안 풀림).
-    **얽힘(고위험)**: overflow를 고쳐 stack index를 높이면 grid_score 순서는 맞으나 counted_loop가
-    `undefined4->int` (타입+순서 동시), sum_to_n/sum_array 깨짐(X64 4/8, tree 9/10) -- stack space의 loc_tree
-    위치가 RestructureVarnode/ActionInferTypes 심볼 스냅샷 타이밍(상단 타입누수 기계)과 order-dependent. 충실
-    수정 = overflow 제거 + 그 loc_tree-order 의존성 동시 해결(전용 세션, 전 매트릭스 가드). print-time
-    재정렬은 heuristic이라 금지.
-    (`& 1U` unsigned 접미사는 2026-07-02 완료: markExplicitUnsigned 포팅 cast.cc:38-71, master `425acb1`.)
-  - **process(별도 큰 기능 갭, 스택과 무관)**: (1) 포인터 파라미터 배열 인덱스 deref
-    `*(int*)(param_1+(longlong)local_14*4)`가 누락 -- heap access, 실제 correctness 갭. (2) 64비트 signed
-    division 반환 타입 렌더링 누락(golden `ulonglong ... & 0xffffffff`). (3) 단축평가 `&&` + comma 연산자 조건
-    구조화 누락. (4) 스택 로컬 타입 누수(undefined4) 잔존 -- 이 문서 상단 "타입 누수" 진단 섹션과 동일 근본.
-- **C++ 참조**: grid_score 선언순서는 `ScopeLocal`류 정렬 비교자(`CompareLocDef`) 관련으로 추정되나 정확한
-  파일/라인 미확인(다음 세션 조사 필요). `& 1U` 접미사는 printc 상수 렌더링(`push_integer`/`renderConstant`
-  계열, sum_array 수정과 인접 경로) 조사 필요. process의 포인터 deref/나눗셈 반환/단축평가 3개 항목은 아직
-  C++ 원본 대응 함수 미조사.
-- **수정 대상 Go 파일**: 미확정. grid_score는 `scopelocal.go`(정렬/merge 표현) + `printc.go`(상수 렌더링) 후보.
-  process는 조사 필요 -- 포인터 처리 rule(`rules_*`), `printc.go`(나눗셈/조건 렌더링), 타입 누수는 상단 항목과
-  Go 파일 공유(`scopelocal.go`, `printc.go`).
-- **성공 기준**: `X64_CORPUS=1 TestX64CorpusGoldenMap`에서 grid_score/process 개별 MATCH(현재 6/8 -> 8/8) +
+> **2026-07-03 완료: grid_score 선언순서 -- stack space index overflow + getNameRepresentative 포팅
+> (master `8d007b5`).** X64 corpus 6/8 -> **7/8**(grid_score MATCH, process만 잔여). **기존 "얽힘" 가설은
+> 반증됨**: ACTTRACE 실측으로 stack idx 0 vs high에서 counted_loop의 counted-action 트레이스가 바이트 동일
+> 확인 -- pass 수/스냅샷 타이밍 불변. 타입 추론은 typeOrder 단조하강 fixpoint + count 미증가라 순서 무관.
+> **진짜 근본**: `pkg/pcode/printc.go collectSymbols`가 named HighVariable의 선언 대표를 loc_tree
+> first-wins로 골라서, stack space index가 바뀌면 rep가 stack/register 인스턴스 사이로 뒤집히고 선언 순서 +
+> 선언 타입 소스가 같이 이동했다. Ghidra는 대표를 `HighVariable::getNameRepresentative`(variable.cc:492,
+> compareName variable.cc:456)로 골라 인스턴스 순서 무관이고, 선언은 scope 심볼맵 주소순 방출
+> (`emitScopeVarDecls` printc.cc:2650). **수정 2건**: (1) `pkg/bridge/bridge.go registerSpaceByIndex`가
+> maxIdx 스캔에서 const space를 포함해 우리 const space(Index=0xFFFF)가 `maxIdx+1`을 uint16 overflow시켜
+> stack space가 index 0(최저)으로 떨어지던 문제 -- const space를 maxIdx 스캔에서 제외(Ghidra는 const을
+> index 0 고정 translate.cc:362, spacebase/stack은 로드시 실공간 위 append architecture.cc:563
+> `addSpacebase`=`numSpaces()`). (2) `pkg/pcode/printc.go collectSymbols` + 신규 `pkg/pcode/
+> action_name_vars.go highNameRepresentativeLive`로 선언 대표를 live-제한 `getNameRepresentative`로
+> 재선택 -- live 제한 이유: C++ `HighVariable::getNameRepresentative`가 스캔하는 `hv->inst`는
+> `HighVariable::remove`(variable.cc:515)가 Varnode 파괴 시 dead member를 즉시 퍼지해 항상 live만 담지만,
+> Gosleigh는 remove를 포팅하지 않아 dead 인스턴스가 잔존할 수 있다(34개 골든 중 sum_list 1건 실측: Def==nil,
+> bank 비멤버). live(bank 멤버십) 제한으로 C++ `inst` 불변식을 국소 재현. **검증**: `TREE_MAP=1
+> TestTreeFullGoldenMap` 10/10 byte-identical 무회귀, `X64_CORPUS=1 TestX64CorpusGoldenMap` 7/8, production
+> `TestMSVC*`/`TestAARCH64*`/`TestX8664*`/`TestX64RegParam*` 전부 PASS, `go test ./...` 클린.
+> **process는 별개 근본 확정**(grid_score와 "공통 근본" 추정은 반증) -- 상세는 아래 미시작 참고.
+
+### 미시작: process 잔여 기능 갭 (grid_score 완료, 별개 근본 확정, 2026-07-03)
+- **현상**: grid_score는 2026-07-03 완료(선언순서, master `8d007b5`, 위 완료 블록 및 CHANGELOG 참고). process는
+  여전히 `TestX64CorpusGoldenMap` MISMATCH(반환타입 `ulonglong` vs golden `int` 등). grid_score와 "공통 근본"
+  추정은 ACTTRACE 실측으로 반증됐음(위 완료 블록 참고) -- process 근본은 별개 4건:
+  - (1) **undefined4 diamond 타입누수**: 근본 = `ActionDoNothing`/`RemoveDoNothingBlock` 미포팅.
+  - (2) **포인터-파라미터 배열 deref 누락**: golden `iVar1 = *(int*)(param_1+(longlong)local_14*4)`
+    (param_1[i], heap access)를 우리는 통째 누락 -- iVar1 미초기화 read, 실제 correctness 갭.
+  - (3) **64비트 signed division 반환 타입 렌더링 누락**: golden `ulonglong ...(longlong)local_c/
+    (longlong)local_10 & 0xffffffff`.
+  - (4) **단축평가 `&&` + comma 연산자 조건 구조화 누락**: golden은 short-circuit 구조, 우리는 if/else-if/else.
+- **C++ 참조**:
+  - (1) `coreaction.cc:3473-3497`(ActionDoNothing), `funcdata_block.cc:327`(RemoveDoNothingBlock). Go 스텁:
+    `coreaction.go:592`(ActionDoNothing), `funcdata.go:614`(RemoveDoNothingBlock).
+  - (2)(3)(4)는 아직 C++ 원본 대응 함수 미조사(다음 세션 조사부터).
+- **수정 대상 Go 파일**: (1) `pkg/pcode/coreaction.go`(ActionDoNothing 실구현), `pkg/pcode/funcdata.go`
+  (RemoveDoNothingBlock 실구현). (2)(3)(4)는 조사 필요 -- 포인터 처리 rule(`rules_*`), `printc.go`
+  (나눗셈/조건 렌더링) 후보.
+- **성공 기준**: `X64_CORPUS=1 TestX64CorpusGoldenMap`에서 process MATCH(현재 7/8 -> 8/8) +
   `TREE_MAP=1 TestTreeFullGoldenMap` 10/10 무회귀 + production `TestMSVC*` 무회귀.
+- **known-gap(별도, 낮은 우선순위)**: const space가 여전히 0xFFFF(Ghidra는 const이 loc_tree 맨 앞 index 0,
+  우리는 맨 뒤) -- 현 corpus 무해(실측), const=0 이관은 별도 세션. `HighVariable::remove`(variable.cc:515)
+  미포팅 = 인스턴스 수명 갭의 근본(printc.go collectSymbols의 live-제한이 국소 보정, 2026-07-03 참고). 완전
+  해소는 remove 포팅.
 
 > **2026-07-02 완료: TYPE-LEAK + sum_array 데이터모델/printc -> x64 corpus 6/8 MATCH
 > (add4/poly4/max3/sum_to_n/sum_array/classify).** master `30810bd`, tree 10/10 유지. sum_array 완료(3커밋):
