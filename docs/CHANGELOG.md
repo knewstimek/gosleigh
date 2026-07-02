@@ -5,6 +5,36 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-03: H8-debt-2 완료 -- production을 universal-action 트리로 (미션 #1 게이트)
+process gap1 + ActionDoNothing 세션(바로 아래 항목) 직후 이어진 세션. `bridge.Decompile`의 41-call 손정렬
+subset을 버리고 `db.BuildUniversalAction(nil)+BuildDefaultGroups()+SetCurrent("decompile").Perform(fd)`
+(universal-action 트리)로 교체했다. 이걸로 미션 #1 게이트("트리를 production 경로로")가 달성됐다. 모든
+production 골든이 byte-identical. master `eadd9c0`.
+- **근본**: 트리와 41-call subset은 액션 목록이 아니라 단 하나의 배선(setup wiring) 차이만 있었다. production
+  콜러가 `bridge.Result`를 cspec 없이(CspecData=nil) 만들어 cspec-less cdecl + 하드코딩 EAX 반환 + bespoke
+  `ActionStackPtrFlow`를 강제하고 있었다. 트리는 cspec `<stackpointer>`가 있어야 faithful ActionSpacebase +
+  RuleLoadVarnode/RuleStoreVarnode 경로가 실제 StackSpace를 갖는다. `bridge.Build`에 cspec+EntryPoint를
+  공급(이미 Build 내부에서 arch-aware default ProtoModel + faithful stack spacebase로 파싱됨)하면 이 갭이
+  닫힌다. Ghidra는 항상 cspec을 갖고 있으므로 cspec 요구는 근사가 아니라 충실 조건이다.
+- **구현**: Step1 = cspec/EntryPoint를 production 하네스(`msvc_diag_test.go` `runPipelineGhidra`)의
+  `bridge.Build` 호출에 배선(CspecPath x86gcc.cspec + EntryPoint). Step2 = `Decompile` 본문을 트리로 교체
+  (ApplyCallingConvention/bespoke ActionStackPtrFlow/수동 Heritage/DeadCode/Merge/InferTypes 손정렬 제거).
+  cspec 공급 계약 주석(`decompile.go`: 콜러가 CspecPath+EntryPoint 필수, 없으면 스택 로컬 미복구; Ghidra는
+  항상 cspec 보유라 충실; 실 다운스트림 콜러는 테스트 하네스뿐).
+- **게이트(감독관 독립 검증)**: `TestMSVC_{CountedLoop,SumList,AbsVal,Classify2,Gcd}` 5/5 byte-identical +
+  `TestAARCH64`/`TestX8664`/`TestX64RegParam` PASS + tree 10/10 + x64 corpus 7/8(무회귀) + `go test ./...` 클린.
+- **Step3(bespoke 파일 삭제) = 후속(별도 세션)**: `action_stack_ptr_flow.go`가 아직 legacy 테스트 하네스
+  ~15개(`loader_test.go` 직접-heritage 테스트, 비-Ghidra `runPipeline`, diag 테스트)에서 직접 호출된다.
+  production 경로에선 이미 은퇴했으나, 파일 자체를 삭제하려면 그 하네스들을 먼저 트리로 이전해야 한다.
+- **process 3갭은 H8-debt-2로 자동 해소되지 않는다(중요 정정)**: 바로 아래 항목이 "H8-debt-2가
+  merge/structuring/snapshot parity를 정면으로 다루므로 process 3갭이 그 과정에서 해소될 경로"라고 적었으나,
+  실측 결과 그렇지 않았다. x64 corpus는 애초에 트리 경로(`BuildUniversalAction+Perform`)로 돌고 있었으므로
+  process는 이미 트리 위에서 발현 중이었다 -- 이번 배선교체(production을 트리로)는 process와 무관하다.
+  process 3갭(gap2 RuleSubCommute/RuleSubZext 순서, gap3 블록구조화 오폴딩, gap4 eax merge/copyprop)은 트리
+  액션 내부의 deep-parity 부채로 별도 세션이 필요하다. H8-debt-2와는 "같은 서브시스템에 수렴"할 뿐
+  "배선교체로 해소"되는 관계가 아니다.
+- C++ 참조: `coreaction.cc`(`ActionDatabase::universalAction`).
+
 ### 2026-07-03: process gap1(포인터 배열 deref) + ActionDoNothing 포팅 -- 잔여 3갭 deep-debt 확정 (x64 corpus 7/8 유지)
 grid_score 선언순서 완료(`8d007b5`) 이후 이어진 세션. process의 4개 근본 후보 중 gap1을 닫고
 `ActionDoNothing`/`RemoveDoNothingBlock`을 충실 포팅했다. ActionDoNothing의 A/B 실측으로 "do-nothing 제거가

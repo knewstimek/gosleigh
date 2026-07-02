@@ -7,7 +7,7 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 목표 + memory `project_e2e_goal` 참조.) x64 실함수(register param RCX/RDX) 성공도 명시 목표.
 
 ### 두 경로의 현재 위치
-- **Production (`bridge.Decompile`)**: H8-debt-2 Step 1-2 완료(2026-07-03)로 손정렬 41-call subset을 버리고
+- **Production (`bridge.Decompile`)**: H8-debt-2 완료(2026-07-03, master `eadd9c0`)로 손정렬 41-call subset을 버리고
   **universal-action 트리로 교체됨**. 유일 load-bearing 배선 = 콜러가 `bridge.Build`에 cspec(+EntryPoint)
   공급. MSVC 골든 5개 byte-identical, TestAARCH64/X8664/X64RegParam 그린, tree 10/10, x64 corpus 7/8 무회귀.
 - **Tree (`ActionDatabase.BuildUniversalAction`, 250 action/rule = 진짜 Ghidra 파이프라인)**: 이제 이것이
@@ -16,16 +16,18 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 현재 상태 (2026-06-30 세션 진행, 전 패키지 그린)
 
-**(2026-07-03 갱신, master `c4d85ea`)** 트리 스택프레임 복구는 2026-07-02 완료된 Ghidra 충실 spacebase 경로
+**(2026-07-03 갱신, master `eadd9c0`)** 트리 스택프레임 복구는 2026-07-02 완료된 Ghidra 충실 spacebase 경로
 (Funcdata.Spacebase + RuleLoadVarnode/RuleStoreVarnode + RuleAddMultCollapse/RuleCollapseConstants 오프셋
 누적) 그대로 유지. 2026-07-03 전반에 grid_score 선언순서가 완료돼 x64 corpus 6/8 -> **7/8** MATCH(진짜 근본은
 printc 선언-대표(representative) 선택이 loc_tree 순서에 의존하던 포팅 버그). 이어진 세션에서 process gap1
 (포인터-파라미터 배열 deref)을 닫고 `ActionDoNothing`/`RemoveDoNothingBlock`을 충실 포팅했으나, x64 corpus는
 **7/8**로 불변(process는 여전히 MISMATCH -- 잔여 3갭이 return-recovery/type-snapshot/merge/structuring
-파이프라인으로 수렴하는 deep-debt로 확정, H8-debt-2와 묶임). **H8-debt-2 Step 1-2 완료(2026-07-03)**: production
-`bridge.Decompile`이 트리 경로(`BuildUniversalAction` + `SetCurrent("decompile").Perform`)로 교체됨 -- 콜러가
-cspec+EntryPoint를 `bridge.Build`에 배선하는 것이 유일 load-bearing 변경. bespoke `ActionStackPtrFlow`는
-production에서 은퇴(레거시 테스트에만 잔존, Step 3 후속 제거). 상세는 아래 완료 블록 및 CHANGELOG 2026-07-03 참고.
+파이프라인으로 수렴하는 deep-debt로 확정, H8-debt-2와 묶임). **H8-debt-2 완료(2026-07-03, master `eadd9c0`) --
+미션 #1 게이트 달성**: production `bridge.Decompile`이 트리 경로(`BuildUniversalAction` + `SetCurrent("decompile").
+Perform`)로 교체됨 -- 콜러가 cspec+EntryPoint를 `bridge.Build`에 배선하는 것이 유일 load-bearing 변경. bespoke
+`ActionStackPtrFlow`는 production에서 은퇴(레거시 테스트에만 잔존, Step 3 후속 제거). process는 이 배선교체로도
+자동 해소되지 않았다(실측 확인, x64 corpus 7/8 불변) -- 아래 미시작 섹션 참고. 상세는 아래 완료 블록 및
+CHANGELOG 2026-07-03 참고.
 
 **트리 전체 골든 맵 10/10 byte-identical** (`TestTreeFullGoldenMap`). **x86-32 8/8 + x64_add_ret + aarch64_add_ret
 전부 MATCH**(complex_max는 바이트 미보유로 미테스트). 트리가 register-param 아키텍처(x86-64 SysV, AArch64 AAPCS64,
@@ -173,10 +175,11 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
   조사 필요(진입점: `ActionReturnRecovery`(coreaction.cc), `Merge`(merge.cc), block 구조화 rule군).
 - **수정 대상 Go 파일**: `pkg/pcode/rules_ext.go`(RuleSubCommute/RuleSubvarZext 순서), `pkg/pcode/
   coreaction.go`(ActionReturnRecovery), `pkg/pcode/merge.go`, 구조화 rule(`pkg/pcode/rules_*.go`,
-  `block_*.go`). H8-debt-2(`bridge.Decompile` -> 트리 교체) 작업 중 병행 조사.
+  `block_*.go`). H8-debt-2(`bridge.Decompile` -> 트리 교체, master `eadd9c0`)는 이미 완료됐으므로 별도 세션에서
+  독립 조사(위 성공 기준 참고).
 - **성공 기준**: `X64_CORPUS=1 TestX64CorpusGoldenMap`에서 process MATCH(7/8 -> 8/8) +
-  `TREE_MAP=1 TestTreeFullGoldenMap` 10/10 무회귀 + production `TestMSVC*` 무회귀. 단 H8-debt-2 완료 전
-  단독 달성을 목표로 삼지 않는다(deep-debt로 재분류됨).
+  `TREE_MAP=1 TestTreeFullGoldenMap` 10/10 무회귀 + production `TestMSVC*` 무회귀. H8-debt-2는 2026-07-03
+  완료됐으나(master `eadd9c0`) process는 자동 해소되지 않았다(실측 확인) -- 별도 세션으로 독립 진행.
 - **known-gap(별도, 낮은 우선순위)**: const space가 여전히 0xFFFF(Ghidra는 const이 loc_tree 맨 앞 index 0,
   우리는 맨 뒤) -- 현 corpus 무해(실측), const=0 이관은 별도 세션. `HighVariable::remove`(variable.cc:515)
   미포팅 = 인스턴스 수명 갭의 근본(printc.go collectSymbols의 live-제한이 국소 보정, 2026-07-03 참고). 완전
@@ -279,13 +282,15 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 > tryReturnPull stub 교체). **결과: corpus add4/poly4 반환 타입 `unsigned long long`->`int` 정확.** 전 회귀
 > 그린(10/10 트리 + production). **남은 미스매치 = 갭3(아래)**: 내부 ZEXT 프로모션 체인 미붕괴라 아직 MATCH 아님.
 
-### 1. [최우선] 미션 #1 게이트 완료 -- production 경로(bridge.Decompile)를 universal-action 트리로 교체
+### 1. [완료] 미션 #1 게이트 -- production 경로(bridge.Decompile)를 universal-action 트리로 교체 (2026-07-03, master `eadd9c0`)
 
-#1 게이트의 실제 교체 작업: `bridge.Decompile`(decompile.go)의 손정렬 41-call subset을
-`db.BuildUniversalAction(nil) + SetCurrent("decompile").Perform(fd)` 경로로 대체. production은 여전히 41-call
-손정렬, 트리는 별도 경로로 공존.
+`bridge.Decompile`(decompile.go)의 손정렬 41-call subset을 `db.BuildUniversalAction(nil)+BuildDefaultGroups()+
+SetCurrent("decompile").Perform(fd)`(universal-action 트리) 경로로 교체 완료. production과 트리가 이제 같은
+경로를 공유한다. 41-call subset 코드는 decompile.go에서 제거됨. 상세 근본/구현/게이트는 CHANGELOG 2026-07-03
+"H8-debt-2 완료" 항목 참고. **process 잔여 3갭은 이 교체로 자동 해소되지 않았다(실측 확인, 아래 미시작 섹션
+참고). Step3(bespoke `ActionStackPtrFlow` 파일 삭제)는 별도 후속 -- 아래 우선순위 2 참고.**
 
-#### 트리 전체 골든 갭 지도 (2026-06-30, `TestTreeFullGoldenMap` TREE_MAP=1, 10 testable)
+#### 트리 전체 골든 갭 지도 (2026-06-30, `TestTreeFullGoldenMap` TREE_MAP=1, 10 testable, 참고용/#1 게이트 근거)
 **10/10 byte-identical.** 트리가 모든 가용 골든에 Ghidra와 동일 출력:
 - **x86-32 (8/9 가용, 8 MATCH = 전부)**: gcd/abs_val/classify2/classify_sign/counted_loop/sum_list/multiply/add3 =
   MATCH. complex_max = 바이트 미보유(instruction-overlap 골든) -> 미테스트.
@@ -294,31 +299,31 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 - **x64_add_ret = MATCH**: entry-point(processEntry) void 프로토타입 + register 인자를 live-on-entry로 렌더 ->
   `long processEntry entry(void) { long in_RSI; long in_RDI; return in_RDI + in_RSI; }`.
 - **핵심 결론**: 트리의 register-param 복구/반환 추론/entry-point 렌더링 인프라가 x86-32/x64/aarch64 모두 동작.
-  미션의 x64 register-param 골든이 전부 byte-identical. **단 이 골든들은 전부 tiny -- 실제 임의 함수는 훨씬 큰 갭(아래 #2/#3).**
-- **다음 우선순위 (갭 지도 기반)**:
-  1. **[#1 게이트 본체] production 경로(bridge.Decompile)를 트리로 교체** -- 트리가 10/10이므로 이제 production
-     골든(11개 `TestMSVC*`)을 전부 트리 경로로 검증. mismatch 골든별 규명 후 `bridge.Decompile`의 41-call 손정렬
-     subset을 `db.BuildUniversalAction(nil) + SetCurrent("decompile").Perform(fd)`로 교체(또는 옵션 플래그 공존).
-     `TestMSVC*`가 트리 경로로 전부 그린이면 subset 제거. **주의**: production 경로는 cspec/EntryPoint 배선이
-     트리 테스트(runTreeCase)와 다름 -- decompile.go가 자체 cdecl 모델을 쓰므로 트리 default model 경로로
-     전환 시 ApplyCallingConvention/EntryPoint 설정을 production에도 맞춰야 함.
-  - **(완료) classify_sign = RuleRangeMeld 포팅**: golden `else if (param_3 < 1)`. 트리 `BOOL_OR(INT_EQUAL(p,0),
-    INT_SLESS(p,0))`를 RuleRangeMeld가 `INT_SLESS(p,1)`로 collapse. 두 수정으로 완성:
-    (1) De Morgan connective flip(전 단계, prefer_complement.go getBooleanFlipOpcode BOOL_AND/BOOL_OR -> (CPUI_MAX,true)).
-    (2) RuleRangeMeld stub -> CircleRange subset 충실 포팅(신규 circlerange.go + rules_ghidra_port.go). x86-32 8/8.
-  - **complex_max**: 바이트 미보유 + instruction-overlap 경고 골든(`/* WARNING: ...overlaps */`), 별도 처리.
-- **작업 순서**:
-  1. x64/ARM register-param 트리 배선(위 갭 지도 상세).
-  2. 11개 production 골든 전부 트리로 검증(아직 일부만). mismatch 골든별 규명.
-  3. 전부 통과하면 `bridge.Decompile`을 트리 호출로 교체(또는 옵션 플래그). `TestMSVC*`가 트리 경로로 그린이면
-     41-call subset 제거.
-- **성공 기준**: production `TestMSVC*` 전부 트리 경로로 그린 + 41-call subset(decompile.go) 제거.
-- **주의**: 트리에 액션 추가/flags 변경 시 `TestTreeGoldensDiag`를 `-timeout 60s`로 감싸 hang 조기 검출.
-  copy-prop/merge/MarkExplicit 등 공유 코드 수정 시 production `TestMSVC*` 전수 회귀 필수.
+  미션의 x64 register-param 골든이 전부 byte-identical. **단 이 골든들은 전부 tiny -- 실제 임의 함수는 훨씬 큰
+  갭(아래 우선순위 3).**
+- **(완료) classify_sign = RuleRangeMeld 포팅**: golden `else if (param_3 < 1)`. 트리 `BOOL_OR(INT_EQUAL(p,0),
+  INT_SLESS(p,0))`를 RuleRangeMeld가 `INT_SLESS(p,1)`로 collapse. 두 수정으로 완성:
+  (1) De Morgan connective flip(prefer_complement.go getBooleanFlipOpcode BOOL_AND/BOOL_OR -> (CPUI_MAX,true)).
+  (2) RuleRangeMeld stub -> CircleRange subset 충실 포팅(신규 circlerange.go + rules_ghidra_port.go). x86-32 8/8.
+- **complex_max**: 바이트 미보유 + instruction-overlap 경고 골든(`/* WARNING: ...overlaps */`), 별도 처리.
+- **주의(이후 트리 작업 전부에 적용)**: 트리에 액션 추가/flags 변경 시 `TestTreeGoldensDiag`를 `-timeout 60s`로
+  감싸 hang 조기 검출. copy-prop/merge/MarkExplicit 등 공유 코드 수정 시 production `TestMSVC*` 전수 회귀
+  필수(production이 이제 트리를 직접 쓰므로 회귀 범위가 넓어졌다).
 - **진단 도구**: `tree_accum_diag_test.go`(ACCUM_DIAG=1, ACCUM_CASE=<name>, PROD_DUMP=1) -- 트리 SSA + alive-ops
   (detached 표시) + high 그룹 + production 대조 덤프. 누산기/포인터-iterate류 갭 재현에 사용.
 
-### 2. [대형] breadth + x64/ARM 실함수
+### 2. H8-debt-2 Step3 -- bespoke `ActionStackPtrFlow` 파일 삭제 (레거시 하네스 트리 이전)
+- **현상**: `pkg/pcode/action_stack_ptr_flow.go`는 production에서는 은퇴했으나(master `eadd9c0`), 여전히
+  legacy 테스트 하네스 ~15개(`loader_test.go`의 직접-heritage 테스트, 비-Ghidra `runPipeline` 경로, diag
+  테스트)에서 직접 호출된다.
+- **작업**: 이 하네스들을 production과 동일한 트리 경로(`db.BuildUniversalAction(nil)+BuildDefaultGroups()+
+  SetCurrent("decompile").Perform(fd)`, cspec+EntryPoint 배선 필수)로 이전. 하네스별로 cspec 유무/EntryPoint
+  여부가 달라 개별 검토 필요(트리는 cspec `<stackpointer>` 없이는 스택 로컬 미복구).
+- **완료 후**: `action_stack_ptr_flow.go` + 관련 stub 삭제, 저장소 전체 grep으로 잔존 참조 0건 확인.
+- **성공 기준**: `action_stack_ptr_flow.go`를 참조하는 파일이 0개, `go test ./...` 클린, `TREE_MAP=1
+  TestTreeFullGoldenMap` 10/10 + `X64_CORPUS=1 TestX64CorpusGoldenMap` 7/8 무회귀.
+
+### 3. [대형] breadth + x64/ARM 실함수
 
 골든 11개(거의 x86-32 + 사소한 x64/aarch64 add_ret)뿐. x64 실함수(register params RCX/RDX..) 성공 필요
 (사용자 명시 요구). struct/union/switch/jumptable/미포팅 opcode(`docs/PARITY_AUDIT.md`). 새 Ghidra 골든
@@ -376,7 +381,7 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
   - **[다음: max3/sum_to_n 등]** 나머지 6개는 stack frame(local 변수) + 갭2b(home-slot reg param 루프 통합) +
     switch/포인터/나눗셈. max3/sum_to_n부터(stack frame은 갭2a 완료라 부분 동작).
 
-### 3. [저우선] 정리
+### 4. [저우선] 정리
 - consume-DeadCode broader corpus 검증 후 `GOSL_DESCENDANT_DC` fallback + 레거시 descendant-count 루프 제거.
 - H9 미포팅 잔여: SUBPIECE/PTRSUB `getOutputToken` / union resolution / markExplicitUnsigned·LongSize.
 - 트리 5개 stub delegate(`Spacebase`/`ApplyForceGoto`/`MarkIndirectOnly`/`RemoveDoNothingBlock`/
@@ -395,8 +400,10 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
   1/5->3/5)+step5(누산기 BuildFromVarnodes high 재사용 + ActionForLoops 배선 + detached dead COPY 정리,
   3/5->5/5 byte-identical)+step6(De Morgan flip + **RuleRangeMeld CircleRange 포팅 = x86-32 8/8, 전체 8/10**)+
   step7(**cspec 구동 arch-aware default ProtoModel -> aarch64 register-param 복구 = 전체 9/10**)+
-  step8(**x64 processEntry in_RDI: entry-point void proto + irregular input 네이밍 = 전체 10/10 byte-identical**).
-  다음 = production 경로(bridge.Decompile)를 트리로 교체(41-call subset 제거). (진행 중)
+  step8(**x64 processEntry in_RDI: entry-point void proto + irregular input 네이밍 = 전체 10/10 byte-identical**)+
+  step9(**production 경로(bridge.Decompile)를 트리로 교체 = 미션 #1 게이트 달성, master `eadd9c0`, 2026-07-03**).
+  **완료**(본체). Step3(bespoke `ActionStackPtrFlow` 파일 삭제, 레거시 하네스 ~15개 이전)만 후속 잔존 -- 위
+  "다음 작업" 2번 참고.
 - **H9** ActionSetCasts: 분석-time CPUI_CAST 삽입 라이브, render-time assignCastStr 제거. (완료 2026-06-29)
 - 기타 미시작: struct/union 타입 복구, switch statement, 대부분 opcode resolution(PARITY_AUDIT), BatchC 품질.
 
