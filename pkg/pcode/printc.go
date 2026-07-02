@@ -277,6 +277,14 @@ func (s *printCState) collectSymbols() {
 	if fp := s.fd.GetFuncProto(); fp != nil {
 		sl := s.fd.GetScopeLocal()
 		all := s.fd.GetVarnodeBank().AllVarnodes()
+		// liveSet is the set of Varnodes currently in the bank (i.e. not destroyed).
+		// It is used to restrict the name-representative scan to live instances,
+		// mirroring Ghidra's HighVariable::inst invariant (dead members are purged by
+		// HighVariable::remove, variable.cc:515, which we do not port).
+		liveSet := make(map[*Varnode]struct{}, len(all))
+		for _, vn := range all {
+			liveSet[vn] = struct{}{}
+		}
 		params := make([]*Varnode, 0)
 		locals := make([]*Varnode, 0)
 		// seenParamHV deduplicates HighVariables added to params to avoid duplicate
@@ -483,6 +491,29 @@ func (s *printCState) collectSymbols() {
 										if hasCondConsumer && namedRegRep != nil {
 											rep = namedRegRep
 										}
+									}
+								}
+								// Choose the declaration representative via the C++ name
+								// representative (HighVariable::getNameRepresentative,
+								// variable.cc:492, which keeps the member winning compareName,
+								// variable.cc:456) rather than loc_tree first-wins. This makes the
+								// rep -- and hence the declaration order and declaration type source
+								// -- independent of the stack space index (a varnode's loc_tree
+								// position). Ghidra emits declarations in scope symbol-map address
+								// order (emitScopeVarDecls, printc.cc:2650), so instance visitation
+								// order never drives the declaration.
+								// The scan is restricted to live instances (liveSet): C++ inst holds
+								// only live members (HighVariable::remove, variable.cc:515, purges dead
+								// ones on Varnode destruction); we do not port remove, so an unfiltered
+								// scan can pick a dead instance that the bank loop above never visits
+								// (leaving it unnamed). A live rep is named by that loop
+								// (s.names[vn] = name), so no direct name binding is required here.
+								if hvNamed {
+									if nrep := highNameRepresentativeLive(hv, func(vn *Varnode) bool {
+										_, ok := liveSet[vn]
+										return ok
+									}); nrep != nil && nrep.Space() != nil && !nrep.Space().IsUnique() {
+										rep = nrep
 									}
 								}
 								if hvNamed {

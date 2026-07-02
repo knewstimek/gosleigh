@@ -75,6 +75,33 @@ func highNameRepresentative(hv *HighVariable) *Varnode {
 	return rep
 }
 
+// highNameRepresentativeLive is highNameRepresentative restricted to instances
+// for which live reports true. C++ parity: HighVariable::getNameRepresentative
+// (variable.cc:492) scans hv->inst, which only ever holds live members because
+// HighVariable::remove (variable.cc:515) purges a member when its Varnode is
+// destroyed. HighVariable::remove is not ported here, so hv.instances can retain
+// a dead member; restricting the scan to live instances reproduces the C++
+// invariant locally so the name representative is a real, declarable Varnode.
+func highNameRepresentativeLive(hv *HighVariable, live func(*Varnode) bool) *Varnode {
+	if hv == nil {
+		return nil
+	}
+	var rep *Varnode
+	for i := 0; i < hv.NumInstances(); i++ {
+		vn := hv.GetInstance(i)
+		if vn == nil {
+			continue
+		}
+		if live != nil && !live(vn) {
+			continue
+		}
+		if rep == nil || compareNameRep(rep, vn) {
+			rep = vn
+		}
+	}
+	return rep
+}
+
 // compareNameRep reports whether vn2 is preferred over vn1 as the name
 // representative. Faithful port of HighVariable::compareName (variable.cc:456).
 // Precedence (most preferred first): name-lock, unaffected, persistent, input,

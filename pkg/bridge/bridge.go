@@ -286,14 +286,14 @@ func buildFaithfulStackSpace(xr *sla.XRefs, cspec *pcode.CspecData, fd *pcode.Fu
 	if regSpace == nil {
 		return nil
 	}
-	// LANDMINE: maxIdx includes the const space (Index = ^uint16(0) = 65535),
-	// so `maxIdx + 1` overflows uint16 to 0 -- the stack space ends up with the
-	// LOWEST index. That currently makes stack locals sort before register/unique
-	// temps in declaration output (grid_score `int iVar1;` ordering diff) but is
-	// ALSO load-bearing for the RestructureVarnode/ActionInferTypes symbol-type
-	// snapshot: naively giving the stack space a high index regresses type
-	// inference (counted_loop undefined4->int, sum_to_n/sum_array break). Do not
-	// "fix" this in isolation. See docs/STATUS.md grid_score decl-order 미시작.
+	// The stack (spacebase) space takes an index above every real space so its
+	// varnodes sort after register/unique temps in declaration output.
+	// registerSpaceByIndex now excludes the const space (Index = 0xFFFF) from
+	// maxIdx, so maxIdx is the highest real space index and `maxIdx + 1` no longer
+	// overflows uint16 to 0 (which previously dropped the stack space below every
+	// real space and reordered grid_score's `int iVar1;` declaration).
+	// C++ parity: AddrSpaceManager::addSpacebase (architecture.cc:563) assigns the
+	// spacebase space numSpaces() -- one past the last real space.
 	stackSpace := &address.Space{
 		Name:     "stack",
 		Kind:     address.SpaceKindStack,
@@ -316,7 +316,14 @@ func registerSpaceByIndex(fd *pcode.Funcdata, si int64) (*address.Space, uint16)
 		if sp == nil {
 			continue
 		}
-		if sp.Index > maxIdx {
+		// Exclude the const space from the max. Ghidra fixes the constant space at
+		// index 0 (translate.cc:362 "constant space must be assigned index 0"), so
+		// it is never the top ordinal; our const space carries Index = 0xFFFF, which
+		// would overflow `maxIdx + 1` to 0 and drop the stack space below every real
+		// space. The stack (spacebase) space is appended at load above all real
+		// spaces (architecture.cc:563 addSpacebase uses numSpaces()), so it must
+		// receive the real high index.
+		if sp.Kind != address.SpaceKindConstant && sp.Index > maxIdx {
 			maxIdx = sp.Index
 		}
 		if found == nil && int64(sp.Index) == si {
