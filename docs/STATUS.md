@@ -95,9 +95,19 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 ### 미시작: grid_score/process 잔여 mismatch (스택프레임 복구 후 follow-on, 2026-07-02)
 - **현상**: master `c87debe`로 스택프레임은 복구됐으나 grid_score/process는 여전히 `TestX64CorpusGoldenMap`
   MISMATCH(스택 문제 아님, 별도 사유):
-  - **grid_score(2개 cosmetic diff)**: (1) 선언 순서 -- merge된 if/else 임시 `iVar1`이 unique-space라
-    `CompareLocDef` 정렬에서 스택 로컬보다 뒤로 밀림. golden은 레지스터에 묶인 `iVar1`이 먼저 정렬됨 -- 단순
-    print 재정렬이 아니라 merge/ScopeLocal 표현 차이. (2) unsigned 상수 접미사 `& 1U` 렌더링 불일치.
+  - **grid_score(선언 순서 1건 남음)**: golden은 `int iVar1;`(레지스터/unique 임시)를 스택 로컬보다 먼저
+    선언, 우리는 스택 로컬을 먼저. 정렬 규칙 자체는 충실(양쪽 다 SymbolEntry storage addr = (space index,
+    offset) 순; Ghidra PrintC::emitScopeVarDecls printc.cc:2650, 우리 `CompareLocDef` varnode_bank.go:57).
+    **진짜 근본(2026-07-02 grid7 확정)**: `bridge.go registerSpaceByIndex`가 stack space Index = maxIdx+1로
+    잡는데 maxIdx가 const space(index 65535)까지 스캔 -> `65535+1` **uint16 overflow -> stack index 0**(최저)
+    -> 스택 로컬이 전부 앞으로 정렬. Ghidra는 stack space가 processor/unique 뒤 高 index라 레지스터/unique
+    임시가 먼저. merge 표현 문제 아님(register-tied로 바꿔도 register idx 4 > stack idx 0이라 안 풀림).
+    **얽힘(고위험)**: overflow를 고쳐 stack index를 높이면 grid_score 순서는 맞으나 counted_loop가
+    `undefined4->int` (타입+순서 동시), sum_to_n/sum_array 깨짐(X64 4/8, tree 9/10) -- stack space의 loc_tree
+    위치가 RestructureVarnode/ActionInferTypes 심볼 스냅샷 타이밍(상단 타입누수 기계)과 order-dependent. 충실
+    수정 = overflow 제거 + 그 loc_tree-order 의존성 동시 해결(전용 세션, 전 매트릭스 가드). print-time
+    재정렬은 heuristic이라 금지.
+    (`& 1U` unsigned 접미사는 2026-07-02 완료: markExplicitUnsigned 포팅 cast.cc:38-71, master `425acb1`.)
   - **process(별도 큰 기능 갭, 스택과 무관)**: (1) 포인터 파라미터 배열 인덱스 deref
     `*(int*)(param_1+(longlong)local_14*4)`가 누락 -- heap access, 실제 correctness 갭. (2) 64비트 signed
     division 반환 타입 렌더링 누락(golden `ulonglong ... & 0xffffffff`). (3) 단축평가 `&&` + comma 연산자 조건
