@@ -225,6 +225,7 @@ func TestX86CountedLoop(t *testing.T) {
 	dir := filepath.Dir(file)
 	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
 	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
 
 	prog := []byte{0xB9, 0x03, 0x00, 0x00, 0x00, 0x49, 0x75, 0xFD, 0xC3}
 	// 0x00: MOV ECX,3
@@ -237,7 +238,7 @@ func TestX86CountedLoop(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "loop", Entry: base, MaxInstructions: 20})
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "loop", Entry: base, MaxInstructions: 20, CspecPath: cspecPath})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
 	}
@@ -249,45 +250,9 @@ func TestX86CountedLoop(t *testing.T) {
 		t.Fatalf("expected >= 2 CFG blocks, got %d", result.Graph.GetSize())
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
-
-	spfLoop := pcode.NewActionStackPtrFlow("analysis")
-	spfLoop.Apply(result.Funcdata)
-
-	var regSpaceIdxLoop int = -1
-	stackSpaceLoop := spfLoop.StackSpace()
-	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		sp := vn.Space()
-		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpaceLoop == nil {
-			stackSpaceLoop = sp
-		}
-		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxLoop < 0 {
-			regSpaceIdxLoop = int(sp.Index)
-		}
-	}
-	cdeclLoop := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceLoop, nil)
-	if regSpaceIdxLoop >= 0 {
-		cdeclLoop.WithReturnReg(regSpaceIdxLoop, 0, 4)
-	}
-	pcode.ApplyCallingConvention(result.Funcdata, cdeclLoop)
-	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclLoop, result.HeritageSpaces, result.Graph)
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
-	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
-	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
-	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-
-	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
+	output, err := bridge.Decompile(engine, result, bridge.DecompileConfig{})
 	if err != nil {
-		t.Fatalf("PrintC.Emit: %v", err)
+		t.Fatalf("bridge.Decompile: %v", err)
 	}
 	if output == "" {
 		t.Fatal("PrintC Emit returned empty string for loop function")
@@ -311,6 +276,7 @@ func TestX86IfElse(t *testing.T) {
 	dir := filepath.Dir(file)
 	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
 	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
 
 	// PUSH EBP; MOV EBP,ESP; MOV EAX,[EBP+8]; TEST EAX,EAX; JNS +4; NEG EAX; JMP +0; POP EBP; RET
 	bytes := []byte{0x55, 0x89, 0xE5, 0x8B, 0x45, 0x08, 0x85, 0xC0, 0x79, 0x04, 0xF7, 0xD8, 0xEB, 0x00, 0x5D, 0xC3}
@@ -320,7 +286,7 @@ func TestX86IfElse(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "abs", Entry: base, MaxInstructions: 20})
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "abs", Entry: base, MaxInstructions: 20, CspecPath: cspecPath})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
 	}
@@ -330,45 +296,9 @@ func TestX86IfElse(t *testing.T) {
 		t.Fatalf("expected >= 3 CFG blocks for if-else diamond, got %d", result.Graph.GetSize())
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
-
-	spfIfElse := pcode.NewActionStackPtrFlow("analysis")
-	spfIfElse.Apply(result.Funcdata)
-
-	var regSpaceIdxIfElse int = -1
-	stackSpaceIfElse := spfIfElse.StackSpace()
-	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		sp := vn.Space()
-		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpaceIfElse == nil {
-			stackSpaceIfElse = sp
-		}
-		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxIfElse < 0 {
-			regSpaceIdxIfElse = int(sp.Index)
-		}
-	}
-	cdeclIfElse := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceIfElse, nil)
-	if regSpaceIdxIfElse >= 0 {
-		cdeclIfElse.WithReturnReg(regSpaceIdxIfElse, 0, 4)
-	}
-	pcode.ApplyCallingConvention(result.Funcdata, cdeclIfElse)
-	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclIfElse, result.HeritageSpaces, result.Graph)
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
-	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
-	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
-	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-
-	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
+	output, err := bridge.Decompile(engine, result, bridge.DecompileConfig{})
 	if err != nil {
-		t.Fatalf("PrintC.Emit: %v", err)
+		t.Fatalf("bridge.Decompile: %v", err)
 	}
 	if strings.TrimSpace(output) == "" {
 		t.Fatal("PrintC.Emit returned empty output for if-else function")
@@ -441,6 +371,7 @@ func TestX86MultiplyFunction(t *testing.T) {
 	dir := filepath.Dir(file)
 	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
 	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
 
 	// PUSH EBP; MOV EBP,ESP; MOV EAX,[EBP+8]; IMUL EAX,[EBP+0xC]; POP EBP; RET
 	prog := []byte{0x55, 0x89, 0xE5, 0x8B, 0x45, 0x08, 0x0F, 0xAF, 0x45, 0x0C, 0x5D, 0xC3}
@@ -450,7 +381,7 @@ func TestX86MultiplyFunction(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "multiply", Entry: base, MaxInstructions: 20})
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "multiply", Entry: base, MaxInstructions: 20, CspecPath: cspecPath})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
 	}
@@ -462,56 +393,9 @@ func TestX86MultiplyFunction(t *testing.T) {
 		t.Fatalf("expected >= 4 instructions, got %d", len(result.Instructions))
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
-
-	// ActionStackPtrFlow: convert LOAD(ram, INT_ADD(FP, offset)) into COPY(stack_input_vn)
-	// so ScopeLocal can classify stack parameters. Must run after Heritage, before ApplyCallingConvention.
-	// C++ parity: ActionStackPtrFlow in coreaction.cc
-	spfMultiply := pcode.NewActionStackPtrFlow("analysis")
-	spfMultiply.Apply(result.Funcdata)
-
-	// Find register address space index for EAX return register anchoring.
-	var regSpaceIdxMultiply int = -1
-	stackSpaceMultiply := spfMultiply.StackSpace()
-	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		sp := vn.Space()
-		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpaceMultiply == nil {
-			stackSpaceMultiply = sp
-		}
-		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxMultiply < 0 {
-			regSpaceIdxMultiply = int(sp.Index)
-		}
-	}
-	// Apply x86-32 cdecl calling convention: anchors EAX as return register and strips EIP ref.
-	cdeclMultiply := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceMultiply, nil)
-	if regSpaceIdxMultiply >= 0 {
-		cdeclMultiply.WithReturnReg(regSpaceIdxMultiply, 0, 4)
-	}
-	pcode.ApplyCallingConvention(result.Funcdata, cdeclMultiply)
-	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclMultiply, result.HeritageSpaces, result.Graph)
-
-	// Merge MULTIEQUAL/INDIRECT phi-nodes so they don't appear verbatim in PrintC output.
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-
-	// Fold flag conditions: CF/OF writes with only flag-safe consumers become dead.
-	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
-
-	// Constant-fold then dead-code eliminate flag chains and epilogue ops.
-	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
-	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
-	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-
-	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
+	output, err := bridge.Decompile(engine, result, bridge.DecompileConfig{})
 	if err != nil {
-		t.Fatalf("PrintC.Emit: %v", err)
+		t.Fatalf("bridge.Decompile: %v", err)
 	}
 	if strings.TrimSpace(output) == "" {
 		t.Fatal("PrintC.Emit returned empty output for multiply function")
@@ -600,6 +484,7 @@ func TestX86Add3Function(t *testing.T) {
 	dir := filepath.Dir(file)
 	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
 	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
 
 	// int add3(int a, int b, int c):
 	//   0x00: PUSH EBP        (55)
@@ -619,7 +504,7 @@ func TestX86Add3Function(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "add3", Entry: base, MaxInstructions: 20})
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "add3", Entry: base, MaxInstructions: 20, CspecPath: cspecPath})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
 	}
@@ -628,56 +513,9 @@ func TestX86Add3Function(t *testing.T) {
 		t.Fatalf("expected >= 6 instructions, got %d", len(result.Instructions))
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
-
-	// ActionStackPtrFlow: convert LOAD(ram, INT_ADD(FP, offset)) into COPY(stack_input_vn)
-	// so ScopeLocal can classify stack parameters. Must run after Heritage, before ApplyCallingConvention.
-	// C++ parity: ActionStackPtrFlow in coreaction.cc
-	spfAdd3 := pcode.NewActionStackPtrFlow("analysis")
-	spfAdd3.Apply(result.Funcdata)
-
-	// Find register address space index for EAX return register anchoring.
-	var regSpaceIdxAdd3 int = -1
-	stackSpaceAdd3 := spfAdd3.StackSpace()
-	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		sp := vn.Space()
-		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpaceAdd3 == nil {
-			stackSpaceAdd3 = sp
-		}
-		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxAdd3 < 0 {
-			regSpaceIdxAdd3 = int(sp.Index)
-		}
-	}
-	// Apply x86-32 cdecl calling convention: anchors EAX as return register and strips EIP ref.
-	cdeclAdd3 := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceAdd3, nil)
-	if regSpaceIdxAdd3 >= 0 {
-		cdeclAdd3.WithReturnReg(regSpaceIdxAdd3, 0, 4)
-	}
-	pcode.ApplyCallingConvention(result.Funcdata, cdeclAdd3)
-	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclAdd3, result.HeritageSpaces, result.Graph)
-
-	// Merge MULTIEQUAL/INDIRECT phi-nodes.
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-
-	// Fold flag conditions: CF/OF/SF/ZF/PF writes with only flag-safe consumers become dead.
-	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
-
-	// Constant-fold then dead-code eliminate. Flags from ADD/CARRY/SCARRY/POPCOUNT are removed.
-	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
-	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
-	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-
-	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
+	output, err := bridge.Decompile(engine, result, bridge.DecompileConfig{})
 	if err != nil {
-		t.Fatalf("PrintC.Emit: %v", err)
+		t.Fatalf("bridge.Decompile: %v", err)
 	}
 	if strings.TrimSpace(output) == "" {
 		t.Fatal("PrintC.Emit returned empty output for add3 function")
@@ -959,6 +797,7 @@ func TestX86ClassifySignFunction(t *testing.T) {
 	dir := filepath.Dir(file)
 	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
 	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
 
 	// Layout (byte offsets):
 	//  0: 55                    PUSH EBP
@@ -990,7 +829,7 @@ func TestX86ClassifySignFunction(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "classify_sign", Entry: base, MaxInstructions: 30})
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "classify_sign", Entry: base, MaxInstructions: 30, CspecPath: cspecPath})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
 	}
@@ -1002,85 +841,9 @@ func TestX86ClassifySignFunction(t *testing.T) {
 		t.Fatalf("expected >= 8 instructions, got %d", len(result.Instructions))
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
-
-	// 1a. ActionStackPtrFlow: convert LOAD(ram, INT_ADD(FP, offset)) patterns into
-	//     COPY(stack_input_vn) so that ScopeLocal.BuildFromVarnodes can classify the
-	//     stack varnodes as named parameters (param_0, param_1, ...).
-	//     Must run after Heritage (SSA is needed to trace the FP definition chain)
-	//     and before ApplyCallingConvention (which calls BuildFromVarnodes).
-	//     C++ parity: ActionStackPtrFlow in coreaction.cc
-	spfAction := pcode.NewActionStackPtrFlow("analysis")
-	spfAction.Apply(result.Funcdata)
-
-	// 1b. Apply x86-32 cdecl calling convention BEFORE dead-code elimination.
-	//    This anchors EAX as the return register so that MOV EAX,1 / MOV EAX,-1 /
-	//    XOR EAX,EAX assignments are not pruned as dead stores (the x86 RET p-code
-	//    does not explicitly read EAX, so without anchoring they have no consumer).
-	//    Find the register address space by scanning varnode bank for a register-space
-	//    varnode; register space is SpaceKindProcessor with name "register".
-	var regSpaceIdx int = -1
-	// ActionStackPtrFlow already created the stack space; use it directly so
-	// the scan below does not need to find it from varnodes.
-	stackSpaceClassify := spfAction.StackSpace()
-	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		sp := vn.Space()
-		if sp.Kind == address.SpaceKindStack || sp.Name == "stack" {
-			if stackSpaceClassify == nil {
-				stackSpaceClassify = sp
-			}
-		}
-		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" {
-			if regSpaceIdx < 0 {
-				regSpaceIdx = int(sp.Index)
-			}
-		}
-	}
-	// Build x86-32 cdecl ProtoModel. CspecPath is not set in this test so
-	// CspecData is nil; use defaults (ParamBaseOffset=4, stack ABI).
-	cdeclModel := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceClassify, nil)
-	if regSpaceIdx >= 0 {
-		// EAX: offset 0, size 4 bytes in the register space.
-		cdeclModel.WithReturnReg(regSpaceIdx, 0, 4)
-	}
-	pcode.ApplyCallingConvention(result.Funcdata, cdeclModel)
-	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclModel, result.HeritageSpaces, result.Graph)
-
-	// 2a. Merge MULTIEQUAL/INDIRECT phi-nodes: force-merge output and all inputs
-	//     of each marker op into a single HighVariable so that MULTIEQUAL does not
-	//     appear verbatim in PrintC output.
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-
-	// 2b. Fold flag conditions: CBRANCH(ZF) -> CBRANCH(INT_EQUAL(EAX,0)).
-	//    After folding, ZF writes have no consumers and ActionDeadCode removes them.
-	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
-
-	// 3. Constant-fold then dead-code eliminate.
-	//    Run constant fold first so that POPCOUNT(0 & 0xff) simplifies before
-	//    dead-code pruning propagates backwards through the chain.
-	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
-	// Run BatchA a second time: PropagateCopy may have updated inputs to constants during
-	// the first pass, enabling BooleanNegate/BoolNegate to fire on the next pass.
-	// C++ Ghidra's pipeline re-runs the batch action group until stabilization.
-	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
-	// Seed signed types on inputs of signed opcodes, then propagate through COPY/MULTIEQUAL.
-	// This makes constant varnodes (e.g. 0xffffffff) inherit TYPE_INT so PrintC emits -1.
-	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
-	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-	// Normalize if-else condition direction to match Ghidra's preferComplement pass.
-	// C++ parity: BlockIf::preferComplement in blockaction.cc
-	pcode.NewActionPreferComplement("analysis").Apply(result.Funcdata)
-
-	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
+	output, err := bridge.Decompile(engine, result, bridge.DecompileConfig{})
 	if err != nil {
-		t.Fatalf("PrintC.Emit: %v", err)
+		t.Fatalf("bridge.Decompile: %v", err)
 	}
 	if strings.TrimSpace(output) == "" {
 		t.Fatal("PrintC.Emit returned empty output for classify_sign function")
@@ -1175,6 +938,7 @@ func TestX86SwitchFunction(t *testing.T) {
 	dir := filepath.Dir(file)
 	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
 	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
 
 	// Layout (49 bytes):
 	//  0x00: 55              PUSH EBP
@@ -1215,7 +979,7 @@ func TestX86SwitchFunction(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "switch_classify", Entry: base, MaxInstructions: 40})
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "switch_classify", Entry: base, MaxInstructions: 40, CspecPath: cspecPath})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
 	}
@@ -1230,45 +994,9 @@ func TestX86SwitchFunction(t *testing.T) {
 		t.Fatalf("expected >= 5 CFG blocks, got %d", result.Graph.GetSize())
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
-
-	spfSwitch := pcode.NewActionStackPtrFlow("analysis")
-	spfSwitch.Apply(result.Funcdata)
-
-	var regSpaceIdxSwitch int = -1
-	stackSpaceSwitch := spfSwitch.StackSpace()
-	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		sp := vn.Space()
-		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpaceSwitch == nil {
-			stackSpaceSwitch = sp
-		}
-		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxSwitch < 0 {
-			regSpaceIdxSwitch = int(sp.Index)
-		}
-	}
-	cdeclSwitch := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceSwitch, nil)
-	if regSpaceIdxSwitch >= 0 {
-		cdeclSwitch.WithReturnReg(regSpaceIdxSwitch, 0, 4)
-	}
-	pcode.ApplyCallingConvention(result.Funcdata, cdeclSwitch)
-	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclSwitch, result.HeritageSpaces, result.Graph)
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
-	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
-	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
-	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-
-	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
+	output, err := bridge.Decompile(engine, result, bridge.DecompileConfig{})
 	if err != nil {
-		t.Fatalf("PrintC.Emit: %v", err)
+		t.Fatalf("bridge.Decompile: %v", err)
 	}
 	if strings.TrimSpace(output) == "" {
 		t.Fatal("PrintC.Emit returned empty output for switch function")
@@ -1284,6 +1012,7 @@ func TestX86StructAccessFunction(t *testing.T) {
 	dir := filepath.Dir(file)
 	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
 	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
 
 	// get_y(Point *p): return p->y (offset 4)
 	//  0x00: 55              PUSH EBP
@@ -1302,7 +1031,7 @@ func TestX86StructAccessFunction(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "get_y", Entry: base, MaxInstructions: 20})
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "get_y", Entry: base, MaxInstructions: 20, CspecPath: cspecPath})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
 	}
@@ -1311,45 +1040,9 @@ func TestX86StructAccessFunction(t *testing.T) {
 		t.Fatalf("expected >= 4 instructions, got %d", len(result.Instructions))
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
-
-	spfStruct := pcode.NewActionStackPtrFlow("analysis")
-	spfStruct.Apply(result.Funcdata)
-
-	var regSpaceIdxStruct int = -1
-	stackSpaceStruct := spfStruct.StackSpace()
-	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		sp := vn.Space()
-		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpaceStruct == nil {
-			stackSpaceStruct = sp
-		}
-		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxStruct < 0 {
-			regSpaceIdxStruct = int(sp.Index)
-		}
-	}
-	cdeclStruct := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceStruct, nil)
-	if regSpaceIdxStruct >= 0 {
-		cdeclStruct.WithReturnReg(regSpaceIdxStruct, 0, 4)
-	}
-	pcode.ApplyCallingConvention(result.Funcdata, cdeclStruct)
-	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclStruct, result.HeritageSpaces, result.Graph)
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
-	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
-	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
-	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-
-	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
+	output, err := bridge.Decompile(engine, result, bridge.DecompileConfig{})
 	if err != nil {
-		t.Fatalf("PrintC.Emit: %v", err)
+		t.Fatalf("bridge.Decompile: %v", err)
 	}
 	if strings.TrimSpace(output) == "" {
 		t.Fatal("PrintC.Emit returned empty output for struct access function")
@@ -1365,6 +1058,7 @@ func TestX86ArrayIndexFunction(t *testing.T) {
 	dir := filepath.Dir(file)
 	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
 	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
 
 	// get_elem(int *arr, int i): return arr[i]
 	//  0x00: 55              PUSH EBP
@@ -1385,7 +1079,7 @@ func TestX86ArrayIndexFunction(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "get_elem", Entry: base, MaxInstructions: 20})
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "get_elem", Entry: base, MaxInstructions: 20, CspecPath: cspecPath})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
 	}
@@ -1394,45 +1088,9 @@ func TestX86ArrayIndexFunction(t *testing.T) {
 		t.Fatalf("expected >= 5 instructions, got %d", len(result.Instructions))
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
-
-	spfArray := pcode.NewActionStackPtrFlow("analysis")
-	spfArray.Apply(result.Funcdata)
-
-	var regSpaceIdxArray int = -1
-	stackSpaceArray := spfArray.StackSpace()
-	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		sp := vn.Space()
-		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpaceArray == nil {
-			stackSpaceArray = sp
-		}
-		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxArray < 0 {
-			regSpaceIdxArray = int(sp.Index)
-		}
-	}
-	cdeclArray := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceArray, nil)
-	if regSpaceIdxArray >= 0 {
-		cdeclArray.WithReturnReg(regSpaceIdxArray, 0, 4)
-	}
-	pcode.ApplyCallingConvention(result.Funcdata, cdeclArray)
-	pcode.ApplyGuardReturnsLive(result.Funcdata, cdeclArray, result.HeritageSpaces, result.Graph)
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
-	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
-	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
-	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-
-	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
+	output, err := bridge.Decompile(engine, result, bridge.DecompileConfig{})
 	if err != nil {
-		t.Fatalf("PrintC.Emit: %v", err)
+		t.Fatalf("bridge.Decompile: %v", err)
 	}
 	if strings.TrimSpace(output) == "" {
 		t.Fatal("PrintC.Emit returned empty output for array index function")
@@ -1711,42 +1369,9 @@ func TestX86CdeclParamLocalFunction(t *testing.T) {
 		t.Fatal("bridge.Build: CspecData is nil -- cspec was not parsed")
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
-
-	// ActionStackPtrFlow: convert LOAD(ram, INT_ADD(FP, offset)) into COPY(stack_input_vn)
-	// so ScopeLocal can classify stack parameters and locals by name.
-	// Must run after Heritage (SSA) and before ApplyCallingConvention.
-	// C++ parity: ActionStackPtrFlow in coreaction.cc
-	spfCdecl := pcode.NewActionStackPtrFlow("analysis")
-	spfCdecl.Apply(result.Funcdata)
-
-	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
-	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-
-	// Use the stack space created by ActionStackPtrFlow.
-	// Fall back to scanning if ActionStackPtrFlow found no frame-pointer pattern.
-	stackSpace := spfCdecl.StackSpace()
-	if stackSpace == nil {
-		for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-			if vn == nil || vn.Space() == nil {
-				continue
-			}
-			if vn.Space().Kind == address.SpaceKindStack || vn.Space().Name == "stack" {
-				stackSpace = vn.Space()
-				break
-			}
-		}
-	}
-
-	// Build ProtoModel from cspec and apply calling convention.
-	model := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace, nil)
-	pcode.ApplyCallingConvention(result.Funcdata, model)
-	pcode.ApplyGuardReturnsLive(result.Funcdata, model, result.HeritageSpaces, result.Graph)
-
-	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
+	output, err := bridge.Decompile(engine, result, bridge.DecompileConfig{})
 	if err != nil {
-		t.Fatalf("PrintC.Emit: %v", err)
+		t.Fatalf("bridge.Decompile: %v", err)
 	}
 	if strings.TrimSpace(output) == "" {
 		t.Fatal("PrintC.Emit returned empty output")
@@ -2379,6 +2004,7 @@ func TestAARCH64SimpleFunction(t *testing.T) {
 	// AARCH64.sla lives at testdata/sla/ in the repo root (two levels above pkg/loader/).
 	slaPath := filepath.Join(dir, "../../testdata/sla/AARCH64.sla")
 	pspecPath := filepath.Join(dir, "../../testdata/sla/AARCH64.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/AARCH64.cspec")
 
 	// ADD X0, X0, X1; RET
 	prog := []byte{
@@ -2399,6 +2025,7 @@ func TestAARCH64SimpleFunction(t *testing.T) {
 		Name:            "aarch64_add_ret",
 		Entry:           entryAddr,
 		MaxInstructions: 10,
+		CspecPath:       cspecPath,
 	})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
@@ -2410,54 +2037,9 @@ func TestAARCH64SimpleFunction(t *testing.T) {
 		t.Fatal("bridge returned no instructions")
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
-
-	// ActionStackPtrFlow: convert LOAD(ram, INT_ADD(FP, offset)) patterns into
-	// COPY(stack_input_vn) so ScopeLocal can classify stack parameters.
-	// AArch64 uses a frame pointer convention similar to x86; run this before
-	// ApplyCallingConvention so stack params are recognized.
-	spfAArch64 := pcode.NewActionStackPtrFlow("analysis")
-	spfAArch64.Apply(result.Funcdata)
-
-	// Apply AArch64 calling convention: X0 is the integer return register.
-	// X0 is at offset 16384 (0x4000) in the register space, size 8 bytes.
-	// Find the register space index from the varnode bank.
-	var regSpaceIdxAArch64 int = -1
-	stackSpaceAArch64 := spfAArch64.StackSpace()
-	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		sp := vn.Space()
-		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdxAArch64 < 0 {
-			regSpaceIdxAArch64 = int(sp.Index)
-		}
-	}
-	// Build AArch64 ProtoModel: X0 (offset 16384) is return reg and param_0;
-	// X1 (offset 16392) is param_1. Both are 8-byte GP registers.
-	aarch64Model := pcode.NewProtoModelFromCspec(result.CspecData, stackSpaceAArch64, nil)
-	if regSpaceIdxAArch64 >= 0 {
-		// X0: register space offset 16384, size 8 bytes (return value).
-		aarch64Model.WithReturnReg(regSpaceIdxAArch64, 16384, 8)
-	}
-	// X0=param_0 (16384), X1=param_1 (16392) per AArch64 AAPCS64 ABI.
-	aarch64Model.WithRegParams([]uint64{16384, 16392})
-	pcode.ApplyCallingConvention(result.Funcdata, aarch64Model)
-	pcode.ApplyGuardReturnsLive(result.Funcdata, aarch64Model, result.HeritageSpaces, result.Graph)
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
-	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
-	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
-	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-
-	output, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).Emit(result.Funcdata)
+	output, err := bridge.Decompile(engine, result, bridge.DecompileConfig{})
 	if err != nil {
-		t.Fatalf("PrintC.Emit: %v", err)
+		t.Fatalf("bridge.Decompile: %v", err)
 	}
 	if strings.TrimSpace(output) == "" {
 		t.Fatal("PrintC.Emit returned empty output for AArch64 function")
@@ -2500,6 +2082,7 @@ func TestX86ClassifySignGoldenProcessEntry(t *testing.T) {
 	dir := filepath.Dir(file)
 	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
 	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
 
 	// Same bytecode as TestX86ClassifySignFunction -- classify_sign with sign branch.
 	prog := []byte{
@@ -2518,7 +2101,7 @@ func TestX86ClassifySignGoldenProcessEntry(t *testing.T) {
 	}
 
 	// Build with Name="entry" to match Ghidra golden function name.
-	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "entry", Entry: base, MaxInstructions: 30})
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "entry", Entry: base, MaxInstructions: 30, CspecPath: cspecPath, EntryPoint: true})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
 	}
@@ -2526,51 +2109,12 @@ func TestX86ClassifySignGoldenProcessEntry(t *testing.T) {
 		t.Fatal("expected non-nil CFG graph")
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
-
-	spf := pcode.NewActionStackPtrFlow("analysis")
-	spf.Apply(result.Funcdata)
-
-	var regSpaceIdx int = -1
-	stackSpace := spf.StackSpace()
-	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		sp := vn.Space()
-		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpace == nil {
-			stackSpace = sp
-		}
-		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdx < 0 {
-			regSpaceIdx = int(sp.Index)
-		}
-	}
-	cdecl := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace, nil)
-	if regSpaceIdx >= 0 {
-		cdecl.WithReturnReg(regSpaceIdx, 0, 4)
-	}
-	pcode.ApplyCallingConvention(result.Funcdata, cdecl)
-	pcode.ApplyGuardReturnsLive(result.Funcdata, cdecl, result.HeritageSpaces, result.Graph)
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
-	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
-	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
-	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionPreferComplement("analysis").Apply(result.Funcdata)
-
-	// SetProcessEntry("processEntry", 2): 2 ghost params (param_1=undefined4, param_2=undefined4),
-	// real param (int [EBP+8]) becomes param_3.
-	output, err := pcode.NewPrintC().
-		SetRegisterNames(engine.RegisterNamesByLocation()).
-		SetProcessEntry("processEntry", 2).
-		Emit(result.Funcdata)
+	output, err := bridge.Decompile(engine, result, bridge.DecompileConfig{
+		ProcessEntryName: "processEntry",
+		GhostParams:      2,
+	})
 	if err != nil {
-		t.Fatalf("PrintC.Emit: %v", err)
+		t.Fatalf("bridge.Decompile: %v", err)
 	}
 	t.Logf("processEntry classify_sign golden output:\n%s", output)
 
@@ -2612,6 +2156,7 @@ func TestX86MultiplyGoldenProcessEntry(t *testing.T) {
 	dir := filepath.Dir(file)
 	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
 	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
 
 	// Same bytecode as TestX86MultiplyFunction.
 	prog := []byte{0x55, 0x89, 0xE5, 0x8B, 0x45, 0x08, 0x0F, 0xAF, 0x45, 0x0C, 0x5D, 0xC3}
@@ -2622,7 +2167,7 @@ func TestX86MultiplyGoldenProcessEntry(t *testing.T) {
 	}
 
 	// Build with Name="entry" to match Ghidra golden function name.
-	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "entry", Entry: base, MaxInstructions: 20})
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "entry", Entry: base, MaxInstructions: 20, CspecPath: cspecPath, EntryPoint: true})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
 	}
@@ -2630,49 +2175,12 @@ func TestX86MultiplyGoldenProcessEntry(t *testing.T) {
 		t.Fatal("expected non-nil CFG graph")
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
-
-	spf := pcode.NewActionStackPtrFlow("analysis")
-	spf.Apply(result.Funcdata)
-
-	var regSpaceIdx int = -1
-	stackSpace := spf.StackSpace()
-	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		sp := vn.Space()
-		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpace == nil {
-			stackSpace = sp
-		}
-		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdx < 0 {
-			regSpaceIdx = int(sp.Index)
-		}
-	}
-	cdecl := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace, nil)
-	if regSpaceIdx >= 0 {
-		cdecl.WithReturnReg(regSpaceIdx, 0, 4)
-	}
-	pcode.ApplyCallingConvention(result.Funcdata, cdecl)
-	pcode.ApplyGuardReturnsLive(result.Funcdata, cdecl, result.HeritageSpaces, result.Graph)
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
-	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
-	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
-	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-
-	// SetProcessEntry("processEntry", 2): 2 ghost params, real params become param_3, param_4.
-	output, err := pcode.NewPrintC().
-		SetRegisterNames(engine.RegisterNamesByLocation()).
-		SetProcessEntry("processEntry", 2).
-		Emit(result.Funcdata)
+	output, err := bridge.Decompile(engine, result, bridge.DecompileConfig{
+		ProcessEntryName: "processEntry",
+		GhostParams:      2,
+	})
 	if err != nil {
-		t.Fatalf("PrintC.Emit: %v", err)
+		t.Fatalf("bridge.Decompile: %v", err)
 	}
 	t.Logf("processEntry multiply golden output:\n%s", output)
 
@@ -2704,6 +2212,7 @@ func TestX86Add3GoldenProcessEntry(t *testing.T) {
 	dir := filepath.Dir(file)
 	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
 	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
 
 	// Same bytecode as TestX86Add3Function.
 	prog := []byte{0x55, 0x89, 0xE5, 0x53, 0x8B, 0x5D, 0x08, 0x03, 0x5D, 0x0C, 0x03, 0x5D, 0x10, 0x89, 0xD8, 0x5B, 0x5D, 0xC3}
@@ -2713,7 +2222,7 @@ func TestX86Add3GoldenProcessEntry(t *testing.T) {
 		t.Fatalf("Build: %v", err)
 	}
 
-	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "entry", Entry: base, MaxInstructions: 25})
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "entry", Entry: base, MaxInstructions: 25, CspecPath: cspecPath, EntryPoint: true})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
 	}
@@ -2721,48 +2230,12 @@ func TestX86Add3GoldenProcessEntry(t *testing.T) {
 		t.Fatal("expected non-nil CFG graph")
 	}
 
-	pcode.NewHeritage(result.Funcdata, result.HeritageSpaces).Heritage(result.Graph)
-
-	spf := pcode.NewActionStackPtrFlow("analysis")
-	spf.Apply(result.Funcdata)
-
-	var regSpaceIdx int = -1
-	stackSpace := spf.StackSpace()
-	for _, vn := range result.Funcdata.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		sp := vn.Space()
-		if (sp.Kind == address.SpaceKindStack || sp.Name == "stack") && stackSpace == nil {
-			stackSpace = sp
-		}
-		if sp.Kind == address.SpaceKindProcessor && sp.Name == "register" && regSpaceIdx < 0 {
-			regSpaceIdx = int(sp.Index)
-		}
-	}
-	cdecl := pcode.NewProtoModelFromCspec(result.CspecData, stackSpace, nil)
-	if regSpaceIdx >= 0 {
-		cdecl.WithReturnReg(regSpaceIdx, 0, 4)
-	}
-	pcode.ApplyCallingConvention(result.Funcdata, cdecl)
-	pcode.ApplyGuardReturnsLive(result.Funcdata, cdecl, result.HeritageSpaces, result.Graph)
-	pcode.NewMerge(result.Funcdata).MergeMarker()
-	pcode.NewActionFoldFlagConditions("analysis").Apply(result.Funcdata)
-	pcode.NewActionConstantFold("analysis").Apply(result.Funcdata)
-	pcode.NewActionDeadCode("analysis").Apply(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a", "analysis").Perform(result.Funcdata)
-	pcode.NewBatchAActionPool("batch-a2", "analysis").Perform(result.Funcdata)
-	pcode.NewActionSeedSignedOps("analysis").Apply(result.Funcdata)
-	pcode.NewActionInferTypesLegacy("analysis").Apply(result.Funcdata)
-	pcode.NewActionBlockStructure("analysis").Apply(result.Funcdata)
-	pcode.NewActionFinalStructure("analysis").Apply(result.Funcdata)
-
-	output, err := pcode.NewPrintC().
-		SetRegisterNames(engine.RegisterNamesByLocation()).
-		SetProcessEntry("processEntry", 2).
-		Emit(result.Funcdata)
+	output, err := bridge.Decompile(engine, result, bridge.DecompileConfig{
+		ProcessEntryName: "processEntry",
+		GhostParams:      2,
+	})
 	if err != nil {
-		t.Fatalf("PrintC.Emit: %v", err)
+		t.Fatalf("bridge.Decompile: %v", err)
 	}
 	t.Logf("processEntry add3 golden output:\n%s", output)
 
