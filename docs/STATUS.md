@@ -15,6 +15,12 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 현재 상태 (2026-06-30 세션 진행, 전 패키지 그린)
 
+**(2026-07-02 갱신, master `c87debe`)** 트리 스택프레임 복구가 Ghidra 충실 spacebase 경로(Funcdata.Spacebase +
+RuleLoadVarnode/RuleStoreVarnode + RuleAddMultCollapse/RuleCollapseConstants 오프셋 누적)로 기본 전환. x64
+corpus 6/8 MATCH -- grid_score/process 스택 로컬이 복구됐고(과거 `stackOffsets=[]` 해소), 두 함수는 스택과
+무관한 follow-on 사유로 여전히 MISMATCH(아래 미시작 참고). production `bridge.Decompile`은 구조적으로 분리돼
+기존 bespoke ActionStackPtrFlow를 그대로 사용.
+
 **트리 전체 골든 맵 10/10 byte-identical** (`TestTreeFullGoldenMap`). **x86-32 8/8 + x64_add_ret + aarch64_add_ret
 전부 MATCH**(complex_max는 바이트 미보유로 미테스트). 트리가 register-param 아키텍처(x86-64 SysV, AArch64 AAPCS64,
 x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션 2단계로 8/10 -> 10/10:
@@ -66,28 +72,45 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ## 다음 작업 (우선순위)
 
-### 미시작: grid_score/process 스택프레임 복구 (x64 corpus 남은 2개, 2026-07-02 진단 완료)
-- **현상**: grid_score/process가 `stackOffsets=[]`(스택 로컬 전면 미복구) -> `uVar2=(int*)(uVar3-0x18)` + `uVar2[N]`
-  포인터 산술 쓰레기. golden은 스택 로컬(예: process `int local_18/14/10/c`) + 정상 파라미터. sum_array 등 단순
-  프레임은 복구되나 grid_score(중첩루프)/process(clamp+다분기)는 실패.
-- **근본(계측 확정, GOSLEIGH_SPF_DEBUG)**: seed(RSP=register:0x20/8) 탐지는 성공. 실패는 `stackAddrOffset()`가
-  in-loop 접근 `INT_ADD(const, register:0x20/8W)`의 rsp base를 못 잡음. 두 원인: (1) 중첩루프 phi cycle --
-  rsp MULTIEQUAL들이 상호참조라 buildStackOffsetMap의 "모든 non-self 입력 매핑+동일offset" 규칙이 cycle에서
-  영구 미해결(action_stack_ptr_flow.go:550-575). (2) free read -- 주소 INT_ADD의 rsp 입력이 def 없는 free
-  varnode(def-use walk 도달 불가), process/grid_score 공통. **grid_score/process 같은 근본.**
-- **C++ 참조**: Ghidra는 RSP를 spacebase(pspec `<stackpointer>`)로 선언, 스택 접근 인식을 **heritage 이전** raw
-  p-code(`INT_ADD(RSP_input,const)`, phi/free 없음)에서 수행. `ActionStackPtrFlow::apply`(coreaction.cc:482)는
-  clog/extrapop 정리만. 우리는 bespoke def-use 전파를 **heritage 이후 1회**(action.go:1361 actstackstall) 실행
-  -> 파편화된 rsp라 실패. 코드 주석도 인지(action_stack_ptr_flow.go:222-224, heritage.go:936-937).
-- **수정 대상 Go**: `pkg/pcode/action_stack_ptr_flow.go`(buildStackOffsetMap/stackAddrOffset), `pkg/pcode/action.go`
-  (파이프라인 순서, :1179 heritage / :1361 actstackstall), heritage/StackSlots 경로.
-- **수정안 A(정석, 고위험)**: 스택 접근 인식을 heritage 이전으로 이동 -- raw INT_ADD(RSP_input,const) 변환 후
-  stack space heritage(StackSlots/HeritageRange 기존). SP 무변화라 base가 전부 RSP_input const-chain -> 전파 자명.
-  단 SSA 없는 SP 값추적(StackSolver 성격) 필요 + **파이프라인 순서 변경이라 x86-32 EBP 회귀 위험 큼 = fresh 세션 +
-  worktree + 전 매트릭스 가드**. B(buildStackOffsetMap phi-cycle 강화)는 process free-read 못 풀어 부분적.
-- **성공 기준**: `X64_CORPUS=1 TestX64CorpusGoldenMap`에서 grid_score/process 스택 로컬 복구(6/8 -> 증가) +
-  `TREE_MAP=1 TestTreeFullGoldenMap` 10/10 유지(x86-32 EBP 무회귀). process는 스택 외 나눗셈 렌더 + 8바이트
-  ulonglong return 잔차 별도(스택 복구 후 재평가).
+> **2026-07-02 완료: grid_score/process 스택프레임 복구 -- faithful spacebase 경로(master `c87debe`, 이전
+> flag-gated `602dde8`).** 이전 진단("Fix A: heritage 이전으로 이동" / "Fix B: def-use walk 패치")은 오진이었음.
+> **실제 근본**: Ghidra는 `Funcdata::spacebase`(funcdata.cc:230-269)가 모든 RSP 계열 varnode(input/sub-result/
+> phi)에 spacebase 마킹을 걸고, 기존에 충실 포팅된 RuleLoadVarnode/RuleStoreVarnode가 그 마킹을 따라 `[rsp+k]`
+> LOAD/STORE를 스택 공간 varnode로 변환한다. `sub rsp,N` 오프셋 누적은 RuleSub2Add + RuleCollapseConstants +
+> RuleAddMultCollapse(ruleaction.cc:4113-4182)가 담당. x86-32 EBP 프레임도 같은 경로(RulePropagateCopy가
+> `MOV EBP,ESP`를 인라인 -> `[EBP+k]`가 `[ESP_input+k]`로 정규화).
+> **메운 갭**: `Funcdata.Spacebase()` no-op stub -> 충실 구현; 주소공간 spacebase-register 인프라 신규
+> (pkg/address/space.go); cspec `<stackpointer>`를 스택 spacebase 공간으로 배선(bridge.go
+> buildFaithfulStackSpace/bindLoadStoreSpaces); RuleAddMultCollapse 누락 분기 + RuleCollapseConstants 신규
+> 추가; 새 스택 varnode에 불충실 타입 시드 제거(rules_loadstore.go -- C++ RuleLoadVarnode는 타입 미설정,
+> ruleaction.cc:4310); `HighVariable::getNameRepresentative`/`compareName` 포팅(variable.cc:456-511, 병합된
+> 스택+레지스터 누산기 HV가 스택 Symbol 이름을 따르도록).
+> **딜리버리 구조**: faithful 경로는 universal-action 트리의 기본값(`GOSLEIGH_FAITHFUL_STACK` 플래그 제거,
+> 무조건 실행). production `bridge.Decompile`(41-call subset)은 ActionSpacebase/RuleLoadVarnode를 안 돌리므로
+> 기존 bespoke `ActionStackPtrFlow`를 그대로 유지 -- **구조적 분리**(bespoke는 트리 액션 리스트에서 빠지고
+> production 전용으로 존속, 완전 폐기는 트리가 production 경로가 되는 H8-debt-2 이후).
+> **검증(감독관 실행)**: `TREE_MAP=1 TestTreeFullGoldenMap` 10/10, `X64_CORPUS=1 TestX64CorpusGoldenMap` 6/8,
+> production `TestMSVC*`/`TestAARCH64*`/`TestX8664*`/`TestX64RegParam*` 전부 PASS, `go test ./...` 클린.
+
+### 미시작: grid_score/process 잔여 mismatch (스택프레임 복구 후 follow-on, 2026-07-02)
+- **현상**: master `c87debe`로 스택프레임은 복구됐으나 grid_score/process는 여전히 `TestX64CorpusGoldenMap`
+  MISMATCH(스택 문제 아님, 별도 사유):
+  - **grid_score(2개 cosmetic diff)**: (1) 선언 순서 -- merge된 if/else 임시 `iVar1`이 unique-space라
+    `CompareLocDef` 정렬에서 스택 로컬보다 뒤로 밀림. golden은 레지스터에 묶인 `iVar1`이 먼저 정렬됨 -- 단순
+    print 재정렬이 아니라 merge/ScopeLocal 표현 차이. (2) unsigned 상수 접미사 `& 1U` 렌더링 불일치.
+  - **process(별도 큰 기능 갭, 스택과 무관)**: (1) 포인터 파라미터 배열 인덱스 deref
+    `*(int*)(param_1+(longlong)local_14*4)`가 누락 -- heap access, 실제 correctness 갭. (2) 64비트 signed
+    division 반환 타입 렌더링 누락(golden `ulonglong ... & 0xffffffff`). (3) 단축평가 `&&` + comma 연산자 조건
+    구조화 누락. (4) 스택 로컬 타입 누수(undefined4) 잔존 -- 이 문서 상단 "타입 누수" 진단 섹션과 동일 근본.
+- **C++ 참조**: grid_score 선언순서는 `ScopeLocal`류 정렬 비교자(`CompareLocDef`) 관련으로 추정되나 정확한
+  파일/라인 미확인(다음 세션 조사 필요). `& 1U` 접미사는 printc 상수 렌더링(`push_integer`/`renderConstant`
+  계열, sum_array 수정과 인접 경로) 조사 필요. process의 포인터 deref/나눗셈 반환/단축평가 3개 항목은 아직
+  C++ 원본 대응 함수 미조사.
+- **수정 대상 Go 파일**: 미확정. grid_score는 `scopelocal.go`(정렬/merge 표현) + `printc.go`(상수 렌더링) 후보.
+  process는 조사 필요 -- 포인터 처리 rule(`rules_*`), `printc.go`(나눗셈/조건 렌더링), 타입 누수는 상단 항목과
+  Go 파일 공유(`scopelocal.go`, `printc.go`).
+- **성공 기준**: `X64_CORPUS=1 TestX64CorpusGoldenMap`에서 grid_score/process 개별 MATCH(현재 6/8 -> 8/8) +
+  `TREE_MAP=1 TestTreeFullGoldenMap` 10/10 무회귀 + production `TestMSVC*` 무회귀.
 
 > **2026-07-02 완료: TYPE-LEAK + sum_array 데이터모델/printc -> x64 corpus 6/8 MATCH
 > (add4/poly4/max3/sum_to_n/sum_array/classify).** master `30810bd`, tree 10/10 유지. sum_array 완료(3커밋):

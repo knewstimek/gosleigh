@@ -5,6 +5,34 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-02: grid_score/process 스택프레임 복구 -- 충실 spacebase 경로 (x64 corpus 프레임 갭 해소)
+이전 진단("heritage 이전으로 스택 인식 이동" Fix A / "def-use walk 패치" Fix B)을 폐기하고 Ghidra의 실제 스택
+인식 경로를 그대로 포팅. master `c87debe`(이전 flag-gated 구현 `602dde8`). grid_score/process의
+`stackOffsets=[]` -> `(int*)(lVar1-24)` 포인터 쓰레기 렌더를 해소.
+- **근본 재규명**: Ghidra는 `Funcdata::spacebase`(funcdata.cc:230-269)가 모든 RSP 계열 varnode(input/
+  sub-result/phi)에 spacebase 마킹을 걸고, 이미 충실 포팅돼 있던 `RuleLoadVarnode`/`RuleStoreVarnode`가 그
+  마킹을 따라 `[rsp+k]` LOAD/STORE를 스택 공간 varnode로 변환한다. `sub rsp,N` 오프셋 누적은 RuleSub2Add +
+  RuleCollapseConstants + `RuleAddMultCollapse`(ruleaction.cc:4113-4182)가 담당. x86-32 EBP 프레임도 동일
+  경로(RulePropagateCopy가 `MOV EBP,ESP`를 인라인 -> `[EBP+k]`가 `[ESP_input+k]`로 정규화).
+- **메운 갭**: (1) `Funcdata.Spacebase()` no-op stub -> 충실 구현. (2) 주소공간 spacebase-register 인프라
+  신규(`pkg/address/space.go`). (3) cspec `<stackpointer>`를 스택 spacebase 공간으로 배선(bridge.go
+  buildFaithfulStackSpace/bindLoadStoreSpaces). (4) `RuleAddMultCollapse` 누락 분기 + `RuleCollapseConstants`
+  신규 추가. (5) 새 스택 varnode에 불충실 타입 시드 제거(rules_loadstore.go -- C++ RuleLoadVarnode는 타입
+  미설정, ruleaction.cc:4310). (6) `HighVariable::getNameRepresentative`/`compareName` 포팅
+  (variable.cc:456-511) -- 병합된 스택+레지스터 누산기 HV가 스택 Symbol 이름을 따르도록.
+- **딜리버리 구조**: faithful 경로는 universal-action 트리의 기본값(`GOSLEIGH_FAITHFUL_STACK` 플래그 제거,
+  무조건 실행). production `bridge.Decompile`(41-call subset)은 ActionSpacebase/RuleLoadVarnode를 안 돌리므로
+  기존 bespoke `ActionStackPtrFlow`를 그대로 유지 -- **구조적 분리**(bespoke는 트리 액션 리스트에서 빠지고
+  production 전용으로 존속, 완전 폐기는 트리가 production 경로가 되는 H8-debt-2 이후).
+- **회귀 0**: `TREE_MAP=1 TestTreeFullGoldenMap` 10/10, `X64_CORPUS=1 TestX64CorpusGoldenMap` 6/8, production
+  `TestMSVC*`/`TestAARCH64*`/`TestX8664*`/`TestX64RegParam*` 전부 PASS, `go test ./...` 클린.
+- **남은 것**: grid_score/process는 스택 프레임이 복구됐지만 별도 non-stack 사유로 여전히 MISMATCH(선언순서/
+  상수접미사/포인터-파라미터 배열 deref/64비트 나눗셈 반환/단축평가 조건 구조화/타입 누수) -- 상세는
+  `docs/STATUS.md` 미시작 참고.
+- C++ 참조: `funcdata.cc:230-269`(Funcdata::spacebase), `ruleaction.cc:4193-4361`(RuleLoadVarnode),
+  `ruleaction.cc:4113-4182`(RuleAddMultCollapse 등), `variable.cc:456-511`(HighVariable::getNameRepresentative/
+  compareName).
+
 ### 2026-07-02: sum_array x64 MATCH (6/8) -- 데이터모델 long/longlong + printc 잔차 2건
 type-leak 완료 후 sum_array의 유일 잔차(시그니처 `long` vs golden `longlong`)를 닫고 본문 잔차 2건 해소. 3커밋.
 - **데이터모델 8바이트 int 이름**(cspec.go/protomodel.go/printc.go): Win x64는 LLP64(long=4/longlong=8)라 8바이트
