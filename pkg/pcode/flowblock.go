@@ -113,6 +113,30 @@ func (b *FlowBlock) ClearFlag(f uint32) { b.flags &^= f }
 // HasFlag returns true if all bits in f are set.
 func (b *FlowBlock) HasFlag(f uint32) bool { return b.flags&f == f }
 
+// IsSwitchOut reports whether this block heads a switch (BRANCHIND) region.
+// C++ parity: block.hh FlowBlock::isSwitchOut
+func (b *FlowBlock) IsSwitchOut() bool { return b.flags&BlockFlagSwitchOut != 0 }
+
+// IsEntryPoint reports whether this block is the function entry.
+// C++ parity: block.hh FlowBlock::isEntryPoint
+func (b *FlowBlock) IsEntryPoint() bool { return b.flags&BlockFlagEntryPoint != 0 }
+
+// IsDead reports whether this block has been marked dead (pending removal).
+// C++ parity: block.hh FlowBlock::isDead
+func (b *FlowBlock) IsDead() bool { return b.flags&BlockFlagDead != 0 }
+
+// SetDead marks this block dead.
+// C++ parity: block.hh FlowBlock::setDead
+func (b *FlowBlock) SetDead() { b.flags |= BlockFlagDead }
+
+// IsDonothingLoop reports whether this block is a flagged do-nothing infinite loop.
+// C++ parity: block.hh FlowBlock::isDonothingLoop
+func (b *FlowBlock) IsDonothingLoop() bool { return b.flags&BlockFlagDoNothingLoop != 0 }
+
+// SetDonothingLoop flags this block as a do-nothing infinite loop.
+// C++ parity: block.hh FlowBlock::setDonothingLoop
+func (b *FlowBlock) SetDonothingLoop() { b.flags |= BlockFlagDoNothingLoop }
+
 // Parent returns the parent block.
 func (b *FlowBlock) Parent() *FlowBlock { return b.parent }
 

@@ -20,6 +20,18 @@ type BlockBasic struct {
 	srcDelegate *BlockBasic
 }
 
+// asBasic recovers the BlockBasic that owns a FlowBlock. In the basic-block
+// graph every FlowBlock is embedded in a BlockBasic (concrete back-pointer set
+// by NewBlockBasic). This is a Go-embedding stand-in for the C++ upcast
+// (BlockBasic *)flowblock. Returns nil if the block is not a BlockBasic.
+func asBasic(b *FlowBlock) *BlockBasic {
+	if b == nil {
+		return nil
+	}
+	bb, _ := b.concrete.(*BlockBasic)
+	return bb
+}
+
 // NewBlockBasic creates a new BlockBasic with BlockBasicType set.
 func NewBlockBasic() *BlockBasic {
 	bb := &BlockBasic{}
@@ -165,6 +177,94 @@ func (bb *BlockBasic) EarliestUse(vn *Varnode) *PcodeOp {
 		}
 	}
 	return nil
+}
+
+// HasOnlyMarkers reports whether this block contains nothing but marker ops
+// (MULTIEQUAL, INDIRECT) and branch ops -- i.e. no substantive computation.
+// C++ parity: block.cc BlockBasic::hasOnlyMarkers (block.cc:2578)
+func (bb *BlockBasic) HasOnlyMarkers() bool {
+	for _, bop := range bb.opSlice() {
+		if bop.IsMarker() {
+			continue
+		}
+		if bop.IsBranch() {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// IsDoNothing reports whether this block does nothing useful and is a candidate
+// for removal. It must have exactly one out-edge, at least one in-edge, must not
+// be a switch target that still propagates a unique value into a join, must not
+// end in an indirect jump, and must contain only marker/branch ops.
+// C++ parity: block.cc BlockBasic::isDoNothing (block.cc:2596)
+func (bb *BlockBasic) IsDoNothing() bool {
+	if bb.SizeOut() != 1 {
+		return false // no return / cbranch: exactly one out
+	}
+	if bb.SizeIn() == 0 {
+		return false // starting block may hold global-var placeholders
+	}
+	for i := 0; i < bb.SizeIn(); i++ {
+		switchbl := bb.InEdge(i).Point
+		if !switchbl.IsSwitchOut() {
+			continue
+		}
+		if switchbl.SizeOut() > 1 {
+			// This block is a switch target; a switch edge may still be
+			// propagating a unique value into a multi-edge join.
+			if bb.OutEdge(0).Point.SizeIn() > 1 {
+				return false
+			}
+		}
+	}
+	lastop := bb.LastOp()
+	if lastop != nil && lastop.Code() == CPUI_BRANCHIND {
+		return false // don't remove single-out indirect jumps
+	}
+	return bb.HasOnlyMarkers()
+}
+
+// UnblockedMulti reports whether removing this block (collapsing it to its
+// out-block at outslot) leaves no implied COPY hidden in a MULTIEQUAL. A hidden
+// implied COPY means the block is doing real work and must not be removed.
+// C++ parity: block.cc BlockBasic::unblockedMulti (block.cc:2534)
+func (bb *BlockBasic) UnblockedMulti(outslot int) bool {
+	blout := asBasic(bb.OutEdge(outslot).Point)
+	// Build the list of blocks that would have redundant branches into blout.
+	var redundlist []*FlowBlock
+	for i := 0; i < bb.SizeIn(); i++ {
+		bl := bb.InEdge(i).Point
+		for j := 0; j < bl.SizeOut(); j++ {
+			if bl.OutEdge(j).Point == &blout.FlowBlock {
+				redundlist = append(redundlist, bl)
+			}
+		}
+	}
+	if len(redundlist) == 0 {
+		return true
+	}
+	for _, multiop := range blout.opSlice() {
+		if multiop.Code() != CPUI_MULTIEQUAL {
+			continue
+		}
+		for _, bl := range redundlist {
+			vnredund := multiop.Input(blout.GetInIndex(bl))       // a redundant varnode
+			vnremove := multiop.Input(blout.GetInIndex(&bb.FlowBlock))
+			if vnremove.IsWritten() {
+				othermulti := vnremove.Def()
+				if othermulti.Code() == CPUI_MULTIEQUAL && othermulti.Parent() == bb {
+					vnremove = othermulti.Input(bb.GetInIndex(bl))
+				}
+			}
+			if vnremove != vnredund {
+				return false // redundant branches must be identical
+			}
+		}
+	}
+	return true
 }
 
 // NegateCondition flips PcodeOpBooleanFlip and PcodeOpFallthruTrue on the
