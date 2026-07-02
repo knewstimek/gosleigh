@@ -65,7 +65,33 @@ func (fd *Funcdata) getStructure() *BlockGraph {
 	return fd.GetStructure()
 }
 
-func (fd *Funcdata) installSwitchDefaults() {}
+// installSwitchDefaults marks the default out-edge on every switch block whose
+// jump table recovered a default case. switchOver computes the default block
+// index (defaultBlock); here it is stamped onto the BRANCHIND parent so the
+// structuring pass (ruleBlockSwitch / checkSwitchSkips) and PrintC can treat
+// that edge as `default:`. Gated on defaultBlock != -1, so a table with no
+// recovered default (e.g. a dense switch whose default arrives via a separate
+// guard) leaves every edge unflagged -- a no-op for non-switch functions.
+// C++ parity: funcdata_block.cc Funcdata::installSwitchDefaults
+func (fd *Funcdata) installSwitchDefaults() {
+	for i := 0; i < fd.NumJumpTables(); i++ {
+		jt := fd.GetJumpTable(i)
+		if jt == nil {
+			continue
+		}
+		indop := jt.IndirectOp()
+		if indop == nil {
+			continue
+		}
+		ind := indop.Parent()
+		if ind == nil {
+			continue
+		}
+		if jt.DefaultBlock() != -1 { // If a default case is present
+			ind.SetDefaultSwitch(int(jt.DefaultBlock()))
+		}
+	}
+}
 
 func cloneFlowBlock(src *FlowBlock) *FlowBlock {
 	switch concrete := src.Concrete().(type) {

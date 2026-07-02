@@ -379,6 +379,18 @@ func (b *FlowBlock) ClearOutEdgeFlag(i int, lab uint32) {
 	tgt.inEdges[revIdx].Label &^= lab
 }
 
+// SetDefaultSwitch marks out-edge pos as the switch default edge, clearing any
+// edge that was previously flagged as the default (a switch has exactly one).
+// C++ parity: block.cc FlowBlock::setDefaultSwitch
+func (b *FlowBlock) SetDefaultSwitch(pos int) {
+	for i := 0; i < len(b.outEdges); i++ {
+		if b.outEdges[i].Label&EdgeFlagDefaultSwitch != 0 {
+			b.ClearOutEdgeFlag(i, EdgeFlagDefaultSwitch)
+		}
+	}
+	b.SetOutEdgeFlag(pos, EdgeFlagDefaultSwitch)
+}
+
 // HasLoopIn returns true if any incoming edge has EdgeFlagLoop.
 func (b *FlowBlock) HasLoopIn() bool {
 	for _, e := range b.inEdges {

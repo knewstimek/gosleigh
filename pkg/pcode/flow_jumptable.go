@@ -91,6 +91,32 @@ func (fd *Funcdata) RecoverJumpTables() {
 	}
 }
 
+// SwitchOverJumpTables converts every recovered jump table's absolute address
+// table into basic-block out-edge indices relative to its BRANCHIND parent, and
+// computes each table's default block. The resolver maps a target address to a
+// PcodeOp in the destination basic block (Ghidra's FlowInfo::target), which is
+// not otherwise reachable from the JumpTable here.
+//
+// Ghidra runs this at the tail of Funcdata::generateBlocks (via
+// switchOverJumpTables); Gosleigh calls it from bridge.Build once the block
+// graph and every recovered table are final. It is a no-op when no jump table
+// is registered, keeping non-switch functions byte-identical.
+// C++ parity: funcdata_block.cc Funcdata::switchOverJumpTables
+func (fd *Funcdata) SwitchOverJumpTables(resolver func(address.Address) *PcodeOp) error {
+	if fd == nil {
+		return nil
+	}
+	for _, jt := range fd.JumpTables() {
+		if jt == nil {
+			continue
+		}
+		if err := jt.SwitchOver(resolver); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // linkJumpTable searches for a previously recovered jump table bound to op.
 // C++ parity: funcdata_block.cc Funcdata::linkJumpTable (funcdata_block.cc:426).
 func (fd *Funcdata) linkJumpTable(op *PcodeOp) *JumpTable {

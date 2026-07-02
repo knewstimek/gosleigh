@@ -252,6 +252,29 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// truncateIndirectJump.
 	fd.RecoverJumpTables()
 
+	// Convert each recovered jump table's absolute address list into block
+	// out-edge indices (and its default block) now that the switch CFG is final.
+	// Ghidra does this at the tail of generateBlocks; the resolver stands in for
+	// FlowInfo::target by returning an op in the case-target block. No-op unless a
+	// table is registered, so non-switch functions are untouched.
+	// C++ parity: funcdata_op.cc generateBlocks -> switchOverJumpTables.
+	if fd.NumJumpTables() > 0 {
+		resolver := func(addr address.Address) *pcode.PcodeOp {
+			if b := blockByAddr[address.Address{Space: cfg.Entry.Space, Offset: addr.Offset}]; b != nil {
+				return b.FirstOp()
+			}
+			for k, b := range blockByAddr {
+				if k.Offset == addr.Offset {
+					return b.FirstOp()
+				}
+			}
+			return nil
+		}
+		if err := fd.SwitchOverJumpTables(resolver); err != nil {
+			return nil, fmt.Errorf("build bridge: switch-over jump tables: %w", err)
+		}
+	}
+
 	translations := make([]sla.InstructionTranslation, len(records))
 	for i := range records {
 		translations[i] = records[i].translation
@@ -818,6 +841,13 @@ func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode
 		// C++ parity: FlowInfo::collectEdges CPUI_BRANCHIND case (flow.cc:933-946),
 		// which findJumpTable()s the op and adds an edge to target(getAddressByIndex(i)).
 		if jt := recoveredTables[record.translation.Address.Offset]; jt != nil {
+			// Mark the BRANCHIND parent as a switch head. Ghidra sets f_switch_out
+			// when the BRANCHIND op is inserted into its block (BlockBasic::insertOp);
+			// Gosleigh builds ops and edges separately, so the flag is stamped here,
+			// where the recovered table is known. ruleBlockSwitch / isSwitchOut gate
+			// switch structuring on this flag.
+			// C++ parity: block.cc BlockBasic::insertOp setFlag(f_switch_out).
+			block.SetFlag(pcode.BlockFlagSwitchOut)
 			codeSpace := record.translation.Address.Space
 			for i := 0; i < jt.NumEntries(); i++ {
 				target := address.Address{Space: codeSpace, Offset: jt.AddressByIndex(i).Offset}
