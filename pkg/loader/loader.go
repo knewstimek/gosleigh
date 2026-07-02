@@ -68,6 +68,16 @@ type EngineBuilder struct {
 	// ReadSize is the number of bytes to map from BinaryPath starting at
 	// BaseOffset. A value of 0 maps the entire file. Ignored when Bytes is used.
 	ReadSize uint64
+
+	// Sections holds additional disjoint image sections, each mapped at its own
+	// virtual memory address (PESection.VMA). This supports loading a fully
+	// linked executable where code (.text) and jump tables / read-only data
+	// (.rdata) live at distinct VMAs. Each section is written independently via
+	// SetInstructionBytes into the backend's sparse image map, so sections at
+	// different VMAs coexist. Sections are additive to (and independent of)
+	// Bytes/BinaryPath; the returned entry address is still {ram, BaseAddr}, so
+	// callers set BaseAddr to the target function VMA.
+	Sections []PESection
 }
 
 // Build executes the full pipeline and returns a ready-to-use Engine and the
@@ -189,6 +199,22 @@ func (b *EngineBuilder) Build() (*sla.Engine, address.Address, error) {
 		copy(padded, b.Bytes)
 		if setErr := backend.SetInstructionBytes(entryAddr, padded); setErr != nil {
 			return nil, address.Address{}, fmt.Errorf("loader: SetInstructionBytes: %w", setErr)
+		}
+	}
+
+	// --- Step 6b: map additional disjoint sections at their own VMAs ---
+	// Each section is written independently into the backend's sparse
+	// image[Address]byte map, so multiple sections at different virtual
+	// addresses coexist without overlap. Used by the PE32+ loader path to place
+	// .text and .rdata at their real VMAs (jump tables live in .rdata for the
+	// general MSVC case; the switch corpus keeps the table inside .text).
+	for _, sec := range b.Sections {
+		if len(sec.Bytes) == 0 {
+			continue
+		}
+		secAddr := address.Address{Space: ram, Offset: sec.VMA}
+		if setErr := backend.SetInstructionBytes(secAddr, sec.Bytes); setErr != nil {
+			return nil, address.Address{}, fmt.Errorf("loader: SetInstructionBytes section %q at 0x%x: %w", sec.Name, sec.VMA, setErr)
 		}
 	}
 
