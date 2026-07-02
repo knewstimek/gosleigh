@@ -66,7 +66,16 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ## 다음 작업 (우선순위)
 
-> **활성 작업(2026-07-01 후반): x64 corpus 4/8 MATCH (add4 + poly4 + sum_to_n + classify).** 이번 세션 5 커밋:
+> **2026-07-02 완료: TYPE-LEAK 충실 포팅 -> x64 corpus 5/8 MATCH (add4/poly4/max3/sum_to_n/classify).** master
+> `be0999c` 머지(7커밋), tree 10/10 유지. 근본 = 심볼 스냅샷 타이밍(ActionInferTypes count=0 -> 마지막
+> restructure가 pre-typeprop undefined 스냅샷; no-diamond=undefined4, diamond=ActionDoNothing+1pass=int; 이전
+> "전파 strength" 가설은 오답). 7 fixes: TypeOrder / faithful InferTypes(tree격리, production=legacy) / DeadCode
+> flags=0(uint-flood 근본) / post-cleanup DeadCode 제거 / RangeHint symbol타입 / decl-from-symbol / RulePtrFlow
+> dormant(오역수정, ruleaction.cc:9068). 상세 CHANGELOG 2026-07-02 + memory `project_gosleigh`. **남은 3개(별도
+> 블로커)**: sum_array=데이터모델 long/longlong(유일 차이), grid_score/process=스택프레임 미복구+step5
+> ActionDoNothing. 이하 이전 4/8 기록 보존:
+>
+> **(이전) 활성 작업(2026-07-01 후반): x64 corpus 4/8 MATCH (add4 + poly4 + sum_to_n + classify).** 이번 세션 5 커밋:
 >   - **classify flip**: 상수 radix를 Ghidra `mostNaturalBase`(printlanguage.cc:735) + `push_integer`
 >     (printc.cc:1395-1399) 충실 포팅. renderConstant fallback이 `<10?dec:hex`였던 걸 `<=10?dec` + 그 외
 >     `mostNaturalBase(val)`로 교체 -> `100/200/..`가 `0x64/0xc8` 대신 십진수. (printc.go renderConstant +
