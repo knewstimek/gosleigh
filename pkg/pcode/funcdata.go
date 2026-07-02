@@ -206,6 +206,20 @@ func (fd *Funcdata) ensureCallSpecs() {
 	}
 }
 
+// rebuildCallSpecs drops the cached call-spec list and rebuilds it from the
+// current op bank. Needed after a raw-flow mutation that adds a CALL/CALLIND op
+// (e.g. TruncateIndirectJump demoting a BRANCHIND) so the newly created call
+// site is tracked. Ghidra builds each FuncCallSpecs eagerly at the mutation
+// site (FlowInfo::setupCallindSpecs pushes onto qlst); Gosleigh's list is lazy,
+// so this forces a fresh scan.
+func (fd *Funcdata) rebuildCallSpecs() {
+	if fd == nil {
+		return
+	}
+	fd.callSpecs = nil
+	fd.ensureCallSpecs()
+}
+
 // StartProcessing marks the function as entering the main analysis phase.
 // C++ parity: funcdata.hh Funcdata::startProcessing
 func (fd *Funcdata) StartProcessing() {

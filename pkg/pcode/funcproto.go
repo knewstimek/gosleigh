@@ -30,6 +30,15 @@ type FuncProto struct {
 	modelLocked  bool
 	outputLocked bool
 
+	// badJumpTable records that this call site was originally an indirect jump
+	// whose jump table could not be recovered (truncated to a CALLIND). It hints
+	// the switch-variable naming pass to use a special name.
+	// C++ parity: fspec.hh FuncProto::isbadjumptable.
+	badJumpTable bool
+	// noReturn records that the call site never returns.
+	// C++ parity: fspec.hh FuncProto no-return flag (setNoReturn/isNoReturn).
+	noReturn bool
+
 	// params holds the discovered parameter HighVariables in order.
 	params []*HighVariable
 	// output holds the recovered return HighVariable, if any.
@@ -166,6 +175,37 @@ func (fp *FuncProto) IsOutputLocked() bool {
 		return false
 	}
 	return fp.outputLocked
+}
+
+// SetBadJumpTable toggles whether this call site looked like an unrecovered
+// indirect jump.
+// C++ parity: fspec.hh FuncProto::setBadJumpTable.
+func (fp *FuncProto) SetBadJumpTable(val bool) {
+	if fp == nil {
+		return
+	}
+	fp.badJumpTable = val
+}
+
+// IsBadJumpTable reports whether this call site was a truncated indirect jump.
+// C++ parity: fspec.hh FuncProto::isBadJumpTable.
+func (fp *FuncProto) IsBadJumpTable() bool {
+	return fp != nil && fp.badJumpTable
+}
+
+// SetNoReturn toggles whether the call site never returns.
+// C++ parity: fspec.hh FuncProto::setNoReturn.
+func (fp *FuncProto) SetNoReturn(val bool) {
+	if fp == nil {
+		return
+	}
+	fp.noReturn = val
+}
+
+// IsNoReturn reports whether the call site never returns.
+// C++ parity: fspec.hh FuncProto::isNoReturn.
+func (fp *FuncProto) IsNoReturn() bool {
+	return fp != nil && fp.noReturn
 }
 
 // ClearUnlockedInput clears recovered parameters when the prototype is not locked.
