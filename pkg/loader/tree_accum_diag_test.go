@@ -47,7 +47,6 @@ func TestTreeAccumDiag(t *testing.T) {
 	// the raw instruction lowering (e.g. the jg flag expression). Returns early.
 	if os.Getenv("RAW_DUMP") != "" {
 		pcode.NewHeritage(fd, result.HeritageSpaces).Heritage(result.Graph)
-		pcode.NewActionStackPtrFlow("analysis").Apply(fd)
 		var rb strings.Builder
 		rb.WriteString("=== RAW SSA (post-heritage) ===\n")
 		for _, op := range fd.GetPcodeOpBank().AliveOps() {
