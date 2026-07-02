@@ -1199,13 +1199,33 @@ func (s *printCState) normalizeTypeForDecl(dt Datatype) Datatype {
 	case *Enum:
 		return sharedTypeFactory.GetEnum(typed.Size(), typed.Metatype(), typed.Name(), typed.Values())
 	case *Base:
-		return normalizedBaseType(typed)
+		return normalizedBaseType(typed, s.longSize())
 	default:
 		return dt
 	}
 }
 
-func normalizedBaseType(base *Base) Datatype {
+// longSize returns the target's size of C "long" in bytes, taken from the proto
+// model's data_organization. Defaults to 8 (LP64) when no model is available.
+// This drives whether an 8-byte signed integer is spelled "long" (LP64) or
+// "longlong" (LLP64 / Windows x64).
+// C++ parity: TypeFactory::sizeOfLong governs which core type fills the size-8 int
+// cache slot ("long" when sizeOfLong==8, otherwise "longlong").
+func (s *printCState) longSize() int {
+	if s != nil && s.fd != nil {
+		if fp := s.fd.GetFuncProto(); fp != nil {
+			if pm := fp.Model(); pm != nil && pm.LongSize > 0 {
+				return pm.LongSize
+			}
+		}
+		if pm := s.fd.DefaultModel(); pm != nil && pm.LongSize > 0 {
+			return pm.LongSize
+		}
+	}
+	return 8
+}
+
+func normalizedBaseType(base *Base, longSize int) Datatype {
 	if base == nil {
 		return sharedTypeFactory.GetBase(4, TYPE_UINT, "unsigned int")
 	}
@@ -1230,9 +1250,16 @@ func normalizedBaseType(base *Base) Datatype {
 		case 4:
 			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "int")
 		case 8:
-			// LP64 model: long is 64-bit signed integer (same as Ghidra's default).
-			// C++ parity: Ghidra uses "long" for 8-byte signed integer on LP64 targets.
-			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "long")
+			// 8-byte signed integer. Ghidra names it "long" on LP64 (sizeOfLong==8)
+			// and "longlong" on LLP64 / Windows x64 (sizeOfLong==4), matching which
+			// core type fills TypeFactory's size-8 int cache slot: on LLP64 "long" is
+			// 4 bytes so only "longlong" is size 8; on LP64 both are size 8 and "long"
+			// wins the cache slot.
+			// C++ parity: TypeFactory::setupSizes / cacheCoreTypes (type.cc).
+			if longSize >= 8 {
+				return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "long")
+			}
+			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "longlong")
 		default:
 			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "int")
 		}

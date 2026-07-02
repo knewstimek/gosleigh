@@ -127,10 +127,16 @@ type CspecVarnodeRef struct {
 // xmlDataOrg mirrors the <data_organization> XML element.
 type xmlDataOrg struct {
 	PointerSize xmlPointerSize `xml:"pointer_size"`
+	LongSize    xmlLongSize    `xml:"long_size"`
 }
 
 // xmlPointerSize mirrors the <pointer_size> element inside <data_organization>.
 type xmlPointerSize struct {
+	Value int `xml:"value,attr"`
+}
+
+// xmlLongSize mirrors the <long_size> element inside <data_organization>.
+type xmlLongSize struct {
 	Value int `xml:"value,attr"`
 }
 
@@ -150,6 +156,12 @@ type CspecData struct {
 	// PointerSizeVal is the pointer size in bytes from <data_organization><pointer_size/>.
 	// 0 means unset (use default 4).
 	PointerSizeVal int
+	// LongSizeVal is the size of the C "long" type in bytes from
+	// <data_organization><long_size/>.  0 means unset (use default 8, LP64).
+	// Determines whether an 8-byte signed integer is named "long" (long_size==8,
+	// LP64) or "longlong" (long_size==4, LLP64 / Windows x64).
+	// C++ parity: TypeFactory::sizeOfLong (type.cc decodeDataOrganization/setupSizes).
+	LongSizeVal int
 }
 
 // xmlCompilerSpec mirrors the top-level <compiler_spec> XML element.
@@ -189,6 +201,9 @@ func ParseCspecBytes(data []byte) (*CspecData, error) {
 	}
 	if raw.DataOrg != nil && raw.DataOrg.PointerSize.Value > 0 {
 		cs.PointerSizeVal = raw.DataOrg.PointerSize.Value
+	}
+	if raw.DataOrg != nil && raw.DataOrg.LongSize.Value > 0 {
+		cs.LongSizeVal = raw.DataOrg.LongSize.Value
 	}
 
 	proto := raw.DefaultProto.Prototype
@@ -241,6 +256,16 @@ func (cs *CspecData) PointerSize() int {
 		return 4
 	}
 	return cs.PointerSizeVal
+}
+
+// LongSize returns the size of the C "long" type in bytes from <data_organization>.
+// Returns 8 when unset. C++ parity: TypeFactory::setupSizes defaults sizeOfLong to 8
+// when sizeOfInt is 4 (the common case), so LP64 "long" is the safe default.
+func (cs *CspecData) LongSize() int {
+	if cs == nil || cs.LongSizeVal == 0 {
+		return 8
+	}
+	return cs.LongSizeVal
 }
 
 // allInputPentries returns all pentry elements from the default proto's input,
