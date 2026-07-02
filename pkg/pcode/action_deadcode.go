@@ -238,7 +238,12 @@ func (a *ActionSetCasts) Apply(data *Funcdata) int {
 func (a *ActionSetCasts) castInput(op *PcodeOp, slot int, data *Funcdata, cs *CastStrategyC) int {
 	ct := op.GetOpcode().GetInputCast(op, slot, cs)
 	if ct == nil {
-		// markExplicitUnsigned / markExplicitLongSize not ported -> no change.
+		// No cast type required: the input may still need an explicit unsigned
+		// marker (a trailing 'U' on a constant in a sign-inheriting op).
+		// markExplicitLongSize (the 'LL' size marker) remains an unported gap.
+		if cs.markExplicitUnsigned(op, slot) {
+			return 1
+		}
 		return 0
 	}
 	vn := op.Input(slot)

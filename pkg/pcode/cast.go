@@ -52,6 +52,95 @@ func NewCastStrategyC(tf *TypeFactory) *CastStrategyC {
 	return &CastStrategyC{tlst: tf, promoteSize: 4}
 }
 
+// opcodeInheritsSign reports whether the C token for opc takes its signedness
+// from its operands (so a constant operand may need an explicit unsigned marker).
+// C++ parity: the addlflags inherits_sign bit set in the TypeOp constructors
+// (typeop.cc); mirrored here because Gosleigh's TypeOp carries no addlflags field.
+func opcodeInheritsSign(opc OpCode) bool {
+	switch opc {
+	case CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL, CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL,
+		CPUI_INT_LESS, CPUI_INT_LESSEQUAL, CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_MULT,
+		CPUI_INT_2COMP, CPUI_INT_NEGATE, CPUI_INT_XOR, CPUI_INT_AND, CPUI_INT_OR,
+		CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT, CPUI_INT_DIV, CPUI_INT_SDIV,
+		CPUI_INT_REM, CPUI_INT_SREM:
+		return true
+	}
+	return false
+}
+
+// opcodeInheritsSignFirstParamOnly reports whether opc inherits its signedness
+// only from its first operand (the second operand does not force signedness).
+// C++ parity: the addlflags inherits_sign_zero bit (typeop.cc), set on the shift
+// operators and the remainder operators.
+func opcodeInheritsSignFirstParamOnly(opc OpCode) bool {
+	switch opc {
+	case CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT, CPUI_INT_REM, CPUI_INT_SREM:
+		return true
+	}
+	return false
+}
+
+// markExplicitUnsigned checks whether the constant input at slot must be coerced
+// (as a source token) into being explicitly unsigned, and if so marks the Varnode
+// so push_integer renders it with a trailing 'U'. Returns true if it marked the
+// Varnode. C++ parity: cast.cc CastStrategy::markExplicitUnsigned (38-71).
+//
+// Simplification vs C++: Gosleigh has no HighVariable read-facing resolution, so
+// getHighTypeReadFacing collapses to Varnode.TypeReadFacing(op).
+func (cs *CastStrategyC) markExplicitUnsigned(op *PcodeOp, slot int) bool {
+	opc := op.Code()
+	if !opcodeInheritsSign(opc) {
+		return false
+	}
+	inheritsFirstParamOnly := opcodeInheritsSignFirstParamOnly(opc)
+	if slot == 1 && inheritsFirstParamOnly {
+		return false
+	}
+	vn := op.Input(slot)
+	if vn == nil || !vn.IsConstant() {
+		return false
+	}
+	dt := vn.TypeReadFacing(op)
+	if dt == nil {
+		return false
+	}
+	meta := dt.Metatype()
+	if meta != TYPE_UINT && meta != TYPE_UNKNOWN && meta != TYPE_PARTIALSTRUCT && meta != TYPE_PARTIALUNION {
+		return false
+	}
+	if isCharPrintLike(dt) {
+		return false
+	}
+	if _, isEnum := dt.(*Enum); isEnum {
+		return false
+	}
+	if op.NumInput() == 2 && !inheritsFirstParamOnly {
+		firstvn := op.Input(1 - slot)
+		if firstvn != nil {
+			if ft := firstvn.TypeReadFacing(op); ft != nil {
+				fmeta := ft.Metatype()
+				if fmeta == TYPE_UINT || fmeta == TYPE_UNKNOWN ||
+					fmeta == TYPE_PARTIALSTRUCT || fmeta == TYPE_PARTIALUNION {
+					return false // other side of the operation will force the unsigned
+				}
+			}
+		}
+	}
+	// Check if the token is going to get forced unsigned anyway.
+	if outvn := op.Output(); outvn != nil {
+		if outvn.IsExplicit() {
+			return false
+		}
+		if lone := outvn.LoneDescend(); lone != nil {
+			if !opcodeInheritsSign(lone.Code()) {
+				return false
+			}
+		}
+	}
+	vn.SetAddlFlags(VarnodeUnsignedPrint)
+	return true
+}
+
 // signbitNegative reports whether the high (sign) bit of an unsigned value of
 // the given byte size is set. C++ parity: signbit_negative (in address.hh).
 func signbitNegative(val uint64, size int32) bool {

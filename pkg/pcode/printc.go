@@ -2603,6 +2603,14 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 			dt = signedDt
 		}
 	}
+	// force_unsigned_token: a constant marked by CastStrategy::markExplicitUnsigned
+	// (an operand of a sign-inheriting op that would otherwise read as signed) is
+	// printed with a trailing 'U'. C++ parity: PrintC::push_integer (printc.cc:1425).
+	// The suffix is not appended to boolean/enum/float/char renderings.
+	unsignedSuffix := ""
+	if vn.HasAddlFlags(VarnodeUnsignedPrint) {
+		unsignedSuffix = "U"
+	}
 	switch typed := dt.(type) {
 	case *Base:
 		switch typed.Metatype() {
@@ -2614,7 +2622,7 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 		case TYPE_INT:
 			switch typed.Size() {
 			case 1, 2, 4:
-				return fmt.Sprintf("%d", int32(vn.Offset()))
+				return fmt.Sprintf("%d", int32(vn.Offset())) + unsignedSuffix
 			case 8:
 				// No "LL" size suffix by default. C++ PrintC::push_integer
 				// (printc.cc:1354) appends the sized token only when
@@ -2622,7 +2630,7 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 				// CastStrategyC (cast.cc:103) for a shift operand that would
 				// otherwise be int-promoted. That narrow case is unmodeled, so
 				// an 8-byte integer constant prints as a plain decimal here.
-				return fmt.Sprintf("%d", int64(vn.Offset()))
+				return fmt.Sprintf("%d", int64(vn.Offset())) + unsignedSuffix
 			}
 		case TYPE_FLOAT:
 			return renderFloatLiteral(vn.Offset(), uint32(typed.Size()))
@@ -2632,12 +2640,12 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 	// C++ parity: PrintC::push_integer (printc.cc:1395-1399) -- values <= 10
 	// print decimal; otherwise the radix is mostNaturalBase(val).
 	if vn.Offset() <= 10 {
-		return fmt.Sprintf("%d", vn.Offset())
+		return fmt.Sprintf("%d", vn.Offset()) + unsignedSuffix
 	}
 	if mostNaturalBase(vn.Offset()) == 16 {
-		return fmt.Sprintf("0x%x", vn.Offset())
+		return fmt.Sprintf("0x%x", vn.Offset()) + unsignedSuffix
 	}
-	return fmt.Sprintf("%d", vn.Offset())
+	return fmt.Sprintf("%d", vn.Offset()) + unsignedSuffix
 }
 
 // inferSignedConstType returns a TYPE_INT base type for a constant varnode whose
