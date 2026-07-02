@@ -286,6 +286,14 @@ func buildFaithfulStackSpace(xr *sla.XRefs, cspec *pcode.CspecData, fd *pcode.Fu
 	if regSpace == nil {
 		return nil
 	}
+	// LANDMINE: maxIdx includes the const space (Index = ^uint16(0) = 65535),
+	// so `maxIdx + 1` overflows uint16 to 0 -- the stack space ends up with the
+	// LOWEST index. That currently makes stack locals sort before register/unique
+	// temps in declaration output (grid_score `int iVar1;` ordering diff) but is
+	// ALSO load-bearing for the RestructureVarnode/ActionInferTypes symbol-type
+	// snapshot: naively giving the stack space a high index regresses type
+	// inference (counted_loop undefined4->int, sum_to_n/sum_array break). Do not
+	// "fix" this in isolation. See docs/STATUS.md grid_score decl-order 미시작.
 	stackSpace := &address.Space{
 		Name:     "stack",
 		Kind:     address.SpaceKindStack,
