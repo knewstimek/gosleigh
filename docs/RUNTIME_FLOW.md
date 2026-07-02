@@ -258,11 +258,17 @@ universal-action 트리에서 스택 접근 복구는 이제 Ghidra 충실 경�
 `ghidra-ref/Ghidra/Features/Decompiler/src/decompile/cpp/funcdata.cc:230-269`(Funcdata::spacebase),
 `ruleaction.cc:4193-4361`(RuleLoadVarnode), `ruleaction.cc:4113-4182`(RuleAddMultCollapse 계열).
 
-bespoke `ActionStackPtrFlow`(action_stack_ptr_flow.go -- heritage 이후 1회 실행하는 Gosleigh 전용 def-use
-전파)는 이제 트리 액션 리스트에서 빠졌다. production `bridge.Decompile`(41-call subset)은 아직
-ActionSpacebase/RuleLoadVarnode 경로를 안 돌리므로 계속 bespoke `ActionStackPtrFlow`를 쓴다. 트리와
-production이 스택 복구 경로에서 구조적으로 분리된 상태이며, 트리가 production 경로가 되는 H8-debt-2 완료
-시점까지 유지된다.
+H8-debt-2 Step 1-2 완료(2026-07-03): production `bridge.Decompile`이 손정렬 41-call subset을 버리고
+`db.BuildUniversalAction(nil)` + `SetCurrent("decompile").Perform(fd)` 트리 경로로 교체됐다. 유일한
+load-bearing 배선 차이는 콜러가 `bridge.Build`에 cspec(+entry-point 함수는 EntryPoint)을 공급하는
+것뿐이다 -- cspec `<stackpointer>`가 있어야 faithful StackSpace가 생성되고 ActionSpacebase +
+RuleLoadVarnode/RuleStoreVarnode가 스택 프레임을 복구한다. 검증: MSVC 골든 5개 byte-identical,
+tree 10/10, x64 corpus 7/8 무회귀. bespoke `ActionStackPtrFlow`(action_stack_ptr_flow.go)는 이제
+production 경로에서 은퇴했고 레거시 테스트 하네스(loader_test.go의 직접 heritage 테스트, 비-Ghidra
+`runPipeline`)에만 남아 있다. 완전 제거(Step 3)는 그 하네스들을 트리로 이전한 뒤 진행하는 후속 작업이다.
+
+콜러 계약: `bridge.Decompile`은 `bridge.Build`가 cspec을 받았다고 가정한다(레포 내 콜러는 현재
+골든 테스트 하네스뿐). 실 다운스트림 통합 시 cspec 공급 계약을 지켜야 스택 로컬이 복구된다.
 
 ## 현재 설계 원칙
 

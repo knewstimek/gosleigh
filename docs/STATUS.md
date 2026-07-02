@@ -7,11 +7,12 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 목표 + memory `project_e2e_goal` 참조.) x64 실함수(register param RCX/RDX) 성공도 명시 목표.
 
 ### 두 경로의 현재 위치
-- **Production (`bridge.Decompile`, 41-call 손정렬 subset)**: x86-32 골든 11개 전부 그린. 단 작은 튜닝
-  함수 코퍼스일 뿐 -- 실제 임의 함수(struct/union/switch/jumptable/미포팅 opcode)는 미완.
-- **Tree (`ActionDatabase.BuildUniversalAction`, 250 action/rule = 진짜 Ghidra 파이프라인)**: 이게 미션의
-  본체. #1 게이트 = 트리를 프로덕션 경로로 만들어 41-call subset을 대체(= H8-debt-2). **현재 트리 x86-32
-  골든 3/5 byte-identical(gcd/abs_val/classify2).**
+- **Production (`bridge.Decompile`)**: H8-debt-2 Step 1-2 완료(2026-07-03)로 손정렬 41-call subset을 버리고
+  **universal-action 트리로 교체됨**. 유일 load-bearing 배선 = 콜러가 `bridge.Build`에 cspec(+EntryPoint)
+  공급. MSVC 골든 5개 byte-identical, TestAARCH64/X8664/X64RegParam 그린, tree 10/10, x64 corpus 7/8 무회귀.
+- **Tree (`ActionDatabase.BuildUniversalAction`, 250 action/rule = 진짜 Ghidra 파이프라인)**: 이제 이것이
+  production 경로다. bespoke `ActionStackPtrFlow`는 production에서 은퇴, 레거시 테스트 하네스에만 잔존
+  (완전 제거 = Step 3 후속).
 
 ## 현재 상태 (2026-06-30 세션 진행, 전 패키지 그린)
 
@@ -21,8 +22,10 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 printc 선언-대표(representative) 선택이 loc_tree 순서에 의존하던 포팅 버그). 이어진 세션에서 process gap1
 (포인터-파라미터 배열 deref)을 닫고 `ActionDoNothing`/`RemoveDoNothingBlock`을 충실 포팅했으나, x64 corpus는
 **7/8**로 불변(process는 여전히 MISMATCH -- 잔여 3갭이 return-recovery/type-snapshot/merge/structuring
-파이프라인으로 수렴하는 deep-debt로 확정, H8-debt-2와 묶임). production `bridge.Decompile`은 구조적으로 분리돼
-기존 bespoke ActionStackPtrFlow를 그대로 사용. 상세는 아래 완료 블록 및 CHANGELOG 2026-07-03 참고.
+파이프라인으로 수렴하는 deep-debt로 확정, H8-debt-2와 묶임). **H8-debt-2 Step 1-2 완료(2026-07-03)**: production
+`bridge.Decompile`이 트리 경로(`BuildUniversalAction` + `SetCurrent("decompile").Perform`)로 교체됨 -- 콜러가
+cspec+EntryPoint를 `bridge.Build`에 배선하는 것이 유일 load-bearing 변경. bespoke `ActionStackPtrFlow`는
+production에서 은퇴(레거시 테스트에만 잔존, Step 3 후속 제거). 상세는 아래 완료 블록 및 CHANGELOG 2026-07-03 참고.
 
 **트리 전체 골든 맵 10/10 byte-identical** (`TestTreeFullGoldenMap`). **x86-32 8/8 + x64_add_ret + aarch64_add_ret
 전부 MATCH**(complex_max는 바이트 미보유로 미테스트). 트리가 register-param 아키텍처(x86-64 SysV, AArch64 AAPCS64,

@@ -154,10 +154,10 @@
 |------|-----------|-----------------|--------|--------|
 | decompiler action (stack recovery, tree) | `Funcdata.Spacebase()` | `Funcdata::spacebase` (funcdata.cc:230-269) | `match` | 이전 no-op stub이었으나 충실 구현으로 교체됐다. 모든 RSP 계열 varnode(input/sub-result/phi)에 spacebase 마킹을 걸어 이후 `RuleLoadVarnode`/`RuleStoreVarnode`가 `[rsp+k]` 접근을 스택 공간 varnode로 변환할 수 있게 한다. universal-action 트리의 기본 경로다 |
 | decompiler action (stack recovery, tree) | `RuleAddMultCollapse` / `RuleCollapseConstants` | `ruleaction.cc:4113-4182` | `match` | `sub rsp,N` 오프셋 누적에 필요한 누락 분기를 `RuleAddMultCollapse`에 추가하고 `RuleCollapseConstants`를 신규 포팅했다 |
-| decompiler action (stack recovery, production) | `ActionStackPtrFlow` (action_stack_ptr_flow.go) | 원본 대응 없음(Gosleigh 전용 bespoke def-use 전파, heritage 이후 1회 실행) | `simplified-safe` | production `bridge.Decompile`(41-call subset)이 아직 ActionSpacebase/RuleLoadVarnode 경로를 안 돌기 때문에 유지되는 **의도적 구조 분리**. 트리가 production 경로가 되는 H8-debt-2 완료 시 폐기 예정 |
+| decompiler action (stack recovery, legacy tests) | `ActionStackPtrFlow` (action_stack_ptr_flow.go) | 원본 대응 없음(Gosleigh 전용 bespoke def-use 전파, heritage 이후 1회 실행) | `simplified-safe` | H8-debt-2 Step 1-2 완료로 production `bridge.Decompile`은 universal-action 트리(faithful spacebase 경로)로 교체됐다. bespoke는 이제 production 경로에서 빠졌고 레거시 테스트 하네스(loader_test.go 등)에만 남아 있다. 완전 제거(Step 3)는 이 하네스들을 트리 경로로 이전한 뒤 진행하는 후속 작업 |
 
-- 트리 기본 경로는 이제 스택 인식을 faithful spacebase 경로로 수행하고, production만 bespoke
-  `ActionStackPtrFlow`를 유지한다(구조적 분리, H8-debt-2까지 임시 상태).
+- production `bridge.Decompile`은 이제 트리(faithful spacebase)로 스택을 복구한다. bespoke
+  `ActionStackPtrFlow`는 production 경로에서 은퇴했고 레거시 테스트에만 잔존한다(Step 3에서 완전 제거 예정).
 
 ## Next Actions
 
