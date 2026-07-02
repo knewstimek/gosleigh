@@ -246,6 +246,24 @@ relative-label patching도 이제 helper resolver 추상화보다 direct `labelR
 - in-memory backend를 넘는 broader `LoadImage` / `ContextDatabase` parity surface
 현재 key runtime/translation shell은 package-wide typed `UnimplError`를 쓰고, typed translation error는 in-place rewrite까지 들어갔다. catch formatting도 더 concrete한 operand text를 출력한다. 다만 아직 full catch coverage와 exact same-object mutation semantics, fallback-free parity는 없다.
 
+## 참고: 디컴파일러 트리 액션의 스택 공간 복구 경로 (범위 밖 -- pkg/pcode, 2026-07-02)
+
+아래는 Sleigh 번역 경로(위 네 축)가 아니라 디컴파일러 액션/룰 파이프라인(`pkg/pcode`)의 변경이다. 이 문서의
+주 범위와는 다른 층이지만, "runtime 실행 경로가 바뀌면 문서를 갱신한다" 원칙에 따라 짧게 기록한다.
+
+universal-action 트리에서 스택 접근 복구는 이제 Ghidra 충실 경로가 기본이다. `Funcdata.Spacebase()`가 RSP
+계열 varnode(input/sub-result/phi)에 spacebase 마킹을 걸고, `RuleLoadVarnode`/`RuleStoreVarnode`가 그 마킹을
+따라 `[rsp+k]` LOAD/STORE를 스택 공간 varnode로 변환한다. `sub rsp,N` 오프셋 누적은
+`RuleSub2Add`+`RuleCollapseConstants`+`RuleAddMultCollapse`가 담당한다. C++ 참조:
+`ghidra-ref/Ghidra/Features/Decompiler/src/decompile/cpp/funcdata.cc:230-269`(Funcdata::spacebase),
+`ruleaction.cc:4193-4361`(RuleLoadVarnode), `ruleaction.cc:4113-4182`(RuleAddMultCollapse 계열).
+
+bespoke `ActionStackPtrFlow`(action_stack_ptr_flow.go -- heritage 이후 1회 실행하는 Gosleigh 전용 def-use
+전파)는 이제 트리 액션 리스트에서 빠졌다. production `bridge.Decompile`(41-call subset)은 아직
+ActionSpacebase/RuleLoadVarnode 경로를 안 돌리므로 계속 bespoke `ActionStackPtrFlow`를 쓴다. 트리와
+production이 스택 복구 경로에서 구조적으로 분리된 상태이며, 트리가 production 경로가 되는 H8-debt-2 완료
+시점까지 유지된다.
+
 ## 현재 설계 원칙
 
 - 원본 C++가 있는 구간에서는 추정 구현 금지
