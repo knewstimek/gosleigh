@@ -22,11 +22,10 @@ type DecompileConfig struct {
 // translate->pcode bridge (Build) produces the Funcdata, and Decompile drives the
 // analysis actions through to PrintC.
 //
-// The pass order mirrors Ghidra's actmainloop for the subset of actions Gosleigh
-// implements today. It is the same sequence that the MSVC golden tests exercise.
-// The full coreaction.cc ActionDatabase::universalAction tree
-// (BuildUniversalAction) is the eventual target; until every action in it is
-// complete this hand-ordered subset is the authoritative decompile path.
+// Decompile drives the full coreaction.cc ActionDatabase::universalAction tree
+// (BuildUniversalAction) -- the faithful Ghidra pass order and the authoritative
+// decompile path. The former hand-ordered 41-call subset was removed once the tree
+// became byte-identical to it on every production golden (H8-debt-2).
 //
 // Engine supplies register naming and xref-based effect offsets; result carries
 // the Funcdata, block graph, heritage spaces, and parsed cspec.
