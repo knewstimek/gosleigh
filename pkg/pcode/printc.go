@@ -2082,7 +2082,26 @@ func (s *printCState) emitOps(bb *BlockBasic, suppressControl bool) error {
 			// suppress the statement. The only case we must not suppress is when the op
 			// has a STORE side-effect, but STORE has no output, so this is always safe.
 			// C++ parity: ActionMarkImplied / PrintC::isImplied skips unique-space writes.
-			if out.Space() != nil && out.Space().IsUnique() {
+			//
+			// Faithful exception: Ghidra's PrintC::emitBlockBasic (printc.cc:2836) does
+			// NOT suppress by space; it suppresses a statement only when the output is
+			// isImplied(). An explicit unique-space def (e.g. a LOAD result named iVar1
+			// with several descendants: "iVar1 = *(int *)(param_1 + i*4);") is emitted
+			// as a normal "name = expr;" statement. ActionMarkExplicit (coreaction.cc:3244,
+			// baseExplicit at coreaction.cc:3009) sets the explicit flag on such varnodes.
+			// Our blanket unique suppression is a Gosleigh approximation; keying on
+			// IsExplicit is the faithful rule. The NumDescend()>0 clause proxies a Ghidra
+			// invariant: ActionMarkExplicit runs after ActionDeadCode has removed
+			// no-descendant dead ops (coreaction.cc:3252 beginDef(0) cuts free varnodes),
+			// so a real explicit def always has live descendants by print time. Without
+			// this clause a residual "sub rsp,0x18" frame COPY (unique = 0x18, explicit,
+			// nd==0) that survives our faithful-stack ActionDeadCode would leak
+			// "uVarN = 0x18;". KNOWN GAP: that residual COPY should be removed by
+			// ActionDeadCode (as Ghidra does); until then NumDescend()>0 proxies Ghidra's
+			// no-emit behavior. This mirrors the local nd==0 skip convention above
+			// (CARRY/SCARRY/SBORROW/POPCOUNT at line ~2042).
+			if out.Space() != nil && out.Space().IsUnique() &&
+				!(out.IsExplicit() && out.NumDescend() > 0) {
 				// Exception: when the unique varnode's sole consumer is a MULTIEQUAL
 				// with a named output, emit this op as an assignment to the MULTIEQUAL
 				// output's name. This covers two related patterns:
