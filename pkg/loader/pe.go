@@ -47,6 +47,90 @@ func LoadPE32TextSection(path string) ([]byte, uint64, error) {
 // Ensure the file handle is closed even on early returns (used via defer above).
 var _ = os.ErrClosed
 
+// PESection is a loaded PE section paired with its virtual memory address
+// (ImageBase + section VirtualAddress) and raw bytes trimmed to VirtualSize.
+type PESection struct {
+	Name  string
+	VMA   uint64
+	Bytes []byte
+}
+
+// peImageBase returns the ImageBase from a PE file's optional header,
+// handling both PE32 (OptionalHeader32.ImageBase is uint32) and PE32+
+// (OptionalHeader64.ImageBase is uint64). MS PE/COFF spec: the optional
+// header magic (0x10b PE32 vs 0x20b PE32+) selects the field width; Go's
+// debug/pe surfaces this as two distinct concrete types.
+func peImageBase(f *pe.File) (uint64, error) {
+	switch oh := f.OptionalHeader.(type) {
+	case *pe.OptionalHeader32:
+		return uint64(oh.ImageBase), nil
+	case *pe.OptionalHeader64:
+		return oh.ImageBase, nil
+	default:
+		return 0, fmt.Errorf("unknown or missing PE optional header")
+	}
+}
+
+// LoadPESections opens a PE (PE32 or PE32+) file and returns the requested
+// sections mapped to their virtual memory addresses (ImageBase + VirtualAddress).
+// When names is empty, all sections are returned. Bitness-agnostic: unlike
+// LoadPE32TextSection this reads ImageBase via peImageBase, so it works on the
+// PE32+ (64-bit) executables that the switch/jump-table corpus requires.
+//
+// Each section's bytes are trimmed to VirtualSize when that is smaller than the
+// raw on-disk size, matching the actual in-memory footprint (raw data may be
+// zero-padded up to FileAlignment). No Ghidra Java loader exists in ghidra-ref;
+// this follows the MS PE/COFF specification directly.
+func LoadPESections(path string, names ...string) ([]PESection, error) {
+	f, err := pe.Open(path)
+	if err != nil {
+		return nil, fmt.Errorf("pe.Open %s: %w", path, err)
+	}
+	defer f.Close()
+
+	imageBase, err := peImageBase(f)
+	if err != nil {
+		return nil, fmt.Errorf("%s: %w", path, err)
+	}
+
+	want := make(map[string]bool, len(names))
+	for _, n := range names {
+		want[n] = true
+	}
+
+	var out []PESection
+	for _, sec := range f.Sections {
+		if len(want) > 0 && !want[sec.Name] {
+			continue
+		}
+		data, derr := sec.Data()
+		if derr != nil {
+			return nil, fmt.Errorf("reading section %q from %s: %w", sec.Name, path, derr)
+		}
+		if vs := int(sec.VirtualSize); vs > 0 && vs < len(data) {
+			data = data[:vs]
+		}
+		out = append(out, PESection{
+			Name:  sec.Name,
+			VMA:   imageBase + uint64(sec.VirtualAddress),
+			Bytes: data,
+		})
+	}
+
+	if len(want) > 0 && len(out) != len(want) {
+		found := make(map[string]bool, len(out))
+		for _, s := range out {
+			found[s.Name] = true
+		}
+		for n := range want {
+			if !found[n] {
+				return nil, fmt.Errorf("%s: no %q section found", path, n)
+			}
+		}
+	}
+	return out, nil
+}
+
 // LoadPE32Exports reads the COFF symbol table from a PE32 file and returns a
 // SymbolTable containing all externally-visible (IMAGE_SYM_CLASS_EXTERNAL)
 // symbols that belong to a valid section.
