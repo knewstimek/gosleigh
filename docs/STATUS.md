@@ -146,30 +146,59 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 > 불변), production `TestMSVC*`/`TestAARCH64*`/`TestX8664*`/`TestX64RegParam*` PASS, `go test ./...` 클린.
 > **process 잔여 3갭의 진짜 근본은 gap34-v2 재규명으로 확정됐고 deep-debt로 재분류됨** -- 아래 미시작 참고.
 
-### 미시작 (a) [최우선]: breadth -- truncateIndirectJump 폴백 (switch/jumptable 신규 갭, 2026-07-03 디스커버리)
-breadth 코퍼스(`testdata/x64_breadth/`, master `5276375`)로 struct/2D 주소산술 parity는 이미 확인됐다
-(dist_sq/sum2d MATCH). 남은 dispatch(dense switch) MISMATCH가 신규 갭이며, ROI 우선순위상 breadth 작업
-중 가장 먼저 착수한다.
-- **현상**: golden은 BRANCHIND(jump table) 복구가 실패해 `undefined8 dispatch(long) { ...
-  uVar1=(*(code*)(...))(); return uVar1; }` 형태로 CALLIND + artificial return을 렌더한다(fail_normal
-  폴백). 트리는 이 폴백이 없어 `void`+raw `goto *(...)` + 링크 안 된 `goto label_missing`이 printC까지
-  생존한다(`testdata/x64_breadth/x64_breadth_goldens.json` dispatch 항목). **Ghidra 자신도** 이 테이블은
-  복구 실패한다(`.rdata`의 `&__ImageBase` 상대 오프셋이 단일 `.text` 하네스에서 relocation 불가) --
-  parity 타깃은 완전한 switch 복구가 아니라 CALLIND 폴백 자체.
-- **C++ 참조**: `flow.cc:799`(`FlowInfo::generateOps`의 jumptable 구동 루프, `tablelist` 순회) ->
-  `flow.hh:138`/`flow.cc:1427`(`FlowInfo::recoverJumpTables`, 미구동 드라이버) 실패 시
-  `flow.cc:727`(`FlowInfo::truncateIndirectJump`, `setBadJumpTable(true)` -> BRANCHIND를 CPUI_CALLIND로
-  전환 + `artificialHalt`로 return 삽입, 미포팅).
-- **수정 대상 Go 파일**: `pkg/pcode/jumptable.go`(1671줄, `JumpTable`/`JumpModel` 머신러리는 이미 포팅됨 --
-  `AddJumpTable`을 채우는 신규 구동 드라이버 부재), `pkg/pcode/coreaction.go`(`ActionSwitchNorm`,
-  coreaction.go:3157 -- 이미 등록된 JumpTable 소비만 함, recoverJumpTables 실패 경로 폴백 신규 필요),
-  `pkg/pcode/funcdata.go`(BRANCHIND -> CALLIND 강등 + artificial return 삽입 지점).
+### 미시작 (a) [최우선]: dispatch 수렴 -- IOP-space 인코딩 + reloc 로더 + printc 타입명 (2026-07-03 갱신)
+`truncateIndirectJump` 실패 폴백은 **완료됐다**(H-dispatch Component 1, master `a02b1a6`). 신규
+`pkg/pcode/flow_jumptable.go`(+222)가 `RecoverJumpTables` 구동 드라이버(`bridge.Build`에 배선)로 복구를
+먼저 실제 시도하고, 실패했을 때만 BRANCHIND를 CALLIND + artificial return으로 강등한다(무조건 truncate
+아님). dispatch golden의 raw `goto *(...)`는 제거됐고 pcode 레벨 강등은 정확하다. 상세는 CHANGELOG
+2026-07-03 "H-dispatch Component 1" 참고.
+- **현상**: 그러나 dispatch **RENDER는 더 나빠졌다**: `void dispatch(uint param_1){...goto *(...)}` ->
+  `undefined4 dispatch(void){...(*0)();return 1;}`(golden은 `undefined8 dispatch(long) {
+  uVar1=(*(code*)(...))(); return uVar1; }`). 근본 = CALLIND 타깃(RAX) 유실. 남은 수렴 블로커를 3갈래로
+  재매핑(ROI 순):
+  1. **IOP-space 인코딩 포팅** [foundational, 최우선] -- INDIRECT op의 input(1)이 zero-const 스텁으로
+     남아 있어(`double.go`/`constseq.go`/`funcdata.go`에 이미 문서화) `Heritage`의 "INDIRECT는 cause op과
+     동시 발생" rename(heritage.cc:2506-2517)이 CALLIND 타깃(RAX=반환 레지스터 alias)을 식별하지 못하고
+     유실시킨다 -- `(*0)()`의 직접 원인. project-wide 인프라 갭이라 dispatch 전용 패치로 안 닫힌다.
+  2. **reloc/COFF 로더** -- 단일 `.text` 하네스가 relocation을 전혀 갖지 않아 주소 상수가 raw literal로
+     남는다(`&__ImageBase`/`0x5b40`). `dumpbin`으로 확인된 실제 relocation: `.text` REL32(`&__ImageBase`
+     기준) + 8개 ADDR32NB(RVA 테이블 엔트리). `ghidra-ref/`에는 Decompiler C++만 있고 COFF/PE 로더는
+     Java라 원본이 없음 -- MS PE/COFF 스펙에서 직접 포팅, Go `debug/pe`가 `.obj` 파싱 가능.
+  3. **printc 타입명** -- `uint`/`undefined8` 등 렌더 타입명이 golden과 다름(하위 우선, 위 2개 해소 후
+     재평가).
+  - **핵심 통찰(재확인)**: bare `.obj` 위 dispatch는 **Ghidra 자신도 복구 실패**(`WARNING: Could not
+    emulate`) -> parity 타깃은 완전한 switch 복구가 아니라 CALLIND 폴백이다. 위 3갈래를 전부 닫아도
+    도달하는 것은 "정확한 CALLIND 폴백 렌더"이지 "진짜 switch 복구"가 아니다 -- 후자는 아래 (a-2) track B.
+- **C++ 참조**: `heritage.cc:2506-2517`(INDIRECT same-time rename). COFF/PE relocation은 MS spec 기반
+  (ghidra-ref에 대응 C++ 없음, Java 로더).
+- **수정 대상 Go 파일**: `pkg/pcode/heritage.go`(rename), `pkg/pcode/double.go`/`constseq.go`/
+  `funcdata.go`(IOP-space 인코딩 스텁 제거), `pkg/loader/`(COFF reloc 파싱, 신규), `pkg/pcode/printc.go`
+  (타입명).
 - **성공 기준**: `X64_BREADTH=1 go test ./pkg/loader/ -run TestX64BreadthGoldenMap`에서 dispatch MATCH
   (2/3 -> 3/3) + `TREE_MAP=1 TestTreeFullGoldenMap` 10/10 무회귀 + `X64_CORPUS=1 TestX64CorpusGoldenMap`
   7/8 무회귀.
-- **후속(별도, 낮은 우선순위 -- truncateIndirectJump 이후)**: multi-section+reloc 로더(현재 단일 `.text`
-  블롭이라 `&__ImageBase`/`.rdata`/relocation 자체가 없음 -- 테이블 실복구의 전제조건), struct 타입 복구
-  (dist_sq는 타입 미복구 상태로 이미 MATCH라 저우선). 상세 `testdata/x64_breadth/README.md`.
+
+### 미시작 (a-2) [신규 우선]: track B -- 실제 switch 복구 실검증 (full-link x64 .exe 코퍼스)
+사용자와 합의된 전략(2026-07-03): "Ghidra보다 나은 switch 복구"에 의미가 있으려면 **Ghidra 자신도
+switch를 성공 복구하는 입력**으로 골든을 만들어 그 골든과 MATCH해야 한다 -- bare `.obj`는 Ghidra도
+복구 실패하는 입력이라 비교 대상이 못 된다("더 나음"을 골든 없이 주장하는 건 검증 불가 = parity 규칙
+위반). 위 (a) CALLIND 폴백 완전 렌더보다 이쪽이 리치 출력을 parity 규칙 안에서 달성하는 진짜 다음 메인
+타깃이다. 방치된 `pkg/pcode/jumptable.go`(1671줄, `JumpTable`/`JumpModel` 머신러리 + H-dispatch
+Component 1의 `RecoverJumpTables` 성공 경로)를 실전 검증하는 것도 겸한다.
+- **현상**: 없음(신규 코퍼스 구축 작업). 현재 breadth 코퍼스는 단일 `.text` obj뿐이라 Ghidra 자신도
+  jump table을 복구하지 못하는 입력만 있다.
+- **필요 작업**: (1) `pkg/loader/pe.go` PE32+/multi-section 확장(현재 지원 범위 확인 선행), (2) MSVC
+  링커로 실제 `.exe` 생성(`/Od`, 다중 섹션 + import table + reloc), (3) Ghidra 12 headless로 신규 골든
+  생성(`testdata/ghidra_decompile.py` 패턴 재사용), (4) `RecoverJumpTables`의
+  `recoverJumpTable`(funcdata_block.cc:639) 성공 경로(`JumpTable.RecoverAddresses`)가 실제로 테이블을
+  복구하는지 확인, (5) `ActionSwitchNorm`(coreaction.go:3157) + printc switch 렌더(`case`/`default`)
+  경로 확인.
+- **C++ 참조**: `flow.cc:1427`(recoverJumpTables), `funcdata_block.cc:639`(recoverJumpTable 성공 경로),
+  `jumptable.cc`(JumpTable::recoverAddresses).
+- **수정 대상 Go 파일**: `pkg/loader/pe.go`(PE32+/multi-section), `pkg/pcode/jumptable.go`(실전 검증 +
+  발견되는 버그 수정), `testdata/x64_breadth/`(신규 링크된 .exe 코퍼스 + 골든), 신규 골든 생성 스크립트.
+- **성공 기준**: 신규 track B 코퍼스에서 switch case golden과 MATCH(신규 테스트 하네스, 이름은 구현 세션
+  재량) + 기존 `TREE_MAP=1`/`X64_CORPUS=1`/`X64_BREADTH=1` 전부 무회귀.
 
 ### 미시작 (b): process 잔여 3갭 (deep-debt, 별도 세션 -- breadth 최우선 처리 후)
 - **완료로 이동**: gap1(포인터-파라미터 배열 deref)과 ActionDoNothing/RemoveDoNothingBlock 포팅은
