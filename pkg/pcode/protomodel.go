@@ -83,6 +83,12 @@ type ProtoModel struct {
 	// 0 means unset; treat as 4.
 	PointerSize int
 
+	// LongSize is the size of the C "long" type in bytes from the cspec
+	// data_organization.  0 means unset; treat as 8 (LP64).  Determines whether an
+	// 8-byte signed integer declaration is spelled "long" (8, LP64) or "longlong"
+	// (4, LLP64 / Windows x64).  C++ parity: TypeFactory::sizeOfLong.
+	LongSize int
+
 	// ReturnRegOffset is the byte offset of the integer return register in the
 	// register address space. 0 for x86-32 (EAX) and x86-64 (RAX).
 	// TODO: derive this from cspec <output> tag in NewProtoModelFromCspec.
@@ -134,6 +140,7 @@ func NewProtoModelFromCspec(cs *CspecData, stackSpace *address.Space, regLookup 
 	pm.ParamBaseOffset = cs.StackParamBaseOffset()
 	pm.ParamAlign = cs.StackParamAlign()
 	pm.PointerSize = cs.PointerSize()
+	pm.LongSize = cs.LongSize()
 
 	if cs.DefaultProto != nil {
 		for _, reg := range cs.DefaultProto.Unaffected.Registers {
