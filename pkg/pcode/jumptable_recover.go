@@ -617,6 +617,119 @@ func (m *JumpBasic) findNormalized(fd *Funcdata, rootbl *BlockBasic, pathout int
 	}
 }
 
+// -----------------------------------------------------------------------
+// findUnnormalized / foldInGuards support (marks, reverse emulation, folding)
+// -----------------------------------------------------------------------
+
+// markModel (un)marks every model PcodeOp: the path ops up to the switch
+// variable plus the guard read ops. The mark is used by flowsOnlyToModel to
+// confirm a candidate switch variable feeds nothing but the model.
+// C++ parity: jumptable.cc JumpBasic::markModel (jumptable.cc:1271).
+func (m *JumpBasic) markModel(val bool) {
+	m.PathMeld.MarkPaths(val, m.VarnodeIndex)
+	for _, guard := range m.SelectGuards {
+		if guard.GetBranch() == nil {
+			continue
+		}
+		readOp := guard.GetReadOp()
+		if readOp == nil {
+			continue
+		}
+		if val {
+			readOp.SetFlag(PcodeOpMark)
+		} else {
+			readOp.ClearFlag(PcodeOpMark)
+		}
+	}
+}
+
+// flowsOnlyToModel reports whether every descendant of vn (except an optional
+// known trail op) is marked, i.e. flows only into the current model. The model
+// ops must have been marked by markModel(true) first.
+// C++ parity: jumptable.cc JumpBasic::flowsOnlyToModel (jumptable.cc:1291).
+func (m *JumpBasic) flowsOnlyToModel(vn *Varnode, trailOp *PcodeOp) bool {
+	for _, op := range vn.DescendIter() {
+		if op == trailOp {
+			continue
+		}
+		if !op.HasFlag(PcodeOpMark) {
+			return false
+		}
+	}
+	return true
+}
+
+// backup2Switch reverse-emulates output from outvn back to invn, undoing each
+// normalization op along the way, to recover the original switch value used as
+// a case label. C++ parity: jumptable.cc JumpBasic::backup2Switch (jumptable.cc:472).
+//
+// Known gap: reverse evaluation of a binary/unary normalization op needs
+// TypeOp::recoverInputBinary/recoverInputUnary, which are not ported. For dense
+// switches the normalized variable is the switch variable (outvn == invn), so
+// the loop never runs; any non-trivial normalization chain returns
+// errBadSwitchNorm, which BuildLabels maps to JumpValueNoLabel (the C++
+// EvaluationError arm).
+func (m *JumpBasic) backup2Switch(_ *Funcdata, output uint64, outvn, invn *Varnode) (uint64, error) {
+	curvn := outvn
+	for curvn != invn {
+		return 0, errBadSwitchNorm
+	}
+	return output, nil
+}
+
+// foldInOneGuard folds a single guard CBRANCH into the switch's default edge:
+// either rerouting the guard's non-switch branch into the switch block as a new
+// default destination, or pinning the guard's condition to a constant so the
+// existing default edge is always taken.
+// C++ parity: jumptable.cc JumpBasic::foldInOneGuard (jumptable.cc:1390).
+func (m *JumpBasic) foldInOneGuard(fd *Funcdata, guard *GuardRecord, jump *JumpTable) bool {
+	cbranch := guard.GetBranch()
+	cbranchblock := cbranch.Parent()
+	// The guard branch may have been converted between switch recovery and now.
+	if cbranchblock.SizeOut() != 2 {
+		return false
+	}
+	indpath := int(guard.GetPath()) // Stored path to indirect block
+	if cbranchblock.HasFlag(BlockFlagFlipPath) {
+		indpath = 1 - indpath // Out branches flipped: get actual path to indirect block
+	}
+	switchbl := jump.IndirectOp().Parent()
+	if cbranchblock.OutEdge(indpath).Point != &switchbl.FlowBlock { // Guard must go directly into switch block
+		return false
+	}
+	guardtargetFB := cbranchblock.OutEdge(1 - indpath).Point
+	pos := 0
+	for ; pos < switchbl.SizeOut(); pos++ {
+		if switchbl.OutEdge(pos).Point == guardtargetFB {
+			break
+		}
+	}
+	if jump.HasFoldedDefault() && int(jump.DefaultBlock()) != pos { // There can be only one folded target
+		return false
+	}
+	if !switchbl.NoInterveningStatement() {
+		return false
+	}
+	if pos == switchbl.SizeOut() {
+		guardtarget := asBasic(guardtargetFB)
+		jump.AddBlockToSwitch(guardtarget, JumpValueNoLabel) // New destination without a label
+		jump.SetLastAsDefault()                              // treating it as the default case or an exit
+		fd.PushBranch(cbranchblock, 1-indpath, switchbl)     // Turn branch target into switch target
+	} else {
+		var val uint64
+		if (indpath == 0) != cbranch.HasFlag(PcodeOpBooleanFlip) {
+			val = 0
+		} else {
+			val = 1
+		}
+		fd.OpSetInput(cbranch, fd.NewConstant(cbranch.Input(0).Size(), val), 1)
+		jump.SetDefaultBlock(int32(pos)) // A guard branch generally targets the default case
+	}
+	jump.SetFoldedDefault() // Default branch folded (and cannot take a label)
+	guard.Clear()
+	return true
+}
+
 // markFoldableGuards clears guards that are not truly part of the model so they
 // will not be folded out of the CFG later. C++ parity: jumptable.cc
 // JumpBasic::markFoldableGuards (jumptable.cc:1256).

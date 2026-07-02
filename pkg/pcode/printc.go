@@ -1928,13 +1928,14 @@ func (s *printCState) emitSwitchBlock(bl *FlowBlock) error {
 		return nil
 	}
 	s.lang.OpenBlockAfter(func() {
+		// Ghidra emits "switch(...)" with no space before the paren.
 		s.lang.Token("switch")
-		s.lang.Space()
 		s.lang.Token("(")
 		s.lang.Token(s.mustRenderSwitchSelector(children[0]))
 		s.lang.Token(")")
 	})
-	for i, child := range children[1:] {
+	cases := children[1:]
+	for i, child := range cases {
 		// PrintLanguage.Label appends the trailing ':' itself, so the label text
 		// must not already carry one (otherwise "case 0::").
 		label := fmt.Sprintf("case %d", i)
@@ -1946,7 +1947,12 @@ func (s *printCState) emitSwitchBlock(bl *FlowBlock) error {
 		if err := s.emitBlock(child); err != nil {
 			return err
 		}
-		if !s.blockTerminates(child) {
+		// Emit an explicit break for a case that formally exits the switch (its
+		// structured block leaves via a single out-edge to the switch exit) and
+		// is not the last case, which falls out of the switch anyway.
+		// C++ parity: printc.cc PrintC::emitBlockSwitch (bl->isExit(i) &&
+		// i != numCaseBlocks-1); BlockSwitch::addCase sets isexit = sizeOut()==1.
+		if s.caseExits(child) && i != len(cases)-1 {
 			s.lang.Statement(func() {
 				s.lang.Token("break")
 			})
@@ -1955,6 +1961,35 @@ func (s *printCState) emitSwitchBlock(bl *FlowBlock) error {
 	}
 	s.lang.CloseBlock()
 	return nil
+}
+
+// caseExits reports whether a switch case's structured block formally exits the
+// switch, i.e. its terminal basic block ends in an unconditional BRANCH to the
+// shared switch exit. Ghidra renders that goto-to-exit as an explicit break. A
+// case terminating in RETURN (or falling through with no terminator) does not
+// need a break. This is the emit-time equivalent of C++
+// BlockSwitch::addCase's isexit = (bl->sizeOut() == 1): the structuring pass
+// collapses the case region and zeroes the FlowBlock out-edges, so the surviving
+// terminal BRANCH op is the faithful signal for the single exit edge.
+// C++ parity: block.cc BlockSwitch::addCase (block.cc:3514) +
+// printc.cc PrintC::emitBlockSwitch.
+func (s *printCState) caseExits(bl *FlowBlock) bool {
+	if bl == nil {
+		return false
+	}
+	switch bl.Type() {
+	case BlockListType:
+		children := bl.StructuredChildren()
+		if len(children) > 0 {
+			return s.caseExits(children[len(children)-1])
+		}
+	case BlockBasicType, BlockPlain:
+		bb := toBasic(bl)
+		if bb != nil && bb.NumOps() > 0 {
+			return bb.Ops()[bb.NumOps()-1].Code() == CPUI_BRANCH
+		}
+	}
+	return false
 }
 
 func selectorHasDefault(selector *FlowBlock, idx int) bool {
@@ -3438,8 +3473,21 @@ func (s *printCState) renderSwitchSelector(bl *FlowBlock) (ExprFragment, error) 
 		return s.lang.Atom("0"), nil
 	}
 	if basic := toBasic(bl); basic != nil {
-		for i := len(basic.Ops()) - 1; i >= 0; i-- {
-			op := basic.Ops()[i]
+		ops := basic.Ops()
+		// The switch selector is the controlling input of the block's
+		// BRANCHIND, mirroring C++ emitBlockSwitch emitting the switch block
+		// with the only_branch modifier. Once ActionSwitchNorm folds in the
+		// normalization, that input is the unnormalized switch variable, so the
+		// header renders as e.g. switch(param_1) rather than the raw address
+		// computation. C++ parity: printc.cc PrintC::emitBlockSwitch.
+		if n := len(ops); n > 0 {
+			last := ops[n-1]
+			if last.Code() == CPUI_BRANCHIND && last.NumInput() > 0 {
+				return s.renderVarnodeExpr(last.Input(0))
+			}
+		}
+		for i := len(ops) - 1; i >= 0; i-- {
+			op := ops[i]
 			if op.Output() != nil {
 				return s.renderVarnodeExpr(op.Output())
 			}
