@@ -94,6 +94,45 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		return nil, fmt.Errorf("build bridge: no instructions translated")
 	}
 
+	// Phase 3b: live jump-table recovery driver. Ghidra's generateOps interleaves
+	// raw-flow decode with jump-table recovery: after the initial fallthru pass it
+	// runs recoverJumpTables, then for each recovered table newAddress()es every
+	// case target and fallthru()s again to decode the case bodies (flow.cc:796-810).
+	// Gosleigh mirrors this here, between the initial collection and block building
+	// (which is generateBlocks, and must run after case bodies exist):
+	//   1. If no BRANCHIND is present, this whole block is skipped -- byte-identical
+	//      no-op for every non-switch function.
+	//   2. Otherwise drive stageJumpTable over a partial (recoverLiveJumpTables).
+	//      Only genuinely resolved tables come back; unresolved BRANCHINDs (e.g. a
+	//      reloc-less dispatch) yield an empty map and fall through to the existing
+	//      truncate path below, unchanged.
+	//   3. On success, re-collect with the case targets seeded so the case bodies
+	//      are decoded, and remember the seeds as extra block starts + edge sources.
+	var recoveredTables map[uint64]*pcode.JumpTable
+	var caseSeeds []address.Address
+	if recordsHaveBranchInd(records) {
+		if tables := recoverLiveJumpTables(engine, cfg); len(tables) > 0 {
+			// Normalize case targets into the code space the records use so block
+			// lookups (blockByAddr) and worklist seeds share one AddrSpace pointer.
+			codeSpace := records[0].translation.Address.Space
+			for _, jt := range tables {
+				for i := 0; i < jt.NumEntries(); i++ {
+					caseSeeds = append(caseSeeds, address.Address{Space: codeSpace, Offset: jt.AddressByIndex(i).Offset})
+				}
+			}
+			records2, _, cerr := collectInstructionsSeeded(engine, cfg, caseSeeds)
+			if cerr == nil && len(records2) > 0 {
+				recoveredTables = tables
+				records = records2
+			} else {
+				// Re-collection failed (e.g. a case target hit undecodable bytes):
+				// discard the recovery and fall back to the truncate path so output
+				// stays exactly as before rather than a half-decoded switch.
+				caseSeeds = nil
+			}
+		}
+	}
+
 	summary := summarizeSpaces(records, cfg.Entry.Space)
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, summary.uniqueBase, summary.constSpace)
 
@@ -120,6 +159,22 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	graph := pcode.NewBlockGraph()
 
 	starts := discoverBlockStarts(records)
+	// Each recovered switch-case target begins a basic block. These addresses are
+	// indirect (BRANCHIND) targets, so discoverBlockStarts -- which only follows
+	// direct branches and fall-through -- never marks them; mark them explicitly.
+	// C++ parity: FlowInfo::newAddress calls opMarkStartBasic on a seen target
+	// (flow.cc:230), which collectEdges/generateBlocks turn into a block boundary.
+	if len(caseSeeds) > 0 {
+		known := make(map[address.Address]struct{}, len(records))
+		for _, record := range records {
+			known[record.translation.Address] = struct{}{}
+		}
+		for _, seed := range caseSeeds {
+			if _, ok := known[seed]; ok {
+				starts[seed] = true
+			}
+		}
+	}
 	blockByAddr := make(map[address.Address]*pcode.BlockBasic, len(starts))
 	instToBlock := make(map[address.Address]*pcode.BlockBasic, len(records))
 	lastInBlock := make(map[*pcode.BlockBasic]instructionRecord, len(starts))
@@ -165,7 +220,19 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// rules, so binding the space is inert there.
 	bindLoadStoreSpaces(fd, buildSpaceIndex(cfg.Entry.Space, summary))
 
-	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock)
+	// Register each recovered jump table on the main Funcdata, relinking it to the
+	// main fd's BRANCHIND op (the recovery ran on a separate partial). This must
+	// happen before addCFGEdges (which queries FindJumpTable to add switch edges)
+	// and before fd.RecoverJumpTables (whose linkJumpTable now finds a complete
+	// table and therefore does NOT truncate the recovered BRANCHIND).
+	// C++ parity: Funcdata::recoverJumpTable relinks with jt->setIndirectOp(op)
+	// after recovering on the partial (funcdata_block.cc:671) and pushes it onto
+	// jumpvec (installJumpTable).
+	if len(recoveredTables) > 0 {
+		registerRecoveredTables(fd, recoveredTables)
+	}
+
+	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock, recoveredTables)
 	graph.FindSpanningTree()
 	assignUnreachableIndices(graph)
 	graph.CalcForwardDominator()
@@ -419,6 +486,18 @@ func BuildFuncdata(engine *sla.Engine, cfg BuildConfig) (*pcode.Funcdata, error)
 }
 
 func collectInstructions(engine *sla.Engine, cfg BuildConfig) ([]instructionRecord, []string, error) {
+	return collectInstructionsSeeded(engine, cfg, nil)
+}
+
+// collectInstructionsSeeded is collectInstructions with extra worklist seed
+// addresses. Build uses it to re-decode a switch's case bodies after jump-table
+// recovery: the recovered case-target addresses are only reachable through the
+// BRANCHIND, so a plain entry-rooted scan never sees them. Seeding them makes the
+// worklist follow each case body to its terminator, exactly as Ghidra's
+// generateOps calls newAddress(jt->getAddressByIndex(i)) + fallthru() for every
+// recovered table entry (flow.cc:806-809). With nil seeds this is byte-identical
+// to the original single-root collection.
+func collectInstructionsSeeded(engine *sla.Engine, cfg BuildConfig, seeds []address.Address) ([]instructionRecord, []string, error) {
 	limit := cfg.MaxInstructions
 	if limit <= 0 {
 		limit = int(^uint(0) >> 1)
@@ -429,12 +508,22 @@ func collectInstructions(engine *sla.Engine, cfg BuildConfig) ([]instructionReco
 
 	// pending holds addresses yet to be scanned. We use a worklist so that
 	// branch targets reachable only via a forward/unconditional branch are also
-	// collected. The entry point is always the first item.
+	// collected. The entry point is always the first item; recovered switch-case
+	// seeds (if any) follow it so case bodies decode after the entry flow.
 	//
 	// C++ ref: FlowInfo::generate / FlowInfo::setRange in FlowInfo.cc collects
 	// all reachable addresses by following branch targets recursively.
 	pending := []address.Address{cfg.Entry}
 	pendingSeen := map[address.Address]struct{}{cfg.Entry: {}}
+	for _, s := range seeds {
+		if s.IsInvalid() {
+			continue
+		}
+		if _, ok := pendingSeen[s]; !ok {
+			pendingSeen[s] = struct{}{}
+			pending = append(pending, s)
+		}
+	}
 
 	for len(pending) > 0 && len(records) < limit {
 		cur := pending[0]
@@ -715,11 +804,25 @@ func materializeConstantInput(fd *pcode.Funcdata, block *pcode.BlockBasic, addr 
 	return fd.NewUniqueOut(constant.Size(), copyOp)
 }
 
-func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode.BlockBasic, instToBlock map[address.Address]*pcode.BlockBasic, lastInBlock map[*pcode.BlockBasic]instructionRecord) {
+func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode.BlockBasic, instToBlock map[address.Address]*pcode.BlockBasic, lastInBlock map[*pcode.BlockBasic]instructionRecord, recoveredTables map[uint64]*pcode.JumpTable) {
 	seen := make(map[edgeKey]struct{})
 	for _, block := range blockByAddr {
 		record, exists := lastInBlock[block]
 		if !exists {
+			continue
+		}
+		// A BRANCHIND with a recovered jump table gets one out-edge per case
+		// target. When there is no table (non-switch, or an unresolved BRANCHIND
+		// bound for truncation) the map lookup misses and this is skipped, so the
+		// block gets no edges here -- identical to the pre-3b behavior.
+		// C++ parity: FlowInfo::collectEdges CPUI_BRANCHIND case (flow.cc:933-946),
+		// which findJumpTable()s the op and adds an edge to target(getAddressByIndex(i)).
+		if jt := recoveredTables[record.translation.Address.Offset]; jt != nil {
+			codeSpace := record.translation.Address.Space
+			for i := 0; i < jt.NumEntries(); i++ {
+				target := address.Address{Space: codeSpace, Offset: jt.AddressByIndex(i).Offset}
+				addEdge(graph, seen, block, blockByAddr[target])
+			}
 			continue
 		}
 		if record.flow.conditional {
@@ -948,6 +1051,45 @@ func min(left int, right int) int {
 		return left
 	}
 	return right
+}
+
+// recordsHaveBranchInd reports whether any collected instruction lowers to a
+// CPUI_BRANCHIND raw op. It gates the whole live jump-table recovery driver:
+// when false, Build takes the exact pre-3b path (no partial build, no heritage,
+// no re-collection), guaranteeing a byte-identical no-op for every function
+// without an indirect jump.
+func recordsHaveBranchInd(records []instructionRecord) bool {
+	for _, record := range records {
+		for _, op := range record.translation.Ops {
+			if op.OpCode == pcode.CPUI_BRANCHIND {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// registerRecoveredTables binds each recovered jump table to the main
+// Funcdata's BRANCHIND op (matched by instruction offset) and installs it. The
+// recovery ran on a separate partial Funcdata, so the table currently points at
+// the partial's op; SetIndirectOp relinks it to the live op, whose address is
+// identical (same instruction). fd.FindJumpTable and fd.RecoverJumpTables both
+// key off this live op afterward.
+// C++ parity: Funcdata::recoverJumpTable's jt->setIndirectOp(op) relink
+// (funcdata_block.cc:671) plus installJumpTable (jumpvec push_back).
+func registerRecoveredTables(fd *pcode.Funcdata, recoveredTables map[uint64]*pcode.JumpTable) {
+	for _, op := range fd.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() {
+			continue
+		}
+		if op.Code() != pcode.CPUI_BRANCHIND {
+			continue
+		}
+		if jt := recoveredTables[op.Addr().Offset]; jt != nil {
+			jt.SetIndirectOp(op)
+			fd.AddJumpTable(jt)
+		}
+	}
 }
 
 // hasHardTerminator reports whether translation contains an unconditional terminating op
