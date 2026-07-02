@@ -5,6 +5,34 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-02: TYPE-LEAK 충실 포팅 -> x64 corpus 5/8 (max3 신규 MATCH), tree 10/10 유지
+`int local_N` vs golden `undefined4 local_N` 미스매치(max3/sum_to_n/sum_array/grid_score 공통)의 근본을
+규명하고 충실 포팅. master `be0999c` 머지(7커밋). 팀 작업(Fable 심층 C++ 규명 + 변형 corpus 3라운드 실측 +
+Opus 구현/SSA 진단).
+- **근본 = 심볼 스냅샷 타이밍**(이전 "committed 타입이 함수별로 갈린다/전파 strength" 가설은 오답 -- 둘 다
+  fixpoint에선 committed int 도달). 로컬 선언 타입 = 마지막 `ActionRestructureVarnode`의 committed varnode
+  타입 스냅샷. `ActionInferTypes`가 count 미보고(coreaction.cc:5422)라 순수 타입 커밋으로는 restructure
+  추가 pass 없음. no-diamond(counted_loop/max3/sum_to_n)는 fullloop iter-2가 1 pass로 수렴 -> 마지막
+  restructure가 pre-typeprop TYPE_UNKNOWN 스냅샷 -> undefined4. diamond(else 분기, process)는 iter-1 tail의
+  `ActionDoNothing`이 marker-only 블록 제거(count+1) -> iter-2가 2 pass -> pass2 restructure가 커밋 후 int
+  gather -> int. 변형 corpus 실측으로 else-분기가 트리거임을 확정(나눗셈/다중return은 반증).
+- **7 fixes**: (1) `TypeOrder`(datatype.go, type.cc:216-222). (2) faithful `ActionInferTypes` count=0, tree
+  전용(action_infertypes.go); production/bridge는 `action_infertypes_legacy.go`로 격리 보존. (3) `ActionDeadCode`
+  OncePerFunc->flags=0(action_deadcode.go, coreaction.hh:560/cc:5514) = **uint-flood 근본**: in-loop DeadCode가
+  매 pass 재실행돼 orphan `RAX=ZEXT(EAX)` 제거(안 죽이면 getLocalType이 ZEXT의 UINT input-local을 집어
+  params/return까지 flood). (4) 중복 post-cleanup DeadCode 제거. (5) `RangeHint` symbol 타입(rangehint.go;
+  varmap.cc gatherVarnodes:1124/isReadActive:1088 -- read-active loop phi는 gather됨, undefined4는 순수 타이밍
+  이지 필터 아님). (6) decl-from-symbol(printc.go). (7) `RulePtrFlow` dormant(rules_pointer.go GetOpList +
+  space.go IsTruncated; ruleaction.cc:9058-9068) -- **오역 수정**: 우리 RulePtrFlow가 "STORE 주소가 pointer
+  타이핑되면 발화"로 잘못 포팅돼 counted_loop 스택 STORE에 spurious late 발화 -> 여분 pass -> int. C++는
+  포인터 폭-절단 rule로 non-truncated 아키텍처(x86/x64/aarch64)에선 op pool 미등록=휴면. sum_list `int local_8`은
+  RulePtrArith(실 param_3 int* 체이스)가 담당, 오역 rule 안 되살림.
+- **회귀 0**: tree 10/10 byte-identical(counted_loop undefined4 복원 + sum_list int 유지), x64 5/8, production
+  TestMSVC*/pcode/bridge/sla green.
+- **남은 3개(별도 블로커)**: sum_array = 유일 차이 `longlong` vs `long`(데이터모델 LLP64, normalizedBaseType
+  printc.go:1177). grid_score/process = 스택프레임 미복구(stackOffsets=[]) + step5 `ActionDoNothing`(현재 no-op
+  스텁 coreaction.go:594; diamond->int)은 스택프레임 복구 후에나 유효.
+
 ### 2026-06-30: x86-64 SysV 파라미터 선언 순서 버그 수정 (breadth probe로 발견)
 표본 충분성 점검차 x64 add 스니펫을 non-processEntry 모드로 트리에 돌려 register-param 복구를 확인하다
 **시그니처 파라미터 순서 역전 버그**를 발견. `entry(long param_1,long param_2)` 대신 `entry(long param_2,long param_1)`
