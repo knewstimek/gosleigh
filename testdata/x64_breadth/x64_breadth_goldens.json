@@ -1,0 +1,22 @@
+{
+  "functions": [
+    {
+      "name": "dist_sq",
+      "entry": 9216,
+      "bytes": "48894c2408488b442408488b4c24088b000faf01488b4c2408488b5424088b49040faf4a0403c1c3",
+      "c": "\r\nint dist_sq(int *param_1)\r\n\r\n{\r\n  return *param_1 * *param_1 + param_1[1] * param_1[1];\r\n}\r\n\r\n"
+    },
+    {
+      "name": "sum2d",
+      "entry": 9264,
+      "bytes": "44894424188954241048894c24084883ec18c744240800000000c7042400000000eb088b0424ffc08904248b4424283904247d44c744240400000000eb0a8b442404ffc0894424048b442430394424047d248b04240faf442430034424044898488b4c24208b04818b4c240803c88bc189442408ebc8ebab8b4424084883c418c3",
+      "c": "\r\nint sum2d(longlong param_1,int param_2,int param_3)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  undefined4 local_10;\r\n  \r\n  local_10 = 0;\r\n  for (local_18 = 0; local_18 < param_2; local_18 = local_18 + 1) {\r\n    for (local_14 = 0; local_14 < param_3; local_14 = local_14 + 1) {\r\n      local_10 = local_10 + *(int *)(param_1 + (longlong)(local_18 * param_3 + local_14) * 4);\r\n    }\r\n  }\r\n  return local_10;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "dispatch",
+      "entry": 9408,
+      "bytes": "894c24084883ec188b442420890424833c2407774f48630424488d0d301100008b8481302500004803c1ffe0b8ffffffff4883c418c3",
+      "c": "\r\nundefined8 dispatch(uint param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000024e0 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)param_1 * 4 + 0x5b40)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
+    }
+  ]
+}
