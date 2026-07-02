@@ -1,5 +1,12 @@
 # 다음 세션 프롬프트 (복사해서 사용)
 
+> **낡은 스냅샷 주의 (2026-07-03 감사).** 이 파일은 register-param 세션 시점(master `fc368a6`)의 낡은
+> 핸드오프다. 현재 세션 프롬프트는 저장소 루트의 `NEXT_SESSION_PROMPT.md`(master `eadd9c0`)를 본다.
+> 아래 본문은 "미션 #1 게이트(손정렬 41-call subset을 universal-action 트리로 대체)"를 앞으로 할 일로
+> 서술하지만, 이 게이트는 2026-07-03 H8-debt-2로 이미 완료됐다(master `eadd9c0`: `bridge.Decompile`이
+> `db.BuildUniversalAction(nil)+BuildDefaultGroups()+SetCurrent("decompile").Perform(fd)` 트리 경로로
+> 교체, 트리 10/10, x64 corpus 7/8). 아래 내용은 그 시점 기록으로만 남긴다.
+
 Gosleigh 작업 재개. master fc368a6, 전 패키지 그린 (loader/pcode/sla/bridge).
 먼저 docs/STATUS.md(현재상태 + "다음 작업 1" = x64/ARM register-param root cause) + docs/CHANGELOG.md
 (2026-06-30 RuleRangeMeld 항목) 읽고 파악.
