@@ -5,6 +5,68 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-03: H8-debt-2 Step3(bespoke ActionStackPtrFlow 은퇴) + breadth 디스커버리(struct/2d/switch 갭 맵)
+H8-debt-2 본체(트리를 production 경로로, master `eadd9c0`) + process gap1/ActionDoNothing 직후 이어진
+세션. 두 가지를 완료했다: (A) 레거시 테스트 하네스를 트리 경로로 이전하고 bespoke `ActionStackPtrFlow`를
+완전히 삭제(H8-debt-2 Step3, master `accd8a9`), (B) struct/2D 배열/switch 패턴의 별도 x64 breadth corpus를
+구축해 신규 갭을 매핑(master `5276375`). **이로써 H8-debt-2(Step1+Step2+Step3)가 완전히 종료됐다.** master
+HEAD `accd8a9`, origin 푸시됨.
+
+- **완료 A: H8-debt-2 Step3 -- bespoke ActionStackPtrFlow 은퇴 (master `accd8a9`)**:
+  - `pkg/pcode/action_stack_ptr_flow.go`(619줄) 삭제. `loader_test.go`의 legacy 직접-heritage 테스트
+    13개를 트리 경로(`bridge.Build(+CspecPath[+EntryPoint])` -> `bridge.Decompile`이 universal-action
+    트리를 구동)로 이전, 원본 assertion은 무수정. x86 non-processEntry(CountedLoop/IfElse/Multiply/Add3/
+    ClassifySign/Switch/StructAccess/ArrayIndex/CdeclParamLocal) + x86gcc.cspec, AArch64
+    (AARCH64SimpleFunction) + AARCH64.cspec, x86 processEntry(ClassifySign/Multiply/Add3
+    GoldenProcessEntry) + x86gcc.cspec + EntryPoint(`Decompile(ProcessEntryName, GhostParams=2)`).
+  - 은퇴한 경로만 운동시키던 진단/중복 하네스도 함께 삭제: `classify2diag_main.go`(scratch), `msvc_debug_test.go`
+    (assertion 없는 debug dump 2건), `msvc_diag_test.go`의 `runPipeline`(출력만 로깅하고 assert 없음 --
+    골든 assertion은 이미 트리 경로인 `runPipelineGhidra`가 담당), `tree_output_diag_test.go`의
+    `TestProductionStagesDiag`+`blockShape`(은퇴한 손정렬 파이프라인의 단계별 복제),
+    `tree_accum_diag_test.go`의 RAW_DUMP spf 라인.
+  - diff: +59/-1794(7파일). `NewActionStackPtrFlow` Go 호출처 0건(잔존은 과거 커밋 메시지/주석/assertion
+    문자열뿐).
+  - 게이트: `go build` 클린, `TREE_MAP=1 TestTreeFullGoldenMap` 10/10, `X64_CORPUS=1
+    TestX64CorpusGoldenMap` 7/8(무회귀, process는 기존 MISMATCH 유지), `go test ./...` 전 패키지 그린
+    (symbols_test 3건은 missing `simple_add_sym.exe` 사전조건 미충족으로 무시, 기존과 동일).
+  - **이로써 H8-debt-2 = Step1(cspec/EntryPoint 배선) + Step2(`Decompile` 트리 교체) + Step3(bespoke 파일
+    삭제) 완전 종료.** 잔여는 런타임 코드 주석 일부가 아직 `ActionStackPtrFlow`를 언급하는 것뿐(동작
+    무관, 후속 정리 가능).
+
+- **완료 B: breadth 디스커버리 -- struct/2D/switch corpus + 갭 맵 (master `5276375`)**:
+  - 기존 `testdata/x64_corpus/`(8함수, 7/8 baseline)는 건드리지 않고 별도 `testdata/x64_breadth/`를
+    신설(파이프라인은 동일 -- MSVC x64 `/Od` -> COFF obj -> Ghidra 12 헤드리스 `GenGoldens.java` 재사용).
+    신규 하네스 `TestX64BreadthGoldenMap`(X64_BREADTH=1). 3함수 2/3 MATCH:
+    - `dist_sq`(struct Point* 필드 접근, offset 0/8) MATCH -- multi-offset 포인터 deref parity 확인.
+    - `sum2d`(2D 배열 `m[i*cols+j]` 인덱싱) MATCH -- 중첩 주소산술 parity 확인.
+    - `dispatch`(dense switch 0..7, MSVC `/Od`가 jump table로 lowering) MISMATCH -- 신규 매핑된 갭.
+  - **dispatch 갭의 근본 분류(4가지, 상세 `testdata/x64_breadth/README.md`)**:
+    1. jumptable 복구가 파이프라인에서 미구동: `JumpTable`/`JumpModel` 머신러리는 `pkg/pcode/jumptable.go`
+       (1671줄)에 포팅돼 있으나, decompile 경로에 `AddJumpTable`을 채우는 신규 등록 드라이버 호출자가
+       없다. C++ 대응: `FlowInfo::generateOps`(flow.cc:799)가 `tablelist`를 순회하며
+       `FlowInfo::recoverJumpTables`(flow.hh:138, flow.cc:1427)를 호출하는 구동 루프 -- Go 측
+       `ActionSwitchNorm`(coreaction.go:3157)은 이미 등록된 JumpTable을 소비만 할 뿐, recoverJumpTables에
+       대응하는 신규 등록 드라이버가 없다.
+    2. `truncateIndirectJump` 실패 폴백 미포팅: 테이블 복구가 실패한 BRANCHIND를 CALLIND + artificial
+       return으로 강등하는 전환이 없다. C++: `FlowInfo::truncateIndirectJump`(flow.cc:727,
+       `setBadJumpTable(true)`). `void`+`goto *(...)` vs `undefined8`+`uVar1=(*(code*)(...))()`+`return`
+       차이의 직접 원인.
+    3. `goto label_missing` 파생: range guard의 default(범위 밖) 타깃 블록이 링크되지 않아 발생 -- #1/#2의
+       파생 증상이지 별개 근본이 아니다.
+    4. `&__ImageBase` 부재: 단일 `.text` 하네스가 image base/.rdata/reloc을 갖지 않아 트리의 테이블
+       base가 raw 상수(`13952`/`0x1150`)로 남는다 -- loader/harness 계층 갭(별개, 낮은 우선순위).
+  - **핵심 통찰**: 이 jump table은 `.rdata`의 `&__ImageBase` 상대 오프셋이라 relocation을 요구하는데,
+    단일 `.text` 블롭 하네스에는 image base/reloc/.rdata가 없다. **Ghidra 자신도** headless로 이 테이블
+    복구에 실패해(`WARNING: Could not emulate address calculation`) 동일 폴백(`truncateIndirectJump`,
+    fail_normal)을 탄다 -- 따라서 parity 타깃은 완전한 switch 테이블 복구가 아니라 CALLIND 폴백 자체다.
+  - **breadth 우선순위(ROI)**: (1) `truncateIndirectJump` 폴백[저비용, 즉시 parity 달성] -> (2)
+    multi-section+reloc 로더[테이블 실복구 전제조건] -> (3) struct 타입 복구[저우선, dist_sq는 이미
+    타입-미복구 상태로 MATCH]. breadth는 다세션 규모 작업.
+  - 게이트: `TREE_MAP=1 TestTreeFullGoldenMap` 10/10, `X64_CORPUS=1 TestX64CorpusGoldenMap` 7/8 무회귀,
+    `go build` + `go test ./pkg/...` 그린. `breadth.obj`는 gitignore(`*.obj`).
+- C++ 참조: `flow.cc:799`(FlowInfo::generateOps jumptable 구동 루프), `flow.hh:138`/`flow.cc:1427`
+  (FlowInfo::recoverJumpTables), `flow.cc:727`(FlowInfo::truncateIndirectJump).
+
 ### 2026-07-03: H8-debt-2 완료 -- production을 universal-action 트리로 (미션 #1 게이트)
 process gap1 + ActionDoNothing 세션(바로 아래 항목) 직후 이어진 세션. `bridge.Decompile`의 41-call 손정렬
 subset을 버리고 `db.BuildUniversalAction(nil)+BuildDefaultGroups()+SetCurrent("decompile").Perform(fd)`
