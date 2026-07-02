@@ -66,6 +66,29 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ## 다음 작업 (우선순위)
 
+### 미시작: grid_score/process 스택프레임 복구 (x64 corpus 남은 2개, 2026-07-02 진단 완료)
+- **현상**: grid_score/process가 `stackOffsets=[]`(스택 로컬 전면 미복구) -> `uVar2=(int*)(uVar3-0x18)` + `uVar2[N]`
+  포인터 산술 쓰레기. golden은 스택 로컬(예: process `int local_18/14/10/c`) + 정상 파라미터. sum_array 등 단순
+  프레임은 복구되나 grid_score(중첩루프)/process(clamp+다분기)는 실패.
+- **근본(계측 확정, GOSLEIGH_SPF_DEBUG)**: seed(RSP=register:0x20/8) 탐지는 성공. 실패는 `stackAddrOffset()`가
+  in-loop 접근 `INT_ADD(const, register:0x20/8W)`의 rsp base를 못 잡음. 두 원인: (1) 중첩루프 phi cycle --
+  rsp MULTIEQUAL들이 상호참조라 buildStackOffsetMap의 "모든 non-self 입력 매핑+동일offset" 규칙이 cycle에서
+  영구 미해결(action_stack_ptr_flow.go:550-575). (2) free read -- 주소 INT_ADD의 rsp 입력이 def 없는 free
+  varnode(def-use walk 도달 불가), process/grid_score 공통. **grid_score/process 같은 근본.**
+- **C++ 참조**: Ghidra는 RSP를 spacebase(pspec `<stackpointer>`)로 선언, 스택 접근 인식을 **heritage 이전** raw
+  p-code(`INT_ADD(RSP_input,const)`, phi/free 없음)에서 수행. `ActionStackPtrFlow::apply`(coreaction.cc:482)는
+  clog/extrapop 정리만. 우리는 bespoke def-use 전파를 **heritage 이후 1회**(action.go:1361 actstackstall) 실행
+  -> 파편화된 rsp라 실패. 코드 주석도 인지(action_stack_ptr_flow.go:222-224, heritage.go:936-937).
+- **수정 대상 Go**: `pkg/pcode/action_stack_ptr_flow.go`(buildStackOffsetMap/stackAddrOffset), `pkg/pcode/action.go`
+  (파이프라인 순서, :1179 heritage / :1361 actstackstall), heritage/StackSlots 경로.
+- **수정안 A(정석, 고위험)**: 스택 접근 인식을 heritage 이전으로 이동 -- raw INT_ADD(RSP_input,const) 변환 후
+  stack space heritage(StackSlots/HeritageRange 기존). SP 무변화라 base가 전부 RSP_input const-chain -> 전파 자명.
+  단 SSA 없는 SP 값추적(StackSolver 성격) 필요 + **파이프라인 순서 변경이라 x86-32 EBP 회귀 위험 큼 = fresh 세션 +
+  worktree + 전 매트릭스 가드**. B(buildStackOffsetMap phi-cycle 강화)는 process free-read 못 풀어 부분적.
+- **성공 기준**: `X64_CORPUS=1 TestX64CorpusGoldenMap`에서 grid_score/process 스택 로컬 복구(6/8 -> 증가) +
+  `TREE_MAP=1 TestTreeFullGoldenMap` 10/10 유지(x86-32 EBP 무회귀). process는 스택 외 나눗셈 렌더 + 8바이트
+  ulonglong return 잔차 별도(스택 복구 후 재평가).
+
 > **2026-07-02 완료: TYPE-LEAK + sum_array 데이터모델/printc -> x64 corpus 6/8 MATCH
 > (add4/poly4/max3/sum_to_n/sum_array/classify).** master `30810bd`, tree 10/10 유지. sum_array 완료(3커밋):
 > cspec `<long_size>` -> ProtoModel -> printc 데이터모델 배선(8바이트 signed = LLP64 "longlong" / LP64 "long")
