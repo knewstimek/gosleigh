@@ -188,11 +188,11 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 
 	// Attach the default evaluation prototype model (Architecture::defaultfp
 	// equivalent) so the universal-action tree's ActionPrototypeTypes can create
-	// a FuncProto + ScopeLocal. This mirrors the model the hand-ordered decompile
-	// driver builds in ApplyCallingConvention; the StackSpace is left nil here
-	// (ActionStackPtrFlow resolves it during the run, then ScopeLocal restructure
-	// maps the stack varnodes). Additive: the decompile driver replaces the proto
-	// via its own ApplyCallingConvention so production output is unaffected.
+	// a FuncProto + ScopeLocal. Since H8-debt-2 the tree is the production decompile
+	// path (bridge.Decompile), so this default model IS the model production runs
+	// with: its faithful stack spacebase space (set below when a cspec is supplied)
+	// is consumed by ActionSpacebase + RuleLoadVarnode/RuleStoreVarnode during the
+	// run. Callers must supply a cspec for stack-frame recovery (see Decompile).
 	fd.SetDefaultModel(buildDefaultModel(engine, result.CspecData, fd, cfg.EntryPoint))
 
 	return result, nil
@@ -203,8 +203,11 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 // arch-aware: register parameter offsets and the integer return register are
 // derived from the parsed cspec so register-based ABIs (x86-64 SysV RDI/RSI...,
 // AArch64 x0/x1...) recover register parameters and the return value, not just
-// x86-32 stack ABIs. StackSpace is left nil; ActionStackPtrFlow resolves it
-// during the run.
+// x86-32 stack ABIs. When a cspec is supplied the faithful stack spacebase space
+// is created up front (buildFaithfulStackSpace) and set as model.StackSpace, so
+// ActionSpacebase + RuleLoadVarnode/RuleStoreVarnode recover stack locals during
+// the run; when cspec is nil the StackSpace stays nil and no stack frame is
+// recovered.
 //
 // When cspec is nil (cspec-less builds, e.g. the gcd tree regression guard) the
 // RegParamOffsets stay empty and the return register falls back to x86 EAX
@@ -226,9 +229,9 @@ func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Fun
 	// the stack pointer as its base. This gives Funcdata.Spacebase (ActionSpacebase)
 	// and RuleLoadVarnode/RuleStoreVarnode a real stack space to mark and write
 	// into. It is set on the default evaluation model, which drives the
-	// universal-action tree; the hand-ordered production driver builds and applies
-	// its own cdecl model (with the bespoke ActionStackPtrFlow stack space), so this
-	// default-model StackSpace is not consulted there.
+	// universal-action tree -- the production decompile path since H8-debt-2. The
+	// bespoke ActionStackPtrFlow is no longer on the production path (it survives
+	// only in legacy test harnesses pending Step 3 retirement).
 	if cspec != nil {
 		if ss := buildFaithfulStackSpace(xr, cspec, fd); ss != nil {
 			model.StackSpace = ss

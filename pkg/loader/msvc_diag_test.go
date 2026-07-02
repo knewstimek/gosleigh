@@ -120,12 +120,23 @@ func runPipelineGhidra(t *testing.T, prog []byte, name string) string {
 	dir := filepath.Dir(file)
 	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
 	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
 
 	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "entry", Entry: base, MaxInstructions: 60})
+	// Supply the cspec + EntryPoint so the universal-action tree (the production
+	// bridge.Decompile path since H8-debt-2) builds a faithful stack spacebase
+	// space and the arch-aware default ProtoModel. The cspec is the one load-bearing
+	// setup difference between the old 41-call subset and the tree: without it the
+	// faithful ActionSpacebase/RuleLoadVarnode path has no StackSpace. These x86-32
+	// MSVC leaf functions are entry points rendered under the processEntry
+	// convention (EntryPoint: true).
+	result, err := bridge.Build(engine, bridge.BuildConfig{
+		Name: "entry", Entry: base, MaxInstructions: 60,
+		CspecPath: cspecPath, EntryPoint: true,
+	})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
 	}
