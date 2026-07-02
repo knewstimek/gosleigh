@@ -2616,7 +2616,13 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 			case 1, 2, 4:
 				return fmt.Sprintf("%d", int32(vn.Offset()))
 			case 8:
-				return fmt.Sprintf("%dLL", int64(vn.Offset()))
+				// No "LL" size suffix by default. C++ PrintC::push_integer
+				// (printc.cc:1354) appends the sized token only when
+				// vn->isLongPrint() is set, which happens solely in
+				// CastStrategyC (cast.cc:103) for a shift operand that would
+				// otherwise be int-promoted. That narrow case is unmodeled, so
+				// an 8-byte integer constant prints as a plain decimal here.
+				return fmt.Sprintf("%d", int64(vn.Offset()))
 			}
 		case TYPE_FLOAT:
 			return renderFloatLiteral(vn.Offset(), uint32(typed.Size()))
