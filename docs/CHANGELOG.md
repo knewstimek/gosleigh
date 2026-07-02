@@ -5,6 +5,67 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-03: process gap1(포인터 배열 deref) + ActionDoNothing 포팅 -- 잔여 3갭 deep-debt 확정 (x64 corpus 7/8 유지)
+grid_score 선언순서 완료(`8d007b5`) 이후 이어진 세션. process의 4개 근본 후보 중 gap1을 닫고
+`ActionDoNothing`/`RemoveDoNothingBlock`을 충실 포팅했다. ActionDoNothing의 A/B 실측으로 "do-nothing 제거가
+gap3/gap4의 공통 근본"이라는 gap34-invest 가설을 반증하고, gap34-v2 재규명(실제 MSVC 디스어셈블 + Ghidra
+golden ground-truth 대조)으로 남은 3갭(gap2/gap3/gap4)의 진짜 근본을 확정했다. master `7a7b203`(gap1),
+`c4d85ea`(ActionDoNothing). x64 corpus는 7/8 유지(process는 여전히 MISMATCH -- 근본 규명은 깊어졌으나
+미해소).
+- **완료 1: process gap1(포인터-파라미터 배열 deref, 실 correctness 버그) -- master `7a7b203`**:
+  - 현상: golden `iVar1 = *(int *)(param_1 + (longlong)local_14 * 4);` 누락 -> iVar1 미초기화 read.
+  - 근본: `pkg/pcode/printc.go` emitOps가 unique-space 출력을 무조건 억제(예외 = named MULTIEQUAL의 단독
+    consumer뿐). Ghidra `PrintC::emitBlockBasic`(printc.cc:2836)는 `isImplied()`로만 억제하지 unique-space
+    여부로 억제하지 않는다 -- 우리 blanket 억제는 근사고, `IsExplicit` 기준 emit이 충실하다. explicit
+    플래그는 `ActionMarkExplicit`(coreaction.cc:3244, baseExplicit 3009)가 세팅.
+  - 수정: 억제 가드에 `out.IsExplicit() && out.NumDescend()>0` 예외 추가. `NumDescend()>0`은 휴리스틱이
+    아니라 충실 프록시다 -- `ActionMarkExplicit`는 `ActionDeadCode` 이후 실행되고(coreaction.cc:3252,
+    beginDef(0)가 no-descendant dead op을 print 전에 제거) 실제 explicit def는 print 시점에 항상 live
+    descendant를 가진다.
+  - KNOWN-GAP: `sub rsp,0x18` 프레임 COPY가 faithful-stack ActionDeadCode를 통과해 잔존(unique, explicit,
+    NumDescend==0)하는 경우가 있어 `uVarN = 0x18;`로 샐 수 있다 -- Ghidra처럼 ActionDeadCode가 그 COPY를
+    제거해야 하나 후속 과제, 그때까지 NumDescend>0 가드가 대리.
+  - 게이트: tree 10/10, x64 7/8(deref 라인 정확 렌더), production green.
+- **완료 2: `ActionDoNothing`/`RemoveDoNothingBlock` 충실 포팅 -- master `c4d85ea`**:
+  - 이전 no-op 스텁이던 `ActionDoNothing.Apply`(coreaction.go:594)/`RemoveDoNothingBlock`(funcdata.go:713)을
+    C++ 그대로 포팅(coreaction.cc:3473-3497, funcdata_block.cc:327). 신규 `pkg/pcode/funcdata_donothing.go`:
+    pushMultiequals(funcdata_block.cc:84), opZeroMulti(:177), descendantsOutside(:233),
+    blockRemoveInternal(:254), removeDoNothingBlock(:327). `pkg/pcode/block_basic.go`에 술어 추가:
+    hasOnlyMarkers(block.cc:2578), isDoNothing(:2596), unblockedMulti(:2534).
+  - **A/B 결과(결정적, gap34-invest 반증)**: ActionDoNothing이 실제 발화해 do-nothing 블록을 제거하는데도
+    (classify/grid_score/process에서 확인) 골든 출력은 전부 byte-identical하게 유지된다 -- grid_score/
+    classify/max3/sum_array는 undefined4 MATCH 그대로(무회귀), process도 변화 없음(&& 여전히 미렌더 +
+    undefined 여전히 유지). 즉 "do-nothing 제거가 gap3(&&)/gap4(타입누수)로 캐스케이드된다"는 gap34-invest의
+    예측은 실측으로 반증됐다.
+  - 커밋 유지 이유: 충실 포팅 + 무회귀 + H8-debt-2에 필요한 선행 인프라이기 때문(A/B가 가설을 반증해도
+    포팅 자체는 정답).
+  - 게이트: tree 10/10, x64 7/8, production green.
+- **판정: process 잔여 3갭(gap2/gap3/gap4) = deep-debt, H8-debt-2와 묶음(1세션 착지 불가)**:
+  gap34-v2 재규명(실제 MSVC 디스어셈블 + Ghidra golden ground-truth)으로 확정.
+  - process 트리 출력은 코스메틱이 아니라 의미적 붕괴다 -- count++가 범위 밖 가드 안(정답 범위 안)에 있고,
+    범위 안 v(local_18)는 미초기화, 로드 대입문이 드롭돼 있었다(gap1로 그 중 하나는 닫힘).
+  - **gap3 진짜 근본**: RuleBlockOr/comma가 아니다(RuleBlockOr는 발화하나 이미 붕괴된 그래프 위에서
+    오극성으로 발화, condexe는 process에서 애초 미발화). 실체 = 비대칭 clamp의 단일-스토어 블록(v=hi)이
+    sibling count 블록으로 오폴딩(블록구조화 collapse 또는 RuleStoreVarnode heritage 결함).
+  - **gap4 진짜 근본**: 스냅샷 타이밍이 아니다. MSVC eax 스크래치 임시가 스택-로컬로 미접힘(Merge/copyprop
+    parity 갭).
+  - **gap2 진짜 근본**(구현 시도는 미커밋, gcd 회귀로 기각): 과축소 주체 = `RuleSubCommute`(rules_ext.go:225).
+    Go의 `RuleSubvarZext`(return narrowing)가 ZEXT를 RuleSubCommute의 overlap 체크 전에 제거해 순서가
+    이탈한다. 충실 SEXT 가드 포팅 시 gcd 회귀(packed .sla가 dividend를 INT_OR로 인코딩하는데 Ghidra는
+    INT_SEXT로 처리 -- `RuleOrSextForm` 미정규화). return-recovery/type-snapshot 타이밍과 얽혀 있다.
+  - **결론**: 3갭 전부 return-recovery/type-snapshot/merge/structuring 파이프라인 재작업으로 수렴한다 --
+    H8-debt-2와 분리할 수 없다. process는 코퍼스 중 유일하게 3-way clamp + count + 64비트 나눗셈 +
+    early-return이 eax를 공유하는 특이 케이스다.
+- **다음 = H8-debt-2 피벗**: `bridge.Decompile`의 41-call 손정렬 subset을 `db.BuildUniversalAction+Perform`
+  (universal-action 트리)로 교체 -> bespoke `ActionStackPtrFlow` 은퇴. 트리는 이미 10/10 + 7/8로 우수.
+  H8-debt-2가 merge/structuring/snapshot parity를 정면으로 다루므로 process 3갭이 그 과정에서 해소될
+  경로다. `ActionDoNothing`(완료 2, `c4d85ea`)은 이 작업의 선행 인프라. 상세는 `docs/STATUS.md` 미시작 +
+  `NEXT_SESSION_PROMPT.md` 참고.
+- C++ 참조: `printc.cc:2836`(emitBlockBasic), `coreaction.cc:3244`(ActionMarkExplicit)/`:3252`(ActionDeadCode
+  beginDef)/`:3473-3497`(ActionDoNothing), `funcdata_block.cc:84/177/233/254/327`(pushMultiequals/
+  opZeroMulti/descendantsOutside/blockRemoveInternal/RemoveDoNothingBlock), `block.cc:2534/2578/2596`
+  (UnblockedMulti/HasOnlyMarkers/IsDoNothing), `rules_ext.go:225`(RuleSubCommute, Go).
+
 ### 2026-07-03: grid_score 선언순서 완료 -- stack space index overflow + getNameRepresentative 포팅 (x64 corpus 7/8)
 이전 세션이 남긴 "얽힘" 가설(stack space index 변경이 RestructureVarnode/ActionInferTypes 타입-스냅샷 타이밍에
 영향)을 ACTTRACE 실측으로 반증하고, 진짜 근본(printc 선언-대표 선택의 loc_tree 의존 포팅 버그)을 규명해 해소.
