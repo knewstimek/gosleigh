@@ -142,7 +142,14 @@ func rewriteLoadToCopy(op *PcodeOp, data *Funcdata, spc *address.Space, off uint
 		return 0
 	}
 	newvn := data.NewVarnode(op.Output().Size(), address.Address{Space: spc, Offset: off})
-	SetVarnodeType(newvn, op.Output().TypeReadFacing(op))
+	// Do NOT seed a data-type on the new stack/const varnode. C++
+	// RuleLoadVarnode::applyOp (ruleaction.cc:4310) creates it with
+	// data.newVarnode(size,baseoff,offoff) and leaves the type undefined so that
+	// ActionInferTypes assigns it later. Seeding the LOAD-output's already-
+	// propagated type here caused ScopeLocal's restructure snapshot
+	// (MapState::gatherVarnodes reading vn.Type()) to leak a speculative int/uint
+	// into the stack Symbol instead of the pre-typeprop undefined that Ghidra
+	// records (e.g. counted_loop local_c: undefined4 vs unsigned int).
 	data.OpSetInput(op, newvn, 0)
 	data.OpRemoveInput(op, 1)
 	data.OpSetOpcode(op, CPUI_COPY)
@@ -157,7 +164,11 @@ func rewriteStoreToCopy(op *PcodeOp, data *Funcdata, spc *address.Space, off uin
 		return 0
 	}
 	out := data.NewVarnodeOut(op.Input(2).Size(), address.Address{Space: spc, Offset: off}, op)
-	SetVarnodeType(out, op.Input(2).TypeReadFacing(op))
+	// Do NOT seed a data-type on the new stack varnode. C++
+	// RuleStoreVarnode::applyOp (ruleaction.cc:4352) uses data.newVarnodeOut(size,
+	// addr, op) with no type; ActionInferTypes assigns it later. See the parity
+	// note in rewriteLoadToCopy -- seeding the stored value's type here leaks a
+	// speculative int/uint into the stack Symbol via the restructure snapshot.
 	out.SetStackStore()
 	data.OpRemoveInput(op, 1)
 	data.OpRemoveInput(op, 0)

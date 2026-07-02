@@ -494,10 +494,119 @@ func (fd *Funcdata) MarkIndirectOnly() {
 	_ = fd
 }
 
-// Spacebase performs stack-pointer spacebase processing.
-// C++ parity: funcdata.hh Funcdata::spacebase
+// spacebaseStackSpace returns the function's stack space (the spacebase-kind
+// space whose base register is the stack pointer), taken from the locked
+// prototype model or the default evaluation model. Returns nil when no stack
+// space has been wired (the flag-off default), which makes Spacebase a no-op.
+func (fd *Funcdata) spacebaseStackSpace() *address.Space {
+	if fd.funcProto != nil {
+		if m := fd.funcProto.Model(); m != nil && m.StackSpace != nil {
+			return m.StackSpace
+		}
+	}
+	if fd.defaultModel != nil && fd.defaultModel.StackSpace != nil {
+		return fd.defaultModel.StackSpace
+	}
+	return nil
+}
+
+// Spacebase marks the stack-pointer register Varnodes as spacebase bases so the
+// LOAD/STORE rules (RuleLoadVarnode/RuleStoreVarnode via correctSpacebase) can
+// convert stack-pointer-relative memory accesses into stack-space Varnodes.
+//
+// For each base register of the stack space: every non-free Varnode at that
+// (space,offset,size) location gets the spacebase flag and the associated stack
+// space bound; the pointer-to-spacebase data-type is set on the INPUT Varnode
+// only; and an already-marked base defined by an INT_ADD has its uses split so
+// dead-code can eliminate the residual add. Running each mainloop pass
+// (ActionSpacebase) makes this incremental: newly created base Varnodes are
+// picked up on the next pass.
+//
+// Gated behind faithfulStackEnabled: when off this is a no-op and stack recovery
+// stays with the bespoke ActionStackPtrFlow (unchanged behavior).
+// C++ parity: funcdata.cc Funcdata::spacebase.
 func (fd *Funcdata) Spacebase() {
-	_ = fd
+	if fd == nil || !faithfulStackEnabled() {
+		return
+	}
+	stackSpace := fd.spacebaseStackSpace()
+	if stackSpace == nil {
+		return
+	}
+	tf := fd.TypeFactory()
+	for i := 0; i < stackSpace.NumSpacebase(); i++ {
+		point := stackSpace.GetSpacebase(i)
+		if point.Space == nil || point.Size == 0 {
+			continue
+		}
+		// Snapshot: SplitUses appends new Varnodes at the same location while we
+		// iterate. Newly created bases are marked on the next Spacebase pass.
+		snapshot := append([]*Varnode(nil), fd.vbank.AllVarnodes()...)
+		for _, vn := range snapshot {
+			if vn == nil || vn.Space() != point.Space ||
+				vn.Offset() != point.Offset || vn.Size() != point.Size {
+				continue
+			}
+			if vn.IsFree() {
+				continue
+			}
+			if vn.IsSpaceBase() {
+				// Already marked: force a use-split once its def is an INT_ADD so
+				// the residual base-pointer add can be removed by dead code.
+				if op := vn.Def(); op != nil && op.Code() == CPUI_INT_ADD {
+					fd.SplitUses(vn)
+				}
+				continue
+			}
+			// Mark all base registers (not just the input).
+			BindSpacebase(vn, stackSpace)
+			if vn.IsInput() && tf != nil {
+				// Only set the pointer type on the input spacebase register.
+				ct := tf.GetTypeSpacebase(stackSpace)
+				ptr := tf.GetPointer(point.Size, ct, uint32(stackSpace.WordSize))
+				vn.UpdateType(ptr)
+			}
+		}
+	}
+}
+
+// SplitUses duplicates a Varnode's defining op at each of its reads so every
+// read becomes a distinct Varnode. Used by Spacebase to break a spacebase base
+// with multiple descendants apart; dead code then removes the original op.
+// No-op for ops with side effects is the caller's responsibility (only called
+// on INT_ADD-defined spacebase Varnodes here).
+// C++ parity: funcdata_varnode.cc Funcdata::splitUses.
+func (fd *Funcdata) SplitUses(vn *Varnode) {
+	if fd == nil || vn == nil {
+		return
+	}
+	op := vn.Def()
+	if op == nil {
+		return
+	}
+	descend := vn.DescendIter()
+	if len(descend) < 2 {
+		return // zero or one descendant: nothing to split
+	}
+	for _, useop := range descend {
+		slot := useop.GetSlot(vn)
+		if slot < 0 {
+			continue
+		}
+		newop := fd.NewOp(op.NumInput(), op.Addr())
+		newvn := fd.NewVarnode(vn.Size(), vn.Addr())
+		if t := vn.Type(); t != nil {
+			SetVarnodeType(newvn, t)
+		}
+		fd.OpSetOutput(newop, newvn)
+		fd.OpSetOpcode(newop, op.Code())
+		for i := 0; i < op.NumInput(); i++ {
+			fd.OpSetInput(newop, op.Input(i), i)
+		}
+		fd.OpSetInput(useop, newvn, slot)
+		fd.OpInsertBefore(newop, op)
+	}
+	// Dead-code actions remove the now-unused original op.
 }
 
 // ApplyForceGoto applies force-goto overrides.

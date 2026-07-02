@@ -116,6 +116,13 @@ func (a *ActionStackPtrFlow) Reset(data *Funcdata) {
 // The C++ version runs before Heritage so Heritage handles stack SSA natively;
 // Gosleigh replicates this by requiring callers to run Heritage after Apply.
 func (a *ActionStackPtrFlow) Apply(data *Funcdata) int {
+	// When the faithful spacebase path owns stack recovery, this bespoke pass is
+	// disabled so it does not create a second (synthetic) stack space or race the
+	// faithful RuleLoadVarnode conversions. Covers every call site (the pass-0
+	// treestack call, the stackstall registration, and the decompile driver).
+	if faithfulStackEnabled() {
+		return 0
+	}
 	// Step 1: locate the frame pointer and its prologue push delta.
 	// Fall back to frameless detection when no EBP-style frame is found.
 	// Frameless functions (e.g. MSVC /O1 leaf functions) access params via

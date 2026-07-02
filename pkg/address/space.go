@@ -54,6 +54,58 @@ type Space struct {
 	// truncate_space attribute. All currently supported architectures
 	// (x86/x64/aarch64) leave it false. C++ parity: AddrSpace::isTruncated.
 	Truncated bool
+
+	// spacebases lists the register locations that act as a base address for
+	// this (spacebase-kind) space. For the stack space this is the single stack
+	// pointer register (RSP/ESP). Funcdata.spacebase iterates it to mark the
+	// matching Varnodes with Varnode::spacebase.
+	// C++ parity: AddrSpace's per-space VarnodeData spacebase list, populated by
+	// AddrSpace::setSpacebase and read via numSpacebase/getSpacebase.
+	spacebases []SpacebaseData
+}
+
+// SpacebaseData identifies a register location that serves as the base pointer
+// for a spacebase-kind address space.
+// C++ parity: the VarnodeData entries returned by AddrSpace::getSpacebase.
+type SpacebaseData struct {
+	// Space is the storage space of the base register (typically the register
+	// space), not this spacebase space.
+	Space  *Space
+	Offset uint64
+	Size   int32
+}
+
+// NumSpacebase returns the number of base registers pointing at this space.
+// C++ parity: AddrSpace::numSpacebase (space.hh).
+func (s *Space) NumSpacebase() int {
+	if s == nil {
+		return 0
+	}
+	return len(s.spacebases)
+}
+
+// GetSpacebase returns the i-th base register location for this space.
+// C++ parity: AddrSpace::getSpacebase (space.cc).
+func (s *Space) GetSpacebase(i int) SpacebaseData {
+	if s == nil || i < 0 || i >= len(s.spacebases) {
+		return SpacebaseData{}
+	}
+	return s.spacebases[i]
+}
+
+// AddSpacebase registers a base register location for this space. Duplicate
+// (space,offset,size) entries are ignored so repeated setup is idempotent.
+// C++ parity: AddrSpace::setSpacebase (space.cc).
+func (s *Space) AddSpacebase(sb SpacebaseData) {
+	if s == nil || sb.Space == nil || sb.Size == 0 {
+		return
+	}
+	for _, existing := range s.spacebases {
+		if existing == sb {
+			return
+		}
+	}
+	s.spacebases = append(s.spacebases, sb)
 }
 
 // IsTruncated reports whether pointers into this space use a truncated width.

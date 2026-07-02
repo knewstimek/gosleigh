@@ -3,6 +3,7 @@ package bridge
 import (
 	"errors"
 	"fmt"
+	"os"
 
 	"gosleigh/pkg/address"
 	"gosleigh/pkg/pcode"
@@ -135,6 +136,16 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		}
 	}
 
+	// INC-1 faithful stack path: bind the target address space onto each
+	// LOAD/STORE space-id constant (input 0) so loadStoreSpace/checkLoadStoreAddress
+	// can resolve it. Ghidra encodes the AddrSpace pointer directly in that
+	// constant; Gosleigh's lowering encodes the space index, so we map it back
+	// here. Gated behind the flag: without it, RuleLoadVarnode/RuleLoadConstAddr
+	// stay dormant (loadStoreSpace == nil) exactly as before.
+	if os.Getenv("GOSLEIGH_FAITHFUL_STACK") == "1" {
+		bindLoadStoreSpaces(fd, buildSpaceIndex(cfg.Entry.Space, summary))
+	}
+
 	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock)
 	graph.FindSpanningTree()
 	assignUnreachableIndices(graph)
@@ -213,6 +224,17 @@ func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Fun
 		return off, ok
 	}
 	model := pcode.NewProtoModelFromCspec(cspec, nil, regLookup)
+	// INC-1 faithful stack path (GOSLEIGH_FAITHFUL_STACK=1): create the stack
+	// spacebase space up front and register the stack pointer as its base. This
+	// gives Funcdata.spacebase (ActionSpacebase) and RuleLoadVarnode/
+	// RuleStoreVarnode a real stack space to mark and write into, replacing the
+	// bespoke ActionStackPtrFlow (which is disabled under the same flag). When the
+	// flag is off StackSpace stays nil, exactly as before.
+	if os.Getenv("GOSLEIGH_FAITHFUL_STACK") == "1" && cspec != nil {
+		if ss := buildFaithfulStackSpace(xr, cspec, fd); ss != nil {
+			model.StackSpace = ss
+		}
+	}
 	// Entry-point functions use the stack-based processEntry convention: register
 	// argument slots stay known (RegParamOffsets) but are not recovered as named
 	// parameters, so live-on-entry argument registers render as in_<reg>.
@@ -245,6 +267,96 @@ func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Fun
 		}
 	}
 	return model
+}
+
+// buildFaithfulStackSpace constructs the stack spacebase space for the INC-1
+// faithful path: it resolves the stack pointer register from the cspec, finds
+// the register storage space among the function's varnodes, and registers the
+// SP as the stack space's base. Returns nil when the SP register cannot be
+// resolved (e.g. cspec-less builds), leaving StackSpace nil as before.
+func buildFaithfulStackSpace(xr *sla.XRefs, cspec *pcode.CspecData, fd *pcode.Funcdata) *address.Space {
+	spName := cspec.StackPointerReg
+	if spName == "" {
+		return nil
+	}
+	si, off, sz, ok := xr.RegisterByName(spName)
+	if !ok || sz <= 0 {
+		return nil
+	}
+	regSpace, maxIdx := registerSpaceByIndex(fd, si)
+	if regSpace == nil {
+		return nil
+	}
+	stackSpace := &address.Space{
+		Name:     "stack",
+		Kind:     address.SpaceKindStack,
+		Index:    maxIdx + 1,
+		AddrSize: uint8(sz),
+		WordSize: 1,
+	}
+	stackSpace.AddSpacebase(address.SpacebaseData{Space: regSpace, Offset: off, Size: int32(sz)})
+	return stackSpace
+}
+
+// registerSpaceByIndex returns the address.Space pointer for the given space
+// index from the function's existing varnodes, plus the maximum space index
+// seen (so the synthetic stack space gets a non-colliding index).
+func registerSpaceByIndex(fd *pcode.Funcdata, si int64) (*address.Space, uint16) {
+	var found *address.Space
+	maxIdx := uint16(0)
+	for _, vn := range fd.GetVarnodeBank().AllVarnodes() {
+		sp := vn.Space()
+		if sp == nil {
+			continue
+		}
+		if sp.Index > maxIdx {
+			maxIdx = sp.Index
+		}
+		if found == nil && int64(sp.Index) == si {
+			found = sp
+		}
+	}
+	return found, maxIdx
+}
+
+// buildSpaceIndex builds an index -> address.Space map covering the spaces the
+// function references (entry/ram, heritage spaces, constant, unique), used to
+// resolve LOAD/STORE space-id constants back to their target space.
+func buildSpaceIndex(entrySpace *address.Space, summary spaceSummary) map[uint16]*address.Space {
+	byIndex := make(map[uint16]*address.Space)
+	add := func(sp *address.Space) {
+		if sp != nil {
+			byIndex[sp.Index] = sp
+		}
+	}
+	add(entrySpace)
+	add(summary.constSpace)
+	add(summary.uniqueSpace)
+	for _, sp := range summary.heritageSpaces {
+		add(sp)
+	}
+	return byIndex
+}
+
+// bindLoadStoreSpaces binds the resolved target space onto each LOAD/STORE
+// space-id constant so loadStoreSpace can recover it.
+func bindLoadStoreSpaces(fd *pcode.Funcdata, byIndex map[uint16]*address.Space) {
+	for _, op := range fd.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() {
+			continue
+		}
+		c := op.Code()
+		if c != pcode.CPUI_LOAD && c != pcode.CPUI_STORE {
+			continue
+		}
+		sel := op.Input(0)
+		if sel == nil || !sel.IsConstant() {
+			continue
+		}
+		if sp := byIndex[uint16(sel.Offset())]; sp != nil {
+			pcode.BindSpaceConstant(sel, sp)
+		}
+	}
 }
 
 func BuildFuncdata(engine *sla.Engine, cfg BuildConfig) (*pcode.Funcdata, error) {
