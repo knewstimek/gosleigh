@@ -54,6 +54,76 @@ func (a *ActionNameVars) Clone(groups ActionGroupList) Action {
 	return NewActionNameVars(a.GetGroup())
 }
 
+// highNameRepresentative returns the HighVariable's canonical name-representative
+// member -- the instance whose properties most dominate the choice of name.
+// C++ parity: HighVariable::getNameRepresentative (variable.cc:492-511), which
+// scans the members keeping the one that wins HighVariable::compareName.
+func highNameRepresentative(hv *HighVariable) *Varnode {
+	if hv == nil || hv.NumInstances() == 0 {
+		return nil
+	}
+	rep := hv.GetInstance(0)
+	for i := 1; i < hv.NumInstances(); i++ {
+		vn := hv.GetInstance(i)
+		if vn == nil {
+			continue
+		}
+		if rep == nil || compareNameRep(rep, vn) {
+			rep = vn
+		}
+	}
+	return rep
+}
+
+// compareNameRep reports whether vn2 is preferred over vn1 as the name
+// representative. Faithful port of HighVariable::compareName (variable.cc:456).
+// Precedence (most preferred first): name-lock, unaffected, persistent, input,
+// address-tied, proto-partial, non-internal (non-unique), written, earliest def.
+// Def-time ordering uses the output Varnode's create index as a proxy for
+// PcodeOp::getTime (only breaks ties between same-address members, so it never
+// changes the selected Symbol).
+func compareNameRep(vn1, vn2 *Varnode) bool {
+	if vn1.IsNameLock() {
+		return false
+	}
+	if vn2.IsNameLock() {
+		return true
+	}
+	if vn1.IsUnaffected() != vn2.IsUnaffected() {
+		return vn2.IsUnaffected()
+	}
+	if vn1.IsPersist() != vn2.IsPersist() {
+		return vn2.IsPersist()
+	}
+	if vn1.IsInput() != vn2.IsInput() {
+		return vn2.IsInput()
+	}
+	if vn1.IsAddrTied() != vn2.IsAddrTied() {
+		return vn2.IsAddrTied()
+	}
+	if vn1.IsProtoPartial() != vn2.IsProtoPartial() {
+		return vn2.IsProtoPartial()
+	}
+	u1 := vn1.Space() != nil && vn1.Space().IsUnique()
+	u2 := vn2.Space() != nil && vn2.Space().IsUnique()
+	if !u1 && u2 {
+		return false
+	}
+	if u1 && !u2 {
+		return true
+	}
+	if vn1.IsWritten() != vn2.IsWritten() {
+		return vn2.IsWritten()
+	}
+	if !vn1.IsWritten() {
+		return false
+	}
+	if vn1.CreateIndex() != vn2.CreateIndex() {
+		return vn2.CreateIndex() < vn1.CreateIndex()
+	}
+	return false
+}
+
 // hvTypePrefix returns the Ghidra variable name prefix for a HighVariable based
 // on its type metatype. Mirrors Datatype::printNameBase() in C++.
 // C++ parity: database.cc ScopeInternal::buildVariableName (the local-var branch)
@@ -151,6 +221,26 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		}
 	}
 
+	// A HighVariable backed by a mapped stack local takes its name from the
+	// attached ScopeLocal Symbol (local_<hex>), never the iVar/uVar convention.
+	// In the flag-off path ScopeLocal.BuildFromVarnodes already named these HVs
+	// before this action runs (so hv.Name() != "" skips them at collection). In
+	// the faithful stack path the stack varnodes appear later (oppool2), so the HV
+	// reaches this action unnamed; here we adopt the Symbol name instead of
+	// assigning iVarN. C++ parity: ScopeInternal::assignDefaultNames leaves
+	// already-symboled storage named by its Symbol; buildVariableName supplies the
+	// stack hex-offset name.
+	//
+	// The symbol is looked up on the HV's NAME REPRESENTATIVE (the addr-tied stack
+	// member when the HV also contains register/unique members), not the arbitrary
+	// iVar-prefix representative -- otherwise a merged accumulator whose live value
+	// is carried in a register (e.g. sum_to_n) would miss its stack symbol and
+	// print iVarN. C++ parity: ActionNameVars names an HV via
+	// high->getNameRepresentative()/getSymbol() (coreaction.cc:2891,2961);
+	// getNameRepresentative selects by HighVariable::compareName precedence
+	// (variable.cc:456), which prefers input/addr-tied/non-unique members.
+	sl := data.GetScopeLocal()
+
 	var toName []hvEntry
 	for _, c := range hvMap {
 		rep := c.bestVn
@@ -161,6 +251,15 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		if rep == nil {
 			// No nameable representative -- skip (params, implied unique-only HVs).
 			continue
+		}
+		if sl != nil {
+			if nr := highNameRepresentative(c.hv); nr != nil {
+				if e := sl.FindOverlap(nr.Addr(), nr.Size()); e != nil && e.Symbol() != nil {
+					c.hv.SetName(e.Symbol().Name())
+					a.count++
+					continue
+				}
+			}
 		}
 		prefix := hvTypePrefix(c.hv)
 		toName = append(toName, hvEntry{

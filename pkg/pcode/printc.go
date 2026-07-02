@@ -4112,6 +4112,23 @@ func (s *printCState) isReturnOnlyVarnode(vn *Varnode) bool {
 	if vn == nil || vn.NumDescend() == 0 {
 		return false
 	}
+	// A storage location backed by a mapped ScopeLocal symbol (an addrtied stack
+	// local) is named by its symbol, never by the uVar/iVar/lVar return-carrier
+	// convention. Ghidra only re-symbols UNMAPPED register/unique return carriers;
+	// a mapped stack local keeps its symbol name even when its sole consumer is
+	// the RETURN (e.g. max3's local_18). The check is location-based (FindOverlap)
+	// rather than per-varnode (EntryForVarnode): renameReturnOnlyLocals also
+	// renames MULTIEQUAL outputs by location key, so a sibling SSA version at the
+	// same stack slot (lacking a vnMap attachment) must not seed the rename.
+	// Register/unique carriers have no stack symbol -> FindOverlap returns nil ->
+	// they still get the convention name.
+	// C++ parity: ActionReturnSplit only names carriers not already tied to a
+	// Symbol; ScopeInternal symbol names win for mapped storage.
+	if sl := s.fd.GetScopeLocal(); sl != nil {
+		if e := sl.FindOverlap(vn.Addr(), vn.Size()); e != nil && e.Symbol() != nil {
+			return false
+		}
+	}
 	hasReturn := false
 	for _, consumer := range vn.DescendIter() {
 		if consumer == nil {

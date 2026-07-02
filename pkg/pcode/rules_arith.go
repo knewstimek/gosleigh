@@ -415,7 +415,98 @@ func (r *RuleAddMultCollapse) apply(op *PcodeOp, data *Funcdata) int {
 			return 1
 		}
 	}
-	return 0
+	// Faithful C++ RuleAddMultCollapse branches (ruleaction.cc:4113-4182), gated
+	// behind the increment flag so the flag-off baseline is unchanged. These are
+	// the two branches the earlier Go port omitted:
+	//   main:    (sub2 + c1) + c0            => sub2 + (c0+c1)
+	//   3-term:  ((base + c1) + other) + c0  => (base + (c0+c1)) + other
+	// The main branch folds the stack base's accumulated offset
+	// (INT_ADD(INT_ADD(rsp_input,-N),k) => INT_ADD(rsp_input,k-N)) so vnSpacebase
+	// can peel a single INT_ADD.
+	if !faithfulStackEnabled() {
+		return 0
+	}
+	opc := op.Code()
+	c0 := op.Input(1)
+	if c0 == nil || !c0.IsConstant() {
+		return 0
+	}
+	sub := op.Input(0)
+	if sub == nil || !sub.IsWritten() {
+		return 0
+	}
+	subop := sub.Def()
+	if subop == nil || subop.Code() != opc { // must be same exact operation
+		return 0
+	}
+	c1 := subop.Input(1)
+	if c1 == nil {
+		return 0
+	}
+	if !c1.IsConstant() {
+		// 3-term spacebase branch: only applied when adding to a base pointer
+		// (adds a new op, so it is restricted to the spacebase-input case).
+		if opc != CPUI_INT_ADD {
+			return 0
+		}
+		for i := 0; i < 2; i++ {
+			othervn := subop.Input(i)
+			if othervn == nil || othervn.IsConstant() || othervn.IsFree() {
+				continue
+			}
+			sub2 := subop.Input(1 - i)
+			if sub2 == nil || !sub2.IsWritten() {
+				continue
+			}
+			baseop := sub2.Def()
+			if baseop == nil || baseop.Code() != CPUI_INT_ADD {
+				continue
+			}
+			cc := baseop.Input(1)
+			if cc == nil || !cc.IsConstant() {
+				continue
+			}
+			basevn := baseop.Input(0)
+			if basevn == nil || !basevn.IsSpaceBase() || !basevn.IsInput() {
+				continue
+			}
+			val := evaluateBinaryConst(opc, c0.Offset(), cc.Offset(), c0.Size())
+			newconst := data.NewConstant(c0.Size(), val)
+			newop := data.NewOp(2, op.Addr())
+			data.OpSetOpcode(newop, CPUI_INT_ADD)
+			newout := data.NewUniqueOut(c0.Size(), newop)
+			data.OpSetInput(newop, basevn, 0)
+			data.OpSetInput(newop, newconst, 1)
+			data.OpInsertBefore(newop, op)
+			data.OpSetInput(op, newout, 0)
+			data.OpSetInput(op, othervn, 1)
+			return 1
+		}
+		return 0
+	}
+	// Main branch: fold the two constants one level down.
+	sub2 := subop.Input(0)
+	if sub2 == nil || sub2.IsFree() {
+		return 0
+	}
+	val := evaluateBinaryConst(opc, c0.Offset(), c1.Offset(), c0.Size())
+	data.OpSetInput(op, data.NewConstant(c0.Size(), val), 1)
+	data.OpSetInput(op, sub2, 0)
+	return 1
+}
+
+// evaluateBinaryConst folds a binary op on two constant operands, truncated to
+// size. Only the opcodes RuleAddMultCollapse/RuleCollapseConstants need are
+// handled. C++ parity: TypeOp::evaluateBinary for INT_ADD/INT_MULT.
+func evaluateBinaryConst(opc OpCode, a, b uint64, size int32) uint64 {
+	switch opc {
+	case CPUI_INT_ADD:
+		return truncateToSize(a+b, size)
+	case CPUI_INT_MULT:
+		return truncateToSize(a*b, size)
+	default:
+		return truncateToSize(a+b, size)
+	}
 }
 
 type RuleSubRight struct{ batchRule }

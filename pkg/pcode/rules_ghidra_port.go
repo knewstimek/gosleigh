@@ -67,10 +67,33 @@ type RuleCollapseConstants struct{ batchRule }
 
 func NewRuleCollapseConstants(group string) *RuleCollapseConstants {
 	r := &RuleCollapseConstants{}
-	// RuleCollapseConstants::applyOp -- ruleaction.cc.
-	// known mismatch: op::collapse, architecture constant-space folding, and constant-symbol propagation are not ported.
-	r.batchRule = newKnownMismatchBatchRule(group, "collapseconstants", nil, func(g string) Rule { return NewRuleCollapseConstants(g) })
+	// RuleCollapseConstants::applyOp -- ruleaction.cc:3874. Faithful subset gated
+	// behind the increment flag: folds a binary op whose inputs are both constant
+	// into a COPY of the resulting constant. Scoped to INT_ADD/INT_MULT (the ops
+	// the stack-base offset accumulation needs -- notably INT_MULT(N,-1) -> -N
+	// produced by RuleSub2Add). When the flag is off apply returns 0, so this is
+	// behaviorally identical to the prior no-op stub.
+	// known mismatch: the full op::collapse over all collapsible opcodes,
+	// architecture constant-space folding, and constant-symbol propagation are
+	// not ported.
+	r.batchRule = newBatchRule(group, "collapseconstants", []OpCode{CPUI_INT_ADD, CPUI_INT_MULT}, r.apply, func(g string) Rule { return NewRuleCollapseConstants(g) })
 	return r
+}
+
+// RuleCollapseConstants::applyOp -- ruleaction.cc:3874 (gated subset).
+func (r *RuleCollapseConstants) apply(op *PcodeOp, data *Funcdata) int {
+	if !faithfulStackEnabled() {
+		return 0
+	}
+	if op.Output() == nil || op.NumInput() != 2 {
+		return 0
+	}
+	a, okA := constantValue(op.Input(0))
+	b, okB := constantValue(op.Input(1))
+	if !okA || !okB {
+		return 0
+	}
+	return rewriteToConst(data, op, evaluateBinaryConst(op.Code(), a, b, op.Output().Size()))
 }
 
 type RuleCarryElim struct{ batchRule }
