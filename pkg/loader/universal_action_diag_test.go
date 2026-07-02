@@ -23,12 +23,18 @@ func buildGcd(t *testing.T) (*sla.Engine, *bridge.Result) {
 	dir := filepath.Dir(file)
 	slaPath := filepath.Join(dir, "../sla/testdata/x86-packed.sla")
 	pspecPath := filepath.Join(dir, "../../testdata/sla/x86.pspec")
+	cspecPath := filepath.Join(dir, "../../testdata/sla/x86gcc.cspec")
 	prog := []byte{0x8b, 0x4c, 0x24, 0x08, 0x8b, 0x44, 0x24, 0x04, 0x85, 0xc9, 0x74, 0x0b, 0x99, 0xf7, 0xf9, 0x8b, 0xc1, 0x8b, 0xca, 0x85, 0xd2, 0x75, 0xf5, 0xc3}
 	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
 	if err != nil {
 		t.Fatalf("Build: %v", err)
 	}
-	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "entry", Entry: base, MaxInstructions: 60})
+	// The faithful spacebase stack-recovery path reads the stack pointer register
+	// from the compiler spec (Ghidra's <stackpointer> lives in the .cspec), so the
+	// universal tree needs the cspec to mark ESP as the stack spacebase. This is a
+	// processEntry entry-point function, so EntryPoint is set (matches the TREE_MAP
+	// gcd case in tree_fullmap_diag_test.go, which produces byte-identical output).
+	result, err := bridge.Build(engine, bridge.BuildConfig{Name: "entry", Entry: base, MaxInstructions: 60, CspecPath: cspecPath, EntryPoint: true})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
 	}

@@ -288,22 +288,12 @@ func (fd *Funcdata) OpHeritage() {
 	// Incremental register/default-space heritage: pass and globalDisjoint persist,
 	// so already-resolved varnodes are skipped and only new free reads are placed.
 	fd.heritage.Heritage(fd.graph)
-	// Resolve the stack pointer immediately after the first register heritage so the
-	// stack parameters are heritaged before the mainloop rule pools transform the
-	// register reads that load them. Ghidra models the stack as a spacebase fixture
-	// that is heritaged in pass 0 alongside registers; Gosleigh synthesizes the stack
-	// space lazily via ActionStackPtrFlow, which sits deep in the mainloop
-	// (stackstall), so without this the stack params would be heritaged too late and
-	// the loop-carried stack values fail to fold (they trace to register temporaries
-	// instead). Running it here co-locates stack and register heritage like the
-	// hand-ordered decompile driver, which runs StackPtrFlow + stack heritage right
-	// after the register pass. The later stackstall ActionStackPtrFlow is then a
-	// no-op (the LOADs are already converted). First pass only (GetPass()==1 after
-	// the first Heritage() call). C++ parity: glb->getStackSpace() exists from pass 0.
-	if fd.heritage.GetPass() == 1 {
-		NewActionStackPtrFlow("treestack").Apply(fd)
-	}
-	// Stack slots synthesized mid-run by ActionStackPtrFlow are heritaged one slot
+	// The stack is recovered faithfully as a spacebase fixture: ActionSpacebase
+	// (Funcdata.Spacebase) marks the stack-pointer varnodes each mainloop pass and
+	// RuleLoadVarnode/RuleStoreVarnode convert the accesses. This mirrors Ghidra,
+	// where the stack space exists from pass 0 (glb->getStackSpace()); no bespoke
+	// synthetic-stack pass runs in the universal tree.
+	// Stack slots synthesized mid-run are heritaged one slot
 	// at a time (HeritageRange), never via the full Heritage() task list, because
 	// the latter merges adjacent stack offsets into a single oversized range and
 	// produces wrong-size phis. Each distinct slot is heritaged exactly once (the
@@ -522,11 +512,9 @@ func (fd *Funcdata) spacebaseStackSpace() *address.Space {
 // (ActionSpacebase) makes this incremental: newly created base Varnodes are
 // picked up on the next pass.
 //
-// Gated behind faithfulStackEnabled: when off this is a no-op and stack recovery
-// stays with the bespoke ActionStackPtrFlow (unchanged behavior).
 // C++ parity: funcdata.cc Funcdata::spacebase.
 func (fd *Funcdata) Spacebase() {
-	if fd == nil || !faithfulStackEnabled() {
+	if fd == nil {
 		return
 	}
 	stackSpace := fd.spacebaseStackSpace()

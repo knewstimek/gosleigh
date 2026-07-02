@@ -415,17 +415,13 @@ func (r *RuleAddMultCollapse) apply(op *PcodeOp, data *Funcdata) int {
 			return 1
 		}
 	}
-	// Faithful C++ RuleAddMultCollapse branches (ruleaction.cc:4113-4182), gated
-	// behind the increment flag so the flag-off baseline is unchanged. These are
-	// the two branches the earlier Go port omitted:
+	// Faithful C++ RuleAddMultCollapse branches (ruleaction.cc:4113-4182). These
+	// are the two branches the earlier Go port omitted:
 	//   main:    (sub2 + c1) + c0            => sub2 + (c0+c1)
 	//   3-term:  ((base + c1) + other) + c0  => (base + (c0+c1)) + other
 	// The main branch folds the stack base's accumulated offset
 	// (INT_ADD(INT_ADD(rsp_input,-N),k) => INT_ADD(rsp_input,k-N)) so vnSpacebase
 	// can peel a single INT_ADD.
-	if !faithfulStackEnabled() {
-		return 0
-	}
 	opc := op.Code()
 	c0 := op.Input(1)
 	if c0 == nil || !c0.IsConstant() {

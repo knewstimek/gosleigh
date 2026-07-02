@@ -3,7 +3,6 @@ package bridge
 import (
 	"errors"
 	"fmt"
-	"os"
 
 	"gosleigh/pkg/address"
 	"gosleigh/pkg/pcode"
@@ -136,15 +135,14 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		}
 	}
 
-	// INC-1 faithful stack path: bind the target address space onto each
-	// LOAD/STORE space-id constant (input 0) so loadStoreSpace/checkLoadStoreAddress
-	// can resolve it. Ghidra encodes the AddrSpace pointer directly in that
-	// constant; Gosleigh's lowering encodes the space index, so we map it back
-	// here. Gated behind the flag: without it, RuleLoadVarnode/RuleLoadConstAddr
-	// stay dormant (loadStoreSpace == nil) exactly as before.
-	if os.Getenv("GOSLEIGH_FAITHFUL_STACK") == "1" {
-		bindLoadStoreSpaces(fd, buildSpaceIndex(cfg.Entry.Space, summary))
-	}
+	// Faithful stack path: bind the target address space onto each LOAD/STORE
+	// space-id constant (input 0) so loadStoreSpace/checkLoadStoreAddress can
+	// resolve it. Ghidra encodes the AddrSpace pointer directly in that constant;
+	// Gosleigh's lowering encodes the space index, so we map it back here. This is
+	// only consumed by RuleLoadVarnode/RuleStoreVarnode/RuleLoadConstAddr in the
+	// universal-action tree; the hand-ordered production driver does not run those
+	// rules, so binding the space is inert there.
+	bindLoadStoreSpaces(fd, buildSpaceIndex(cfg.Entry.Space, summary))
 
 	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock)
 	graph.FindSpanningTree()
@@ -224,13 +222,14 @@ func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Fun
 		return off, ok
 	}
 	model := pcode.NewProtoModelFromCspec(cspec, nil, regLookup)
-	// INC-1 faithful stack path (GOSLEIGH_FAITHFUL_STACK=1): create the stack
-	// spacebase space up front and register the stack pointer as its base. This
-	// gives Funcdata.spacebase (ActionSpacebase) and RuleLoadVarnode/
-	// RuleStoreVarnode a real stack space to mark and write into, replacing the
-	// bespoke ActionStackPtrFlow (which is disabled under the same flag). When the
-	// flag is off StackSpace stays nil, exactly as before.
-	if os.Getenv("GOSLEIGH_FAITHFUL_STACK") == "1" && cspec != nil {
+	// Faithful stack path: create the stack spacebase space up front and register
+	// the stack pointer as its base. This gives Funcdata.Spacebase (ActionSpacebase)
+	// and RuleLoadVarnode/RuleStoreVarnode a real stack space to mark and write
+	// into. It is set on the default evaluation model, which drives the
+	// universal-action tree; the hand-ordered production driver builds and applies
+	// its own cdecl model (with the bespoke ActionStackPtrFlow stack space), so this
+	// default-model StackSpace is not consulted there.
+	if cspec != nil {
 		if ss := buildFaithfulStackSpace(xr, cspec, fd); ss != nil {
 			model.StackSpace = ss
 		}
