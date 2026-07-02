@@ -66,14 +66,17 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ## 다음 작업 (우선순위)
 
-> **2026-07-02 완료: TYPE-LEAK 충실 포팅 -> x64 corpus 5/8 MATCH (add4/poly4/max3/sum_to_n/classify).** master
-> `be0999c` 머지(7커밋), tree 10/10 유지. 근본 = 심볼 스냅샷 타이밍(ActionInferTypes count=0 -> 마지막
+> **2026-07-02 완료: TYPE-LEAK + sum_array 데이터모델/printc -> x64 corpus 6/8 MATCH
+> (add4/poly4/max3/sum_to_n/sum_array/classify).** master `30810bd`, tree 10/10 유지. sum_array 완료(3커밋):
+> cspec `<long_size>` -> ProtoModel -> printc 데이터모델 배선(8바이트 signed = LLP64 "longlong" / LP64 "long")
+> + push_integer LL 접미사 제거(isLongPrint parity, cast.cc:103) + cast==unary precedence로 `*(int*)x` 여분괄호
+> 제거(dereference/typecast OpToken 둘 다 62, printc.cc:34-35). 이하 type-leak(7커밋) 기록: 근본 = 심볼 스냅샷 타이밍(ActionInferTypes count=0 -> 마지막
 > restructure가 pre-typeprop undefined 스냅샷; no-diamond=undefined4, diamond=ActionDoNothing+1pass=int; 이전
 > "전파 strength" 가설은 오답). 7 fixes: TypeOrder / faithful InferTypes(tree격리, production=legacy) / DeadCode
 > flags=0(uint-flood 근본) / post-cleanup DeadCode 제거 / RangeHint symbol타입 / decl-from-symbol / RulePtrFlow
-> dormant(오역수정, ruleaction.cc:9068). 상세 CHANGELOG 2026-07-02 + memory `project_gosleigh`. **남은 3개(별도
-> 블로커)**: sum_array=데이터모델 long/longlong(유일 차이), grid_score/process=스택프레임 미복구+step5
-> ActionDoNothing. 이하 이전 4/8 기록 보존:
+> dormant(오역수정, ruleaction.cc:9068). 상세 CHANGELOG 2026-07-02 + memory `project_gosleigh`. **남은 2개(별도
+> 블로커)**: grid_score/process=스택프레임 미복구(stackOffsets=[], 레지스터/리턴 기반) + step5
+> ActionDoNothing(diamond->int, 스택프레임 복구 후에나 유효). sum_array 완료(cspec long_size->printc + LL접미사 + cast precedence). 이하 이전 4/8 기록 보존:
 >
 > **(이전) 활성 작업(2026-07-01 후반): x64 corpus 4/8 MATCH (add4 + poly4 + sum_to_n + classify).** 이번 세션 5 커밋:
 >   - **classify flip**: 상수 radix를 Ghidra `mostNaturalBase`(printlanguage.cc:735) + `push_integer`
