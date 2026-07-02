@@ -5,6 +5,62 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-03: track B -- 실제 switch 복구 실검증 (실 .exe 코퍼스 + B1 PE32+ 로더 + B2 phase1/phase2 엔진)
+바로 아래 H-dispatch Component 1(같은 날, master `a02b1a6`)에서 확정된 전략에 따라, "Ghidra도 switch를
+성공 복구하는 입력"으로 새 코퍼스를 만들고 방치돼 있던 `pkg/pcode/jumptable.go`(1671줄)를 실전 검증하는
+track B를 착수했다. 커밋 체인: Comp1 `a02b1a6` -> docs `9e6f7b9` -> 실 switch 코퍼스 `6e5d9a7` -> B1
+로더 `bc9b936` -> B2 phase1 `6bba62a` -> B2 phase2 `80a28d1`(origin 푸시됨).
+
+- **(a) 실 switch .exe 코퍼스 (master `6e5d9a7`)**: `testdata/x64_switch/` 신설 -- freestanding x64
+  PE32+ `.exe`(dense 0..7 switch, import 0, `/NODEFAULTLIB /ENTRY:entry`). 대상 함수 `op_switch`
+  (FUN_140001000, VMA `0x140001000`), imageBase `0x140000000`, `.text` RVA `0x1000`, jump table은
+  `.text` 내부 `0x10B8`(8 x 4-byte RVA). **Ghidra가 실제로 `switch{case 0..7}`로 복구함을 골든으로
+  확인**(`x64_switch_goldens.json`). exe/obj는 gitignore(`build.py`로 재생성). 골든 바이트(184B)에는
+  테이블(32B)이 없고 절대 imageBase가 필요해 기존 bytes-only 하네스로는 불가 -- `.exe` 섹션 VMA 로딩이
+  필수라는 것이 B1의 동기.
+- **(b) B1: PE32+ 섹션 VMA 로더 (master `bc9b936`)**: `pkg/loader/pe.go`에 PE32+ 지원 추가
+  (`peImageBase`가 OH32/OH64 optional-header magic으로 분기 + `PESection{Name,VMA,Bytes}` +
+  `LoadPESections(path,names...)`, 기존 `LoadPE32*` API는 무수정, MS PE/COFF 스펙 기반 -- ghidra-ref에는
+  Java PE 로더가 없어 원본 부재). `pkg/loader/loader.go`의 `EngineBuilder.Sections` 필드 + Step6b가
+  각 섹션을 `backend.SetInstructionBytes`로 VMA에 매핑(sparse image map, `backend.go:257`). 신규
+  `x64_switch_diag_test.go`(X64_SWITCH=1, 코퍼스 부재 시 skip). **결과: switch.exe 로드 +
+  `FUN_140001000` end-to-end 디컴파일 완주**, 단 MISMATCH(`(*0)()`, Comp1의 `truncateIndirectJump`
+  폴백 경유) -- jump-table 복구가 아직 스텁이라 예상된 결과.
+- **(c) B2 phase1: emulator + circleRange wiring + 이미지 read 훅 (master `6bba62a`)**: B2 스코핑 결과
+  (`jumptable.go`는 데이터구조+스텁 위주, `EmulateFunction.EmulatePath`/`CircleRange`/`PathMeld.Meld`/
+  `JumpBasic.RecoverModel`이 전부 스텁)를 바탕으로 4세션 규모로 스테이징한 첫 단계. 신규 `emulate.go`
+  (`EmulatePcodeOp`, emulate.cc 대응) + `circlerange.go`(이미 충실 포팅된 CircleRange를 jumptable의
+  RawCircleRange 스텁 대신 배선) + `Funcdata.imageReader` 훅(`bridge.Build` <- `engine.LoadImageBytes`
+  <- `backend.LoadInstructionBytes` 체인, 이전엔 `pkg/pcode`에 이미지 read 경로가 전혀 없었음) +
+  `evalBinary`의 outSize/shift/SUBPIECE 확장. 단위테스트: range `[0,8)` 8개 열거 + `emulatePath` 값=3
+  -> 실 `switch.exe`의 RVA를 읽어 case 3 타깃 산출까지 검증. **무회귀 근거**: `JumpBasic.RecoverModel`이
+  여전히 `false`를 반환해 에뮬레이터 경로가 dormant -- 라이브 출력 불변.
+- **(d) B2 phase2: JumpBasic 모델 복구 엔진 완성 (master `80a28d1`)**: 신규 `jumptable_recover.go`
+  (634줄) -- `findDeterminingVarnodes`(jumptable.cc:554, do/while 트리워크 + `PathMeld.SetPath`) +
+  `analyzeGuards`(jumptable.cc:1061) + `calcRange`(:1135) + `findSmallestNormal`(:1180) +
+  `findNormalized`(:1221) + `markFoldableGuards`(:1256) + `guardQuasiCopy`/`valueMatch`/`oneOffMatch`/
+  coveringmask/isprune/ispoint/getStride/getMaxValue. `JumpBasic.RecoverModel`(:1435)과
+  `BuildAddresses`(:1451)가 실체화됐고 `GuardRecord`는 RawCircleRange에서 (c)에서 배선한 실
+  circleRange로 전환. `PathMeld.meld`/`internalIntersect`/`checkUnrolledGuard`는 스텁 유지(이 코퍼스는
+  단일 path + 단일 guard라 미도달, 코드에 정직하게 명시). **엔진 검증**: 손수 구성한 heritage'd
+  fixture(SSA 체인 `selector -> SEXT -> MULT -> ADD -> LOAD -> ZEXT -> ADD -> BRANCHIND` + guard 블록)에
+  실제 `switch.exe` 바이트를 먹여 `RecoverAddresses`가 8개 case 타깃(`0x140001039..0x14000109c` =
+  `imageBase+RVA[i]`, 전부 `.text` 내부 실제 case body)을 정확히 복구 + `jrange.Size==8` +
+  `startVn==selector` + `sanityCheck` 통과까지 확인. **jump-table 복구 엔진 자체는 완성**(phase1+phase2로
+  실바이트 검증 완료) -- 남은 것은 파이프라인 통합(phase3: 실 함수 CFG/타이밍에 엔진을 붙이는 작업)과
+  phase4(라벨/`ActionSwitchNorm` fold -> 골든 MATCH)뿐이다.
+- **회귀**: (b)/(c)/(d) 전부 `TREE_MAP=1 TestTreeFullGoldenMap` 10/10, `X64_CORPUS=1
+  TestX64CorpusGoldenMap` 7/8, `X64_BREADTH=1 TestX64BreadthGoldenMap` 2/3(dispatch는 여전히
+  MISMATCH=CALLIND 폴백 -- phase3 통합 전이라 정상), production `TestMSVC*`/`TestPELoader`/
+  `TestX86PEDecompile` PASS 무회귀. 감독관이 매 커밋 cherry-pick 후 독립 전 매트릭스 재실행 + 핵심 함수
+  C++ 스팟체크로 검증.
+- C++ 참조: `jumptable.cc:554`(findDeterminingVarnodes), `:1061`(analyzeGuards), `:1135`(calcRange),
+  `:1180`(findSmallestNormal), `:1221`(findNormalized), `:1256`(markFoldableGuards), `:1435`
+  (JumpBasic::recoverModel), `:1451`(buildAddresses), `emulate.cc`(EmulatePcodeOp), `rangeutil.cc`
+  (CircleRange, 이미 `circlerange.go`에 포팅됨).
+- **다음(phase3, 미시작)**: `docs/STATUS.md` 미시작 (a-2) 참고 -- partial Funcdata + 자체 heritage
+  설계(3a/3b/3c 스테이징)로 엔진을 실 CFG/파이프라인에 통합.
+
 ### 2026-07-03: H-dispatch Component 1 -- FlowInfo::truncateIndirectJump 충실 포팅 (jump-table 실패 폴백)
 breadth 디스커버리(바로 아래 항목, master `5276375`)에서 매핑된 dispatch(dense switch) 갭의 첫 조각을
 닫았다. Ghidra의 raw-flow jump-table 복구 드라이버와 그 실패 폴백을 포팅해, 복구 불가능한 BRANCHIND를

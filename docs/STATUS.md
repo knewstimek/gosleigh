@@ -146,7 +146,7 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 > 불변), production `TestMSVC*`/`TestAARCH64*`/`TestX8664*`/`TestX64RegParam*` PASS, `go test ./...` 클린.
 > **process 잔여 3갭의 진짜 근본은 gap34-v2 재규명으로 확정됐고 deep-debt로 재분류됨** -- 아래 미시작 참고.
 
-### 미시작 (a) [최우선]: dispatch 수렴 -- IOP-space 인코딩 + reloc 로더 + printc 타입명 (2026-07-03 갱신)
+### 미시작 (a) [차순위, track B phase3 이후]: dispatch 수렴 -- IOP-space 인코딩 + reloc 로더 + printc 타입명 (2026-07-03 갱신)
 `truncateIndirectJump` 실패 폴백은 **완료됐다**(H-dispatch Component 1, master `a02b1a6`). 신규
 `pkg/pcode/flow_jumptable.go`(+222)가 `RecoverJumpTables` 구동 드라이버(`bridge.Build`에 배선)로 복구를
 먼저 실제 시도하고, 실패했을 때만 BRANCHIND를 CALLIND + artificial return으로 강등한다(무조건 truncate
@@ -178,27 +178,62 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
   (2/3 -> 3/3) + `TREE_MAP=1 TestTreeFullGoldenMap` 10/10 무회귀 + `X64_CORPUS=1 TestX64CorpusGoldenMap`
   7/8 무회귀.
 
-### 미시작 (a-2) [신규 우선]: track B -- 실제 switch 복구 실검증 (full-link x64 .exe 코퍼스)
-사용자와 합의된 전략(2026-07-03): "Ghidra보다 나은 switch 복구"에 의미가 있으려면 **Ghidra 자신도
-switch를 성공 복구하는 입력**으로 골든을 만들어 그 골든과 MATCH해야 한다 -- bare `.obj`는 Ghidra도
-복구 실패하는 입력이라 비교 대상이 못 된다("더 나음"을 골든 없이 주장하는 건 검증 불가 = parity 규칙
-위반). 위 (a) CALLIND 폴백 완전 렌더보다 이쪽이 리치 출력을 parity 규칙 안에서 달성하는 진짜 다음 메인
-타깃이다. 방치된 `pkg/pcode/jumptable.go`(1671줄, `JumpTable`/`JumpModel` 머신러리 + H-dispatch
-Component 1의 `RecoverJumpTables` 성공 경로)를 실전 검증하는 것도 겸한다.
-- **현상**: 없음(신규 코퍼스 구축 작업). 현재 breadth 코퍼스는 단일 `.text` obj뿐이라 Ghidra 자신도
-  jump table을 복구하지 못하는 입력만 있다.
-- **필요 작업**: (1) `pkg/loader/pe.go` PE32+/multi-section 확장(현재 지원 범위 확인 선행), (2) MSVC
-  링커로 실제 `.exe` 생성(`/Od`, 다중 섹션 + import table + reloc), (3) Ghidra 12 headless로 신규 골든
-  생성(`testdata/ghidra_decompile.py` 패턴 재사용), (4) `RecoverJumpTables`의
-  `recoverJumpTable`(funcdata_block.cc:639) 성공 경로(`JumpTable.RecoverAddresses`)가 실제로 테이블을
-  복구하는지 확인, (5) `ActionSwitchNorm`(coreaction.go:3157) + printc switch 렌더(`case`/`default`)
-  경로 확인.
-- **C++ 참조**: `flow.cc:1427`(recoverJumpTables), `funcdata_block.cc:639`(recoverJumpTable 성공 경로),
-  `jumptable.cc`(JumpTable::recoverAddresses).
-- **수정 대상 Go 파일**: `pkg/loader/pe.go`(PE32+/multi-section), `pkg/pcode/jumptable.go`(실전 검증 +
-  발견되는 버그 수정), `testdata/x64_breadth/`(신규 링크된 .exe 코퍼스 + 골든), 신규 골든 생성 스크립트.
-- **성공 기준**: 신규 track B 코퍼스에서 switch case golden과 MATCH(신규 테스트 하네스, 이름은 구현 세션
-  재량) + 기존 `TREE_MAP=1`/`X64_CORPUS=1`/`X64_BREADTH=1` 전부 무회귀.
+### 미시작 (a-2) [최우선]: track B phase3 -- switch 복구 엔진을 실 CFG/파이프라인에 통합 (2026-07-03 갱신)
+Comp1(truncateIndirectJump, master `a02b1a6`) 이후 착수한 track B가 코퍼스/로더/엔진까지 완료됐다: 실
+switch `.exe` 코퍼스(master `6e5d9a7`), B1 PE32+ 섹션 VMA 로더(master `bc9b936`), B2 phase1
+emulator+circleRange wiring+이미지 read 훅(master `6bba62a`), B2 phase2 JumpBasic 모델 복구 엔진 완성
+(master `80a28d1`, origin 푸시됨) -- 상세는 CHANGELOG 2026-07-03 "track B" 참고. **엔진
+(`findDeterminingVarnodes`/`analyzeGuards`/`RecoverModel`/`BuildAddresses`)은 손수 구성한 heritage'd
+fixture에서 실 `switch.exe` 바이트로 8개 case 타깃 복구를 완료했다.** 남은 것은 그 엔진을 실 함수
+디컴파일 파이프라인(CFG 생성 + heritage 타이밍)에 통합하는 phase3, 그리고 라벨/폴드 렌더를 완성하는
+phase4뿐이다.
+- **현상**: `X64_SWITCH=1` 하네스로 `switch.exe`의 `op_switch`를 실제 디컴파일하면 여전히 Comp1의
+  `truncateIndirectJump` 폴백(`(*0)()`)로 떨어진다 -- `RecoverJumpTables` 드라이버(현재 `bridge.Build`,
+  block structuring 직후 = heritage 이전)가 부르는 `recoverJumpTable`이 pre-heritage raw BRANCHIND
+  위에서 `findDeterminingVarnodes`를 걸 수 없기 때문(SSA 체인이 아직 없음 -- fixture는 이 체인을 손으로
+  만들어 우회 검증했다).
+- **설계 결정(2026-07-03 확정)**: **(A) 채택 = Ghidra식 partial Funcdata + 자체 heritage.** 후보였던
+  (B) "복구를 main Funcdata의 heritage 이후로 이동"은 **기각** -- 구조적으로 깨진다: (1)
+  `MaxInstructions:200` 선형 스캔이 BRANCHIND에서 끊겨 8개 case body가 애초에 decode조차 안 됨(edge
+  문제가 아니라 decode 문제), (2) 복구 전 main heritage를 돌리면 틀린 CFG(out-edge 0, case 부재) 위에서
+  SSA numbering/merge/naming이 Ghidra와 어긋난다, (3) main heritage를 두 번 돌리는 것은 "완전한 CFG
+  위에서 1회 heritage"라는 pass order 자체를 이탈한다.
+  **Ghidra 실제 메커니즘**: jump table 복구는 `FlowInfo::generateOps`(flow.cc:785, main heritage 이전)
+  도중 별도 partial `Funcdata`(`recoverJumpTables`, flow.cc:1437)를 만들어 진행한다 --
+  `stageJumpTable`(funcdata_block.cc:491)이 `truncatedFlow`(funcdata_op.cc:792)로 raw pcode를 클론 +
+  `generateBlocks`하고, "jumptable" 액션그룹(`ActionHeritage` 포함, coreaction.cc:5445/5503)을 그
+  partial에만 perform해 **partial만 SSA화**한 뒤 `jt.recoverAddresses(partial)`을 부른다. 성공하면
+  `generateOps`로 복귀해 `newAddress`(flow.cc:807) + `fallthru`(:809)로 case body를 실제 decode하고,
+  `generateBlocks`+`collectEdges`(flow.cc:933-946)가 `findJumpTable`로 switch edge를 CFG에 삽입한다.
+  이후 main decompile 중 `ActionSwitchNorm`이 **완전히 heritage된 main fd 위에서 `recoverModel`을
+  재실행**하고 `switchOver`(jumptable.cc:2545)로 최종 case 렌더를 만든다.
+  Go 충실 지름길: C++처럼 op를 클론하지 않고, 기존 `InstructionTranslation` 레코드로 partial을
+  `addInstructionOps`로 재생성하면 충분하다(BRANCHIND 상류 레코드만 있으면 됨).
+- **회귀 격리**: partial은 별도 Funcdata라 main heritage는 여전히 1회만 실행됨 -- non-switch 함수는
+  byte-identical 유지. `addCFGEdges`의 BRANCHIND 분기는 `findJumpTable() != nil`일 때만 새 경로를 타서,
+  테이블이 없으면 오늘과 완전히 동일하게 동작한다.
+- **스테이징(phase3, 권고: 3a+3b를 한 푸시로, 3c는 후속)**:
+  - **3a [최고위험, 우선 격리]**: partial Funcdata 빌드 + "jumptable" 액션그룹을 partial에 heritage +
+    `RecoverModel`/`BuildAddresses` 복구를 라이브 `switch.exe` 경로에 붙여서 **8-entry 테이블 복구를
+    assert만** 한다 -- 이 단계에서는 CFG/최종 출력을 바꾸지 않는다(heritage-on-partial의 정확성만
+    검증, 최대 난관이라 단독 격리).
+  - **3b**: 3a가 검증되면 `Funcdata.Build`가 partial 결과로 재진입해 case body를 실제 decode
+    (`discoverBlockStarts`/`addCFGEdges` BRANCHIND 처리 + 기존 truncate 중단) -- 8개 case 블록 + 9개
+    edge + dominator 관계까지 확인.
+  - **3c**: `installSwitchDefaults`(`block_actions.go:68`, 현재 스텁) 실구현 + `switchOver`.
+  - **phase4(B2g, 후속)**: `recoverLabels`/`foldInNormalization`/`foldInGuards`(라벨/폴드) ->
+    `ActionSwitchNorm` 최종 -> `x64_switch_goldens.json`과 byte-identical MATCH.
+- **C++ 참조**: `flow.cc:785`(generateOps)/`:1437`(recoverJumpTables partial 생성)/`:807`(newAddress)/
+  `:809`(fallthru)/`:933-946`(collectEdges), `funcdata_block.cc:491`(stageJumpTable)/`:639`
+  (recoverJumpTable), `funcdata_op.cc:792`(truncatedFlow), `coreaction.cc:5445`/`:5503`("jumptable"
+  액션그룹), `jumptable.cc:2545`(switchOver).
+- **수정 대상 Go 파일**: `pkg/bridge/bridge.go`(`collectInstructions:421`/`discoverBlockStarts:609`/
+  `addCFGEdges:718`/`Build` 순서), `pkg/pcode/flow_jumptable.go`(`recoverJumpTable`가 partial
+  Funcdata를 받아 처리하도록), `pkg/pcode/block_actions.go`(`installSwitchDefaults:68` 스텁 실구현).
+- **성공 기준**: `X64_SWITCH=1 go test ./pkg/loader/ -run TestX64SwitchGoldenMap`(또는 구현 세션이 정하는
+  이름)에서 `op_switch` MATCH + `TREE_MAP=1 TestTreeFullGoldenMap` 10/10 무회귀 + `X64_CORPUS=1
+  TestX64CorpusGoldenMap` 7/8 무회귀 + `X64_BREADTH=1 TestX64BreadthGoldenMap` 2/3 무회귀(dispatch는 이
+  track이 완성돼도 별도 렌더 갭이 남을 수 있음 -- 위 (a) 참고).
 
 ### 미시작 (b): process 잔여 3갭 (deep-debt, 별도 세션 -- breadth 최우선 처리 후)
 - **완료로 이동**: gap1(포인터-파라미터 배열 deref)과 ActionDoNothing/RemoveDoNothingBlock 포팅은
