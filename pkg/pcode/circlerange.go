@@ -774,3 +774,88 @@ func (r *circleRange) translate2Op() (opc OpCode, c uint64, cslot int, restype i
 	}
 	return CPUI_MAX, 0, 0, 2 // Cannot represent
 }
+
+// -----------------------------------------------------------------------
+// Range accessors / constructors used by JumpValuesRange enumeration.
+// These port the small CircleRange surface (rangeutil.hh:64-82) that the
+// jump-table value iterator needs on top of the RuleRangeMeld subset above:
+// a boundary constructor, setRange, and the getMin/getMax/getEnd/getStep/
+// getMask/getSize/getNext accessors driving the do/while iteration idiom.
+// -----------------------------------------------------------------------
+
+// newCircleRangeBounds builds a range from explicit boundaries.
+// C++ parity: CircleRange::CircleRange(uintb lft,uintb rgt,int4 size,int4 stp)
+// (rangeutil.cc:179).
+func newCircleRangeBounds(lft, rgt uint64, size, stp int32) circleRange {
+	return circleRange{
+		left:    lft,
+		right:   rgt,
+		mask:    maskForSize(size),
+		step:    int(stp),
+		isempty: false,
+	}
+}
+
+// setRange assigns explicit boundaries in place.
+// C++ parity: CircleRange::setRange(uintb,uintb,int4,int4) (rangeutil.cc:219).
+func (r *circleRange) setRange(lft, rgt uint64, size, stp int32) {
+	r.mask = maskForSize(size)
+	r.left = lft
+	r.right = rgt
+	r.step = int(stp)
+	r.isempty = false
+}
+
+// getMin returns the left boundary of the range.
+// C++ parity: CircleRange::getMin (rangeutil.hh:74).
+func (r *circleRange) getMin() uint64 { return r.left }
+
+// getMax returns the right-most integer contained in the range.
+// C++ parity: CircleRange::getMax (rangeutil.hh:75).
+func (r *circleRange) getMax() uint64 { return (r.right - uint64(r.step)) & r.mask }
+
+// getEnd returns the right (open) boundary of the range.
+// C++ parity: CircleRange::getEnd (rangeutil.hh:76).
+func (r *circleRange) getEnd() uint64 { return r.right }
+
+// getMask returns the domain mask.
+// C++ parity: CircleRange::getMask (rangeutil.hh:77).
+func (r *circleRange) getMask() uint64 { return r.mask }
+
+// getStep returns the explicit step.
+// C++ parity: CircleRange::getStep (rangeutil.hh:79).
+func (r *circleRange) getStep() int { return r.step }
+
+// getSize returns the number of integers contained in the range.
+// The step==0 guard is a Go addition: a zero-value circleRange (Go composite
+// literal default) has step 0, which the C++ default constructor never
+// produces because it sets isempty. Guarding avoids a divide-by-zero if such
+// a value ever reaches getSize.
+// C++ parity: CircleRange::getSize (rangeutil.cc:256).
+func (r *circleRange) getSize() uint64 {
+	if r.isempty || r.step == 0 {
+		return 0
+	}
+	var val uint64
+	if r.left < r.right {
+		val = (r.right - r.left) / uint64(r.step)
+	} else {
+		val = (r.mask - (r.left - r.right) + uint64(r.step)) / uint64(r.step)
+		if val == 0 { // Overflow: all uintb values are in the range
+			val = r.mask
+			if r.step > 1 {
+				val = val / uint64(r.step)
+				val += 1
+			}
+		}
+	}
+	return val
+}
+
+// getNext advances an integer within the range, returning the next value and
+// whether iteration should continue (i.e. the new value is not the end).
+// C++ parity: CircleRange::getNext (rangeutil.hh:82).
+func (r *circleRange) getNext(val uint64) (uint64, bool) {
+	next := (val + uint64(r.step)) & r.mask
+	return next, next != r.right
+}

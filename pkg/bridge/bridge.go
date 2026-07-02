@@ -96,6 +96,27 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 
 	summary := summarizeSpaces(records, cfg.Entry.Space)
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, summary.uniqueBase, summary.constSpace)
+
+	// Install the load-image read hook so downstream jump-table address
+	// emulation (pcode.EmulateFunction.getLoadImageValue) can read section-mapped
+	// table entries at their virtual addresses. The engine's backend exposes raw
+	// image bytes; wrap them as a little-endian value (x86-64 is little-endian).
+	// This is inert for functions without a recovered jump-table model.
+	fd.SetImageReader(func(addr address.Address, sz int) (uint64, error) {
+		data, ok, rerr := engine.LoadImageBytes(addr, sz)
+		if rerr != nil {
+			return 0, rerr
+		}
+		if !ok {
+			return 0, fmt.Errorf("load image miss at %v", addr)
+		}
+		var res uint64
+		for i := 0; i < sz && i < len(data); i++ {
+			res |= uint64(data[i]) << (uint(i) * 8)
+		}
+		return res, nil
+	})
+
 	graph := pcode.NewBlockGraph()
 
 	starts := discoverBlockStarts(records)
