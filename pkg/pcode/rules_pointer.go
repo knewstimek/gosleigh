@@ -58,10 +58,41 @@ func NewRuleSegment(group string) *RuleSegment {
 	return r
 }
 
+// ptrFlowTruncationsEnabled reports whether the default data space uses a
+// truncated pointer width (pspec truncate_space). C++ RulePtrFlow is a
+// pointer-width-truncation rule: its getOpList early-returns with no opcodes when
+// the default data space is not truncated (ruleaction.cc:9058-9068,
+// hasTruncations), so on non-truncated architectures the rule is never registered
+// in the op pool and never fires. All currently supported architectures
+// (x86/x64/aarch64) leave the default data space non-truncated, so this is false.
+// TODO: source this from the loaded architecture's default data space
+// (AddrSpace::isTruncated) once truncate_space is wired through the pspec loader.
+var ptrFlowTruncationsEnabled = false
+
 func NewRulePtrFlow(group string) *RulePtrFlow {
 	r := &RulePtrFlow{}
 	r.batchRule = newBatchRule(group, "ptrflow", []OpCode{CPUI_LOAD, CPUI_STORE, CPUI_PTRSUB, CPUI_PTRADD}, r.apply, func(g string) Rule { return NewRulePtrFlow(g) })
 	return r
+}
+
+// GetOpList registers RulePtrFlow only when the default data space is truncated,
+// mirroring C++ RulePtrFlow::getOpList (ruleaction.cc:9065-9068: `if (!hasTruncations) return;`).
+// On non-truncated architectures the rule is dormant -- it must NOT fire, because
+// C++ never registers it. (The previous Gosleigh port fired it whenever a LOAD/STORE
+// address became pointer-typed, which spuriously reported a data-flow change during
+// type recovery and drove an extra mainloop pass, leaking propagated types into
+// stack-local declarations.)
+func (r *RulePtrFlow) GetOpList() []OpCode {
+	if !ptrFlowTruncationsEnabled {
+		return nil
+	}
+	// TODO: when a truncated architecture is supported, the fire body
+	// (RulePtrFlow.apply) must be rewritten to the C++ pointer-width truncation
+	// semantics (truncatePointer + propagateFlowToDef, ruleaction.cc:9179) over
+	// the C++ opcode set [STORE,LOAD,COPY,MULTIEQUAL,INDIRECT,INT_ADD,...]. The
+	// current apply body is a non-parity approximation retained only for the
+	// direct-call unit test and is unreachable through the op pool.
+	return append([]OpCode(nil), r.batchRule.opcodes...)
 }
 
 func NewRulePtrsubCharConstant(group string) *RulePtrsubCharConstant {

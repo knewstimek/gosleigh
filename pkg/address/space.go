@@ -49,7 +49,16 @@ type Space struct {
 	BigEndian bool
 	Physical  bool
 	Delay     int32
+	// Truncated marks a space whose usable pointer width is smaller than its
+	// modelled address size. It is set from the pspec <space_base>/<space>
+	// truncate_space attribute. All currently supported architectures
+	// (x86/x64/aarch64) leave it false. C++ parity: AddrSpace::isTruncated.
+	Truncated bool
 }
+
+// IsTruncated reports whether pointers into this space use a truncated width.
+// C++ parity: AddrSpace::isTruncated (space.hh).
+func (s *Space) IsTruncated() bool { return s != nil && s.Truncated }
 
 func (s Space) Validate() error {
 	if s.Name == "" {
