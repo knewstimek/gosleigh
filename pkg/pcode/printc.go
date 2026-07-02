@@ -1935,9 +1935,11 @@ func (s *printCState) emitSwitchBlock(bl *FlowBlock) error {
 		s.lang.Token(")")
 	})
 	for i, child := range children[1:] {
-		label := fmt.Sprintf("case %d:", i)
+		// PrintLanguage.Label appends the trailing ':' itself, so the label text
+		// must not already carry one (otherwise "case 0::").
+		label := fmt.Sprintf("case %d", i)
 		if selectorHasDefault(children[0], i) {
-			label = "default:"
+			label = "default"
 		}
 		s.lang.Label(label)
 		s.lang.Indent()
