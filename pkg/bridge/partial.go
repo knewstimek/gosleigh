@@ -116,7 +116,10 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 
 	bindLoadStoreSpaces(fd, buildSpaceIndex(cfg.Entry.Space, summary))
 
-	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock)
+	// The partial models pre-jumptable flow only: its BRANCHIND has no out-edges
+	// (Ghidra's partial assumption, flow.cc:937), so no recovered tables feed edge
+	// generation here.
+	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock, nil)
 	graph.FindSpanningTree()
 	assignUnreachableIndices(graph)
 	graph.CalcForwardDominator()
@@ -167,4 +170,84 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 		BranchInds:     branchInds,
 		CspecData:      cspecData,
 	}, nil
+}
+
+// recoverLiveJumpTables drives Ghidra's jump-table recovery for the LIVE build:
+// it builds ONE jumptable partial covering the function, runs the "jumptable"
+// heritage action group over it once, then recovers the address table for every
+// surviving BRANCHIND. Successful recoveries are returned keyed by BRANCHIND
+// instruction offset so the caller (Build) can register them on the main
+// Funcdata and seed the case bodies for decode.
+//
+// The returned map is EMPTY whenever recovery does not succeed (no BRANCHIND, a
+// partial-build error, a heritage panic, or a JumpTable that recovers zero
+// entries). An empty map means the caller changes nothing: the main fd's
+// RecoverJumpTables demotes those BRANCHINDs to CALLIND exactly as before. This
+// is the no-regression gate -- only functions whose indirect jump genuinely
+// resolves into a table observe any behavioral change.
+//
+// Package boundary: the partial build lives in bridge (it needs the engine and
+// the shared instruction-collection helpers); the heritage group, address
+// recovery, and (later, in Build) AddJumpTable/TruncateIndirectJump live in
+// pcode. bridge drives them, preserving the bridge -> pcode dependency.
+//
+// C++ parity: FlowInfo::recoverJumpTables (flow.cc:1427) constructs one partial
+// Funcdata for the whole tablelist and calls Funcdata::recoverJumpTable
+// (funcdata_block.cc:639) per BRANCHIND, which runs Funcdata::stageJumpTable
+// (funcdata_block.cc:491): truncatedFlow + setCurrent("jumptable") + perform +
+// jt->recoverAddresses(&partial). The heritage is done once (isJumptableRecoveryOn
+// guard, funcdata_block.cc:494) and reused across the tablelist.
+func recoverLiveJumpTables(engine *sla.Engine, cfg BuildConfig) map[uint64]*pcode.JumpTable {
+	recovered := make(map[uint64]*pcode.JumpTable)
+
+	// Build the partial and run the "jumptable" heritage group under a recover
+	// guard. Ghidra's stageJumpTable wraps the perform in try/catch(LowlevelError)
+	// and returns fail_normal on error; a Go panic here is the analog, and it must
+	// NOT abort the live Build -- a failed speculative recovery simply falls back
+	// to the truncate path. So any panic/error yields an empty map.
+	partial := func() *PartialResult {
+		defer func() { _ = recover() }()
+		p, err := BuildJumpTablePartial(engine, cfg)
+		if err != nil {
+			return nil
+		}
+		return p
+	}()
+	if partial == nil || len(partial.BranchInds) == 0 {
+		return recovered
+	}
+
+	// One heritage pass over the partial SSA-forms every stack-routed selector ->
+	// table -> BRANCHIND computation, matching stageJumpTable's single
+	// perform(partial) reused across the tablelist.
+	heritaged := func() bool {
+		defer func() { _ = recover() }()
+		db := pcode.NewActionDatabase()
+		db.BuildUniversalAction(nil)
+		db.BuildDefaultGroups()
+		db.SetCurrent("jumptable").Perform(partial.Funcdata)
+		return true
+	}()
+	if !heritaged {
+		return recovered
+	}
+
+	for _, bop := range partial.BranchInds {
+		jt := func() *pcode.JumpTable {
+			defer func() { _ = recover() }()
+			t := pcode.NewJumpTable(bop.Addr())
+			t.SetIndirectOp(bop)
+			if err := t.RecoverAddresses(partial.Funcdata); err != nil {
+				return nil
+			}
+			if t.NumEntries() == 0 {
+				return nil
+			}
+			return t
+		}()
+		if jt != nil {
+			recovered[bop.Addr().Offset] = jt
+		}
+	}
+	return recovered
 }
