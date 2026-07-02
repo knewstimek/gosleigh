@@ -5,6 +5,76 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-03: track B 완성 -- switch 복구 엔진을 실 CFG/파이프라인에 통합 + switch{case} 구조 렌더 (phase3a/3b/3c/phase4)
+바로 아래 항목(B2 phase1/phase2, master `80a28d1`)에서 완성된 JumpBasic 모델 복구 엔진을 실 함수
+디컴파일 파이프라인에 통합해 **실제 링크된 x64 `.exe`에서 Ghidra와 동일한 `switch(param_1){case 0:
+...break; default:...}` 구조를 복구**했다. 커밋 체인: 3a `f137921` -> 3b `e56439e` -> 3c `528c116` ->
+phase4 `c50ced5`(전부 origin 푸시됨).
+
+- **(a) phase3a: partial Funcdata + 자체 heritage로 실 바이트 8주소 복구 (master `f137921`)**: 신규
+  `pkg/bridge/partial.go` `BuildJumpTablePartial`(라이브 `Build` 헬퍼 `collectInstructions`/
+  `addInstructionOps`/`addCFGEdges`/`buildDefaultModel` 재사용, `RecoverJumpTables`만 생략 --
+  `truncatedFlow`(funcdata_op.cc:792)의 Go 등가물, 기존 `InstructionTranslation` 레코드가 곧 raw
+  ops라 op 클론이 불필요). `db.SetCurrent("jumptable").Perform(partial)`로 partial만 heritage한 뒤
+  `RecoverAddresses(partial)`을 호출 -- **실 `switch.exe` 바이트에서 8개 case 타깃
+  (`0x140001039..0x14000109c`) 정확 복구 + BRANCHIND target `IsWritten()==true` + `jrange.Size==8`
+  확인**(heritage-on-partial 메커니즘이 fixture가 아닌 실 바이트에서 동작함을 증명, track B 최대
+  난관 해소). 순수 additive(신규 2파일, 기존 파일 무수정) -- 회귀 제로.
+- **(b) phase3b: 라이브 CFG 통합 (master `e56439e`)**: `bridge.Build`가 `collectInstructions` 직후
+  블록 빌드 전에 복구를 구동한다(`recoverLiveJumpTables`: partial 1개 빌드 + jumptable 액션그룹
+  heritage 1회 + 각 BRANCHIND `RecoverAddresses` -> map). 성공하면 `registerRecoveredTables`가 main
+  fd BRANCHIND에 relink + `AddJumpTable`(기존 `linkJumpTable`이 complete 테이블을 찾아 truncate를
+  자연 skip) + `collectInstructionsSeeded`로 8개 case body decode 재진입 + `discoverBlockStarts` seed
+  추가 + `addCFGEdges` BRANCHIND 케이스로 8개 edge 삽입. **2중 격리 게이트**: `recordsHaveBranchInd`
+  (없으면 드라이버 전체 skip -- pre-3b byte-identical) + `len(tables)>0`(미복구면 기존 empty-map
+  truncate 폴백 그대로). 검증(`TestX64SwitchCFGIntegration`): BRANCHIND 생존 + `NumJumpTables==1`
+  (8-entry) + 8개 case body decode + out-edge 8 + dominator 정상. 8개 case 연산 전부 렌더
+  (add/sub/mul/xor/or/and/shl/shr) + default. 이 시점 GOT는 BRANCHIND `goto *(...)` 생존 + 8개 case
+  body 렌더(switch 라벨 미fold).
+- **(c) phase3c: switch{case} 구조 렌더 + goto* 완전 소멸 (master `528c116`)**: 신규
+  `Funcdata.SwitchOverJumpTables`(flow_jumptable.go, funcdata_block.cc:678, `bridge.Build`에서
+  `NumJumpTables>0`일 때 구동, blockByAddr resolver) + `installSwitchDefaults` 실구현
+  (block_actions.go, funcdata_block.cc:687, default edge 마킹) + `FlowBlock.SetDefaultSwitch`
+  (flowblock.go, block.cc:318) + `addCFGEdges`가 switch 부모 블록에 `BlockFlagSwitchOut`을 세팅
+  (block.cc:2287 -- 이 플래그가 없어서 기존에 이미 포팅돼 있던 `ActionSwitchNorm`/`SwitchOver`/
+  `ruleBlockSwitch`/`emitSwitchBlock`이 발화하지 못하고 있었다) + `printc` `emitSwitchBlock`의
+  `case %d::` 이중콜론 렌더 버그 수정. **결과**: `switch((ull)*(uint*)(...)+0x140000000){case 0:
+  ...case 7:}` + switch 밖 default -- 구조에 도달(byte-MATCH는 아직).
+- **(d) phase4: fold machinery로 switch-고유 잔차 전부 닫힘 (master `c50ced5`)**: `JumpBasic`
+  `FoldInNormalization`(jumptable.cc:1563, BRANCHIND `in(0)`을 unnormalized SwitchVn으로 교체 --
+  주소계산 체인이 dead로 소멸, `renderSwitchSelector`가 `in(0)`을 직접 렌더해 `switch(param_1)`) +
+  `FoldInGuards`/`foldInOneGuard`(jumptable.cc:1572/1390, guard target을 `AddBlockToSwitch` +
+  `SetLastAsDefault` + `PushBranch`로 default에 흡수) + `BuildLabels`/`backup2Switch`
+  (jumptable.cc:1523/472, `normalvn==switchvn`이라 label 0..7 정확) + `FindUnnormalized`/`markModel`/
+  `MarkPaths` + `emitBlockSwitch`의 `break` 렌더(printc.cc:3448, `isExit`=out-edge 0인 terminal
+  BRANCH, 마지막 case가 아니면 `break`). 지원: `Funcdata.PushBranch`(funcdata_block.cc:403),
+  `BlockBasic.NoInterveningStatement`(block.cc:2712). **crux**: `MatchModel` 스텁을 `saveModel` +
+  `RecoverModel(fd)`로 실체화 -- 모델이 partial에서 복구돼 varnode가 live fd 기준으로 외래이므로 live
+  fd에서 재복구해야 한다(jumptable.cc:2700). **최종 GOT**: `switch(param_1){case 0: param_2=param_2+
+  param_3; break; ... case 7: ...; break; default: param_2=0xffffffff;} return param_2;` -- switch
+  구조가 골든과 일치한다.
+- **남은 diff = 오직 (B) 공통 type-model deep-debt**: `unsigned int` vs `uint` + `undefined1` vs
+  `byte`(전역 typeop 단축타입명, switch 국소 아님) + `param_2` 재사용 vs `uVar1` temp(return-split/
+  merge) + 여분 `& 0x3f`(RuleAndCollapse) + case7 `(int)` 캐스트(signedness). **이 4개는 x64 corpus
+  `process` 미MATCH와 동일 class의 광범위 type-model/merge deep-debt이지 switch 고유 갭이 아니다.**
+  uint/byte 단축명은 전역 typeop 변경이라 저위험 조건 미충족 + uVar1 merge 미해결로 byte-MATCH가
+  안 되므로 이번 세션엔 미시도(파리티 규율 -- 휴리스틱 금지).
+- **게이트(전 단계)**: `TREE_MAP=1 TestTreeFullGoldenMap` 10/10, `X64_CORPUS=1
+  TestX64CorpusGoldenMap` 7/8, `X64_BREADTH=1 TestX64BreadthGoldenMap` 2/3, production
+  `TestMSVC*`/`TestAARCH64*`/`TestX8664*`/`TestX64RegParam*`/`TestPELoader`/`TestX86PEDecompile`
+  전부 PASS 무회귀. 감독관이 매 커밋 cherry-pick 후 독립 전 매트릭스 재실행 + 핵심 함수 C++ 스팟체크로
+  검증.
+- C++ 참조: `funcdata_block.cc:678`(switchOverJumpTables)/`:687`(installSwitchDefaults)/`:403`
+  (pushBranch), `block.cc:318`(setDefaultSwitch)/`:2287`(BlockFlagSwitchOut)/`:2712`
+  (noInterveningStatement), `jumptable.cc:1563`(foldInNormalization)/`:1572`(foldInGuards)/`:1390`
+  (foldInOneGuard)/`:1523`(buildLabels)/`:472`(backup2Switch)/`:2700`(matchModel/recoverModel 재실행),
+  `printc.cc:3448`(emitBlockSwitch break).
+- **=> track B 완성**: 방치돼 있던 `jumptable.go`(1671줄, `EmulatePcodeOp`/`CircleRange`/`JumpBasic`
+  전부 스텁이던 상태)가 실동작해 실 x64 `.exe`에서 Ghidra와 동일한 switch{case} 구조를 복구한다.
+  byte-MATCH만 별개의 광범위 type-model deep-debt에 게이팅돼 있다.
+- **다음(미시작)**: `docs/STATUS.md` 미시작 (a-2) 참고 -- (B) type-model deep-debt(process와 공유) +
+  breadth `dispatch`(reloc 부재로 truncate 폴백 유지, 위 (a) 참고).
+
 ### 2026-07-03: track B -- 실제 switch 복구 실검증 (실 .exe 코퍼스 + B1 PE32+ 로더 + B2 phase1/phase2 엔진)
 바로 아래 H-dispatch Component 1(같은 날, master `a02b1a6`)에서 확정된 전략에 따라, "Ghidra도 switch를
 성공 복구하는 입력"으로 새 코퍼스를 만들고 방치돼 있던 `pkg/pcode/jumptable.go`(1671줄)를 실전 검증하는
