@@ -151,6 +151,19 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	fd.SetBasicBlocks(graph)
 	fd.SetFlag(pcode.FuncBlocksGenerated)
 
+	// Raw-flow jump-table recovery: try to recover a jump table for every
+	// BRANCHIND, and demote (truncate) those that cannot be recovered to a
+	// CALLIND call site plus an artificial return. This mirrors Ghidra's
+	// FlowInfo::generateOps, which runs recoverJumpTables/truncateIndirectJump
+	// during raw flow generation -- before any Action. Running it here (after the
+	// block graph is built but before the universal-action tree in Decompile)
+	// keeps the demotion ahead of heritage/parameter/return recovery, so those
+	// passes model the indirect jump as a call exactly as Ghidra does. It is a
+	// no-op for functions with no BRANCHIND.
+	// C++ parity: flow.cc FlowInfo::generateOps / recoverJumpTables /
+	// truncateIndirectJump.
+	fd.RecoverJumpTables()
+
 	translations := make([]sla.InstructionTranslation, len(records))
 	for i := range records {
 		translations[i] = records[i].translation
