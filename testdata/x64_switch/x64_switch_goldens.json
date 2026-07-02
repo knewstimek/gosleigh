@@ -1,0 +1,16 @@
+{
+  "functions": [
+    {
+      "name": "FUN_140001000",
+      "entry": 5368713216,
+      "bytes": "448944241889542410894c24084883ec188b442420890424833c24070f878c00000048630424488d0dd3efffff8b8481b81000004803c1ffe08b4424308b4c242803c88bc1eb6c8b4424308b4c24282bc88bc1eb5e8b4424280faf442430eb538b4424308b4c242833c88bc1eb458b4424308b4c24280bc88bc1eb378b4424308b4c242823c88bc1eb298b44243083e03f0fb6c88b442428d3e0eb178b44243083e03f0fb6c88b442428d3f8eb05b8ffffffff4883c418c3",
+      "c": "\r\nuint FUN_140001000(undefined4 param_1,uint param_2,uint param_3)\r\n\r\n{\r\n  uint uVar1;\r\n  \r\n  switch(param_1) {\r\n  case 0:\r\n    uVar1 = param_2 + param_3;\r\n    break;\r\n  case 1:\r\n    uVar1 = param_2 - param_3;\r\n    break;\r\n  case 2:\r\n    uVar1 = param_2 * param_3;\r\n    break;\r\n  case 3:\r\n    uVar1 = param_2 ^ param_3;\r\n    break;\r\n  case 4:\r\n    uVar1 = param_2 | param_3;\r\n    break;\r\n  case 5:\r\n    uVar1 = param_2 & param_3;\r\n    break;\r\n  case 6:\r\n    uVar1 = param_2 << ((byte)param_3 & 0x1f);\r\n    break;\r\n  case 7:\r\n    uVar1 = (int)param_2 >> ((byte)param_3 & 0x1f);\r\n    break;\r\n  default:\r\n    uVar1 = 0xffffffff;\r\n  }\r\n  return uVar1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "entry",
+      "entry": 5368713440,
+      "bytes": "4883ec2841b802000000ba07000000b903000000e807ffffff4883c428c3",
+      "c": "\r\nvoid entry(void)\r\n\r\n{\r\n  FUN_140001000(3,7,2);\r\n  return;\r\n}\r\n\r\n"
+    }
+  ]
+}
