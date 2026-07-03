@@ -1258,7 +1258,7 @@ func (s *printCState) longSize() int {
 
 func normalizedBaseType(base *Base, longSize int) Datatype {
 	if base == nil {
-		return sharedTypeFactory.GetBase(4, TYPE_UINT, "unsigned int")
+		return sharedTypeFactory.GetBase(4, TYPE_UINT, "uint")
 	}
 	switch base.Metatype() {
 	case TYPE_BOOL:
@@ -1301,17 +1301,29 @@ func normalizedBaseType(base *Base, longSize int) Datatype {
 		// distinction between a typed unsigned and an untyped/undefined slot.
 		return sharedTypeFactory.GetBase(base.Size(), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", base.Size()))
 	case TYPE_UINT:
+		// Ghidra prints dt->getName() for its interned core types; the Java-side
+		// <coretypes> element names the unsigned bases with short forms, not the
+		// C-standard spellings. Mirror the signed TYPE_INT arm above so the
+		// signed/unsigned pair stays consistent.
+		// C++ parity: type.cc coretype names (byte/ushort/uint/ulong/ulonglong).
 		switch base.Size() {
 		case 1:
-			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "unsigned char")
+			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "byte")
 		case 2:
-			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "unsigned short")
+			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "ushort")
 		case 4:
-			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "unsigned int")
+			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "uint")
 		case 8:
-			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "unsigned long long")
+			// 8-byte unsigned integer. Same longSize() split as the signed size-8
+			// name: "ulong" on LP64 (sizeOfLong==8), "ulonglong" on LLP64 /
+			// Windows x64 (sizeOfLong==4), matching which unsigned core type fills
+			// the size-8 cache slot.
+			if longSize >= 8 {
+				return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "ulong")
+			}
+			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "ulonglong")
 		default:
-			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "unsigned int")
+			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "uint")
 		}
 	default:
 		return base
