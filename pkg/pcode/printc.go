@@ -922,7 +922,11 @@ func (s *printCState) inferReturnType() Datatype {
 		// return-value carrier only when no specific type could be recovered.
 		if vn.Space() != nil && !vn.IsConstant() && s.returnOnlyLocs[varnodeLocKey(vn)] {
 			dt := vn.TypeReadFacing(op)
-			if dt == nil || dt.Metatype() == TYPE_UINT || dt.Metatype() == TYPE_UNKNOWN {
+			// Only a genuinely untyped (TYPE_UNKNOWN) carrier degrades to
+			// undefined%d. A carrier typed by a real op (e.g. INT_AND -> TYPE_UINT)
+			// keeps that type so the return type follows (e.g. ulonglong), matching
+			// Ghidra, which infers the return type from the carrier's real type.
+			if dt == nil || dt.Metatype() == TYPE_UNKNOWN {
 				return sharedTypeFactory.GetBase(int32(vn.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", vn.Size()))
 			}
 		}
@@ -1148,12 +1152,20 @@ func (s *printCState) emitLocalDeclarations() {
 			continue
 		}
 		declared[name] = struct{}{}
-		// Return-only locals are rendered with undefined%d regardless of their
-		// committed type. Ghidra's ActionReturnSplit assigns TYPE_UNKNOWN to the
-		// return-value carrier; we approximate this at render time.
+		// Return-only carriers render with their genuinely inferred type. Ghidra
+		// keeps the carrier's real type (ScopeInternal names it, buildVariableName
+		// prints ct->printNameBase): a carrier fed by a real typed op (e.g. an
+		// INT_AND -> TYPE_UINT) stays ulonglong, while one carrying only constants
+		// (TYPE_UNKNOWN) prints as undefined%d. Only the genuinely untyped case is
+		// coerced to undefined%d. C++ parity: database.cc buildVariableName.
 		var dt Datatype
 		if !vn.Space().IsUnique() && s.returnOnlyLocs[varnodeLocKey(vn)] {
-			dt = sharedTypeFactory.GetBase(int32(vn.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", vn.Size()))
+			rt := vn.TypeDefFacing()
+			if rt == nil || rt.Metatype() == TYPE_UNKNOWN {
+				dt = sharedTypeFactory.GetBase(int32(vn.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", vn.Size()))
+			} else {
+				dt = s.normalizeTypeForDecl(rt)
+			}
 		} else if st := s.stackSymbolType(vn); st != nil {
 			dt = st
 		} else {
@@ -4045,9 +4057,6 @@ func sanitizeIdent(name string) string {
 // symbol name to the return-value carrier varnode. This is our equivalent
 // without actually splitting the return path.
 func (s *printCState) renameReturnOnlyLocals() {
-	// Count existing Ghidra-style names by prefix to determine the next index.
-	prefixCount := make(map[string]int)
-
 	// Collect location keys of locals that are return-only.
 	// Multiple SSA versions of the same register/slot share a location key;
 	// we rename the whole group together.
@@ -4075,7 +4084,6 @@ func (s *printCState) renameReturnOnlyLocals() {
 		}
 		seenLoc[key] = true
 		prefix := ghidraVarPrefix(vn)
-		prefixCount[prefix]++
 		retOnlyKeys = append(retOnlyKeys, retOnlyEntry{key, prefix})
 	}
 
@@ -4083,24 +4091,44 @@ func (s *printCState) renameReturnOnlyLocals() {
 		return
 	}
 
-	// Assign Ghidra-style names, starting from 1 (uVar1, iVar1, ...).
-	// Re-count per prefix starting from 1.
-	prefixIdx := make(map[string]int)
-	for p := range prefixCount {
-		prefixIdx[p] = 1
+	// Ghidra assigns every default local name from a SINGLE shared counter
+	// (database.cc ScopeInternal::buildVariableName: "Var" << index++), not a
+	// per-prefix counter, and threads one base index through assignDefaultNames.
+	// The return-value carrier is created last, so it continues the counter after
+	// all other default-named locals: a function with a loop temp iVar1 numbers
+	// its carrier uVar2, not uVar1. Seed the shared counter past the highest index
+	// already used by a NON-carrier default local (iVarN/uVarN/lVarN/...).
+	// C++ parity: database.cc buildVariableName + assignDefaultNames(int4 &base).
+	carrierKeys := make(map[locationKey]bool, len(retOnlyKeys))
+	for _, e := range retOnlyKeys {
+		carrierKeys[e.key] = true
+	}
+	base := 0
+	for _, vn := range s.locals {
+		if carrierKeys[varnodeLocKey(vn)] {
+			continue
+		}
+		if idx, ok := parseDefaultVarIndex(s.nameOf(vn)); ok && idx > base {
+			base = idx
+		}
 	}
 
-	// Build a location-key -> newName map.
+	// Build a location-key -> newName map using the shared counter.
 	keyName := make(map[locationKey]string)
 	for _, e := range retOnlyKeys {
-		name := fmt.Sprintf("%s%d", e.prefix, prefixIdx[e.prefix])
-		prefixIdx[e.prefix]++
-		keyName[e.key] = name
+		base++
+		keyName[e.key] = fmt.Sprintf("%s%d", e.prefix, base)
 	}
 
-	// Apply new names to all locals at those location keys, and record the
-	// location as return-only so the type is rendered as undefined%d.
-	for _, vn := range s.locals {
+	// Apply new names to every non-unique varnode at those location keys, and
+	// record the location as return-only. All SSA versions and body-op outputs
+	// that share the carrier's storage (e.g. the else-branch INT_AND result in
+	// the same register) must render under one name; scanning only s.locals would
+	// miss the body-op outputs that are not declared locals.
+	for _, vn := range s.fd.GetVarnodeBank().AllVarnodes() {
+		if vn == nil || vn.IsConstant() || vn.IsAnnotation() {
+			continue
+		}
 		if vn.Space() != nil && vn.Space().IsUnique() {
 			continue
 		}
@@ -4241,6 +4269,33 @@ func (s *printCState) isParamName(name string) bool {
 		}
 	}
 	return false
+}
+
+// parseDefaultVarIndex extracts N from a Ghidra default local name of the form
+// <letter>Var<N> (iVar1, uVar12, lVar3, ...). Returns (0,false) for any other
+// name (local_*, tmp_*, param_*, register names). Used to continue the shared
+// default-name counter past names already assigned by ActionNameVars.
+// C++ parity: the index parsed back out of buildVariableName's "<prefix>Var<N>".
+func parseDefaultVarIndex(nm string) (int, bool) {
+	// Single metatype letter, then "Var", then decimal digits.
+	if len(nm) < 5 || nm[1:4] != "Var" {
+		return 0, false
+	}
+	switch nm[0] {
+	case 'i', 'u', 'l', 'f', 'b', 'c', 'd':
+	default:
+		return 0, false
+	}
+	digits := nm[4:]
+	n := 0
+	for i := 0; i < len(digits); i++ {
+		ch := digits[i]
+		if ch < '0' || ch > '9' {
+			return 0, false
+		}
+		n = n*10 + int(ch-'0')
+	}
+	return n, true
 }
 
 // ghidraVarPrefix returns the Ghidra variable name prefix for a local based on
