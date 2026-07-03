@@ -1106,8 +1106,10 @@ func (fd *Funcdata) OpInsertAfter(op *PcodeOp, prev *PcodeOp) {
 // models an unknown side-effect on the address range (sp, off, size).
 // The INDIRECT output is a new SSA version of the location that MAY have been
 // modified by the call; input[0] is a fresh free varnode (renamed during Heritage
-// to the pre-call SSA value); input[1] is a zero constant (cause reference --
-// simplified: C++ uses an IOP-space varnode encoding the CALL op pointer).
+// to the pre-call SSA value); input[1] is an IOP annotation varnode referring
+// back to callOp (see NewVarnodeIop) -- this is the cause-op reference that
+// Heritage::renameRecurse's "INDIRECTs and their op happen AT SAME TIME" check
+// decodes (heritage.cc:2506-2517; ported in heritage.go renameRecurse).
 // Both input[0] and output are marked ActiveHeritage for renaming.
 //
 // C++ parity: Funcdata::newIndirectOp (funcdata_op.cc:683)
@@ -1120,7 +1122,7 @@ func (fd *Funcdata) NewIndirectOp(callOp *PcodeOp, sp *address.Space, off uint64
 	out.SetActiveHeritage()
 	fd.OpSetOpcode(op, CPUI_INDIRECT)
 	fd.OpSetInput(op, in0, 0)
-	fd.OpSetInput(op, fd.NewConstant(4, 0), 1) // cause ref (IOP stub)
+	fd.OpSetInput(op, fd.NewVarnodeIop(callOp), 1) // cause ref (funcdata_op.cc:695)
 	fd.OpInsertBefore(op, callOp)
 	return op
 }
@@ -1130,6 +1132,8 @@ func (fd *Funcdata) NewIndirectOp(callOp *PcodeOp, sp *address.Space, off uint64
 // Unlike NewIndirectOp, the output has no data-flow from the pre-call value:
 // input[0] is a zero constant, signalling that the call produces a new value
 // at this location (e.g., EAX holding the return value of the callee).
+// input[1] is an IOP annotation varnode referring back to callOp (see
+// NewVarnodeIop), same as NewIndirectOp.
 // The op and output are flagged with PcodeOpIndirectCreation / VarnodeIndirectCreation.
 //
 // C++ parity: Funcdata::newIndirectCreation (funcdata_op.cc:710)
@@ -1141,8 +1145,8 @@ func (fd *Funcdata) NewIndirectCreation(callOp *PcodeOp, sp *address.Space, off 
 	out.SetFlags(VarnodeIndirectCreation)
 	out.SetActiveHeritage()
 	fd.OpSetOpcode(op, CPUI_INDIRECT)
-	fd.OpSetInput(op, fd.NewConstant(4, 0), 0) // no pre-call value flows through
-	fd.OpSetInput(op, fd.NewConstant(4, 0), 1) // cause ref (IOP stub)
+	fd.OpSetInput(op, fd.NewConstant(4, 0), 0)     // no pre-call value flows through
+	fd.OpSetInput(op, fd.NewVarnodeIop(callOp), 1) // cause ref (funcdata_op.cc:725)
 	fd.OpInsertBefore(op, callOp)
 	return op
 }

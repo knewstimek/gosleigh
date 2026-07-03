@@ -150,7 +150,6 @@ func (h *Heritage) BuildInfoList() {
 	}
 }
 
-
 // toBasic recovers the *BlockBasic from a *FlowBlock using the concrete
 // back-pointer. Returns nil if the block is not a BlockBasic.
 func toBasic(bl *FlowBlock) *BlockBasic {
@@ -687,6 +686,29 @@ func (h *Heritage) renameRecurse(bl *BlockBasic, graph *BlockGraph,
 					stk = varStack[key]
 				}
 				top := stk[len(stk)-1]
+				// INDIRECTs and their cause op really happen AT THE SAME TIME: if the
+				// top of the stack is the output of an INDIRECT whose input(1) refers
+				// back to the op we are currently visiting, that INDIRECT models an
+				// effect that has not "happened" yet from op's own point of view (e.g.
+				// a CALLIND reading its own target register, where the INDIRECT for
+				// that register's post-call value is inserted just before the call).
+				// Skip past it to the value beneath it on the stack, synthesizing a
+				// fresh input if the INDIRECT's output is all there is.
+				// C++ parity: heritage.cc Heritage::renameRecurse lines 2506-2517.
+				if top.IsWritten() && top.Def() != nil && top.Def().Code() == CPUI_INDIRECT &&
+					top.Def().NumInput() >= 2 {
+					if cause := top.Def().Input(1).GetIndirectCause(); cause == op {
+						if len(stk) == 1 {
+							fresh := h.fd.NewVarnode(inp.Size(), inp.Addr())
+							fresh = h.fd.SetInputVarnode(fresh)
+							stk = append([]*Varnode{fresh}, stk...)
+							varStack[key] = stk
+							top = fresh
+						} else {
+							top = stk[len(stk)-2]
+						}
+					}
+				}
 				if top != inp {
 					// Replace input with top of stack
 					h.fd.OpUnsetInput(op, slot)

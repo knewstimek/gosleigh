@@ -9,16 +9,18 @@ import (
 var sharedTypeFactory = NewTypeFactory()
 
 type pcodeMetadataState struct {
-	mu         sync.RWMutex
-	varTypes   map[*Varnode]Datatype
-	spaceIDs   map[*Varnode]*address.Space
-	spacebases map[*Varnode]*address.Space
+	mu             sync.RWMutex
+	varTypes       map[*Varnode]Datatype
+	spaceIDs       map[*Varnode]*address.Space
+	spacebases     map[*Varnode]*address.Space
+	indirectCauses map[*Varnode]*PcodeOp
 }
 
 var pcodeMetadata = pcodeMetadataState{
-	varTypes:   make(map[*Varnode]Datatype),
-	spaceIDs:   make(map[*Varnode]*address.Space),
-	spacebases: make(map[*Varnode]*address.Space),
+	varTypes:       make(map[*Varnode]Datatype),
+	spaceIDs:       make(map[*Varnode]*address.Space),
+	spacebases:     make(map[*Varnode]*address.Space),
+	indirectCauses: make(map[*Varnode]*PcodeOp),
 }
 
 func SetVarnodeType(vn *Varnode, dt Datatype) {
@@ -84,6 +86,47 @@ func (vn *Varnode) GetSpaceFromConst() *address.Space {
 	pcodeMetadata.mu.RLock()
 	defer pcodeMetadata.mu.RUnlock()
 	return pcodeMetadata.spaceIDs[vn]
+}
+
+// BindIndirectCause attaches the PcodeOp that a CPUI_INDIRECT's input(1)
+// refers to (the CALL/CALLIND/STORE causing the indirect effect).
+// C++ parity: op.hh PcodeOp::getOpFromConst / funcdata_varnode.cc
+// Funcdata::newVarnodeIop (line 176). C++ encodes op's raw host pointer as
+// the varnode's offset in the dedicated iop address space (IPTR_IOP) and
+// decodes it back with a bare (PcodeOp *)(uintp)offset cast. That round-trip
+// is unsafe in Go: a plain uintptr does not keep the referenced PcodeOp
+// reachable for the garbage collector, and Go gives no guarantee the bits
+// still name a live object by the time they are cast back. Gosleigh instead
+// keeps the varnode a plain zero constant -- structurally identical to every
+// other consumer that expects a CPUI_INDIRECT's input(1) to be IsConstant()
+// -- and binds the real cause-op reference through the same side-table idiom
+// already used for AddrSpace* references (BindSpaceConstant/GetSpaceFromConst
+// above).
+func BindIndirectCause(vn *Varnode, op *PcodeOp) {
+	if vn == nil {
+		return
+	}
+	pcodeMetadata.mu.Lock()
+	defer pcodeMetadata.mu.Unlock()
+	if op == nil {
+		delete(pcodeMetadata.indirectCauses, vn)
+		return
+	}
+	pcodeMetadata.indirectCauses[vn] = op
+}
+
+// GetIndirectCause decodes the PcodeOp referenced by a CPUI_INDIRECT's
+// input(1) annotation varnode. Returns nil if vn was not created via
+// Funcdata.NewVarnodeIop (e.g. a plain constant, or an INDIRECT input(1)
+// built by a code path that has not yet been ported to use NewVarnodeIop).
+// C++ parity: PcodeOp::getOpFromConst (op.hh:249).
+func (vn *Varnode) GetIndirectCause() *PcodeOp {
+	if vn == nil {
+		return nil
+	}
+	pcodeMetadata.mu.RLock()
+	defer pcodeMetadata.mu.RUnlock()
+	return pcodeMetadata.indirectCauses[vn]
 }
 
 func BindSpacebase(vn *Varnode, spc *address.Space) {
@@ -176,6 +219,19 @@ func (fd *Funcdata) NewSpaceIDConst(spc *address.Space) *Varnode {
 	}
 	vn := fd.NewConstant(size, 0)
 	BindSpaceConstant(vn, spc)
+	return vn
+}
+
+// NewVarnodeIop creates a special annotation Varnode that lets a
+// CPUI_INDIRECT refer to the PcodeOp causing its indirect effect. This is
+// always input(1) of a CPUI_INDIRECT (see NewIndirectOp / NewIndirectCreation
+// in funcdata.go).
+// C++ parity: funcdata_varnode.cc Funcdata::newVarnodeIop (line 176). See
+// BindIndirectCause above for why Gosleigh represents the cause-op reference
+// through a side-table instead of literally re-encoding op's address.
+func (fd *Funcdata) NewVarnodeIop(op *PcodeOp) *Varnode {
+	vn := fd.NewConstant(4, 0)
+	BindIndirectCause(vn, op)
 	return vn
 }
 
