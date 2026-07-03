@@ -83,6 +83,26 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ## 다음 작업 (우선순위)
 
+> **[최신] 2026-07-03 세션2 완료 (master `746a72c`) -- x64 corpus 8/8 완전 MATCH. 아래 미시작 (a)/(a-2)/(b)는
+> 이 세션 발견으로 재편됨. 권위 있는 다음-작업/현재상태는 저장소 루트 `NEXT_SESSION_PROMPT.md` + 메모리
+> `project_gosleigh` 상단 "2026-07-03 (세션2)" 섹션 참조.**
+> - **process 완료(8/8)**: 아래 미시작 (b)와 (a-2)의 process 관련 항목은 **DONE**. 5개 faithful 조각으로 착지 --
+>   printc 단축타입명(`50a9557`) + faithful BlockCondition(`ad73759`, &&/comma/De Morgan, 배열로드 문장 복원) +
+>   비결정성(addCFGEdges map->ascending)+halfDelete slide-down 반전수정(`781c9d6`) + gap2 RuleSubZext
+>   INT_ZEXT->AND 포팅+RuleOrSextForm(`8bdd340`, 64bit signed div 반환) + 반환 carrier 실타입+shared 카운터
+>   (`2296513`). gcd 포함 전 게이트 무회귀.
+> - **switch uVar1 = HEADLESS 아티팩트로 확정(미시작 (a-2) 폐기)**: decomp_dbg.exe(CPUI_DEBUG Ghidra 코어)로
+>   실측 -- Ghidra 디컴파일러 CORE도 `param_2` 재사용 = Gosleigh와 byte-identical, 골든 uVar1 아님. uVar1은
+>   full HEADLESS 분석(param recovery)에서만. **uVar1 강제(merge/cover/heritage 수정, descending edge, merge-gate
+>   포팅)는 C++ 코어 파리티 위반 -- 절대 하지 말 것.** switch byte-MATCH는 headless-env recovery에 게이팅.
+> - **breadth "reloc 갭"(미시작 (a)) 폐기**: 하네스가 .obj를 안 읽고 골든 JSON 바이트(이미 post-reloc)를 먹임 --
+>   reloc 로더는 dead code. dispatch 진짜 갭 = CALLIND target 붕괴+param recovery(headless-env). IOP-space
+>   인코딩은 착지(`746a72c`, Sonnet 5 작성, INDIRECT cause-op side-table + heritage same-time rename,
+>   necessary-not-sufficient). truncateIndirectJump 등은 이미 포팅+구동중(README "미포팅" 정정).
+> - **다음 프론티어 = headless-environment param/type/symbol recovery** (dispatch param_1 + switch uVar1 공통 축,
+>   대형/고위험). 상세는 NEXT_SESSION_PROMPT.md.
+> - **게이트(현재)**: tree 10/10, x64 8/8, breadth 2/3, production PASS, `go test ./...` green.
+
 > **2026-07-02 완료: grid_score/process 스택프레임 복구 -- faithful spacebase 경로(master `c87debe`, 이전
 > flag-gated `602dde8`).** 이전 진단("Fix A: heritage 이전으로 이동" / "Fix B: def-use walk 패치")은 오진이었음.
 > **실제 근본**: Ghidra는 `Funcdata::spacebase`(funcdata.cc:230-269)가 모든 RSP 계열 varnode(input/sub-result/

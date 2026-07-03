@@ -5,6 +5,54 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-03 (세션2): x64 corpus 8/8 완전 MATCH -- process 착지 + IOP-space groundwork (master `746a72c`)
+메모리/STATUS가 반복적으로 "가장 어렵다/deep-debt/1세션 착지 불가"로 기술한 `process`를 골든과 byte-identical로
+착지 -> **x64 corpus 8/8 첫 완전 MATCH.** 감독관 세션(Opus 서브에이전트 근본규명+구현, worktree 격리, 매 커밋
+C++ 스팟체크+전매트릭스+cherry-pick+push). 6 faithful 커밋:
+
+- **`50a9557` printc unsigned 단축타입명**: `unsigned int`->`uint`, `unsigned char`->`byte`, ushort, size-8은
+  longSize() split로 `ulonglong`(LLP64)/`ulong`(LP64). type.cc coretype getName 충실. normalizedBaseType가
+  C표준명 재합성하던 걸 Ghidra 단축명으로. blast radius: green 골든 중 unsigned 선언 0.
+- **`ad73759` faithful BlockCondition**: Go BlockCondition 머신러리가 스텁이었음 -- newBlockCondition(collapse.go)
+  opcode 미저장, renderCondition `||` 하드코딩, negateCondition De Morgan 안 함. 수정: BlockCondition struct+opc
+  (opc=(b1.FalseOut==b2)?INT_OR:INT_AND, block.cc:1785) + ForceFalseEdge(block.cc:1204) + negate opc
+  flip(INT_AND->BOOL_AND 정규화)+양쪽 negate+SwapEdges(block.cc:3023) + emitBlockCondition &&/|| 디스패치+comma
+  (printc.cc:2968). process 조건 `if((param_3<=iVar1)&&(local_18=param_4,iVar1<=param_4))` 구조 골든 일치 +
+  degenerate BlockCondition가 버리던 배열로드 `iVar1=*(...)` 문장 복원.
+- **`781c9d6` process 비결정성+반전 수정 (process loop/clamp byte-identical 도달)**: (1) addCFGEdges(bridge.go:830)
+  `for _,block:=range blockByAddr` map 순회 -> merge블록 in-edge 순서 랜덤 -> phi슬롯 permute -> process 출력
+  3-4개 비결정. Ghidra collectEdges(flow.cc:906)는 dead op 리스트 ascending 주소순. **fix=block 주소 ascending
+  정렬**. (2) ascending만으론 comma/body 뒤바뀜 -- 진짜 반전 근본 = halfDeleteInEdge/OutEdge(flowblock.go)가
+  swap-with-last, Ghidra는 slide-down 순서보존(block.cc:100/115). do-nothing 블록 제거시 MULTIEQUAL 입력
+  trim(opRemoveInput slide-down)과 lockstep 필요 -> swap이 desync. **fix=slide-down**(block.cc byte-for-byte).
+- **`8bdd340` gap2 64bit signed div 반환**: 반환 `ZEXT(SUBPIECE(INT_SDIV,0,4),8)`에 Ghidra RuleSubZext
+  (ruleaction.cc:5057)가 먼저 발화해 `sdiv&0xffffffff`(INT_AND, 8byte div 유지)로 재작성, coreaction.cc가
+  RuleSubZext(5596)를 RuleSubvarZext(5638) 앞에 등록. Gosleigh엔 RuleSubZext 미포팅(기존 Go RuleSubZext는 무관한
+  SUBPIECE-cancel)이라 RuleSubvarZext가 ZEXT 벗기고 RuleSubCommute가 4byte 절단. fix=RuleSubZext::applyOp -> Go
+  RuleSubZextMask(INT_ZEXT, RuleSubvarZext 앞) + RuleOrSextForm를 live oppool1 등록(CDQ INT_OR->INT_SEXT). gcd
+  무회귀.
+- **`2296513` 반환 carrier 타입+번호 (process 8/8 완결)**: typeOrder(datatype.go:497)/INT_AND 타입은 이미
+  faithful(task 가설 오진). 실제 잔차는 printc 렌더 -- (A) inferReturnType/emitLocalDeclarations가 return-only
+  carrier를 TYPE_UINT/TYPE_UNKNOWN이면 undefined%d 강제하던 걸 TYPE_UNKNOWN만으로 제한(real-typed->실타입,
+  Ghidra buildVariableName). process(INT_AND->TYPE_UINT)만 `ulonglong`으로 이동. (B) renameReturnOnlyLocals
+  per-prefix 카운터 -> Ghidra shared base 카운터(database.cc, carrier 마지막 생성이라 iVar1 다음 uVar2). (B)는
+  국소 재현(단일 global 카운터 완전통합은 미포팅, 현 골든 없는 mixed-prefix+carrier 가상케이스만 영향).
+- **`746a72c` IOP-space 인코딩 (Sonnet 5 작성, foundational)**: INDIRECT input(1)이 zero-const 스텁이라 heritage
+  same-time rename(heritage.cc:2506-2517)이 CALLIND 타깃 유실. C++의 raw-pointer 인코딩(op.hh:249
+  getOpFromConst, funcdata_varnode.cc:176 newVarnodeIop)은 Go GC-unsafe(uintptr가 대상 reachability 미보장) ->
+  기존 codebase idiom(BindSpaceConstant/GetSpaceFromConst) 재사용한 BindIndirectCause/GetIndirectCause
+  side-table(addtreestate.go). INDIRECT input(1)은 여전히 zero constant(기존 consumer 무영향) + cause-op
+  out-of-band 바인딩. NewIndirectOp/Creation input(1)=NewVarnodeIop(callOp)(funcdata_op.cc:695/725) +
+  renameRecurse same-time 체크 line-by-line 충실. **necessary-not-sufficient for dispatch(2/3 불변)**.
+
+**확정된 벽/재규명**: (1) **switch uVar1 = HEADLESS 아티팩트, merge 버그 아님** -- decomp_dbg.exe(CPUI_DEBUG
+Ghidra 코어)로 실측: Ghidra 디컴파일러 CORE도 `param_2` 재사용 = Gosleigh와 byte-identical. 골든 uVar1은 full
+HEADLESS 분석(param recovery)에서만. merge.cc/cover.cc 12.0.4<->12.2 byte-identical. **uVar1 강제는 C++ 코어
+파리티 위반 -- 하지 말 것.** (2) **breadth "reloc 갭" 프레이밍 폐기** -- 하네스가 .obj 안 읽고 골든
+JSON(post-reloc) 바이트 먹임, reloc 로더는 dead code. dispatch 진짜 갭 = CALLIND target 붕괴+param
+recovery(headless-env). **converged frontier = headless-environment param/type/symbol recovery**(대형/고위험,
+다음 세션). 상세는 `NEXT_SESSION_PROMPT.md` + 메모리 `project_gosleigh`.
+
 ### 2026-07-03: track B 완성 -- switch 복구 엔진을 실 CFG/파이프라인에 통합 + switch{case} 구조 렌더 (phase3a/3b/3c/phase4)
 바로 아래 항목(B2 phase1/phase2, master `80a28d1`)에서 완성된 JumpBasic 모델 복구 엔진을 실 함수
 디컴파일 파이프라인에 통합해 **실제 링크된 x64 `.exe`에서 Ghidra와 동일한 `switch(param_1){case 0:
