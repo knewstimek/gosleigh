@@ -53,3 +53,7 @@ local/
 
 # gorchera runtime artifacts
 .gorchera/serve.pid
+
+# Local launcher scripts (personal, keep on disk only)
+/Gosleigh.bat
+/Gosleigh-codex.bat
