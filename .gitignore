@@ -43,3 +43,13 @@ coverage.txt
 *.local
 .env
 local/
+
+# Go build cache (GOCACHE) -- never commit; leaks local paths/username
+/.gocache/
+
+# Stray build leftovers
+*.old
+*.pid
+
+# gorchera runtime artifacts
+.gorchera/serve.pid
