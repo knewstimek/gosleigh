@@ -341,10 +341,12 @@ func TestPrintCEndToEndRawPcodeToStructuredC(t *testing.T) {
 	// C++ parity: ruleBlockIfNoExit fires at i=0 (FalseOut=param_1+1 path),
 	// negates condition (param_1==0 -> param_1!=0), and makes that the if-body.
 	// param_1 lives in register space with no committed type -> TYPE_UNKNOWN -> "undefined4".
-	// Return type: INT_ADD produces a TYPE_UINT unique varnode -> "unsigned int".
+	// Return type: INT_ADD produces a TYPE_UINT unique varnode -> "uint".
 	// C++ parity: Ghidra emits "undefined4" for untyped 4-byte varnodes;
 	// the return type is inferred from the RETURN's input (TYPE_UINT from INT_ADD).
-	want := "unsigned int sample(undefined4 param_1) {\n    if (param_1 != 0) {\n        return param_1 + 1;\n    }\n    return 1;\n}\n"
+	// TYPE_UINT size 4 prints as the core-type short name "uint" (type.cc coretypes),
+	// not the C-standard "unsigned int".
+	want := "uint sample(undefined4 param_1) {\n    if (param_1 != 0) {\n        return param_1 + 1;\n    }\n    return 1;\n}\n"
 	if got != want {
 		t.Fatalf("unexpected emitted C:\n%s", got)
 	}
