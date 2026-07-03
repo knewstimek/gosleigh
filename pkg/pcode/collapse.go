@@ -229,6 +229,29 @@ func (b *FlowBlock) negateCondition(top bool) bool {
 		bb.NegateCondition(top)
 		return true
 	}
+	if bc, ok := b.Concrete().(*BlockCondition); ok {
+		// C++ parity: BlockCondition::negateCondition (block.cc:3023).
+		// Distribute the NOT to both children, flip the boolean opcode, then flip
+		// the order of this block's outgoing edges via FlowBlock::negateCondition.
+		children := b.StructuredChildren()
+		res1, res2 := false, false
+		if len(children) > 0 {
+			res1 = children[0].negateCondition(false)
+		}
+		if len(children) > 1 {
+			res2 = children[1].negateCondition(false)
+		}
+		if bc.opc == CPUI_BOOL_AND {
+			bc.opc = CPUI_BOOL_OR
+		} else {
+			bc.opc = CPUI_BOOL_AND
+		}
+		// FlowBlock::negateCondition(top): swap outgoing edges only at top/bottom.
+		if top && b.SizeOut() == 2 {
+			b.SwapEdges()
+		}
+		return res1 || res2
+	}
 	for _, child := range b.StructuredChildren() {
 		if child.negateCondition(top) {
 			return true
@@ -273,6 +296,25 @@ func (b *BlockWhileDo) SetForLoop(iterateOp, initializeOp *PcodeOp) {
 	b.initializeOp = initializeOp
 }
 
+// BlockCondition is a compound short-circuit condition: two conditional
+// sub-blocks glued together with a boolean AND/OR. The opc field carries the
+// boolean operation, used both to render "&&"/"||" and to flip under negation.
+// C++ parity: block.hh BlockCondition -- OpCode opc, getOpcode, negateCondition.
+type BlockCondition struct {
+	FlowBlock
+	// opc is the boolean operation. newBlockCondition seeds it with the INTEGER
+	// opcode (CPUI_INT_AND/OR); negateCondition normalizes it to the BOOLEAN
+	// opcode (CPUI_BOOL_AND/OR), which is what the emitter tests to choose the
+	// "&&"/"||" joiner. A never-negated condition therefore renders as "||",
+	// matching PrintC::emitBlockCondition's getOpcode()==CPUI_BOOL_AND test.
+	// C++ parity: BlockCondition::opc
+	opc OpCode
+}
+
+// Opcode returns the boolean operation of the condition block.
+// C++ parity: BlockCondition::getOpcode
+func (b *BlockCondition) Opcode() OpCode { return b.opc }
+
 type edgeRecord struct {
 	other *FlowBlock
 	node  *FlowBlock
@@ -287,6 +329,11 @@ func newStructuredFlowBlock(tp BlockType) *FlowBlock {
 	switch tp {
 	case BlockWhileDoType:
 		bl := &BlockWhileDo{}
+		bl.FlowBlock.SetType(tp)
+		bl.FlowBlock.SetConcrete(bl)
+		return &bl.FlowBlock
+	case BlockConditionType:
+		bl := &BlockCondition{}
 		bl.FlowBlock.SetType(tp)
 		bl.FlowBlock.SetConcrete(bl)
 		return &bl.FlowBlock
@@ -430,7 +477,26 @@ func (bg *BlockGraph) newBlockList(nodes []*FlowBlock) *FlowBlock {
 }
 
 func (bg *BlockGraph) newBlockCondition(left, right *FlowBlock) *FlowBlock {
-	return bg.collapseRegion([]*FlowBlock{left, right}, BlockConditionType)
+	// C++ parity: BlockGraph::newBlockCondition (block.cc:1780).
+	// opc = (b1->getFalseOut()==b2) ? CPUI_INT_OR : CPUI_INT_AND. Computed from
+	// left's original false edge before collapse; collapseRegion's in-place edge
+	// redirection preserves the 2-output false/true ordering that C++ pins with
+	// forceOutputNum(2)/forceFalseEdge(out0).
+	opc := CPUI_INT_AND
+	if left.FalseOut() == right {
+		opc = CPUI_INT_OR
+	}
+	// out0 = b2->getOut(0), captured before collapse so forceFalseEdge can pin
+	// the condition's false out to it (preserving the condition ordering).
+	out0 := right.getOut(0)
+	res := bg.collapseRegion([]*FlowBlock{left, right}, BlockConditionType)
+	if bc, ok := res.Concrete().(*BlockCondition); ok {
+		bc.opc = opc
+	}
+	// C++ forceOutputNum(2) is a no-op for a real binary condition (already 2
+	// outs); forceFalseEdge(out0) pins outEdges[0] to b2's original out(0).
+	res.ForceFalseEdge(out0)
+	return res
 }
 
 func (bg *BlockGraph) newBlockIf(cond, clause *FlowBlock) *FlowBlock {

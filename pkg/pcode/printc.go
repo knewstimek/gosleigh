@@ -1416,14 +1416,11 @@ func (s *printCState) emitBlock(bl *FlowBlock) error {
 	case BlockListType:
 		return s.emitListBlock(bl)
 	case BlockConditionType:
-		s.lang.Line(func() {
-			s.lang.Token("/*")
-			s.lang.Space()
-			s.lang.Token(s.mustRenderCondition(bl))
-			s.lang.Space()
-			s.lang.Token("*/")
-		})
-		return nil
+		// A condition block reached standalone (not consumed by an if/loop header)
+		// has no branch mod set; C++ emitBlockCondition emits nothing in that case
+		// (printc.cc:2968 falls through). Emit block(0)'s leading statements (the
+		// no_branch behavior) so real assignments are not dropped.
+		return s.emitConditionLead(bl)
 	case BlockIfType:
 		return s.emitIfBlock(bl)
 	case BlockWhileDoType:
@@ -1497,6 +1494,30 @@ func (s *printCState) isBlockEmpty(bl *FlowBlock) bool {
 	return true
 }
 
+// emitConditionLead emits the leading (non-branch) statements of a condition
+// block before the enclosing "if"/loop header. For a compound BlockCondition it
+// descends into block(0) -- the only sub-block C++ emits under no_branch -- and
+// for a basic block it emits the block's ops with the final branch suppressed.
+// C++ parity: PrintC::emitBlockIf emits condBlock with no_branch (printc.cc:3026)
+// -> emitBlockCondition's no_branch path emits getBlock(0) recursively
+// (printc.cc:2972).
+func (s *printCState) emitConditionLead(bl *FlowBlock) error {
+	if bl == nil {
+		return nil
+	}
+	if bl.Type() == BlockConditionType {
+		children := bl.StructuredChildren()
+		if len(children) > 0 {
+			return s.emitConditionLead(children[0])
+		}
+		return nil
+	}
+	if basic := toBasic(bl); basic != nil {
+		return s.emitOps(basic, true)
+	}
+	return nil
+}
+
 // emitIfBlockChain emits a BlockIf as either a leading "if" or a chained
 // "else if", allowing deeply nested else-if ladders to be flattened.
 // When isElseIf is true the "if" header is preceded by "else " inline with
@@ -1546,11 +1567,11 @@ func (s *printCState) emitIfBlockChain(bl *FlowBlock, isElseIf bool) error {
 		// first comparison: "local = param_1;" then "if (...)"). emitOps with
 		// suppressControl skips the branch and the implied condition temp.
 		// C++ parity: PrintC::emitBlockIf emits condBlock once with no_branch set
-		// (printc.cc:3026-3030) before rendering the "if".
-		if basic := toBasic(children[0]); basic != nil {
-			if err := s.emitOps(basic, true); err != nil {
-				return err
-			}
+		// (printc.cc:3026-3030) before rendering the "if". For a compound
+		// BlockCondition this descends into block(0), the only sub-block C++'s
+		// emitBlockCondition emits under no_branch (printc.cc:2972).
+		if err := s.emitConditionLead(children[0]); err != nil {
+			return err
 		}
 		s.lang.OpenBlockAfter(func() {
 			s.lang.Token("if")
@@ -3431,19 +3452,30 @@ func (s *printCState) renderCondition(bl *FlowBlock) (ExprFragment, error) {
 		if len(children) == 0 {
 			return s.lang.Atom("0"), nil
 		}
-		parts := make([]ExprFragment, 0, len(children))
-		for _, child := range children {
-			part, err := s.renderCondition(child)
-			if err != nil {
-				return ExprFragment{}, err
-			}
-			parts = append(parts, part)
+		if len(children) == 1 {
+			return s.renderCondition(children[0])
 		}
-		combined := parts[0]
-		for i := 1; i < len(parts); i++ {
-			combined = s.lang.BinaryExpr(combined, "||", parts[i], cPrecLogicalOr, ExprAssocLeft)
+		// C++ parity: PrintC::emitBlockCondition (printc.cc:2968). block(0) is
+		// emitted with only_branch (its condition only); block(1) with
+		// comma_separate (its leading stores joined by ',' then its condition).
+		// The joiner is "&&" when the opcode is CPUI_BOOL_AND, else "||", matching
+		// the getOpcode()==CPUI_BOOL_AND test. Both operands render at the lowest
+		// precedence so BinaryExpr parenthesizes them, as Ghidra does.
+		left, err := s.renderCondition(children[0])
+		if err != nil {
+			return ExprFragment{}, err
 		}
-		return combined, nil
+		right, err := s.renderConditionComma(children[1])
+		if err != nil {
+			return ExprFragment{}, err
+		}
+		op := "||"
+		prec := cPrecLogicalOr
+		if bc, ok := bl.Concrete().(*BlockCondition); ok && bc.opc == CPUI_BOOL_AND {
+			op = "&&"
+			prec = cPrecLogicalAnd
+		}
+		return s.lang.BinaryExpr(left, op, right, prec, ExprAssocLeft), nil
 	case BlockBasicType, BlockPlain:
 		basic := toBasic(bl)
 		if basic == nil {
@@ -3470,6 +3502,20 @@ func (s *printCState) renderCondition(bl *FlowBlock) (ExprFragment, error) {
 		}
 		return s.lang.Atom("0"), nil
 	}
+}
+
+// renderConditionComma renders a condition sub-block as the second operand of a
+// compound condition, in comma_separate mode: a basic block emits its leading
+// non-branch stores joined by ',' followed by its CBRANCH condition; a nested
+// condition renders recursively as a compound condition. Rendered at the lowest
+// precedence so the enclosing BinaryExpr wraps it in parentheses.
+// C++ parity: PrintC::emitBlockCondition sets comma_separate on getBlock(1)
+// (printc.cc:2984), which for a basic block emits statements comma-separated.
+func (s *printCState) renderConditionComma(bl *FlowBlock) (ExprFragment, error) {
+	if bl != nil && bl.Type() == BlockBasicType {
+		return s.lang.Expr(s.renderCondBlockComma(bl), cPrecLowest), nil
+	}
+	return s.renderCondition(bl)
 }
 
 func (s *printCState) mustRenderSwitchSelector(bl *FlowBlock) string {
