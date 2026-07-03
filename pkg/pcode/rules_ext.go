@@ -175,6 +175,112 @@ func (r *RuleSubZext) apply(op *PcodeOp, data *Funcdata) int {
 	return rewriteToCopy(data, op, ext.Input(0))
 }
 
+// RuleSubZextMask simplifies INT_ZEXT applied to a SUBPIECE (optionally through an
+// INT_RIGHT), turning the truncate-then-extend-to-same-size into an INT_AND mask:
+//   - zext( sub(V,0) )       => V & mask
+//   - zext( sub(V,c) )       => (V >> c*8) & mask
+//   - zext( sub(V,c) >> d )  => (V >> (c*8+d)) & mask
+// This keeps the full-width value V intact (e.g. a 64-bit INT_SDIV result stays
+// 64-bit) and only masks the low logical bits, matching Ghidra's return-register
+// rendering `x & 0xffffffff`. Because it is registered on INT_ZEXT ahead of
+// RuleSubvarZext, it pre-empts the subvariable-flow narrowing that would otherwise
+// remove the extension and let RuleSubCommute over-truncate a signed divide.
+//
+// The Go type is suffixed "Mask" only because the plain RuleSubZext identifier is
+// already used by an unrelated SUBPIECE-cancel rule above; this is the faithful port.
+// C++ parity: RuleSubZext::applyOp in ruleaction.cc (registered before
+// RuleSubvarZext in coreaction.cc universalAction).
+type RuleSubZextMask struct{ batchRule }
+
+func NewRuleSubZextMask(group string) *RuleSubZextMask {
+	r := &RuleSubZextMask{}
+	r.batchRule = newBatchRule(group, "subzextmask", []OpCode{CPUI_INT_ZEXT}, r.apply, func(g string) Rule { return NewRuleSubZextMask(g) })
+	return r
+}
+
+func (r *RuleSubZextMask) apply(op *PcodeOp, data *Funcdata) int {
+	subvn := op.Input(0)
+	if subvn == nil || !subvn.IsWritten() {
+		return 0
+	}
+	subop := subvn.Def()
+	switch subop.Code() {
+	case CPUI_SUBPIECE:
+		basevn := subop.Input(0)
+		if basevn == nil || basevn.IsFree() {
+			return 0
+		}
+		// Truncating then extending back to the same size.
+		if basevn.Size() != outputSize(op) {
+			return 0
+		}
+		if basevn.Size() > 8 {
+			return 0
+		}
+		if subOffset, _ := constantValue(subop.Input(1)); subOffset != 0 {
+			// Truncating from the middle: fold the byte offset into an INT_RIGHT
+			// shift of the full value, but only when the truncated value has no
+			// other use.
+			if subvn.LoneDescend() != op {
+				return 0
+			}
+			newvn := data.NewUnique(basevn.Size())
+			constvn := subop.Input(1)
+			rightVal := subOffset * 8
+			data.OpSetInput(op, newvn, 0)
+			data.OpSetOpcode(subop, CPUI_INT_RIGHT)
+			data.OpSetInput(subop, data.NewConstant(constvn.Size(), rightVal), 1)
+			data.OpSetOutput(subop, newvn)
+		} else {
+			// Bypass the truncation entirely.
+			data.OpSetInput(op, basevn, 0)
+		}
+		val := maskForSize(subvn.Size())
+		constvn := data.NewConstant(basevn.Size(), val)
+		data.OpSetOpcode(op, CPUI_INT_AND)
+		data.OpInsertInput(op, constvn, 1)
+		return 1
+	case CPUI_INT_RIGHT:
+		shiftop := subop
+		if !shiftop.Input(1).IsConstant() {
+			return 0
+		}
+		midvn := shiftop.Input(0)
+		if midvn == nil || !midvn.IsWritten() {
+			return 0
+		}
+		innersub := midvn.Def()
+		if innersub.Code() != CPUI_SUBPIECE {
+			return 0
+		}
+		basevn := innersub.Input(0)
+		if basevn == nil || basevn.IsFree() {
+			return 0
+		}
+		if basevn.Size() != outputSize(op) {
+			return 0
+		}
+		if midvn.LoneDescend() != shiftop || subvn.LoneDescend() != op {
+			return 0
+		}
+		val := maskForSize(midvn.Size()) // mask based on truncated size
+		sa, _ := constantValue(shiftop.Input(1))
+		val >>= sa
+		innerOff, _ := constantValue(innersub.Input(1))
+		sa += innerOff * 8 // combined shift = truncation + small shift
+		newvn := data.NewUnique(basevn.Size())
+		data.OpSetInput(op, newvn, 0)
+		data.OpSetInput(shiftop, basevn, 0)
+		data.OpSetInput(shiftop, data.NewConstant(shiftop.Input(1).Size(), sa), 1)
+		data.OpSetOutput(shiftop, newvn)
+		constvn := data.NewConstant(basevn.Size(), val)
+		data.OpSetOpcode(op, CPUI_INT_AND)
+		data.OpInsertInput(op, constvn, 1)
+		return 1
+	}
+	return 0
+}
+
 type RuleSubExtComm struct{ batchRule }
 
 func NewRuleSubExtComm(group string) *RuleSubExtComm {
