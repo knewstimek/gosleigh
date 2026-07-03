@@ -1283,6 +1283,11 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	actprop.AddRule(NewRuleConcatZero("analysis"))
 	actprop.AddRule(NewRuleConcatLeftShift("analysis"))
 	actprop.AddRule(NewRuleSubZext("analysis"))
+	// Faithful C++ RuleSubZext (INT_ZEXT -> INT_AND mask). Registered here, ahead of
+	// RuleSubvarZext below, so zext(sub(V,0)) collapses to V & mask before the
+	// subvariable-flow narrowing can strip the extension. C++ parity: coreaction.cc
+	// registers RuleSubZext (5596) before RuleSubvarZext (5638).
+	actprop.AddRule(NewRuleSubZextMask("analysis"))
 	actprop.AddRule(NewRuleSubCancel("analysis"))
 	actprop.AddRule(NewRuleShiftSub("analysis"))
 	actprop.AddRule(NewRuleHumptyDumpty("analysis"))
@@ -1296,6 +1301,12 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	actprop.AddRule(NewRuleDivOpt("analysis"))
 	actprop.AddRule(NewRuleSignForm("analysis"))
 	actprop.AddRule(NewRuleSignForm2("analysis"))
+	// RuleOrSextForm collapses the packed-.sla CDQ dividend INT_OR(shifted-sign, zext)
+	// back to INT_SEXT, the Gosleigh equivalent of Ghidra's PIECE(EDX,EAX) ->
+	// RulePiece2Sext. Needed once a 64-bit IDIV dividend survives (does not get
+	// truncated by RuleSubCommute) so it renders as `(longlong)x` instead of the raw
+	// OR expansion. Runs after RuleSignForm produces the INT_SRIGHT sign term.
+	actprop.AddRule(NewRuleOrSextForm("analysis"))
 	actprop.AddRule(NewRuleSignDiv2("analysis"))
 	actprop.AddRule(NewRuleDivChain("analysis"))
 	actprop.AddRule(NewRuleSignNearMult("analysis"))
