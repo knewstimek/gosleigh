@@ -254,31 +254,37 @@ func (b *FlowBlock) AddInEdge(source *FlowBlock, label uint32) {
 	})
 }
 
-// halfDeleteInEdge removes inEdges[slot] and fixes the ReverseIndex on the
-// opposite (outEdges) side for the edge that moves into the vacated slot.
+// halfDeleteInEdge removes inEdges[slot], sliding the subsequent edges down to
+// preserve order (NOT a swap-with-last). Order preservation is required so the
+// in-edge list stays in lockstep with a merge block's MULTIEQUAL inputs, which
+// PcodeOp.RemoveInput / Funcdata.OpRemoveInput also slide down. A swap-with-last
+// here would desync the two: removing a block's edge would leave the MULTIEQUAL
+// input order (shifted) inconsistent with the in-edge order (swapped), permuting
+// which predecessor feeds which phi slot.
+// C++ parity: block.cc FlowBlock::halfDeleteInEdge (100).
 func (b *FlowBlock) halfDeleteInEdge(slot int) {
-	last := len(b.inEdges) - 1
-	if slot != last {
-		// Move last element into the vacated slot.
-		b.inEdges[slot] = b.inEdges[last]
-		// The moved edge's source block has an outEdge pointing here;
-		// update its ReverseIndex to the new slot.
-		movedEdge := &b.inEdges[slot]
-		movedEdge.Point.outEdges[movedEdge.ReverseIndex].ReverseIndex = slot
+	for slot < len(b.inEdges)-1 {
+		b.inEdges[slot] = b.inEdges[slot+1] // slide the edge entry over
+		// The moved edge came from slot+1; its mirror out-edge's ReverseIndex
+		// pointed there, so decrement it to track the new position.
+		moved := &b.inEdges[slot]
+		moved.Point.outEdges[moved.ReverseIndex].ReverseIndex--
+		slot++
 	}
-	b.inEdges = b.inEdges[:last]
+	b.inEdges = b.inEdges[:len(b.inEdges)-1]
 }
 
-// halfDeleteOutEdge removes outEdges[slot] and fixes the ReverseIndex on the
-// opposite (inEdges) side for the edge that moves into the vacated slot.
+// halfDeleteOutEdge removes outEdges[slot], sliding subsequent edges down to
+// preserve order (mirror of halfDeleteInEdge).
+// C++ parity: block.cc FlowBlock::halfDeleteOutEdge (115).
 func (b *FlowBlock) halfDeleteOutEdge(slot int) {
-	last := len(b.outEdges) - 1
-	if slot != last {
-		b.outEdges[slot] = b.outEdges[last]
-		movedEdge := &b.outEdges[slot]
-		movedEdge.Point.inEdges[movedEdge.ReverseIndex].ReverseIndex = slot
+	for slot < len(b.outEdges)-1 {
+		b.outEdges[slot] = b.outEdges[slot+1] // slide the edge entry over
+		moved := &b.outEdges[slot]
+		moved.Point.inEdges[moved.ReverseIndex].ReverseIndex--
+		slot++
 	}
-	b.outEdges = b.outEdges[:last]
+	b.outEdges = b.outEdges[:len(b.outEdges)-1]
 }
 
 // RemoveInEdge removes the bidirectional edge at inEdges[slot].

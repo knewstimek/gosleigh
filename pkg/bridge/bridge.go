@@ -3,6 +3,7 @@ package bridge
 import (
 	"errors"
 	"fmt"
+	"sort"
 
 	"gosleigh/pkg/address"
 	"gosleigh/pkg/pcode"
@@ -829,7 +830,20 @@ func materializeConstantInput(fd *pcode.Funcdata, block *pcode.BlockBasic, addr 
 
 func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode.BlockBasic, instToBlock map[address.Address]*pcode.BlockBasic, lastInBlock map[*pcode.BlockBasic]instructionRecord, recoveredTables map[uint64]*pcode.JumpTable) {
 	seen := make(map[edgeKey]struct{})
-	for _, block := range blockByAddr {
+	// Visit blocks in ascending source-op-address order. Ghidra builds CFG edges
+	// by walking the dead op list in ascending address order (FlowInfo::collectEdges,
+	// flow.cc:906) and calling bblocks.addEdge in that order (connectBasic,
+	// flow.cc:1021); FlowBlock::addInEdge appends without sorting (block.cc:73). So a
+	// merge block's in-edges land ordered by predecessor source-op address. Iterating
+	// a Go map here instead would randomize predecessor order and permute phi input
+	// slots run-to-run; sorting the keys ascending reproduces Ghidra's order exactly.
+	addrs := make([]address.Address, 0, len(blockByAddr))
+	for addr := range blockByAddr {
+		addrs = append(addrs, addr)
+	}
+	sort.Slice(addrs, func(i, j int) bool { return addrs[i].Less(addrs[j]) })
+	for _, addr := range addrs {
+		block := blockByAddr[addr]
 		record, exists := lastInBlock[block]
 		if !exists {
 			continue
