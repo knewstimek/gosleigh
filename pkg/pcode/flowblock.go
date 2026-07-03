@@ -361,6 +361,24 @@ func (b *FlowBlock) SwapEdges() {
 	b.flags ^= BlockFlagFlipPath
 }
 
+// ForceFalseEdge pins outEdges[0] (the false out) to out0, swapping the two
+// outgoing edges if necessary. Used when collapsing a binary condition so the
+// false/true ordering is preserved, which later structuring rules rely on to
+// decide whether to negate. A self-loop target (out0 collapsed into this block)
+// is redirected to this block, matching C++.
+// C++ parity: block.cc BlockGraph::forceFalseEdge
+func (b *FlowBlock) ForceFalseEdge(out0 *FlowBlock) {
+	if len(b.outEdges) != 2 {
+		return // can only preserve a binary condition
+	}
+	if out0 != nil && out0.parent == b {
+		out0 = b // allow for loops to self
+	}
+	if b.outEdges[0].Point != out0 {
+		b.SwapEdges()
+	}
+}
+
 // SetOutEdgeFlag sets flag bits on outEdges[i] and the mirror inEdge.
 // C++ parity: block.cc FlowBlock::setOutEdgeFlag
 func (b *FlowBlock) SetOutEdgeFlag(i int, lab uint32) {
