@@ -612,8 +612,24 @@ func applyReturnRecovery(fd *Funcdata) {
 			continue
 		}
 		if !ancestorOpUseReturn(retVn, op, retSlot, 5, make(map[*PcodeOp]bool)) {
-			fd.OpUnsetInput(op, retSlot)
-			op.SetNumInputs(retSlot)
+			// ancestorOpUse short-circuits false for a CALL/CALLIND-defined varnode
+			// (matching C++ Funcdata::ancestorOpUse: a call output is not evidence of
+			// a single-op use for output-trial classification). But a call result
+			// whose only consumer is this RETURN (through the transparent ops
+			// onlyReturnUse walks) IS the function's return value -- the tail-call
+			// carrier a demoted BRANCHIND produces (uVar1 = (*code)(...); return
+			// uVar1;). Rescue only that call-output case; a non-call clobber that
+			// happens to be return-only-consumed (e.g. a loop-carried parameter left
+			// in the return register) is still stripped to a void return.
+			rescued := false
+			if def := retVn.Def(); def != nil && !def.IsDead() && def.IsCall() &&
+				onlyReturnUse(retVn, op, retSlot, make(map[*Varnode]bool)) {
+				rescued = true
+			}
+			if !rescued {
+				fd.OpUnsetInput(op, retSlot)
+				op.SetNumInputs(retSlot)
+			}
 		}
 	}
 }

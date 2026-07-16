@@ -261,6 +261,21 @@ func (fd *Funcdata) GetCallSpecs(i int) *FuncCallSpecs {
 	return fd.callSpecs[i]
 }
 
+// callSpecsForOp returns the FuncCallSpecs bound to the given CALL/CALLIND op,
+// or nil if none is tracked. C++ parity: Funcdata::getCallSpecs(PcodeOp*).
+func (fd *Funcdata) callSpecsForOp(op *PcodeOp) *FuncCallSpecs {
+	if fd == nil || op == nil {
+		return nil
+	}
+	fd.ensureCallSpecs()
+	for _, fc := range fd.callSpecs {
+		if fc != nil && fc.op == op {
+			return fc
+		}
+	}
+	return nil
+}
+
 func (fd *Funcdata) ensureCallSpecs() {
 	if fd == nil || fd.callSpecs != nil {
 		return
