@@ -11,6 +11,122 @@
     {
       "name": "sum_pp_walk",
       "output": "\nint sum_pp_walk(undefined8 *param_1,int param_2)\n\n{\nlonglong lVar1;\nint local_28;\nundefined8 *local_20;\n\nlocal_28 = 0;\nlVar1 = param_2;\nfor (local_20 = param_1; local_20 \u003c param_1 + lVar1 * 8; local_20 = local_20 + 1 * 8) {\nlocal_28 = local_28 + *(int *)*local_20;\n}\nreturn local_28;\n}\n"
+    },
+    {
+      "name": "while_pretest_sum",
+      "output": "\nint while_pretest_sum(longlong param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nlocal_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\n}\nreturn local_14;\n}\n"
+    },
+    {
+      "name": "loop_forever_break",
+      "output": "\nint loop_forever_break(longlong param_1,int param_2,int param_3)\n\n{\nundefined4 local_18;\n\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nif (*(int *)(param_1 + (longlong)local_18 * 4) == param_3) goto label_0;\n}\nlocal_18 = -1;\nreturn local_18;\n}\n"
+    },
+    {
+      "name": "nested_while_matrix",
+      "output": "\nint nested_while_matrix(longlong param_1,int param_2,int param_3)\n\n{\nundefined4 local_18;\nundefined4 local_14;\nundefined4 local_10;\n\nlocal_10 = 0;\nfor (local_14 = 0; local_14 \u003c param_2; local_14 = local_14 + 1) {\nfor (local_18 = 0; local_18 \u003c param_3; local_18 = local_18 + 1) {\nlocal_10 = local_10 + *(int *)(param_1 + (longlong)(local_14 * param_3 + local_18) * 4);\n}\n}\nreturn local_10;\n}\n"
+    },
+    {
+      "name": "while_countdown",
+      "output": "\nint while_countdown(int param_1)\n\n{\nundefined4 local_8;\nundefined4 local_18;\n\nlocal_18 = 0;\nfor (local_8 = param_1; 1 \u003c= local_8; local_8 = local_8 - 2) {\nlocal_18 = local_18 + local_8;\n}\nreturn local_18;\n}\n"
+    },
+    {
+      "name": "switch_dense",
+      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nint uVar1;\nundefined8 uVar2;\n\nuVar1 = param_1 - 10U;\nif (8 \u003c= (uint)uVar1) goto label_missing;\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar2 = (*(code *)((ulonglong)*(uint *)((longlong)uVar1 * 4 + 0x4258) + 0x1a20))();\nreturn uVar2;\n}\n"
+    },
+    {
+      "name": "switch_sparse",
+      "output": "\nundefined8 switch_sparse(int param_1)\n\n{\nundefined8 uVar1;\n\nif (param_1 == 1) {\nuVar1 = 0x6f;\n}\nelse if (param_1 == 0x32) {\nuVar1 = 0xde;\n}\nelse if (param_1 == 999) {\nuVar1 = 0x14d;\n}\nelse {\nuVar1 = 0xffffffff;\n}\nreturn uVar1;\n}\n"
+    },
+    {
+      "name": "switch_no_default",
+      "output": "\nundefined4 switch_no_default(int param_1)\n\n{\nundefined4 local_18;\n\nlocal_18 = 0xffffffff;\nif (param_1 == 1) {\nlocal_18 = 10;\n}\nelse if (param_1 == 2) {\nlocal_18 = 0x14;\n}\nelse if (param_1 == 3) {\nlocal_18 = 0x1e;\n}\nreturn local_18;\n}\n"
+    },
+    {
+      "name": "switch_fallthrough",
+      "output": "\nundefined4 switch_fallthrough(int param_1)\n\n{\nundefined4 local_14;\n\nif ((param_1 == 1) || (param_1 == 2)) {\nlocal_14 = 100;\n}\nelse if (param_1 == 3) {\nlocal_14 = 200;\n}\nelse {\nlocal_14 = 0xffffffff;\n}\nreturn local_14;\n}\n"
+    },
+    {
+      "name": "array_2d_sum",
+      "output": "\nint array_2d_sum(longlong param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\nundefined4 local_10;\n\nlocal_10 = 0;\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nfor (local_14 = 0; local_14 \u003c 4; local_14 = local_14 + 1) {\nlocal_10 = local_10 + *(int *)(param_1 + (longlong)local_18 * 0x10 + (longlong)local_14 * 4);\n}\n}\nreturn local_10;\n}\n"
+    },
+    {
+      "name": "array_init_then_sum",
+      "output": "\nint array_init_then_sum(int param_1)\n\n{\nundefined4 local_8;\nundefined4 local_58;\nundefined4 local_54;\n\nlocal_8 = param_1;\nif (0x11 \u003c= param_1) {\nlocal_8 = 0x10;\n}\nfor (local_58 = 0; local_58 \u003c local_8; local_58 = local_58 + 1) {\n*(int *)((local_428 - 0x48U) + (longlong)local_58 * 4) = local_58 * local_58;\n}\nlocal_54 = 0;\nfor (local_58 = 0; local_58 \u003c local_8; local_58 = local_58 + 1) {\nlocal_54 = local_54 + *(int *)((local_428 - 0x48U) + (longlong)local_58 * 4);\n}\nreturn local_54;\n}\n"
+    },
+    {
+      "name": "array_reverse_sum",
+      "output": "\nint array_reverse_sum(longlong param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\nwhile (local_18 = param_2 + -1, 0 \u003c= local_18) {\nlocal_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\nparam_2 = local_18;\n}\nreturn local_14;\n}\n"
+    },
+    {
+      "name": "reverse_bytes_inplace",
+      "output": "\nvoid reverse_bytes_inplace(longlong param_1,int param_2,longlong param_3)\n\n{\nundefined4 local_14;\nundefined4 local_10;\n\nwhile (local_10 = iVar2 + -1, local_14 \u003c local_10) {\n*(undefined1 *)(param_1 + (longlong)local_14) = *(undefined1 *)(param_1 + local_10);\n*(undefined1 *)(param_1 + local_10) = *(undefined1 *)(param_1 + (longlong)local_14);\nlocal_14 = local_14 + 1;\niVar2 = local_10;\n}\nreturn;\n}\n"
+    },
+    {
+      "name": "bit_mask_shift_combo",
+      "output": "\nuint bit_mask_shift_combo(uint param_1)\n\n{\nreturn (param_1 \u003e\u003e 0x10) * 0x10000 | (param_1 \u003e\u003e 8 \u0026 0xff) * 0x100 | param_1 \u0026 0xff;\n}\n"
+    },
+    {
+      "name": "popcount_loop",
+      "output": "\nint popcount_loop(uint param_1)\n\n{\nundefined4 local_8;\nundefined4 local_18;\n\nlocal_18 = 0;\nlocal_8 = param_1;\nwhile (local_8 != 0) {\nlocal_8 = local_8 \u0026 local_8 + 0xffffffff;\nlocal_18 = local_18 + 1;\n}\nreturn local_18;\n}\n"
+    },
+    {
+      "name": "xor_swap_pair",
+      "output": "\nvoid xor_swap_pair(uint *param_1,uint *param_2)\n\n{\n*param_1 = *param_1 ^ *param_2;\n*param_2 = *param_2 ^ *param_1;\n*param_1 = *param_1 ^ *param_2;\nreturn;\n}\n"
+    },
+    {
+      "name": "bit_rotate_left",
+      "output": "\nuint bit_rotate_left(uint param_1,byte param_2)\n\n{\nreturn param_1 \u003c\u003c (param_2 \u0026 0x1f) | param_1 \u003e\u003e (0x20 - param_2 \u0026 0x1fU);\n}\n"
+    },
+    {
+      "name": "unsigned_wrap_compare",
+      "output": "\nuint unsigned_wrap_compare(uint param_1,int param_2)\n\n{\nuint uVar1;\n\nuVar1 = param_1 - param_2;\nif (param_1 \u003c uVar1) {\nuVar1 = 0;\n}\nreturn uVar1;\n}\n"
+    },
+    {
+      "name": "longlong_combo",
+      "output": "\nlonglong longlong_combo(longlong param_1,longlong param_2,longlong param_3)\n\n{\nreturn (param_1 * param_2 + param_3 * 8) - lVar2;\n}\n"
+    },
+    {
+      "name": "sign_extend_boundary",
+      "output": "\nint sign_extend_boundary(int param_1)\n\n{\nreturn (int)param_1 + (int)param_1;\n}\n"
+    },
+    {
+      "name": "char_arith_promote",
+      "output": "\nint char_arith_promote(signed char param_1,signed char param_2)\n\n{\nreturn (signed char)(param_1 + param_2) * 2;\n}\n"
+    },
+    {
+      "name": "short_arith_trunc",
+      "output": "\nint short_arith_trunc(short param_1,short param_2)\n\n{\nreturn (int)(short)(param_1 * param_2 + 1);\n}\n"
+    },
+    {
+      "name": "cond_assign_abs",
+      "output": "\nint cond_assign_abs(int param_1)\n\n{\nlocal_18 = param_1;\nif (param_1 \u003c 0) {\nlocal_18 = -param_1;\n}\nreturn local_18;\n}\n"
+    },
+    {
+      "name": "minmax_chain4",
+      "output": "\nint minmax_chain4(int param_1,int param_2,int param_3,int param_4)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_18 = param_1;\nif (param_2 \u003c param_1) {\nlocal_18 = param_2;\n}\nif (param_3 \u003c local_18) {\nlocal_18 = param_3;\n}\nif (param_4 \u003c local_18) {\nlocal_18 = param_4;\n}\nlocal_14 = param_1;\nif (param_1 \u003c param_2) {\nlocal_14 = param_2;\n}\nif (local_14 \u003c param_3) {\nlocal_14 = param_3;\n}\nif (local_14 \u003c param_4) {\nlocal_14 = param_4;\n}\nreturn local_14 - local_18;\n}\n"
+    },
+    {
+      "name": "strlen_style",
+      "output": "\nint strlen_style(longlong param_1)\n\n{\nundefined4 local_18;\n\nlocal_18 = 0;\nwhile (*(signed char *)(param_1 + local_18) != 0) {\nlocal_18 = local_18 + 1;\n}\nreturn local_18;\n}\n"
+    },
+    {
+      "name": "memcpy_style",
+      "output": "\nvoid memcpy_style(longlong param_1,longlong param_2,int param_3)\n\n{\nundefined4 local_18;\n\nfor (local_18 = 0; local_18 \u003c param_3; local_18 = local_18 + 1) {\n*(undefined1 *)(param_1 + local_18) = *(undefined1 *)(param_2 + local_18);\n}\nreturn;\n}\n"
+    },
+    {
+      "name": "multi_return_early",
+      "output": "\nundefined8 multi_return_early(longlong param_1,int param_2)\n\n{\nundefined8 uVar1;\nundefined4 local_18;\n\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nif (*(int *)(param_1 + (longlong)local_18 * 4) \u003c 0) goto label_0;\nif (*(int *)(param_1 + (longlong)local_18 * 4) == 0) goto label_1;\nif (0x3e9 \u003c= *(int *)(param_1 + (longlong)local_18 * 4)) goto label_2;\n}\nuVar1 = 2;\nreturn uVar1;\nuVar1 = 0xffffffff;\ngoto label_3;\nuVar1 = 0;\ngoto label_3;\nuVar1 = 1;\ngoto label_3;\n}\n"
+    },
+    {
+      "name": "nested_if_ladder_grade",
+      "output": "\nvoid nested_if_ladder_grade(int param_1)\n\n{\nif (param_1 \u003c 0x5a) goto label_missing;\nif (0) goto label_missing;\n}\n"
+    },
+    {
+      "name": "param_reuse_accum",
+      "output": "\nint param_reuse_accum(int param_1,int param_2)\n\n{\nreturn (param_1 + param_2) * 2 - param_2;\n}\n"
+    },
+    {
+      "name": "swap_via_temp",
+      "output": "\nvoid swap_via_temp(undefined4 *param_1,undefined4 *param_2)\n\n{\n*param_1 = *param_2;\n*param_2 = *param_1;\nreturn;\n}\n"
     }
   ]
 }

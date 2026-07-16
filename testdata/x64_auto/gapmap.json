@@ -2,7 +2,7 @@
   "functions": [
     {
       "name": "sum_loop",
-      "entry": 9216,
+      "entry": 9472,
       "tags": [
         "MATCH"
       ],
@@ -14,7 +14,7 @@
     },
     {
       "name": "dowhile_count",
-      "entry": 9312,
+      "entry": 9568,
       "tags": [
         "STRUCT",
         "TYPECAST",
@@ -39,7 +39,7 @@
     },
     {
       "name": "sum_pp_walk",
-      "entry": 9408,
+      "entry": 9664,
       "tags": [
         "PTR",
         "TEMP"
@@ -52,17 +52,419 @@
           "extra temp/local identifiers in output (3 vs 2): lVar1"
         ]
       }
+    },
+    {
+      "name": "while_pretest_sum",
+      "entry": 9776,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "loop_forever_break",
+      "entry": 9872,
+      "tags": [
+        "STRUCT"
+      ],
+      "evidence": {
+        "STRUCT": [
+          "dangling goto target(s) in output: label_0",
+          "keyword 'while': want=1 got=0",
+          "keyword 'for': want=0 got=1",
+          "keyword 'break': want=1 got=0"
+        ]
+      }
+    },
+    {
+      "name": "nested_while_matrix",
+      "entry": 9968,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "while_countdown",
+      "entry": 10112,
+      "tags": [
+        "TEMP"
+      ],
+      "evidence": {
+        "TEMP": [
+          "extra temp/local identifiers in output (2 vs 1): local_8"
+        ]
+      }
+    },
+    {
+      "name": "switch_dense",
+      "entry": 10176,
+      "tags": [
+        "STRUCT",
+        "TYPECAST",
+        "TEMP"
+      ],
+      "evidence": {
+        "STRUCT": [
+          "dangling goto target(s) in output: label_missing"
+        ],
+        "TYPECAST": [
+          "cast (int): want=1 got=0",
+          "cast (uint): want=1 got=2",
+          "cast (ulonglong): want=0 got=1"
+        ],
+        "TEMP": [
+          "extra temp/local identifiers in output (2 vs 1): uVar2"
+        ]
+      }
+    },
+    {
+      "name": "switch_sparse",
+      "entry": 10336,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "switch_no_default",
+      "entry": 10416,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "switch_fallthrough",
+      "entry": 10512,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "array_2d_sum",
+      "entry": 10592,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "array_init_then_sum",
+      "entry": 10736,
+      "tags": [
+        "TYPECAST",
+        "PTR",
+        "TEMP"
+      ],
+      "evidence": {
+        "TYPECAST": [
+          "cast (int): want=0 got=2",
+          "cast (longlong): want=0 got=2"
+        ],
+        "PTR": [
+          "raw pointer scale '* 4': want=0 got=2"
+        ],
+        "TEMP": [
+          "extra temp/local identifiers in output (4 vs 2): local_428, local_8"
+        ]
+      }
+    },
+    {
+      "name": "array_reverse_sum",
+      "entry": 10880,
+      "tags": [
+        "UNKNOWN"
+      ],
+      "evidence": {
+        "UNKNOWN": [
+          "no heuristic matched -- manual review needed"
+        ]
+      }
+    },
+    {
+      "name": "reverse_bytes_inplace",
+      "entry": 10976,
+      "tags": [
+        "STRUCT",
+        "TYPECAST"
+      ],
+      "evidence": {
+        "STRUCT": [
+          "keyword 'while': want=0 got=1",
+          "keyword 'for': want=1 got=0"
+        ],
+        "TYPECAST": [
+          "cast (longlong): want=0 got=2"
+        ]
+      }
+    },
+    {
+      "name": "bit_mask_shift_combo",
+      "entry": 11120,
+      "tags": [
+        "UNKNOWN"
+      ],
+      "evidence": {
+        "UNKNOWN": [
+          "no heuristic matched -- manual review needed"
+        ]
+      }
+    },
+    {
+      "name": "popcount_loop",
+      "entry": 11216,
+      "tags": [
+        "STRUCT",
+        "TEMP"
+      ],
+      "evidence": {
+        "STRUCT": [
+          "keyword 'while': want=0 got=1",
+          "keyword 'for': want=1 got=0"
+        ],
+        "TEMP": [
+          "extra temp/local identifiers in output (2 vs 1): local_8"
+        ]
+      }
+    },
+    {
+      "name": "xor_swap_pair",
+      "entry": 11280,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "bit_rotate_left",
+      "entry": 11376,
+      "tags": [
+        "UNKNOWN"
+      ],
+      "evidence": {
+        "UNKNOWN": [
+          "no heuristic matched -- manual review needed"
+        ]
+      }
+    },
+    {
+      "name": "unsigned_wrap_compare",
+      "entry": 11424,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "longlong_combo",
+      "entry": 11488,
+      "tags": [
+        "TEMP"
+      ],
+      "evidence": {
+        "TEMP": [
+          "extra temp/local identifiers in output (1 vs 0): lVar2"
+        ]
+      }
+    },
+    {
+      "name": "sign_extend_boundary",
+      "entry": 11584,
+      "tags": [
+        "TYPECAST"
+      ],
+      "evidence": {
+        "TYPECAST": [
+          "cast (char): want=1 got=0"
+        ]
+      }
+    },
+    {
+      "name": "char_arith_promote",
+      "entry": 11632,
+      "tags": [
+        "TYPECAST",
+        "PTR"
+      ],
+      "evidence": {
+        "TYPECAST": [
+          "cast (char): want=1 got=0",
+          "cast (int): want=1 got=0"
+        ],
+        "PTR": [
+          "raw pointer scale '* 2': want=0 got=1"
+        ]
+      }
+    },
+    {
+      "name": "short_arith_trunc",
+      "entry": 11680,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "cond_assign_abs",
+      "entry": 11728,
+      "tags": [
+        "UNKNOWN"
+      ],
+      "evidence": {
+        "UNKNOWN": [
+          "no heuristic matched -- manual review needed"
+        ]
+      }
+    },
+    {
+      "name": "minmax_chain4",
+      "entry": 11776,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "strlen_style",
+      "entry": 11952,
+      "tags": [
+        "STRUCT",
+        "TYPECAST"
+      ],
+      "evidence": {
+        "STRUCT": [
+          "keyword 'while': want=0 got=1",
+          "keyword 'for': want=1 got=0"
+        ],
+        "TYPECAST": [
+          "cast (char): want=1 got=0"
+        ]
+      }
+    },
+    {
+      "name": "memcpy_style",
+      "entry": 12016,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "multi_return_early",
+      "entry": 12112,
+      "tags": [
+        "STRUCT",
+        "TEMP"
+      ],
+      "evidence": {
+        "STRUCT": [
+          "dangling goto target(s) in output: label_0, label_1, label_2, label_3",
+          "keyword 'while': want=1 got=0",
+          "keyword 'for': want=0 got=1",
+          "keyword 'break': want=1 got=0"
+        ],
+        "TEMP": [
+          "extra temp/local identifiers in output (2 vs 1): uVar1"
+        ]
+      }
+    },
+    {
+      "name": "nested_if_ladder_grade",
+      "entry": 12240,
+      "tags": [
+        "STRUCT",
+        "TEMP"
+      ],
+      "evidence": {
+        "STRUCT": [
+          "dangling goto target(s) in output: label_missing"
+        ],
+        "TEMP": [
+          "fewer temp/local identifiers than golden (0 vs 1), missing: uVar1"
+        ]
+      }
+    },
+    {
+      "name": "param_reuse_accum",
+      "entry": 12320,
+      "tags": [
+        "UNKNOWN"
+      ],
+      "evidence": {
+        "UNKNOWN": [
+          "no heuristic matched -- manual review needed"
+        ]
+      }
+    },
+    {
+      "name": "swap_via_temp",
+      "entry": 12384,
+      "tags": [
+        "TEMP"
+      ],
+      "evidence": {
+        "TEMP": [
+          "fewer temp/local identifiers than golden (0 vs 1), missing: uVar1"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 3,
-    "match": 1,
+    "total": 32,
+    "match": 12,
     "tag_counts": {
-      "MATCH": 1,
-      "STRUCT": 1,
-      "TYPECAST": 1,
-      "PTR": 2,
-      "TEMP": 2
+      "MATCH": 12,
+      "STRUCT": 8,
+      "TYPECAST": 7,
+      "PTR": 4,
+      "TEMP": 10,
+      "UNKNOWN": 5
     }
   }
 }

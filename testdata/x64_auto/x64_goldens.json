@@ -2,21 +2,195 @@
   "functions": [
     {
       "name": "sum_loop",
-      "entry": 9216,
+      "entry": 9472,
       "bytes": "8954241048894c24084883ec18c744240400000000c7042400000000eb088b0424ffc08904248b4424283904247d1a48630424488b4c24208b04818b4c240403c88bc189442404ebd58b4424044883c418c3",
       "c": "\r\nint sum_loop(longlong param_1,int param_2)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  \r\n  local_14 = 0;\r\n  for (local_18 = 0; local_18 < param_2; local_18 = local_18 + 1) {\r\n    local_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
     },
     {
       "name": "dowhile_count",
-      "entry": 9312,
+      "entry": 9568,
       "bytes": "8954241048894c24084883ec18c744240400000000c704240000000048630424488b4c2420833c81007e0a8b442404ffc0894424048b0424ffc08904248b4424283904247cd68b4424044883c418c3",
       "c": "\r\nint dowhile_count(longlong param_1,int param_2)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  \r\n  local_14 = 0;\r\n  local_18 = 0;\r\n  do {\r\n    if (0 < *(int *)(param_1 + (longlong)local_18 * 4)) {\r\n      local_14 = local_14 + 1;\r\n    }\r\n    local_18 = local_18 + 1;\r\n  } while (local_18 < param_2);\r\n  return local_14;\r\n}\r\n\r\n"
     },
     {
       "name": "sum_pp_walk",
-      "entry": 9408,
+      "entry": 9664,
       "bytes": "8954241048894c24084883ec28c7042400000000488b44243048894424084863442438488b4c2430488d04c14889442410488b44241048394424087324488b442408488b008b008b0c2403c88bc1890424488b4424084883c0084889442408ebd08b04244883c428c3",
       "c": "\r\nint sum_pp_walk(undefined8 *param_1,int param_2)\r\n\r\n{\r\n  int local_28;\r\n  undefined8 *local_20;\r\n  \r\n  local_28 = 0;\r\n  for (local_20 = param_1; local_20 < param_1 + param_2; local_20 = local_20 + 1) {\r\n    local_28 = local_28 + *(int *)*local_20;\r\n  }\r\n  return local_28;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "while_pretest_sum",
+      "entry": 9776,
+      "bytes": "8954241048894c24084883ec18c7042400000000c7442404000000008b4424283904247d2248630424488b4c24208b04818b4c240403c88bc1894424048b0424ffc0890424ebd58b4424044883c418c3",
+      "c": "\r\nint while_pretest_sum(longlong param_1,int param_2)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  \r\n  local_14 = 0;\r\n  for (local_18 = 0; local_18 < param_2; local_18 = local_18 + 1) {\r\n    local_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "loop_forever_break",
+      "entry": 9872,
+      "bytes": "44894424188954241048894c24084883ec18c70424000000008b4424283904247c07b8ffffffffeb2148630424488b4c24208b54243039148175058b0424eb0a8b0424ffc0890424ebcf4883c418c3",
+      "c": "\r\nint loop_forever_break(longlong param_1,int param_2,int param_3)\r\n\r\n{\r\n  int local_18;\r\n  \r\n  local_18 = 0;\r\n  while( true ) {\r\n    if (param_2 <= local_18) {\r\n      return -1;\r\n    }\r\n    if (*(int *)(param_1 + (longlong)local_18 * 4) == param_3) break;\r\n    local_18 = local_18 + 1;\r\n  }\r\n  return local_18;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "nested_while_matrix",
+      "entry": 9968,
+      "bytes": "44894424188954241048894c24084883ec18c744240400000000c7442408000000008b442428394424047d48c70424000000008b4424303904247d2c8b4424040faf4424300304244898488b4c24208b04818b4c240803c88bc1894424088b0424ffc0890424ebcb8b442404ffc089442404ebae8b4424084883c418c3",
+      "c": "\r\nint nested_while_matrix(longlong param_1,int param_2,int param_3)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  undefined4 local_10;\r\n  \r\n  local_10 = 0;\r\n  for (local_14 = 0; local_14 < param_2; local_14 = local_14 + 1) {\r\n    for (local_18 = 0; local_18 < param_3; local_18 = local_18 + 1) {\r\n      local_10 = local_10 + *(int *)(param_1 + (longlong)(local_14 * param_3 + local_18) * 4);\r\n    }\r\n  }\r\n  return local_10;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "while_countdown",
+      "entry": 10112,
+      "bytes": "894c24084883ec18c7042400000000837c2420007e1b8b4424208b0c2403c88bc18904248b44242083e80289442420ebde8b04244883c418c3",
+      "c": "\r\nint while_countdown(int param_1)\r\n\r\n{\r\n  undefined4 local_res8;\r\n  undefined4 local_18;\r\n  \r\n  local_18 = 0;\r\n  for (local_res8 = param_1; 0 < local_res8; local_res8 = local_res8 + -2) {\r\n    local_18 = local_18 + local_res8;\r\n  }\r\n  return local_18;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "switch_dense",
+      "entry": 10176,
+      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0df71900008b8481382800004803c1ffe0b8ffffffff4883c418c3",
+      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000027e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x6a18)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "switch_sparse",
+      "entry": 10336,
+      "bytes": "894c24084883ec188b442420890424833c24017411833c24327412813c24e70300007410eb15b86f000000eb13b8de000000eb0cb84d010000eb05b8ffffffff4883c418c3",
+      "c": "\r\nundefined8 switch_sparse(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 == 1) {\r\n    uVar1 = 0x6f;\r\n  }\r\n  else if (param_1 == 0x32) {\r\n    uVar1 = 0xde;\r\n  }\r\n  else if (param_1 == 999) {\r\n    uVar1 = 0x14d;\r\n  }\r\n  else {\r\n    uVar1 = 0xffffffff;\r\n  }\r\n  return uVar1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "switch_no_default",
+      "entry": 10416,
+      "bytes": "894c24084883ec18c70424ffffffff8b44242089442404837c2404017410837c2404027412837c2404037414eb19c704240a000000eb10c7042414000000eb07c704241e0000008b04244883c418c3",
+      "c": "\r\nundefined4 switch_no_default(int param_1)\r\n\r\n{\r\n  undefined4 local_18;\r\n  \r\n  local_18 = 0xffffffff;\r\n  if (param_1 == 1) {\r\n    local_18 = 10;\r\n  }\r\n  else if (param_1 == 2) {\r\n    local_18 = 0x14;\r\n  }\r\n  else if (param_1 == 3) {\r\n    local_18 = 0x1e;\r\n  }\r\n  return local_18;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "switch_fallthrough",
+      "entry": 10512,
+      "bytes": "894c24084883ec188b442420890424833c2401740e833c24027408833c2403740ceb14c744240464000000eb12c7442404c8000000eb08c7442404ffffffff8b4424044883c418c3",
+      "c": "\r\nundefined4 switch_fallthrough(int param_1)\r\n\r\n{\r\n  undefined4 local_14;\r\n  \r\n  if ((param_1 == 1) || (param_1 == 2)) {\r\n    local_14 = 100;\r\n  }\r\n  else if (param_1 == 3) {\r\n    local_14 = 200;\r\n  }\r\n  else {\r\n    local_14 = 0xffffffff;\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "array_2d_sum",
+      "entry": 10592,
+      "bytes": "8954241048894c24084883ec18c744240800000000c7042400000000eb088b0424ffc08904248b4424283904247d46c744240400000000eb0a8b442404ffc089442404837c2404047d2948630424486bc010488b4c24204803c8488bc148634c24048b04888b4c240803c88bc189442408ebc6eba98b4424084883c418c3",
+      "c": "\r\nint array_2d_sum(longlong param_1,int param_2)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  undefined4 local_10;\r\n  \r\n  local_10 = 0;\r\n  for (local_18 = 0; local_18 < param_2; local_18 = local_18 + 1) {\r\n    for (local_14 = 0; local_14 < 4; local_14 = local_14 + 1) {\r\n      local_10 = local_10 + *(int *)(param_1 + (longlong)local_18 * 0x10 + (longlong)local_14 * 4);\r\n    }\r\n  }\r\n  return local_10;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "array_init_then_sum",
+      "entry": 10736,
+      "bytes": "894c24084883ec58837c2460107e08c744246010000000c7042400000000eb088b0424ffc08904248b4424603904247d118b04240faf042448630c2489448c10ebdec744240400000000c7042400000000eb088b0424ffc08904248b4424603904247d16486304248b4484108b4c240403c88bc189442404ebd98b4424044883c458c3",
+      "c": "\r\nint array_init_then_sum(int param_1)\r\n\r\n{\r\n  int local_res8;\r\n  int local_58;\r\n  int local_54;\r\n  int aiStack_48 [18];\r\n  \r\n  local_res8 = param_1;\r\n  if (0x10 < param_1) {\r\n    local_res8 = 0x10;\r\n  }\r\n  for (local_58 = 0; local_58 < local_res8; local_58 = local_58 + 1) {\r\n    aiStack_48[local_58] = local_58 * local_58;\r\n  }\r\n  local_54 = 0;\r\n  for (local_58 = 0; local_58 < local_res8; local_58 = local_58 + 1) {\r\n    local_54 = local_54 + aiStack_48[local_58];\r\n  }\r\n  return local_54;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "array_reverse_sum",
+      "entry": 10880,
+      "bytes": "8954241048894c24084883ec18c7442404000000008b442428ffc8890424eb088b0424ffc8890424833c24007c1a48630424488b4c24208b04818b4c240403c88bc189442404ebd88b4424044883c418c3",
+      "c": "\r\nint array_reverse_sum(longlong param_1,int param_2)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  \r\n  local_14 = 0;\r\n  while (local_18 = param_2 + -1, -1 < local_18) {\r\n    local_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\r\n    param_2 = local_18;\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "reverse_bytes_inplace",
+      "entry": 10976,
+      "bytes": "8954241048894c24084883ec18c7442404000000008b442428ffc8894424088b442408394424047d544863442404488b4c24200fb60401880424486344240848634c2404488b5424204c8b442420410fb6040088040a4863442408488b4c24200fb614248814018b442404ffc0894424048b442408ffc889442408eba24883c418c3",
+      "c": "\r\nvoid reverse_bytes_inplace(longlong param_1,int param_2)\r\n\r\n{\r\n  undefined1 uVar1;\r\n  undefined4 local_14;\r\n  undefined4 local_10;\r\n  \r\n  for (local_14 = 0; local_10 = param_2 + -1, local_14 < local_10; local_14 = local_14 + 1) {\r\n    uVar1 = *(undefined1 *)(param_1 + local_14);\r\n    *(undefined1 *)(param_1 + local_14) = *(undefined1 *)(param_1 + local_10);\r\n    *(undefined1 *)(param_1 + local_10) = uVar1;\r\n    param_2 = local_10;\r\n  }\r\n  return;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "bit_mask_shift_combo",
+      "entry": 11120,
+      "bytes": "894c24084883ec188b44242025ff000000894424088b442420c1e80825ff000000894424048b442420c1e81025ffff00008904248b0424c1e0108b4c2404c1e1080bc10b4424084883c418c3",
+      "c": "\r\nuint bit_mask_shift_combo(uint param_1)\r\n\r\n{\r\n  return param_1 & 0xffff0000 | (param_1 >> 8 & 0xff) << 8 | param_1 & 0xff;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "popcount_loop",
+      "entry": 11216,
+      "bytes": "894c24084883ec18c7042400000000837c242000741c8b442420ffc88b4c242023c88bc1894424208b0424ffc0890424ebdd8b04244883c418c3",
+      "c": "\r\nint popcount_loop(uint param_1)\r\n\r\n{\r\n  undefined4 local_res8;\r\n  undefined4 local_18;\r\n  \r\n  local_18 = 0;\r\n  for (local_res8 = param_1; local_res8 != 0; local_res8 = local_res8 & local_res8 - 1) {\r\n    local_18 = local_18 + 1;\r\n  }\r\n  return local_18;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "xor_swap_pair",
+      "entry": 11280,
+      "bytes": "488954241048894c2408488b442408488b4c24108b098b0033c1488b4c24088901488b442410488b4c24088b098b0033c1488b4c24108901488b442408488b4c24108b098b0033c1488b4c24088901c3",
+      "c": "\r\nvoid xor_swap_pair(uint *param_1,uint *param_2)\r\n\r\n{\r\n  *param_1 = *param_1 ^ *param_2;\r\n  *param_2 = *param_2 ^ *param_1;\r\n  *param_1 = *param_1 ^ *param_2;\r\n  return;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "bit_rotate_left",
+      "entry": 11376,
+      "bytes": "89542410894c24088b4424100fb6c88b442408d3e0b9200000002b4c24108b542408d3ea8bca0bc1c3",
+      "c": "\r\nuint bit_rotate_left(uint param_1,byte param_2)\r\n\r\n{\r\n  return param_1 << (param_2 & 0x1f) | param_1 >> (0x20 - param_2 & 0x1f);\r\n}\r\n\r\n"
+    },
+    {
+      "name": "unsigned_wrap_compare",
+      "entry": 11424,
+      "bytes": "89542410894c24084883ec188b4424288b4c24202bc88bc18904248b442420390424760433c0eb038b04244883c418c3",
+      "c": "\r\nuint unsigned_wrap_compare(uint param_1,int param_2)\r\n\r\n{\r\n  uint uVar1;\r\n  \r\n  uVar1 = param_1 - param_2;\r\n  if (param_1 < uVar1) {\r\n    uVar1 = 0;\r\n  }\r\n  return uVar1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "longlong_combo",
+      "entry": 11488,
+      "bytes": "4c89442418488954241048894c24084883ec18488b442420480faf442428488b4c2430488d04c848890424488b44242048c1f802488b0c24482bc8488bc148890424488b04244883c418c3",
+      "c": "\r\nlonglong longlong_combo(longlong param_1,longlong param_2,longlong param_3)\r\n\r\n{\r\n  return (param_1 * param_2 + param_3 * 8) - (param_1 >> 2);\r\n}\r\n\r\n"
+    },
+    {
+      "name": "sign_extend_boundary",
+      "entry": 11584,
+      "bytes": "894c24084883ec180fb64424208804240fb744242066894424040fbe04240fbf4c240403c14883c418c3",
+      "c": "\r\nint sign_extend_boundary(short param_1)\r\n\r\n{\r\n  undefined1 local_res8;\r\n  \r\n  local_res8 = (char)param_1;\r\n  return (int)local_res8 + (int)param_1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "char_arith_promote",
+      "entry": 11632,
+      "bytes": "88542410884c24084883ec180fbe4424200fbe4c242803c18804240fbe0424d1e04883c418c3",
+      "c": "\r\nint char_arith_promote(char param_1,char param_2)\r\n\r\n{\r\n  return (int)(char)(param_1 + param_2) << 1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "short_arith_trunc",
+      "entry": 11680,
+      "bytes": "668954241066894c24084883ec180fbf4424200fbf4c24280fafc1ffc0668904240fbf04244883c418c3",
+      "c": "\r\nint short_arith_trunc(short param_1,short param_2)\r\n\r\n{\r\n  return (int)(short)(param_1 * param_2 + 1);\r\n}\r\n\r\n"
+    },
+    {
+      "name": "cond_assign_abs",
+      "entry": 11728,
+      "bytes": "894c24084883ec188b442420890424833c24007d088b0424f7d88904248b04244883c418c3",
+      "c": "\r\nint cond_assign_abs(int param_1)\r\n\r\n{\r\n  undefined4 local_18;\r\n  \r\n  local_18 = param_1;\r\n  if (param_1 < 0) {\r\n    local_18 = -param_1;\r\n  }\r\n  return local_18;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "minmax_chain4",
+      "entry": 11776,
+      "bytes": "44894c2420448944241889542410894c24084883ec188b4424208904248b0424394424287d078b4424288904248b0424394424307d078b4424308904248b0424394424387d078b4424388904248b442420894424048b442404394424287e088b442428894424048b442404394424307e088b442430894424048b442404394424387e088b442438894424048b04248b4c24042bc88bc14883c418c3",
+      "c": "\r\nint minmax_chain4(int param_1,int param_2,int param_3,int param_4)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  \r\n  local_18 = param_1;\r\n  if (param_2 < param_1) {\r\n    local_18 = param_2;\r\n  }\r\n  if (param_3 < local_18) {\r\n    local_18 = param_3;\r\n  }\r\n  if (param_4 < local_18) {\r\n    local_18 = param_4;\r\n  }\r\n  local_14 = param_1;\r\n  if (param_1 < param_2) {\r\n    local_14 = param_2;\r\n  }\r\n  if (local_14 < param_3) {\r\n    local_14 = param_3;\r\n  }\r\n  if (local_14 < param_4) {\r\n    local_14 = param_4;\r\n  }\r\n  return local_14 - local_18;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "strlen_style",
+      "entry": 11952,
+      "bytes": "48894c24084883ec18c704240000000048630424488b4c24200fbe040185c0740a8b0424ffc0890424ebe58b04244883c418c3",
+      "c": "\r\nint strlen_style(longlong param_1)\r\n\r\n{\r\n  undefined4 local_18;\r\n  \r\n  for (local_18 = 0; *(char *)(param_1 + local_18) != '\\0'; local_18 = local_18 + 1) {\r\n  }\r\n  return local_18;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "memcpy_style",
+      "entry": 12016,
+      "bytes": "4489442418488954241048894c24084883ec18c7042400000000eb088b0424ffc08904248b4424303904247d1c4863042448630c24488b5424204c8b442428410fb6040088040aebd34883c418c3",
+      "c": "\r\nvoid memcpy_style(longlong param_1,longlong param_2,int param_3)\r\n\r\n{\r\n  undefined4 local_18;\r\n  \r\n  for (local_18 = 0; local_18 < param_3; local_18 = local_18 + 1) {\r\n    *(undefined1 *)(param_1 + local_18) = *(undefined1 *)(param_2 + local_18);\r\n  }\r\n  return;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "multi_return_early",
+      "entry": 12112,
+      "bytes": "8954241048894c24084883ec18c7042400000000eb088b0424ffc08904248b4424283904247d4448630424488b4c2420833c81007d07b8ffffffffeb3348630424488b4c2420833c8100750433c0eb2048630424488b4c2420813c81e80300007e07b801000000eb07ebabb8020000004883c418c3",
+      "c": "\r\nundefined8 multi_return_early(longlong param_1,int param_2)\r\n\r\n{\r\n  int local_18;\r\n  \r\n  local_18 = 0;\r\n  while( true ) {\r\n    if (param_2 <= local_18) {\r\n      return 2;\r\n    }\r\n    if (*(int *)(param_1 + (longlong)local_18 * 4) < 0) {\r\n      return 0xffffffff;\r\n    }\r\n    if (*(int *)(param_1 + (longlong)local_18 * 4) == 0) {\r\n      return 0;\r\n    }\r\n    if (1000 < *(int *)(param_1 + (longlong)local_18 * 4)) break;\r\n    local_18 = local_18 + 1;\r\n  }\r\n  return 1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "nested_if_ladder_grade",
+      "entry": 12240,
+      "bytes": "894c2408837c24085a7c06b041eb2b837c2408507c06b042eb1e837c2408467c06b043eb11837c24083c7c06b044eb04b046c3",
+      "c": "\r\nundefined1 nested_if_ladder_grade(int param_1)\r\n\r\n{\r\n  undefined1 uVar1;\r\n  \r\n  if (param_1 < 0x5a) {\r\n    if (param_1 < 0x50) {\r\n      if (param_1 < 0x46) {\r\n        if (param_1 < 0x3c) {\r\n          uVar1 = 0x46;\r\n        }\r\n        else {\r\n          uVar1 = 0x44;\r\n        }\r\n      }\r\n      else {\r\n        uVar1 = 0x43;\r\n      }\r\n    }\r\n    else {\r\n      uVar1 = 0x42;\r\n    }\r\n  }\r\n  else {\r\n    uVar1 = 0x41;\r\n  }\r\n  return uVar1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "param_reuse_accum",
+      "entry": 12320,
+      "bytes": "89542410894c24088b4424108b4c240803c88bc1894424088b442408d1e0894424088b4424108b4c24082bc88bc1894424088b442408c3",
+      "c": "\r\nint param_reuse_accum(int param_1,int param_2)\r\n\r\n{\r\n  return param_1 * 2 + param_2;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "swap_via_temp",
+      "entry": 12384,
+      "bytes": "488954241048894c24084883ec18488b4424208b00890424488b442420488b4c24288b098908488b4424288b0c2489084883c418c3",
+      "c": "\r\nvoid swap_via_temp(undefined4 *param_1,undefined4 *param_2)\r\n\r\n{\r\n  undefined4 uVar1;\r\n  \r\n  uVar1 = *param_1;\r\n  *param_1 = *param_2;\r\n  *param_2 = uVar1;\r\n  return;\r\n}\r\n\r\n"
     }
   ]
 }
