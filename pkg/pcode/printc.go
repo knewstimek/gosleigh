@@ -3034,6 +3034,12 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	case CPUI_INT_LESSEQUAL:
 		return s.renderBinary(op, "<=", cPrecRelational, ExprAssocLeft)
 	case CPUI_INT_ZEXT:
+		// option_hide_exts (on by default): when the extension is an implied
+		// integer promotion for the consuming op, drop it and render the operand
+		// alone. C++ parity: PrintC::opIntZext + isExtensionCastImplied.
+		if s.extensionCastHidden(op) {
+			return s.renderVarnodeExpr(op.Input(0))
+		}
 		// A zero-extension reads as a plain cast only when the input is unsigned;
 		// otherwise it stays an explicit ZEXT(). C++ parity: CastStrategyC::isZextCast.
 		if s.extensionIsCast(op, false) {
@@ -3041,6 +3047,10 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 		}
 		return s.renderPseudoCall("ZEXT", op, 0)
 	case CPUI_INT_SEXT:
+		// option_hide_exts: same implied-promotion hiding as INT_ZEXT.
+		if s.extensionCastHidden(op) {
+			return s.renderVarnodeExpr(op.Input(0))
+		}
 		// A sign-extension reads as a plain cast only when the input is signed.
 		// C++ parity: CastStrategyC::isSextCast.
 		if s.extensionIsCast(op, true) {
@@ -3263,6 +3273,23 @@ func (s *printCState) extensionIsCast(op *PcodeOp, signed bool) bool {
 		return sharedCastStrategyC.IsSextCast(outType, inType)
 	}
 	return sharedCastStrategyC.IsZextCast(outType, inType)
+}
+
+// extensionCastHidden reports whether an INT_ZEXT/INT_SEXT should be rendered as
+// its bare operand (the extension hidden) because it is an implied integer
+// promotion for its unique consumer. The consumer is the lone descendant of the
+// extension output, matching the readOp Ghidra passes to opIntZext/opIntSext.
+// C++ parity: PrintC::opIntZext gate (option_hide_exts && isExtensionCastImplied).
+func (s *printCState) extensionCastHidden(op *PcodeOp) bool {
+	out := op.Output()
+	if out == nil {
+		return false
+	}
+	readOp := out.LoneDescend()
+	if readOp == nil {
+		return false
+	}
+	return sharedCastStrategyC.IsExtensionCastImplied(op, readOp)
 }
 
 // subpieceIsCast reports whether a SUBPIECE op should render as a plain cast
