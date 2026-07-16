@@ -1,0 +1,3 @@
+== ABLATION: 프로토타입 UNLOCK (modellock=false, returnsym typelock=false) ==
+결과: 여전히 uVar1 그대로 (param_2 재사용 아님).
+-> 반환 typelock/modellock 은 uVar1 분리의 원인이 아님. 코어의 레지스터 스토리지(EAX vs EDX) 기반 동작.

@@ -171,3 +171,23 @@
 8. sink error semantics와 remaining internal cache ownership differences를 원본 `PcodeCacher`에 더 가깝게 정리한다.
 9. `symbols.go`, `metadata.go` 나머지 parity audit를 이어서 완료한다. (`ContextSymbolBoundary`/`ContextOpBoundary` runtime 활용은 완료됐다.)
 10. **[우선순위 높음]** `DecisionNode::resolve()` 결함 수정: 6502 BRK 외 대부분 opcode에서 발생하는 `"unable to resolve constructor"` 오류의 원인을 C++ `slghsymbol.cc` 대조로 찾아 수정한다. 수정 후 golden fixture를 `GOSLEIGH_UPDATE_GOLDEN=1`로 재생성한다.
+
+## 2026-07-17 (세션3) 신규 포팅 -- 디컴파일/출력 파이프라인 (전부 `match`, 전매트릭스 검증)
+
+| Area | Go symbol | C++ counterpart | Status | Reason |
+|------|-----------|-----------------|--------|--------|
+| heritage | `TaskList.Add`/`LocationMap.Add` | `Address::overlap` (address.cc:153-165) | `match` | strict `>`(dist<size)로 정확히 인접한 범위는 병합 안 함 |
+| merge | `mergeTestAdjacent`/`mergeTestSpeculative`/Symbol 가드 | `Merge::mergeTest*` (merge.cc:157-234) | `match` | Symbol 불일치/isolated/name-lock/type-equal 가드 verbatim; isolate가 op_switch uVar1 분리 |
+| database | `Varnode.symbolEntry`/`HighVariable.GetSymbol` | `Varnode::getSymbolEntry`/`HighVariable::getSymbol` (variable.cc:418) | `match` | 인스턴스 훑어 mapped Symbol; VariablePiece 분기만 미모델 |
+| typeop | `typeOpSubpiece.GetOutputToken` | `TypeOpSubpiece::getOutputToken` (typeop.cc:2144) | `match` | 출력 def-facing 타입 반환(byte); composite findTruncation 미포팅(atomic 무관) |
+| typeop | `typeOpIntSright.getInputCast` | `TypeOpIntSright::getInputCast` (typeop.cc:1587) | `match` | careUintInt=true로 `(int)` 강제 |
+| cast | `IsExtensionCastImplied` | `CastStrategyC::isExtensionCastImplied` (cast.cc:249) | `simplified-safe` | PTRADD/INT 산술 게이트; PTRADD 형성(spacebase 포인터 타이핑) 미완이라 dispatch ZEXT 아직 안 숨음 |
+| rules | `RuleCollapseConstants`/`RuleAndOrLump` | ruleaction.cc:3874/413, op.cc:115 | `match` | 전 opcode 상수폴딩 + 상수-lump(기존 흡수법칙 오구현 정정) |
+| printc | `formatIntegerLiteral` radix | `PrintC::push_integer` mostNaturalBase (printc.cc:1376) | `match` | TYPE_INT 10진 강제 정정 |
+| printc | `PrettyEmitter` | `EmitPrettyPrint` (prettyprint.cc, Oppen) | `match` | maxlinesize=100 라인랩; 비개행 출력 byte-identical |
+| comment | `CommentDatabase`/`Funcdata.warning` | comment.cc / funcdata.cc:119 | `match` | jumptable 강등시만 방출, CommentSorter 위치계산 |
+| jumptable | `stageJumpTable` partial-clone | `Funcdata::stageJumpTable` (funcdata_block.cc:491) | `match` | truncatedFlow 부분클론+heritage+emulate 실패 warning |
+| return | `ActionActiveReturn`/guardCalls 출력트라이얼 | coreaction.cc:1774 / heritage.cc:1453 | `match` | CALL-site 반환 carrier 복구(dispatch uVar1) |
+| collapse | `newBlockGoto`/`scopeBreak` | block.cc:1702/1270 | `match` | goto 엣지 removeEdge, break/continue 방출 |
+| return | ActionReturnSplit / NodeSplit | blockaction.cc:2264 / funcdata_block.cc:845 | `unimplemented` | 보존브랜치 `42522d9`에 faithful split엔진 있으나 하류 collapse multi-exit-loop 구조화 갭으로 미착지 |
+| type-model | spacebase PTRSUB 출력 포인터 타이핑 | funcdata.cc:413-419 (`getTypePointerStripArray`) | `mismatch` | 출력 int 유지 -> PTRADD 미형성 -> dispatch `(ulonglong)` ZEXT 안 숨음(breadth 3/3 게이팅) |

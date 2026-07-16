@@ -1,128 +1,123 @@
-# 다음 세션 프롬프트 (2026-07-03 세션2 작성, master `746a72c`)
+# 다음 세션 프롬프트 (2026-07-17 세션3 작성, master `db12bfc`)
 
 ## THE mission (절대 잊지 말 것)
 Ghidra C++ 디컴파일러 엔진을 Go로 **byte-identical** 포팅. 실제 .sla(x86/x64/ARM) 로드해 임의 실제 함수를
-Ghidra와 같은 C 출력까지. x64 실함수(register param RCX/RDX) 성공이 명시 목표.
+Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 목표.
 
 ## 핵심 규칙 (반드시 지킬 것)
 **원본 C++ parity 최우선. 추정/근사/휴리스틱 절대 금지.** golden이 통과해도 C++과 다르게 동작하면(unfaithful)
-되돌린다. 이번 세션에 이 규율이 실전에서 결정적이었다(아래 switch uVar1 참고).
+되돌린다. **green이어도 의미 손상(semantic damage)이면 착지 금지** -- 이번 세션 ReturnSplit이 전 게이트 green
+이었으나 parse_steps를 의미 손상시켜 보류했다(아래 보존 브랜치).
 
-## 현재 상태 (master `746a72c`, origin 푸시됨, 전 게이트 green)
-- **x64 corpus 8/8 완전 MATCH 달성** (`TestX64CorpusGoldenMap`, X64_CORPUS=1). 메모리/STATUS가 반복적으로
-  "가장 어렵다 / deep-debt / 1세션 착지 불가"로 기술했던 `process`가 골든과 byte-identical.
-- 트리 전체 골든 맵 **10/10** byte-identical (`TestTreeFullGoldenMap`, TREE_MAP=1).
-- x64 breadth **2/3** (`TestX64BreadthGoldenMap`, X64_BREADTH=1): dist_sq/sum2d MATCH, dispatch만 잔여.
+## 현재 상태 (master `db12bfc`, origin 푸시됨, 전 게이트 green)
+- **op_switch byte-MATCH 달성** (`X64_SWITCH=1 TestX64Switch`). 세션2 말미까지 "switch 구조는 맞으나 uVar1
+  byte-MATCH는 게이팅"이던 것을 완전 착지.
+- 트리 전체 골든 맵 **10/10** byte-identical (`TREE_MAP=1 TestTreeFullGoldenMap`).
+- x64 corpus **8/8** byte-identical (`X64_CORPUS=1 TestX64CorpusGoldenMap`, process 포함 사수).
+- x64 breadth **2/3** (`X64_BREADTH=1`): dist_sq/sum2d MATCH, **dispatch는 골든과 한 토큰 차이**(아래 (A)).
+- x64 corpus2(신규 discovery) **2/13** (`X64_CORPUS2=1 TestX64Corpus2`): bump_scores/divmix MATCH.
 - production `TestMSVC*`/`TestAARCH64*`/`TestX8664*`/`TestX64RegParam*`/`TestPELoader`/`TestX86PEDecompile` PASS.
-- `go test ./...` 완전 green (전 패키지 ok).
+- `go test ./...` green (단 fresh worktree는 `testdata/elfs/simple_add_sym.exe` 미생성으로 symbols_test 3건
+  실패 가능 -- `go run testdata/elfs/gen_import_pe.go`로 생성; 환경 이슈, 코드 무관).
 
-## 이번 세션(세션2) 완료 -- 6 faithful 커밋 (건드리지 말 것, 전부 감독관 C++ 스팟체크+전매트릭스 검증)
-process를 "구조적 붕괴+비결정성"에서 "전체 body byte-identical 골든"으로 5개 조각으로 쪼개 착지 + IOP-space
-groundwork:
-1. **`50a9557`(rewrite전 677382e) printc unsigned 단축타입명**: `unsigned int`->`uint`, `unsigned char`->
-   `byte`, ushort, size-8은 longSize() split로 `ulonglong`(LLP64)/`ulong`(LP64). type.cc coretype getName 충실.
-2. **`ad73759`(c7fcdf7) faithful BlockCondition**: Go BlockCondition 머신러리가 스텁이었음. boolean opcode
-   INT_AND/OR seed(block.cc:1785)+forceFalseEdge(block.cc:1204)+De Morgan negate(block.cc:3023, opc flip)+
-   emitBlockCondition &&/|| opcode 디스패치+comma(printc.cc:2968). process 조건 `if((param_3<=iVar1)&&
-   (local_18=param_4,iVar1<=param_4))` 구조 골든 일치 + 누락됐던 배열로드 문장 복원.
-3. **`781c9d6`(e1d3087) process 비결정성+반전 수정**: (a) addCFGEdges(bridge.go) map 순회->ascending 정렬
-   (collectEdges flow.cc:906; map은 merge블록 in-edge순서 랜덤화->phi슬롯 permute->3-4개 비결정 출력). (b)
-   halfDeleteInEdge/OutEdge swap-with-last->slide-down(block.cc:100/115; MULTIEQUAL trim opRemoveInput
-   slide-down과 lockstep). => process loop/clamp byte-identical 골든, 결정적.
-4. **`8bdd340`(e170c56) gap2 64bit signed div 반환**: RuleSubZext 미포팅(기존 Go RuleSubZext는 무관한
-   SUBPIECE-cancel)이라 RuleSubvarZext가 ZEXT 벗기고 RuleSubCommute가 4byte 절단. fix=RuleSubZext::applyOp
-   (ruleaction.cc:5057)->Go RuleSubZextMask(INT_ZEXT, RuleSubvarZext 앞 등록, coreaction.cc:5596<5638) +
-   RuleOrSextForm를 live oppool1 등록(CDQ dividend INT_OR->INT_SEXT). => `(longlong)local_c/(longlong)local_10
-   & 0xffffffff`, gcd 무회귀.
-5. **`2296513`(31255aa) 반환 carrier 타입+번호 (process 8/8 완결)**: typeOrder는 이미 faithful했음(오진).
-   실제 잔차는 printc 렌더: (A) return-only carrier를 TYPE_UINT/TYPE_UNKNOWN이면 undefined%d 강제하던 걸
-   TYPE_UNKNOWN만으로 제한(real-typed->실타입, Ghidra buildVariableName). (B) per-prefix 카운터->Ghidra
-   shared base 카운터(database.cc, carrier 마지막 생성이라 iVar1 다음 uVar2). (B)는 "국소 재현"(단일 global
-   카운터 완전통합은 미포팅, mixed-prefix 다중temp+carrier 가상케이스만 영향, 현 골든 없음).
-6. **`746a72c` IOP-space 인코딩 (Sonnet 5 작성, foundational)**: INDIRECT input(1)이 zero-const 스텁이라
-   heritage same-time rename(heritage.cc:2506-2517)이 CALLIND 타깃 유실. fix=side-table
-   BindIndirectCause/GetIndirectCause(addtreestate.go, C++ raw-pointer 인코딩은 Go GC-unsafe라 기존
-   BindSpaceConstant idiom 재사용; input(1)은 여전히 zero constant라 기존 consumer 무영향) +
-   NewIndirectOp/Creation input(1)=NewVarnodeIop(callOp)(funcdata_op.cc:695/725) + renameRecurse same-time
-   체크. **necessary-not-sufficient for dispatch(2/3 불변)**. merge.go:953/1107 same-time은 여전히
-   fallback(pre-existing, input(1) 상수라 안전).
+## 이번 세션(세션3) 확정 대반전 (다음 세션이 삽질하지 말 것)
+- **switch uVar1 = Ghidra 디컴파일러 CORE 기본 동작으로 재확정 (세션2의 "headless 아티팩트" 결론 폐기).**
+  재빌드한 `tools/decomp_dbg.exe`(CPUI_DEBUG Ghidra 12.0.4 core 콘솔)로 실측 savefile
+  `tools/captures/debug_op_switch.xml`을 restore->decompile -> **C++ 코어가 골든과 byte-identical uVar1 출력**.
+  기전 확정(인스트루먼트 빌드로 로그): savefile의 `merge="false"` 속성 -> Symbol isolate 플래그
+  (database.cc:423-427) -> `Merge::mergeTestAdjacent`의 isolated-Symbol 가드(merge.cc:198-205)가 누산기<->param
+  speculative merge를 기각. `merge="false"` 제거 ablation 시 C++도 Gosleigh 구버전처럼 `param_2` 재사용으로
+  반전 -> 단일 기전 확정. **세션2의 "merge/cover 수정 절대 금지"는 폐기됨** -- Gosleigh의 param_2 재사용이
+  진짜 버그였고 세션3에서 착지함(`7682720`).
+- **methodology 자산 확보**: `tools/decomp_dbg.exe`로 이제 C++ 코어 ground truth를 온디맨드로 실측 가능
+  (print C / print raw / print tree varnode / print cover high / break start <action>). savefile은
+  `tools/captures/`. 인스트루먼트 빌드(로깅 삽입) 절차는 `tools/BUILD_NOTES.md` + scratchpad `cpp_instr/`,
+  `build_instr.py`(93 obj 재사용 + 단일 TU 재컴파일). **가설을 코드로 박기 전에 이 도구로 실측하라.**
 
-## 확정된 벽 / 재규명 (다음 세션이 삽질하지 말 것)
-- **switch uVar1 = HEADLESS 환경 아티팩트, merge 버그 아님 (decomp_dbg.exe CPUI_DEBUG로 실측 확정)**. 기존
-  세션 자산 debug-built Ghidra 디컴파일러(CPUI_DEBUG)로 switch.exe를 x86:LE:64 .sla 로드->디컴파일:
-  **Ghidra 디컴파일러 CORE도 `param_2 = param_2 + param_3`(param_2 재사용) = Gosleigh와 byte-identical,
-  골든 uVar1 아님.** merge 발화+testCache.intersection=false(cover boundary, Gosleigh와 동일) -> **Gosleigh
-  cover/merge는 정확, C++ 코어와 일치.** 골든의 uVar1은 full HEADLESS 분석(param/stack/symbol recovery가 다른
-  Funcdata를 같은 merge 코어에 먹임)에서만. merge.cc/cover.cc는 12.0.4(골든생성)<->12.2 byte-identical.
-  **=> switch uVar1 강제(merge.go/cover.go/heritage.go 수정, descending edge order, merge-gate 포팅
-  landing)는 C++ 코어 파리티를 깨는 UNFAITHFUL. 절대 하지 말 것.** switch byte-MATCH는 headless-env
-  recovery(아래)에 게이팅. (구 STATUS의 "(a-2) type-model uVar1 return-split/merge"는 이 발견으로 폐기 --
-  uVar1은 type-model 갭이 아니라 headless 아티팩트.)
-- **breadth dispatch "reloc/COFF 로더 갭" 프레이밍은 틀렸다 (Opus 실측 debunk)**. (1) 하네스
-  (x64_breadth_diag_test.go:43-44)는 .obj를 안 읽고 골든 JSON의 hexToBytes(fn.Bytes)를 단일 base로 먹임 --
-  relocation site 자체가 파이프라인에 없음, pe.go 미사용. (2) 골든 바이트가 이미 post-relocation(Ghidra가
-  골든 캡처 전 reloc 적용; raw .obj addend 0). (3) 이 골든은 emulation-실패 폴백(CALLIND+setBadJumpTable);
-  full-image 로딩하면 track-B 복구가 성공해 switch{} 방출->골든과 더 벌어짐. **=> reloc 로더 짓지 말 것(dead
-  code).** stale doc 정정: truncateIndirectJump/ArtificialHalt/RecoverJumpTables/SetBadJumpTable는 이미
-  포팅+구동중(flow_jumptable.go:72/199/241, funcproto.go:183, bridge.go:254) -- breadth README/STATUS의
-  "미포팅"은 out-of-date.
+## 이번 세션(세션3) 완료 -- 28 faithful 커밋 (`11740fb..db12bfc`, 전부 감독관 C++ 스팟체크+전매트릭스+cherry-pick)
+묶음별 요약(상세 CHANGELOG 2026-07-17):
+1. **dispatch param_1 복구**: heritage 인접범위 병합 버그(`086fc39`) -- `Address::overlap`(address.cc:163)은
+   정확히 인접(dist==size)이면 -1인데 Go가 `>=`로 병합 -> RAX+RCX 16byte task -> CALLIND INDIRECT가 ECX param
+   삼킴. strict `>`로 수정.
+2. **전역 심볼 주입 + code-pointer CALLIND**(`8ac541a`,`35bc7a3`,`b5c6a27`): opt-in `BuildConfig.InjectedGlobals`
+   + `GlobalScope`(scope_global.go) -> `&__ImageBase` 심볼릭 보존; CALLIND 타깃 code-pointer 타입(typeop.cc:754)
+   + bare-code 렌더; 하네스가 함수를 실 VA에 로드.
+3. **comment/warning 인프라**(`94a9006`,`58e0411`,`17c113c`): CommentDatabase 포팅(신규 comment.go) +
+   Funcdata.warning + printc 방출. dispatch WARNING 1줄 byte-match.
+4. **stageJumpTable partial-clone heritage**(`41f7e9b`,`32413bd`): funcdata_block.cc:491 스테이징 포팅 ->
+   dispatch 두 번째 WARNING("Could not emulate...") byte-match.
+5. **locked-FuncProto 주입 + comment 접목**(`eb58de8`,`08df0f3`,`5e97b84`): opt-in `InjectedPrototype`,
+   locked-output storage(opInsertInput 잠재버그 수정).
+6. **cast/radix**(`801a004`,`4722583`,`38a9036`): mostNaturalBase radix(printc.cc:1376), TypeOpIntSright
+   getInputCast(typeop.cc:1587), option_hide_exts 게이트(cast.cc:249).
+7. **마스크 폴딩**(`66dbc16`,`6334812`): RuleCollapseConstants 전 opcode(op.cc:115 isCollapsible),
+   RuleAndOrLump 상수-lump 정정(ruleaction.cc:413, 기존 Go는 흡수법칙 오구현).
+8. **SUBPIECE 타입**(`c45365d`): TypeOpSubpiece.getOutputToken(typeop.cc:2144) -> `(byte)` 캐스트.
+9. **op_switch uVar1 byte-MATCH**(`42f78c6`,`70ba8f0`,`e9d3400`,`7682720` + mergeTestAdjacent `83998c8`):
+   Varnode-Symbol 링크 + HighVariable.getSymbol(variable.cc:418) + merge Symbol 가드(merge.cc:157-164) +
+   isolate 가드(merge.cc:198-205) + mergeTestSpeculative(merge.cc:220-234) + 주입 param isolate/namelock 배선.
+10. **Oppen pretty-printer**(`888736a`): EmitPrettyPrint 라인랩(prettyprint.cc, maxlinesize=100) -> corpus2
+    bump_scores byte-MATCH.
+11. **구조화**(`051b51c`,`0095ddb`): goto-엣지 제거(block.cc:1711 removeEdge, multi-exit 루프 collapse) +
+    scopeBreak(block.cc:1270) -> break/continue 방출.
+12. **dispatch carrier**(`db12bfc`): CALL-site 반환값 복구 -- ActionActiveReturn 스텁 실체화(coreaction.cc:1774)
+    + guardCalls 출력 트라이얼(heritage.cc:1453) + printc call-output explicit. dispatch가 `uVar1 = (*(code
+    *)(...))(); return uVar1;`로 골든과 **한 토큰 빼고 일치**.
+13. **discovery 코퍼스 x64_corpus2**(`7d427df`): 13함수(do-while/중첩루프/short-circuit/struct/포인터/signed
+    div/함수호출/goto/float/64bit곱) + 갭 지도(testdata/x64_corpus2/README.md).
 
-## 다음 작업 (우선순위) -- converged frontier
-남은 두 타겟(breadth dispatch, switch byte-MATCH)이 **같은 축으로 수렴**했다: **headless-environment
-param/type/symbol recovery**. Gosleigh는 Ghidra 디컴파일러 CORE 포팅인데 골든은 full HEADLESS 출력이라,
-대부분 함수는 core≈headless로 일치하나 일부(switch uVar1, dispatch param_1)는 headless 분석 계층(파라미터
-recovery, type-lock, symbol homing)이 코어에 다른 Funcdata를 먹인다. 이 계층이 최종목표(Ghidra headless 출력
-완전 일치)의 다음 대형 아키텍처 방향이다.
+## 보존 브랜치 (착지 안 함 -- 다음 세션이 이어받을 것)
+- **`worktree-agent-a31599a51b280b836` @ `42522d9`**: **faithful ActionReturnSplit** -- NodeSplit/CloneBlockOps
+  (funcdata_block.cc:845-1093) SSA 수술 완전 포팅 + gatherReturnGotos/getCopyMap(blockaction.cc:2205). **split
+  엔진 자체는 byte-correct** (dowhile_scan 정상 개선 입증). **착지 금지 사유**: ReturnSplit을 켜면 parse_steps가
+  의미 손상(multi-exit 루프를 whiledo로 구조화하는데 compound-head를 Go emitWhileBlock이 못 다뤄 가드 소실
+  -> 항상 `return -1`). 근본은 split이 아니라 **하류 collapse의 multi-exit-loop -> infinite-loop 구조화 갭**
+  (LoopBody.FindExit/ruleBlockWhileDo/isComplex 스텁/PrintC compound-head whiledo). 이 collapse 갭을 먼저
+  고친 뒤 이 브랜치를 얹으면 parse_steps가 수렴한다.
 
-### (frontier) [최우선, 대형/고위험] headless-environment param/type/symbol recovery
-- **현상**: (dispatch) `undefined4 dispatch(void)` vs golden `undefined8 dispatch(uint param_1)` -- param_1
-  전면 유실 + CALLIND target 표현식(`&__ImageBase + table[param_1]`)이 param_1/심볼 recovery에 의존해 `(*0)`로
-  붕괴. (switch) uVar1 return-split이 headless param recovery 산물.
-- **후보 근본(미확정, 조사 선행 필수)**: headless가 recovered param을 type-lock하거나 stack Symbol로
-  homing해 merge 입력을 바꾼다(ghidra-debug 팀원 강력 후보). Ghidra의 headless 분석 파이프라인
-  (DecompileCallback/파라미터 recovery/prototype override)이 코어 Funcdata에 param/type을 주입하는 경로 규명 필요.
-- **고위험**: param/type 코어를 건드려 방금 얻은 8/8 + tree 10/10을 위협. worktree 격리 + 전매트릭스 무회귀
-  게이트 필수. green이어도 unfaithful이면 되돌림.
-- **C++ 참조**: headless 경로는 ghidra-ref에 Decompiler C++만 있어 부분적 -- DecompileCallback/ifacedecomp
-  주변 + prototype/param recovery(funcdata param, ScopeInternal). 조사부터.
-- **성공 기준**: dispatch MATCH(2/3->3/3) 또는 switch op_switch byte-MATCH, + tree 10/10 + x64 8/8 무회귀.
+## 다음 작업 (우선순위)
+### (A) [자기완결, 중] dispatch `(ulonglong)` ZEXT -> breadth 3/3
+- **현상**: dispatch가 `&__ImageBase + (ulonglong)*(uint *)(...)` vs 골든 `&__ImageBase + *(uint *)(...)`.
+  **단 한 토큰.** carrier/WARNING/guard/구조 전부 이미 일치.
+- **근본(실측 확정)**: 골든은 `INT_ADD(&__ImageBase, idx)`가 PTRADD(포인터 산술)라 ZEXT를 숨김. Go는
+  spacebase PTRSUB 출력을 포인터로 타이핑 안 함(C++ funcdata.cc:413-419 `updateType(getTypePointerStripArray)`)
+  -> int 유지 -> RulePtrArith 미발화 -> IsExtensionCastImplied metatype 체크 실패.
+- **주의**: dispatch-carrier 팀원이 시도했다가 ActionInferTypes 리셋 + typelock시 spacebase-collapse로
+  `&__ImageBase` 소실 부작용 확인 후 revert. **type-model 深부채** -- PTRSUB 출력 포인터 타이핑이 InferTypes
+  수렴에서 유지되게 하는 게 관건.
+- **수정 대상**: pkg/pcode의 spacebase constant 타이핑(funcdata.cc:413 대응), TypeOpPtrsub 출력 타입, RulePtrArith.
 
-### (a) [차순위, 자기완결적 조각] dispatch CALLIND target=0 붕괴 규명
-IOP-space는 착지했으나 dispatch는 여전히 `(*0)`. breadth-reloc 팀원 미확정: target-0가 (a)언매핑 jumptable
-load가 0 fold vs (b)emulation실패가 target varnode 0으로 vs (c)IOP-space 오rename. p-code 덤프 필요
-(bridge.Build->RecoverJumpTables->TruncateIndirectJump 주변). 단 target 표현식이 param_1 recovery에 의존하니
-frontier와 얽힘 -- 부분 진전만 가능.
+### (B) [대형, 고위험] collapse multi-exit-loop 구조화 -> ReturnSplit 착지 + corpus2 P1
+- **현상**: corpus2 dowhile_scan/parse_steps/find_pair가 do-while/for 구조까지는 형성되나 early-return이
+  goto로 남거나(ReturnSplit 부재) 2-exit 루프가 잘못 구조화됨. 보존 브랜치(위)가 ReturnSplit을 제공하나
+  collapse 갭에 게이팅.
+- **근본**: LoopBody.FindExit/ruleBlockWhileDo가 2-exit 루프를 compound-head whiledo로 만들고 Go
+  emitWhileBlock이 compound-head 미지원; isComplex() 스텁(false); infinite-loop(while(true)) 라벨링 미포팅.
+- **C++ 참조**: blockaction.cc(CollapseStructure, LoopBody), block.cc(BlockWhileDo/BlockInfLoop scopeBreak),
+  printc.cc emitBlockWhileDo. **tree/corpus 공유 루프 코드라 회귀 극도 주의** -- 실측(decomp_dbg) 후 착수.
+- **성공 기준**: corpus2 dowhile_scan/parse_steps 구조 수렴 + 보존 브랜치 얹어 parse_steps 의미 무손상.
 
-### (b) [보류, 낮은 우선순위] switch Diffs 3/4/5
-op_switch byte-MATCH의 잔차 중 uVar1(headless) 외: shift-count `(byte)` vs `(undefined1)` 타입추론, 여분
-`& 0x3f`(RuleAndCollapse), case7 `(int)` 캐스트. 단 switch byte-MATCH는 uVar1(headless)에 게이팅되니 이것만으론
-gate-win 불가. core-vs-headless 여부 미확정.
+### (C) [디스커버리 후속] corpus2 갭 지도 P3-P8 (testdata/x64_corpus2/README.md)
+- P3 umulhi: copy-prop/CSE 깊이(여분 임시). P4 gate: De Morgan/분기반전 + 네이밍. P5 sum_via_pp/add_pt:
+  포인터 원소 스케일링/struct CONCAT44 분해(type-model). P6 helper_sum: 스택 파라미터(5번째 인자) 미해결.
+  P7 caller: IOP-space CALLIND + COFF reloc 부재(가짜 호출). P8 faverage: **FP 전면 미포팅**(탐침).
 
-## 참고 / 자산
-- 메모리 `project_gosleigh` 상단 "2026-07-03 (세션2)" 섹션들에 전부 상세.
-- decomp_dbg.exe (CPUI_DEBUG Ghidra 12.2 디컴파일러): 기존 세션 scratchpad에 존재. Ghidra CORE 동작 관찰용
-  (headless 아님 주의). x86:LE:64 .sla는 Ghidra 설치(SLEIGHHOME)서. `adjust vma`는 Win64서 32bit truncation
-  버그 -> PE-mapped(file offset=RVA) base 0 로딩으로 우회.
-- worktree 브랜치들(worktree-agent-*)에 이번 세션 실험 보존: d2adf57(merge-gate 포팅, faithful하나
-  output-neutral+switch 무관 판명 -> landing 안 함), 그 외 landed 커밋들의 원본. 정리 가능.
-- `.gocache`는 gitignore 처리됨(`/.gocache/`,`*.exe`,`*.obj`). `.git` 258MB bloat는 옛 blob 잔존 --
-  `git gc --prune=now`로 로컬 회수(repo quiescent시). `.gorchera/`는 orchestrator goal 인프라(정상).
-
-## 회귀 가드 (매 수정마다 필수)
-- `TREE_MAP=1 go test ./pkg/loader/ -run TestTreeFullGoldenMap` (10/10 유지 -- x86-32 회귀 극도 주의)
-- `X64_CORPUS=1 go test ./pkg/loader/ -run TestX64CorpusGoldenMap -v` (8/8 유지 -- process 사수)
-- `X64_BREADTH=1 go test ./pkg/loader/ -run TestX64BreadthGoldenMap -v` (2/3 유지/증가)
-- `X64_SWITCH=1 go test ./pkg/loader/ -run TestX64Switch -v` (코퍼스 gitignore -- testdata/x64_switch/build.py
-  재실행 필요, 부재 시 skip; structure MATCH, byte-MATCH는 headless 게이팅)
+## 회귀 가드 (매 수정마다 필수, 2회 결정성)
+- `TREE_MAP=1 go test ./pkg/loader/ -run TestTreeFullGoldenMap` (10/10 -- x86-32 회귀 극도 주의)
+- `X64_CORPUS=1 go test ./pkg/loader/ -run TestX64CorpusGoldenMap -v` (8/8 -- process 사수)
+- `X64_SWITCH=1 go test ./pkg/loader/ -run TestX64Switch -v` (**op_switch byte-MATCH 사수** -- 코퍼스 gitignore,
+  부재 시 testdata/x64_switch/build.py 재실행)
+- `X64_BREADTH=1 go test ./pkg/loader/ -run TestX64BreadthGoldenMap -v` (2/3, dispatch 개선 시 3/3)
+- `X64_CORPUS2=1 go test ./pkg/loader/ -run TestX64Corpus2 -v` (2/13, 개선 목표; 코퍼스 gitignore, 부재 시
+  testdata/x64_corpus2/build.py 재실행)
 - `go test ./pkg/loader/ -run 'TestMSVC|TestAARCH64|TestX8664|TestX64RegParam|TestPELoader|TestX86PEDecompile'`
-- `go test ./...` (전 패키지 green -- 단 fresh worktree는 testdata/elfs/simple_add_sym.exe 미생성으로 3건
-  symbols_test 실패 가능, gen_*.go로 생성되는 fixture라 환경 이슈)
+- `go test ./...`
 
 ## 방법론 (이번 세션에서 재검증)
-- **투자 전 조사(investigate-first)**: reloc 프레이밍이 틀렸음을 실측으로 debunk해 dead code 회피. switch uVar1이
-  headless 아티팩트임을 decomp_dbg로 확정해 unfaithful 강제 회피. **가설을 코드로 박기 전에 실측/C++로 검증.**
-- **green이어도 unfaithful 기각**: descending edge order가 골든 통과했으나 C++ collectEdges ascending 위배 ->
-  기각하고 진짜 근본(halfDelete slide-down) 찾음. output-neutral 변경은 "실제 목표+실제 갭 해소"면 landing
-  (IOP-space, ActionDoNothing 선례), "비-목표"면 보류(merge-gate 포팅).
-- **비결정성 출력**: Go map 순회가 흔한 원인. 결정성 확인은 게이트 다회 실행.
-- Sonnet 5는 hard foundational 포팅을 Opus급으로 수행(정확한 C++ 근거+안전한 설계결정+A/B검증). 어려운 위임 가능.
+- **decomp_dbg 실측 우선**: uVar1 headless 반전, isolate 기전 확정, dispatch carrier 구조 -- 전부 실측이 가설을
+  뒤집거나 확정. **코드 박기 전 tools/decomp_dbg.exe로 C++ 코어 관찰.** 인스트루먼트 빌드로 특정 가드 발화도 로그.
+- **green이어도 unfaithful/의미손상 기각**: ReturnSplit(전 게이트 green이나 parse_steps 손상) 보류. 오포팅
+  발견 시(RuleAndOrLump 흡수법칙, goto-엣지 미제거) 근본 정렬.
+- **감독관 병렬 2슬롯**(사용자 승인): worktree 격리 + 수정 파일 분할 + 매 landing 전매트릭스 게이트. 팀원이
+  메인 repo 오염 사고 2회 -> 프롬프트에 "worktree 경로 기준" 명시 필수.
+- 선행 팀원 가설도 실측으로 검증(cover 가설 3회 반증됨: Intersection 정확, Symbol 가드 아님, 최종 isolate).

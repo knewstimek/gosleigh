@@ -1,0 +1,205 @@
+<xml_savefile name="FUN_140001000" target="default" adjustvma="0">
+<binaryimage arch="x86:LE:64:default:windows">
+<bytechunk space="ram" offset="0x140001000" readonly="true">
+448944241889542410894c24084883ec
+188b442420890424833c24070f878c00
+000048630424488d0dd3efffff8b8481
+b81000004803c1ffe08b4424308b4c24
+2803c88bc1eb6c8b4424308b4c24282b
+c88bc1eb5e8b4424280faf442430eb53
+8b4424308b4c242833c88bc1eb458b44
+24308b4c24280bc88bc1eb378b442430
+8b4c242823c88bc1eb298b44243083e0
+3f0fb6c88b442428d3e0eb178b442430
+83e03f0fb6c88b442428d3f8eb05b8ff
+ffffff4883c418c33910000047100000
+55100000601000006e1000007c100000
+8a1000009c100000cccccccc
+</bytechunk>
+</binaryimage>
+
+<coretypes>
+  <type name="uint3" size="3" metatype="uint" id="0xc0000000000000c0"/>
+  <type name="uint5" size="5" metatype="uint" id="0xc0000000000000c1"/>
+  <type name="code" size="1" metatype="code" id="0xe000000000000001"/>
+  <type name="uint6" size="6" metatype="uint" id="0xc0000000000000c2"/>
+  <type name="double" size="8" metatype="float" id="0xc000000000000082"/>
+  <type name="uint7" size="7" metatype="uint" id="0xc0000000000000c3"/>
+  <type name="uint" size="4" metatype="uint" id="0xc0000000000000c4"/>
+  <type name="float10" size="10" metatype="float" id="0xc000000000000084"/>
+  <type name="float16" size="16" metatype="float" id="0xc000000000000085"/>
+  <type name="float2" size="2" metatype="float" id="0xc000000000000086"/>
+  <type name="ulonglong" size="8" metatype="uint" id="0xc0000000000000c7"/>
+  <type name="ushort" size="2" metatype="uint" id="0xc0000000000000c8"/>
+  <type name="void" size="0" metatype="void" id="0xc0000000000000c9"/>
+  <type name="float" size="4" metatype="float" id="0xc00000000000008a"/>
+  <type name="wchar32" size="4" metatype="int" utf="true" id="0xc0000000000000cc"/>
+  <type name="wchar_t" size="2" metatype="int" utf="true" id="0xc0000000000000cd"/>
+  <type name="int16" size="16" metatype="int" id="0xc000000000000090"/>
+  <type name="int3" size="3" metatype="int" id="0xc000000000000091"/>
+  <type name="int5" size="5" metatype="int" id="0xc000000000000092"/>
+  <type name="int6" size="6" metatype="int" id="0xc000000000000093"/>
+  <type name="int7" size="7" metatype="int" id="0xc000000000000094"/>
+  <type name="int" size="4" metatype="int" id="0xc000000000000095"/>
+  <type name="longlong" size="8" metatype="int" id="0xc00000000000009a"/>
+  <type name="short" size="2" metatype="int" id="0xc0000000000000a8"/>
+  <type name="sbyte" size="1" metatype="int" id="0xc0000000000000a9"/>
+  <type name="undefined1" size="1" metatype="unknown" id="0xc0000000000000b4"/>
+  <type name="undefined2" size="2" metatype="unknown" id="0xc0000000000000b5"/>
+  <type name="undefined3" size="3" metatype="unknown" id="0xc0000000000000b6"/>
+  <type name="undefined4" size="4" metatype="unknown" id="0xc0000000000000b7"/>
+  <type name="undefined5" size="5" metatype="unknown" id="0xc0000000000000b8"/>
+  <type name="undefined6" size="6" metatype="unknown" id="0xc0000000000000b9"/>
+  <type name="bool" size="1" metatype="bool" id="0xc000000000000079"/>
+  <type name="undefined7" size="7" metatype="unknown" id="0xc0000000000000ba"/>
+  <type name="byte" size="1" metatype="uint" id="0xc00000000000007a"/>
+  <type name="undefined8" size="8" metatype="unknown" id="0xc0000000000000bb"/>
+  <type name="char" size="1" metatype="int" char="true" id="0xc00000000000007b"/>
+  <type name="uint16" size="16" metatype="uint" id="0xc0000000000000bf"/>
+</coretypes><save_state>
+
+<typegrp structalign="4"/><db scopeidbyname="false">
+<scope name="" id="0x0">
+<symbollist>
+
+<mapsym>
+  <function id="0x1" name="FUN_140001000" size="1">
+    <addr space="ram" offset="0x140001000"/>
+    <localdb lock="false" main="stack">
+      <scope name="FUN_140001000">
+        <parent id="0x0"/>
+        <rangelist/>
+        <symbollist>
+          <mapsym>
+            <symbol id="0x68" name="param_1" typelock="true" namelock="true" merge="false" cat="0" index="0x0">
+              <typeref name="undefined4" id="0xc0000000000000b7"/>
+            </symbol>
+            <addr space="register" offset="0x8" size="4"/>
+            <rangelist>
+              <range space="ram" first="0x140000fff" last="0x140000fff"/>
+            </rangelist>
+          </mapsym>
+          <mapsym>
+            <symbol id="0x69" name="param_2" typelock="true" namelock="true" merge="false" cat="0" index="0x1">
+              <type name="uint" id="0xc0000000000000c4" metatype="uint" size="4"/>
+            </symbol>
+            <addr space="register" offset="0x10" size="4"/>
+            <rangelist>
+              <range space="ram" first="0x140000fff" last="0x140000fff"/>
+            </rangelist>
+          </mapsym>
+          <mapsym>
+            <symbol id="0x6a" name="param_3" typelock="true" namelock="true" merge="false" cat="0" index="0x2">
+              <type name="uint" id="0xc0000000000000c4" metatype="uint" size="4"/>
+            </symbol>
+            <addr space="register" offset="0x80" size="4"/>
+            <rangelist>
+              <range space="ram" first="0x140000fff" last="0x140000fff"/>
+            </rangelist>
+          </mapsym>
+          <mapsym>
+            <symbol id="0x6b" name="local_18" typelock="false" namelock="true" cat="-1">
+              <typeref name="undefined4" id="0xc0000000000000b7"/>
+            </symbol>
+            <addr space="stack" offset="0xffffffffffffffe8" size="4"/>
+            <rangelist/>
+          </mapsym>
+          <mapsym>
+            <symbol id="0x6c" name="local_res8" typelock="false" namelock="true" cat="-1">
+              <typeref name="undefined4" id="0xc0000000000000b7"/>
+            </symbol>
+            <addr space="stack" offset="0x8" size="4"/>
+            <rangelist/>
+          </mapsym>
+          <mapsym>
+            <symbol id="0x6d" name="local_res10" typelock="false" namelock="true" cat="-1">
+              <typeref name="undefined4" id="0xc0000000000000b7"/>
+            </symbol>
+            <addr space="stack" offset="0x10" size="4"/>
+            <rangelist/>
+          </mapsym>
+          <mapsym>
+            <symbol id="0x6e" name="local_res18" typelock="false" namelock="true" cat="-1">
+              <typeref name="undefined4" id="0xc0000000000000b7"/>
+            </symbol>
+            <addr space="stack" offset="0x18" size="4"/>
+            <rangelist/>
+          </mapsym>
+        </symbollist>
+      </scope>
+    </localdb>
+    <prototype extrapop="8" model="__fastcall" modellock="true">
+      <returnsym typelock="true">
+        <addr space="register" offset="0x0" size="4"/>
+        <type name="uint" id="0xc0000000000000c4" metatype="uint" size="4"/>
+      </returnsym>
+    </prototype>
+  </function>
+  <addr space="ram" offset="0x140001000" size="1"/>
+  <rangelist/>
+</mapsym></symbollist>
+</scope>
+</db>
+<context_points>
+
+<context_pointset space="ram" offset="0x140001000">
+  <set name="longMode" val="1"/>
+  <set name="reserved" val="0"/>
+  <set name="addrsize" val="2"/>
+  <set name="bit64" val="1"/>
+  <set name="opsize" val="1"/>
+  <set name="segover" val="0"/>
+  <set name="highseg" val="0"/>
+  <set name="protectedMode" val="0"/>
+  <set name="mandover" val="0"/>
+  <set name="repneprefx" val="0"/>
+  <set name="xacquireprefx" val="0"/>
+  <set name="prefix_f2" val="0"/>
+  <set name="repprefx" val="0"/>
+  <set name="xreleaseprefx" val="0"/>
+  <set name="prefix_f3" val="0"/>
+  <set name="prefix_66" val="0"/>
+  <set name="rexWRXBprefix" val="0"/>
+  <set name="rexWprefix" val="0"/>
+  <set name="rexRprefix" val="0"/>
+  <set name="rexXprefix" val="0"/>
+  <set name="rexBprefix" val="0"/>
+  <set name="rexprefix" val="0"/>
+  <set name="vexMode" val="0"/>
+  <set name="evexL" val="0"/>
+  <set name="evexLp" val="0"/>
+  <set name="suffix3D" val="0"/>
+  <set name="vexL" val="0"/>
+  <set name="evexV5" val="0"/>
+  <set name="evexVp" val="0"/>
+  <set name="vexVVVV" val="0"/>
+  <set name="vexHighV" val="0"/>
+  <set name="instrPhase" val="0"/>
+  <set name="lockprefx" val="0"/>
+  <set name="vexMMMMM" val="0"/>
+  <set name="evexRp" val="0"/>
+  <set name="evexB" val="0"/>
+  <set name="evexZ" val="0"/>
+  <set name="evexAAA" val="0"/>
+  <set name="evexD8Type" val="0"/>
+  <set name="evexTType" val="0"/>
+  <set name="evexDisp8" val="0"/>
+  <set name="evexBType" val="0"/>
+  <set name="reservedHigh" val="0"/>
+</context_pointset>
+<tracked_pointset space="ram" offset="0x140001000">
+  <set space="register" offset="0x118" size="8" val="0xff00000000"/>
+  <set space="register" offset="0x20a" size="1" val="0x0"/>
+</tracked_pointset>
+<tracked_pointset space="ram" offset="0x140001000">
+  <set space="register" offset="0x118" size="8" val="0xff00000000"/>
+  <set space="register" offset="0x20a" size="1" val="0x0"/>
+</tracked_pointset></context_points>
+
+<commentdb/>
+<optionslist>
+  <readonly>on</readonly>
+  <setlanguage>c-language</setlanguage>
+  <protoeval>default</protoeval>
+</optionslist></save_state>
+</xml_savefile>

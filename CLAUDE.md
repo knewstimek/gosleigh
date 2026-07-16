@@ -25,6 +25,8 @@ Ghidra decompiler/Sleigh runtime을 Go로 다시 구현하는 프로젝트. stan
 
 ## 작업 방식
 
+- (감독관 전용) 위임 작업 대기 중엔 ScheduleWakeup 55분(3300초)을 건다 -- 캐시 웜업(TTL 1시간) 겸 hang fallback 체크. 완료 알림이 먼저 오면 다음 대기 때 다시 건다.
+- (감독관 전용) 이 프로젝트는 서브에이전트 병렬 2슬롯까지 허용 (2026-07-16 사용자 승인). 단 병렬 태스크끼리 수정 파일이 겹치지 않게 분할할 것.
 - placeholder/noop/빈 입력 UI를 만들지 않는다. 이런 UI가 뜨면 실패로 간주한다.
 - 사용자 입력 없이 멈추는 인터랙티브 단계나 broad tool 호출을 만들지 않는다.
 - (보류) 오케스트레이터 + 서브에이전트 위임 모델은 `docs/ORCHESTRATOR_WORKFLOW.md`로 빼둠. 다시 쓰려면 거기서 되돌린다.

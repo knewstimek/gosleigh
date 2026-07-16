@@ -15,7 +15,20 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-06-30 세션 진행, 전 패키지 그린)
+## 현재 상태 (2026-07-17 세션3, master `db12bfc`, 전 게이트 green)
+
+**권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`** (세션3 성과/다음작업/보존브랜치 전부). 요약:
+- **op_switch byte-MATCH 달성**(`X64_SWITCH`): uVar1 = Ghidra CORE 동작으로 재확정(세션2 "headless 아티팩트"
+  폐기, decomp_dbg 실측), 기전 = savefile `merge="false"` -> Symbol isolate -> mergeTestAdjacent 가드.
+- tree **10/10**, x64 corpus **8/8**, breadth **2/3**(dispatch는 골든과 `(ulonglong)` 한 토큰 차이),
+  corpus2(신규 discovery) **2/13**. production 전부 PASS, `go test ./...` green.
+- 자산: `tools/decomp_dbg.exe`(재빌드 CPUI_DEBUG core 콘솔) + `tools/captures/` -> C++ 코어 ground truth 실측.
+- 보존 브랜치 `worktree-agent-a31599a51b280b836`@`42522d9`: faithful ActionReturnSplit(split 엔진 correct,
+  하류 collapse 갭 때문에 미착지). 상세 NEXT_SESSION_PROMPT.md + CHANGELOG 2026-07-17.
+- 다음: (A) dispatch ZEXT type-model -> breadth 3/3, (B) collapse multi-exit-loop 구조화 -> ReturnSplit 착지,
+  (C) corpus2 P3-P8.
+
+<details><summary>이전 상태 (2026-06-30~07-03, 접힘)</summary>
 
 **(2026-07-03 갱신, master `accd8a9`)** 트리 스택프레임 복구는 2026-07-02 완료된 Ghidra 충실 spacebase 경로
 (Funcdata.Spacebase + RuleLoadVarnode/RuleStoreVarnode + RuleAddMultCollapse/RuleCollapseConstants 오프셋
@@ -81,11 +94,17 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ---
 
+</details>
+
 ## 다음 작업 (우선순위)
 
-> **[최신] 2026-07-03 세션2 완료 (master `746a72c`) -- x64 corpus 8/8 완전 MATCH. 아래 미시작 (a)/(a-2)/(b)는
-> 이 세션 발견으로 재편됨. 권위 있는 다음-작업/현재상태는 저장소 루트 `NEXT_SESSION_PROMPT.md` + 메모리
-> `project_gosleigh` 상단 "2026-07-03 (세션2)" 섹션 참조.**
+> **[최신] 2026-07-17 세션3 (master `db12bfc`): op_switch byte-MATCH 달성, dispatch 한 토큰 근접. 권위 있는
+> 다음-작업/현재상태/보존브랜치는 저장소 루트 `NEXT_SESSION_PROMPT.md` + 메모리 `project_gosleigh` 상단
+> "2026-07-17 (세션3)" + CHANGELOG 2026-07-17 참조. 우선순위: (A) dispatch `(ulonglong)` ZEXT type-model 부채
+> -> breadth 3/3 ; (B) collapse multi-exit-loop 구조화 -> 보존브랜치 ReturnSplit 착지 + corpus2 P1 ; (C)
+> corpus2 갭 P3-P8(testdata/x64_corpus2/README.md).**
+>
+> <details><summary>이전 세션2 포인터 (접힘)</summary>
 > - **process 완료(8/8)**: 아래 미시작 (b)와 (a-2)의 process 관련 항목은 **DONE**. 5개 faithful 조각으로 착지 --
 >   printc 단축타입명(`50a9557`) + faithful BlockCondition(`ad73759`, &&/comma/De Morgan, 배열로드 문장 복원) +
 >   비결정성(addCFGEdges map->ascending)+halfDelete slide-down 반전수정(`781c9d6`) + gap2 RuleSubZext
@@ -101,7 +120,9 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 >   necessary-not-sufficient). truncateIndirectJump 등은 이미 포팅+구동중(README "미포팅" 정정).
 > - **다음 프론티어 = headless-environment param/type/symbol recovery** (dispatch param_1 + switch uVar1 공통 축,
 >   대형/고위험). 상세는 NEXT_SESSION_PROMPT.md.
-> - **게이트(현재)**: tree 10/10, x64 8/8, breadth 2/3, production PASS, `go test ./...` green.
+> - **게이트(당시)**: tree 10/10, x64 8/8, breadth 2/3, production PASS, `go test ./...` green.
+>
+> </details>
 
 > **2026-07-02 완료: grid_score/process 스택프레임 복구 -- faithful spacebase 경로(master `c87debe`, 이전
 > flag-gated `602dde8`).** 이전 진단("Fix A: heritage 이전으로 이동" / "Fix B: def-use walk 패치")은 오진이었음.

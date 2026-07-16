@@ -5,6 +5,80 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-17 (세션3): op_switch byte-MATCH + dispatch 근접 + discovery 코퍼스 (master `db12bfc`, 28 커밋)
+감독관 세션(Opus 서브에이전트 근본규명+구현, worktree 격리, 병렬 2슬롯[사용자 승인], 매 landing C++
+스팟체크+전매트릭스+cherry-pick+push). 핵심 성과: **op_switch byte-MATCH 완전 착지** + dispatch 골든과 한
+토큰까지 근접 + 신규 discovery 코퍼스 + **decomp_dbg 재빌드로 C++ 코어 실측 인프라 확보**.
+
+**대반전 -- switch uVar1 = Ghidra CORE 동작 (세션2 "headless 아티팩트" 폐기)**: 재빌드 decomp_dbg
+(CPUI_DEBUG Ghidra 12.0.4, `tools/decomp_dbg.exe`)로 실측 savefile restore -> C++ 코어가 골든과 byte-identical
+uVar1 출력. 인스트루먼트 빌드 로그로 기전 확정: savefile `merge="false"` -> Symbol isolate(database.cc:423-427)
+-> mergeTestAdjacent isolated 가드(merge.cc:198-205)가 병합 기각. `merge="false"` 제거 ablation으로 단일 기전
+확정. 세션2의 "merge/cover 수정 금지" 방침 폐기, Gosleigh param_2 재사용이 실제 버그였음.
+
+**dispatch param_1 복구** (`086fc39`): heritage 인접범위 병합 버그. `Address::overlap`(address.cc:163)은 정확히
+인접(dist==size)이면 -1인데 Go가 `>=`로 병합 -> RAX+RCX 16byte task -> CALLIND INDIRECT가 ECX param 삼켜
+`dispatch(void)`. strict `>`로 수정 -> `undefined8 dispatch(uint param_1)`. corpus classify는 CALLIND 부재로
+8/8 통과했던 것.
+
+**전역 심볼 주입 + code-pointer CALLIND** (`8ac541a`,`35bc7a3`,`b5c6a27`): opt-in `BuildConfig.InjectedGlobals`
++ 신규 `GlobalScope`(scope_global.go), ActionConstantPtr가 global scope 우선 조회 -> `&__ImageBase` 심볼릭
+보존(spacebase PTRSUB `&symbol` 렌더, printc.cc:1076). CALLIND 타깃 code-pointer 타입(typeop.cc:754) + bare
+`code` 렌더. 하네스가 함수를 골든 entry의 실 VA에 로드.
+
+**comment/warning 인프라** (`94a9006`,`58e0411`,`17c113c`): CommentDatabase 포팅(신규 comment.go, comment.cc
+대응) + Funcdata.warning(funcdata.cc:119) + printRaw + CommentSorter 위치계산 + printc 인라인 블록주석 방출.
+dispatch `/* WARNING: Treating indirect jump as call */`(flow.cc:755) byte-match. 비-jumptable 골든은 DB 비어
+무영향.
+
+**stageJumpTable partial-clone heritage** (`41f7e9b`,`32413bd`): `Funcdata::stageJumpTable`(funcdata_block.cc:491)
+스테이징 포팅 -- partial clone(truncatedFlow) + heritage 후 recoverModel/guard 복구 + emulate 실패시 원본에
+warning. dispatch 두 번째 WARNING("Could not emulate address calculation at 0x000024e0", jumptable.cc:248)
+byte-match. 성공 경로(x64_switch) 무회귀.
+
+**cast/radix** (`801a004`,`4722583`,`38a9036`): (a) 상수 radix를 mostNaturalBase로(printc.cc:1376, TYPE_INT이
+10진 강제하던 것 정정) -> `0x5b40`. (b) TypeOpIntSright.getInputCast(typeop.cc:1587) -> case7 `(int)` 캐스트.
+(c) option_hide_exts 게이트(CastStrategyC::isExtensionCastImplied, cast.cc:249) 포팅(PTRADD 형성시 자동 활성).
+
+**마스크 폴딩** (`66dbc16`,`6334812`): RuleCollapseConstants를 전 opcode로(op.cc:115 isCollapsible 런타임
+게이팅) + evalConstOp에 SUBPIECE/shift/PIECE 추가. RuleAndOrLump를 C++ 상수-lump(ruleaction.cc:413)로 정정
+(기존 Go는 무관한 흡수법칙 오구현). op_switch case6/7 마스크 체인 `& 0x1f` 수렴.
+
+**SUBPIECE 타입** (`c45365d`): TypeOpSubpiece.getOutputToken(typeop.cc:2144) 포팅 -- 전용 TypeOp 부재로 base
+undefined 토큰 반환 -> ActionSetCasts가 추론된 byte 타입 덮어쓰던 근본. `(byte)param_3`.
+
+**op_switch uVar1 byte-MATCH** (`83998c8`,`42f78c6`,`70ba8f0`,`e9d3400`,`7682720`): mergeTestAdjacent
+(merge.cc:175) 포팅 + Varnode-Symbol 링크 + HighVariable.getSymbol(variable.cc:418) + merge Symbol
+가드(merge.cc:157-164) + isolate 가드(merge.cc:198-205) + mergeTestSpeculative(merge.cc:220-234) + 주입 param
+Symbol isolate/namelock 배선 + renameReturnOnlyLocals input-skip. `uVar1 = param_2 + param_3; return uVar1;`.
+
+**Oppen pretty-printer** (`888736a`): EmitPrettyPrint(prettyprint.cc, Derek Oppen, maxlinesize=100) 신규
+포팅(prettyprint.go). 비개행 출력 byte-identical, 개행만 추가. corpus2 bump_scores byte-MATCH.
+
+**구조화** (`051b51c`,`0095ddb`): (a) newBlockGoto/newBlockIfGoto가 goto 엣지를 유지하던 오포팅 ->
+removeEdge(block.cc:1711)로 제거, multi-exit 루프가 do-while/for로 collapse. (b) scopeBreak(block.cc:1270 per
+블록타입) + emitGotoStatement break/continue 분기 포팅 -> 루프 exit goto가 `break;`/`continue;`.
+
+**dispatch carrier** (`db12bfc`): CALL-site 반환값 복구 -- ActionActiveReturn 스텁 실체화(coreaction.cc:1774,
+checkOutputTrialUse/deriveOutputMap/buildOutputFromTrials) + guardCalls 출력 트라이얼(heritage.cc:1453) +
+ActionDefaultParams nil-model 수정 + printc call-output explicit(coreaction.cc:3017). dispatch가 `undefined8
+uVar1; uVar1 = (*(code *)(...))(); return uVar1;`로 골든과 한 토큰(`(ulonglong)` ZEXT) 빼고 일치.
+
+**discovery 코퍼스 x64_corpus2** (`7d427df`): 기존 코퍼스 미커버 13함수(do-while/중첩루프/short-circuit/삼항/
+struct/포인터/signed div/함수호출/goto/float/64bit곱). 재현 파이프라인(build.py/run_ghidra.py/GenGoldens.java)
++ 갭 지도(README.md). 1/13 -> Oppen/구조화로 2/13. 신규 신호: 제어흐름 구조화(P1), 라인랩(P2), 스택 파라미터(P6).
+
+**미착지 (보존 브랜치 `worktree-agent-a31599a51b280b836` @ `42522d9`)**: faithful ActionReturnSplit
+(NodeSplit/CloneBlockOps SSA 수술, funcdata_block.cc:845-1093 + gatherReturnGotos/getCopyMap
+blockaction.cc:2205). split 엔진 byte-correct(dowhile_scan 개선 입증)이나 ReturnSplit 활성시 parse_steps 의미
+손상(하류 collapse multi-exit-loop 구조화 갭) -> parity-first로 보류. 상세 NEXT_SESSION_PROMPT.md.
+
+**자산**: `tools/decomp_dbg.exe`(재빌드, CPUI_DEBUG core 콘솔) + `tools/BUILD_NOTES.md`(재빌드 절차) +
+`tools/build_decomp_dbg.py` + `tools/captures/`(debug_op_switch.xml, debug_dispatch.xml, 측정 결과). C++ 코어
+ground truth 온디맨드 실측 가능.
+
+---
+
 ### 2026-07-03 (세션2): x64 corpus 8/8 완전 MATCH -- process 착지 + IOP-space groundwork (master `746a72c`)
 메모리/STATUS가 반복적으로 "가장 어렵다/deep-debt/1세션 착지 불가"로 기술한 `process`를 골든과 byte-identical로
 착지 -> **x64 corpus 8/8 첫 완전 MATCH.** 감독관 세션(Opus 서브에이전트 근본규명+구현, worktree 격리, 매 커밋

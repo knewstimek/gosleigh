@@ -1,0 +1,45 @@
+== decomp_dbg (Ghidra core C++, CPUI_DEBUG, MSVC build) 실측 ==
+입력: tools/captures/debug_op_switch.xml  (xml_savefile, locked prototype 포함)
+SLEIGHHOME=ghidra_12.0.4_PUBLIC
+
+--- print C ---
+uint FUN_140001000(undefined4 param_1,uint param_2,uint param_3)
+{
+  uint uVar1;
+  switch(param_1) {
+  case 0:  uVar1 = param_2 + param_3; break;
+  case 1:  uVar1 = param_2 - param_3; break;
+  case 2:  uVar1 = param_2 * param_3; break;
+  case 3:  uVar1 = param_2 ^ param_3; break;
+  case 4:  uVar1 = param_2 | param_3; break;
+  case 5:  uVar1 = param_2 & param_3; break;
+  case 6:  uVar1 = param_2 << ((byte)param_3 & 0x1f); break;
+  case 7:  uVar1 = (int)param_2 >> ((byte)param_3 & 0x1f); break;
+  default: uVar1 = 0xffffffff;
+  }
+  return uVar1;
+}
+
+--- print raw (핵심 발췌) ---
+Block 0: switch ECX(i)            ; param_1 == ECX (offset 0x8), SUB41 -> u0x10000018
+case 결과가 쓰이는 레지스터:
+  case0 ADD -> ECX(...41:127)     case1 SUB -> ECX(...4f:112)
+  case2 MUL -> EAX(...59:100)     case3 XOR -> ECX(...68:ed)
+  case4 OR  -> ECX(...76:d8)      case5 AND -> ECX(...84:c3)
+  case6 SHL -> EAX(...98:94)      case7 SAR -> EAX(...aa:5c)
+  default   -> EAX(...ae:247)
+Block 10 (exit):
+  EAX(10b3:23f) = MULTIEQUAL( 위 9개 EAX/ECX )      ; <- 누산기 = uVar1
+  EAX(10b7:1ba) = EAX(10b3:23f)                     ; <- return carrier COPY
+  return(#0x0) EAX(10b7:1ba)
+
+--- 심볼 스토리지 (savefile) ---
+param_1 : register offset 0x8  (ECX)  undefined4
+param_2 : register offset 0x10 (EDX)  uint    typelock namelock
+param_3 : register offset 0x80 (R8D)  uint    typelock namelock
+returnsym: register offset 0x0 (EAX) size 4 uint  typelock  (modellock=true, __fastcall)
+
+== 결론 ==
+같은 locked-prototype savefile 로 Ghidra 코어 C++ 가 uVar1 을 그대로 낸다.
+uVar1 은 EAX(누산기/반환) 이고 param_2 는 EDX(입력 전용) -- 스토리지가 달라 병합될 이유가 없다.
+따라서 uVar1 분리는 headless 아티팩트가 아니라 코어 디컴파일러 동작이다.
