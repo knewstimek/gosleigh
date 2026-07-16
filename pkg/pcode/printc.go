@@ -2800,17 +2800,13 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 			}
 			return "1"
 		case TYPE_INT:
+			// C++ parity: PrintC::push_integer with sign=true (printc.cc:1376-1408).
+			// Signedness only controls the leading '-'; the radix is still chosen by
+			// mostNaturalBase over the magnitude, never forced to decimal. Sizes 1/2/4
+			// and 8 share this path (no "LL" suffix: vn->isLongPrint() is unmodeled).
 			switch typed.Size() {
-			case 1, 2, 4:
-				return fmt.Sprintf("%d", int32(vn.Offset())) + unsignedSuffix
-			case 8:
-				// No "LL" size suffix by default. C++ PrintC::push_integer
-				// (printc.cc:1354) appends the sized token only when
-				// vn->isLongPrint() is set, which happens solely in
-				// CastStrategyC (cast.cc:103) for a shift operand that would
-				// otherwise be int-promoted. That narrow case is unmodeled, so
-				// an 8-byte integer constant prints as a plain decimal here.
-				return fmt.Sprintf("%d", int64(vn.Offset())) + unsignedSuffix
+			case 1, 2, 4, 8:
+				return formatIntegerLiteral(vn.Offset(), typed.Size(), true) + unsignedSuffix
 			}
 		case TYPE_FLOAT:
 			return renderFloatLiteral(vn.Offset(), uint32(typed.Size()))
@@ -2819,13 +2815,36 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 	// Untyped constant: choose decimal vs hex following Ghidra's heuristic.
 	// C++ parity: PrintC::push_integer (printc.cc:1395-1399) -- values <= 10
 	// print decimal; otherwise the radix is mostNaturalBase(val).
-	if vn.Offset() <= 10 {
-		return fmt.Sprintf("%d", vn.Offset()) + unsignedSuffix
+	return formatIntegerLiteral(vn.Offset(), vn.Size(), false) + unsignedSuffix
+}
+
+// formatIntegerLiteral renders a constant magnitude following the radix and
+// sign logic of PrintC::push_integer (printc.cc:1376-1408). When sign is set and
+// the value's high bit (per sz) is on, a leading '-' is emitted over the negated
+// magnitude. The radix is decimal for magnitudes <= 10, otherwise mostNaturalBase
+// decides hex vs decimal. Signedness never forces decimal on its own.
+func formatIntegerLiteral(val uint64, sz int32, sign bool) string {
+	negsign := false
+	if sign {
+		mask := bitfieldSizeMask(sz)
+		flip := val ^ mask
+		if flip < val {
+			negsign = true
+			val = flip + 1
+		}
 	}
-	if mostNaturalBase(vn.Offset()) == 16 {
-		return fmt.Sprintf("0x%x", vn.Offset()) + unsignedSuffix
+	var body string
+	if val <= 10 {
+		body = fmt.Sprintf("%d", val)
+	} else if mostNaturalBase(val) == 16 {
+		body = fmt.Sprintf("0x%x", val)
+	} else {
+		body = fmt.Sprintf("%d", val)
 	}
-	return fmt.Sprintf("%d", vn.Offset()) + unsignedSuffix
+	if negsign {
+		return "-" + body
+	}
+	return body
 }
 
 // inferSignedConstType returns a TYPE_INT base type for a constant varnode whose
