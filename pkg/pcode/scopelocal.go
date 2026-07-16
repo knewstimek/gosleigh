@@ -213,11 +213,18 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 			// C++ parity: a locked ProtoParameter produces a ParameterSymbol whose
 			// SymbolEntry is attached to the input Varnode (Funcdata::linkSymbol ->
 			// Varnode::setSymbolEntry).
-			if pname, nlock, ok := fp.LockedParamName(slot.vn.Offset()); ok {
+			if pname, nlock, isolate, ok := fp.LockedParamName(slot.vn.Offset()); ok {
 				sym := NewSymbol(pname, slot.vn.Type())
 				sym.SetCategory(SymbolFunctionParameter, slot.idx)
 				if nlock {
 					sym.SetFlags(VarnodeNameLock)
+				}
+				// A committed prototype serializes a parameter with merge="false"
+				// (isolate) so it is never speculatively merged with an accumulator;
+				// the merge Symbol/adjacency guard needs this to keep param_N distinct.
+				// C++ parity: Symbol::setIsolated set from ATTRIB_MERGE=false decode.
+				if isolate {
+					sym.SetIsolated(true)
 				}
 				entry := NewSymbolEntry(sym, 0, slot.vn.Addr(), slot.vn.Size(), 0)
 				sym.attachEntry(entry)

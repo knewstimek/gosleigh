@@ -4280,6 +4280,19 @@ func (s *printCState) renameReturnOnlyLocals() {
 		if vn.Space() != nil && vn.Space().IsUnique() {
 			continue
 		}
+		// A function-input Varnode that merely shares storage with the return
+		// carrier (e.g. a register parameter whose register is later reused as the
+		// carrier) is a DISTINCT HighVariable and keeps its own name. Renaming by
+		// location key alone would collapse it into the carrier's uVar name; the
+		// carrier's own instances are always written (case results / MULTIEQUAL
+		// outputs), never inputs, so skipping inputs never drops a real carrier
+		// member. Without this a param (param_1 in the op_switch corpus) sharing
+		// ECX with the accumulator would misrender as the carrier name.
+		// C++ parity: names are per-HighVariable; a param's HighVariable is not the
+		// carrier's, so ActionReturnSplit never renames it.
+		if vn.IsInput() {
+			continue
+		}
 		key := varnodeLocKey(vn)
 		if newName, ok := keyName[key]; ok {
 			s.names[vn] = newName

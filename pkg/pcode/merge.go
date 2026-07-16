@@ -350,6 +350,46 @@ func mergeTestAdjacent(hOut, hIn *HighVariable) bool {
 	if hOut.Type() != hIn.Type() {
 		return false
 	}
+	// Isolated-Symbol guard: a Symbol flagged isolate (merge="false" in the
+	// committed prototype) must never be speculatively merged. This is what keeps
+	// a namelocked/typelocked register parameter (e.g. param_2) distinct from a
+	// same-typed accumulator, yielding the distinct `uVar1` return carrier instead
+	// of reusing the parameter storage. Measured on the op_switch corpus: the
+	// savefile serializes param_1/2/3 with merge="false", and the C++ core rejects
+	// the accumulator<->param_2 adjacency here (mergeTestAdjacent=false), NOT via a
+	// Cover intersection.
+	// C++ parity: merge.cc:198-205 (high_in/high_out getSymbol()->isIsolated()).
+	if sym := hIn.GetSymbol(); sym != nil && sym.IsIsolated() {
+		return false
+	}
+	if sym := hOut.GetSymbol(); sym != nil && sym.IsIsolated() {
+		return false
+	}
+	return true
+}
+
+// mergeTestSpeculative performs the adjacency tests plus the extra restrictions
+// required for a purely speculative (Cover-driven) merge: nothing global,
+// input, or address-tied may be speculatively merged. Returns true when merging
+// is allowed. C++ parity: merge.cc Merge::mergeTestSpeculative (lines 220-234).
+func mergeTestSpeculative(hOut, hIn *HighVariable) bool {
+	if !mergeTestAdjacent(hOut, hIn) {
+		return false
+	}
+	// Don't merge anything speculatively with a global.
+	if hOut.IsPersist() || hIn.IsPersist() {
+		return false
+	}
+	// Don't merge anything speculatively with a function input. This is what
+	// keeps a register parameter (param_N) from being absorbed by a same-typed
+	// accumulator during the by-datatype speculative pass.
+	if hOut.IsInput() || hIn.IsInput() {
+		return false
+	}
+	// Don't merge anything speculatively with an address-tied variable.
+	if hOut.IsAddrTied() || hIn.IsAddrTied() {
+		return false
+	}
 	return true
 }
 
@@ -824,7 +864,13 @@ func (m *Merge) mergeByDatatype() {
 		for _, high := range group {
 			placed := false
 			for _, dst := range merged {
-				if !mergeTestRequired(dst, high) {
+				// C++ mergeByDatatype defers to mergeLinear, which gates each
+				// candidate on mergeTestSpeculative (not the weaker Required test):
+				// globals, inputs, and addr-tied variables are never speculatively
+				// merged. Using Required here would let a register parameter be
+				// absorbed by a same-typed accumulator.
+				// C++ parity: merge.cc Merge::mergeLinear (line 286).
+				if !mergeTestSpeculative(dst, high) {
 					continue
 				}
 				if m.testCache.Intersection(dst, high) {

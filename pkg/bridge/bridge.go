@@ -68,6 +68,11 @@ type InjectedProtoParam struct {
 	// TypeLock/NameLock mirror the Ghidra symbol locks.
 	TypeLock bool
 	NameLock bool
+	// Isolate mirrors the committed prototype's merge="false" attribute: when
+	// true the recovered parameter Symbol is flagged isolate so it is never
+	// speculatively merged with an accumulator (yielding a distinct return
+	// carrier instead of parameter reuse). C++ parity: Symbol isolate dispflag.
+	Isolate bool
 }
 
 // InjectedPrototype captures a fully-locked function prototype (model + return +
@@ -529,7 +534,7 @@ func applyInjectedPrototype(engine *sla.Engine, fd *pcode.Funcdata, spec *Inject
 				fp.SetLockedParamType(addr.Offset, p.Type)
 			}
 			if p.Name != "" {
-				fp.SetLockedParamName(addr.Offset, p.Name, p.NameLock)
+				fp.SetLockedParamName(addr.Offset, p.Name, p.NameLock, p.Isolate)
 			}
 		}
 	}
