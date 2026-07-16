@@ -100,6 +100,12 @@ type Varnode struct {
 	// multi-pass propagation can accumulate candidates before committing.
 	// Not part of the C++ Varnode struct; Go-local inference scratch field.
 	tempType Datatype
+
+	// symbolEntry is the SymbolEntry that maps this Varnode to a Symbol (or nil).
+	// The owning HighVariable reads it back through HighVariable::getSymbol to
+	// resolve the mapped Symbol for the merge guards.
+	// C++ parity: Varnode::mapentry
+	symbolEntry *SymbolEntry
 }
 
 // NewVarnode creates a Varnode. Initializes flags based on space type.
@@ -162,6 +168,34 @@ func (vn *Varnode) High() *HighVariable { return vn.high }
 // SetHigh sets the high-level variable link.
 // C++ parity: Varnode::setHigh
 func (vn *Varnode) SetHigh(hv *HighVariable) { vn.high = hv }
+
+// GetSymbolEntry returns the SymbolEntry mapping this Varnode to a Symbol, or nil.
+// C++ parity: Varnode::getSymbolEntry
+func (vn *Varnode) GetSymbolEntry() *SymbolEntry {
+	if vn == nil {
+		return nil
+	}
+	return vn.symbolEntry
+}
+
+// SetSymbolEntry attaches a Symbol mapping to this Varnode. The Varnode is
+// marked mapped (and namelocked when the Symbol is namelocked); the data-type
+// is not changed. The owning HighVariable resolves the Symbol lazily through
+// GetSymbol, so no eager high update is needed here.
+// C++ parity: Varnode::setSymbolEntry (varnode.cc:429)
+func (vn *Varnode) SetSymbolEntry(entry *SymbolEntry) {
+	if vn == nil {
+		return
+	}
+	vn.symbolEntry = entry
+	fl := VarnodeMapped
+	if entry != nil {
+		if sym := entry.Symbol(); sym != nil && sym.IsNameLocked() {
+			fl |= VarnodeNameLock
+		}
+	}
+	vn.SetFlags(fl)
+}
 
 // ---------------------------------------------------------------------------
 // Flag operations
