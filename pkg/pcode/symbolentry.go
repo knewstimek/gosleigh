@@ -134,6 +134,16 @@ func (s *Symbol) Category() int {
 	return s.category
 }
 
+// SetCategory assigns the symbol category and its position within that category.
+// C++ parity: Symbol::setCategory (Scope-driven category assignment).
+func (s *Symbol) SetCategory(cat int, index int) {
+	if s == nil {
+		return
+	}
+	s.category = cat
+	s.catIndex = index
+}
+
 // CategoryIndex returns the position within the category (function_parameter).
 // C++ parity: Symbol::getCategoryIndex
 func (s *Symbol) CategoryIndex() int {

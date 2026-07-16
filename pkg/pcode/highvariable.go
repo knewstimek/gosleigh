@@ -30,6 +30,76 @@ type HighVariable struct {
 	cover *Cover
 }
 
+// GetSymbol returns the Symbol this high variable maps to, or nil. It walks the
+// member Varnodes and returns the Symbol of the first one carrying a
+// SymbolEntry -- mirroring HighVariable::updateSymbol, which stops at the first
+// instance with a mapentry. The resolution is recomputed on each call rather
+// than cached with a dirty flag; the result is identical because it depends
+// only on the current instance/entry population.
+// C++ parity: HighVariable::getSymbol / updateSymbol (variable.cc:418)
+func (hv *HighVariable) GetSymbol() *Symbol {
+	if hv == nil {
+		return nil
+	}
+	for _, vn := range hv.instances {
+		if vn == nil {
+			continue
+		}
+		if e := vn.GetSymbolEntry(); e != nil {
+			return e.Symbol()
+		}
+	}
+	return nil
+}
+
+// GetSymbolOffset returns the byte offset into the mapped Symbol that this high
+// variable represents, or -1 when it maps the whole Symbol (or no Symbol). The
+// offset is derived from the same instance GetSymbol selects.
+// C++ parity: HighVariable::getSymbolOffset (with setSymbol offset rules)
+func (hv *HighVariable) GetSymbolOffset() int32 {
+	if hv == nil {
+		return -1
+	}
+	for _, vn := range hv.instances {
+		if vn == nil {
+			continue
+		}
+		if e := vn.GetSymbolEntry(); e != nil {
+			return symbolOffsetFor(vn, e)
+		}
+	}
+	return -1
+}
+
+// symbolOffsetFor computes the symbol offset a member Varnode contributes for a
+// given SymbolEntry, following HighVariable::setSymbol. VariablePiece groups are
+// not modeled, so the proto-partial branch is omitted; the remaining branches
+// (dynamic, equate, whole-storage match, and the byte-distance fallback) are
+// ported verbatim.
+// C++ parity: HighVariable::setSymbol (variable.cc:245)
+func symbolOffsetFor(vn *Varnode, entry *SymbolEntry) int32 {
+	sym := entry.Symbol()
+	switch {
+	case entry.IsDynamic():
+		return -1
+	case sym != nil && sym.Category() == SymbolEquate:
+		return -1
+	case sym != nil && sym.Type() != nil &&
+		sym.Type().Size() == vn.Size() && entry.Addr() == vn.Addr():
+		// A matching whole-storage entry.
+		return -1
+	default:
+		// Byte distance of the Varnode within the Symbol storage plus the entry
+		// offset. C++ uses Address::overlapJoin; for non-join spaces this reduces
+		// to the plain byte distance, which is the only case Gosleigh produces.
+		var dist int32
+		if sym != nil && entry.Addr().Space == vn.Addr().Space {
+			dist = int32(vn.Addr().Offset - entry.Addr().Offset)
+		}
+		return dist + entry.Offset()
+	}
+}
+
 // NewHighVariable creates a HighVariable with the given name and zero instances.
 // C++ parity: HighVariable::HighVariable
 func NewHighVariable(name string) *HighVariable {
