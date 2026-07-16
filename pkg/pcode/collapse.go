@@ -43,6 +43,7 @@ func (e *FloatingEdge) GetCurrentEdge(graph *FlowBlock) (*FlowBlock, int) {
 type blockStructInfo struct {
 	children       []*FlowBlock
 	gotoEdge       int
+	gotoTarget     *FlowBlock
 	overflowSyntax bool
 }
 
@@ -82,6 +83,17 @@ func (b *FlowBlock) GotoEdgeIndex() int {
 
 func (b *FlowBlock) setGotoEdgeIndex(idx int) {
 	getBlockStructInfo(b).gotoEdge = idx
+}
+
+// GotoTargetBlock returns the stored goto target for a BlockGoto/BlockIf-goto
+// whose goto edge was removed from the structure graph, or nil.
+// C++ parity: BlockGoto::getGotoTarget / BlockIf::getGotoTarget.
+func (b *FlowBlock) GotoTargetBlock() *FlowBlock {
+	return getBlockStructInfo(b).gotoTarget
+}
+
+func (b *FlowBlock) setGotoTargetBlock(tgt *FlowBlock) {
+	getBlockStructInfo(b).gotoTarget = tgt
 }
 
 func (b *FlowBlock) HasOverflowSyntax() bool {
@@ -411,6 +423,15 @@ func (bg *BlockGraph) collapseRegion(nodes []*FlowBlock, tp BlockType) *FlowBloc
 				if _, ok := region[entry]; !ok || node == entry {
 					continue
 				}
+				// A goto-marked edge back to the entry is an unstructured interior
+				// jump, not a structural loop back-edge. C++ selfIdentify keeps such
+				// an edge internal to the collapsed sub-structure; it must NOT become
+				// a self-loop out-edge on the new block. Otherwise the self-loop
+				// detector (LoopBody.Update) re-selects the already-goto'd self-edge
+				// forever, since ruleBlockGoto cannot collapse a >2-out block.
+				if node.OutEdge(i).Label&EdgeFlagGoto != 0 {
+					continue
+				}
 				label := collapseEdgeLabel(node.OutEdge(i).Label)
 				if _, ok := selfSeen[label]; ok {
 					continue
@@ -507,19 +528,40 @@ func (bg *BlockGraph) newBlockIfElse(cond, trueClause, falseClause *FlowBlock) *
 	return bg.collapseRegion([]*FlowBlock{cond, trueClause, falseClause}, BlockIfType)
 }
 
+// newBlockGoto collapses bl into an unconditional BlockGoto. The goto edge is
+// stored as the block's goto target and then removed from the structure graph,
+// leaving the BlockGoto with no outgoing edges. Keeping the edge would inflate
+// SizeOut and prevent later ruleBlockCat/ruleBlockProperIf collapses.
+// C++ parity: BlockGraph::newBlockGoto (block.cc:1702) -- forceOutputNum(1)
+// followed by removeEdge(ret, ret->getOut(0)).
 func (bg *BlockGraph) newBlockGoto(bl *FlowBlock) *FlowBlock {
+	target := bl.getOut(0)
 	res := bg.collapseRegion([]*FlowBlock{bl}, BlockGotoType)
+	res.setGotoTargetBlock(target)
 	res.setGotoEdgeIndex(0)
+	if idx := res.GetOutIndex(target); idx >= 0 {
+		res.RemoveOutEdge(idx)
+	} else if res.SizeOut() > 0 {
+		res.RemoveOutEdge(0)
+	}
 	return res
 }
 
+// newBlockIfGoto collapses a 2-out conditional bl (goto on the true/out1 edge)
+// into a BlockIf whose true branch is stored as the goto target and removed from
+// the graph, leaving a single false/fall-through out edge. This lets the if-goto
+// participate in later ruleBlockCat/ruleBlockProperIf collapses.
+// C++ parity: BlockGraph::newBlockIfGoto (block.cc:1799) -- BlockIf with
+// setGotoTarget(getOut(1)), forceFalseEdge(getOut(0)), removeEdge(getTrueOut()).
 func (bg *BlockGraph) newBlockIfGoto(bl *FlowBlock) *FlowBlock {
-	res := bg.collapseRegion([]*FlowBlock{bl}, BlockGotoType)
-	for i := 0; i < bl.SizeOut(); i++ {
-		if bl.isGotoOut(i) {
-			res.setGotoEdgeIndex(i)
-			break
-		}
+	out0 := bl.getOut(0)   // false / fall-through, preserved by forceFalseEdge
+	target := bl.getOut(1) // true branch is the goto target
+	res := bg.collapseRegion([]*FlowBlock{bl}, BlockIfType)
+	res.setGotoTargetBlock(target)
+	res.setGotoEdgeIndex(1)
+	res.ForceFalseEdge(out0)
+	if idx := res.GetOutIndex(target); idx >= 0 {
+		res.RemoveOutEdge(idx)
 	}
 	return res
 }
