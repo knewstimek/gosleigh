@@ -99,6 +99,40 @@ func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 		if op.Code() != CPUI_CALL && op.Code() != CPUI_CALLIND {
 			continue
 		}
+		// Skip guarding a range the call already assigns as its output: once
+		// return-value recovery (ActionActiveReturn) has moved the return register
+		// to be the CALL op's output, re-heritage must not re-guard that same range
+		// with an INDIRECT -- doing so shadows the call output and drops the
+		// RETURN's reference to it. C++ parity: heritage.cc Heritage::guardCalls
+		// (the isAssignment guard, lines 1453-1456).
+		if out := op.Output(); out != nil && out.Addr().Space == sp &&
+			out.Addr().Offset == offset && out.Size() == size {
+			continue
+		}
+		// Register an output (return-value) trial when the call is recovering its
+		// output and this range fits its return storage. This runs independently of
+		// the INDIRECT dedup below (guarded by whichTrial) so the trial is picked up
+		// even on a re-heritage pass after the INDIRECT-creation already exists --
+		// ActionActiveReturn matches trials to those INDIRECT ops by cause-op, not
+		// by insertion order. C++ parity: heritage.cc Heritage::guardCalls
+		// (isOutputActive block, lines 1469-1485; contained_by overlap guard unported).
+		if fc := h.fd.callSpecsForOp(op); fc != nil && fc.IsOutputActive() {
+			active := fc.GetActiveOutput()
+			addr := address.Address{Space: sp, Offset: offset}
+			switch fc.CharacterizeAsOutput(addr, size) {
+			case retOutNoContainment:
+				// No overlap with the return register; not an output candidate.
+			case retOutContainedBy:
+				// TODO known mismatch: tryOutputOverlapGuard (range larger than the
+				// output register) is not ported; the exact-size register-output
+				// path below covers the current call-return-carrier corpus.
+			default: // retOutOther: range fits the return storage
+				if active != nil && active.WhichTrial(addr, size) < 0 {
+					active.RegisterTrial(addr, size)
+				}
+			}
+		}
+
 		key := callGuardKey{callOp: op, offset: offset, size: size}
 		if h.guarded[key] {
 			continue

@@ -890,6 +890,12 @@ func (s *printCState) shouldInline(op *PcodeOp) bool {
 	switch op.Code() {
 	case CPUI_BRANCH, CPUI_CBRANCH, CPUI_BRANCHIND, CPUI_STORE, CPUI_RETURN, CPUI_MULTIEQUAL, CPUI_INDIRECT:
 		return false
+	case CPUI_CALL, CPUI_CALLIND, CPUI_CALLOTHER, CPUI_NEW:
+		// A call output is always explicit (ActionMarkExplicit::baseExplicit returns
+		// -1 for def->isCall(), coreaction.cc:3017), so its result is materialized as
+		// a named statement (uVar1 = call(...); ... return uVar1;) rather than inlined
+		// into the single consumer. C++ parity: baseExplicit isCall branch.
+		return false
 	default:
 		return true
 	}
@@ -2484,6 +2490,11 @@ func (s *printCState) renderReturnValue(vn *Varnode) (string, error) {
 		case CPUI_BRANCH, CPUI_CBRANCH, CPUI_BRANCHIND, CPUI_STORE, CPUI_RETURN,
 			CPUI_MULTIEQUAL, CPUI_INDIRECT:
 			// Cannot inline control/marker ops.
+		case CPUI_CALL, CPUI_CALLIND, CPUI_CALLOTHER, CPUI_NEW:
+			// A call result is always explicit (ActionMarkExplicit::baseExplicit
+			// isCall -> -1) and is materialized as its own statement
+			// (uVar1 = call(...);), so the RETURN names it (return uVar1;) rather
+			// than re-expanding the call expression. C++ parity: baseExplicit.
 		default:
 			frag, err := s.renderOpExprFrag(defOp)
 			if err != nil {

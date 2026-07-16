@@ -945,14 +945,15 @@ func (a *ActionDefaultParams) Apply(data *Funcdata) int {
 	if data == nil {
 		return 0
 	}
-	evalfp := data.GetFuncProto()
-	var defaultModel *ProtoModel
-	if evalfp != nil {
-		defaultModel = evalfp.Model()
-	}
-	if defaultModel == nil && evalfp != nil {
-		defaultModel = evalfp.Model()
-	}
+	// C++ uses data.getArch()->evalfp_called (special "evaluate called funcs"
+	// model), falling back to data.getArch()->defaultfp. Gosleigh has no separate
+	// evalfp_called, so the architecture default model (Funcdata.DefaultModel) is
+	// the faithful source. Using data.GetFuncProto().Model() here is wrong: the
+	// current function's own proto model may still be nil when this action fires
+	// (e.g. for a call site created by a late BRANCHIND->CALLIND demotion), which
+	// would leave the call site model-less and break return-value recovery.
+	// C++ parity: coreaction.cc ActionDefaultParams::apply (evalfp selection).
+	defaultModel := data.DefaultModel()
 
 	for i := 0; i < data.NumCalls(); i++ {
 		fc := data.GetCallSpecs(i)
@@ -1181,18 +1182,34 @@ func (a *ActionActiveReturn) Clone(groups ActionGroupList) Action {
 	return NewActionActiveReturn(a.GetGroup())
 }
 
-// Apply determines the active return value from the current SSA graph.
+// Apply recovers each CALL site's return value from its active-output trials.
+// For a call whose output recovery is active, the INDIRECT-creation varnodes
+// seeded by Heritage::guardCalls at the clobbered return register are collected
+// (checkOutputTrialUse), the model picks which one is the formal output
+// (deriveOutputMap), and that varnode is moved to be the CALL op's output
+// (buildOutputFromTrials). Analysis is then turned off for the call.
 //
-// Unimplemented (no-op stub): the faithful C++ ActionActiveReturn::apply recovers
-// CALL-site output trials (checkOutputTrialUse/deriveOutputMap/buildOutputFromTrials)
-// for the call-output ParamActive objects. The current function's own return value
-// is instead recovered by ApplyGuardReturnsLive (Heritage::guardReturns + dominance
-// rename) wired in the decompile driver, so the former Go-local return-anchoring
-// helper (ApplyActiveReturnModel + anchorReturnReg) was removed in H7 step3.
-// This action is present in actfullloop for universalAction structure parity but
-// its call-output body is not yet ported.
-// C++ parity: coreaction.cc ActionActiveReturn::apply (call-output recovery -- unported).
+// The current function's own return value is recovered separately by
+// ActionReturnRecovery / ApplyGuardReturnsLive; this action handles only the
+// sub-call outputs.
+// C++ parity: coreaction.cc ActionActiveReturn::apply.
 func (a *ActionActiveReturn) Apply(data *Funcdata) int {
+	if data == nil {
+		return 0
+	}
+
+	for i := 0; i < data.NumCalls(); i++ {
+		fc := data.GetCallSpecs(i)
+		if fc == nil || !fc.IsOutputActive() {
+			continue
+		}
+		trialvn := fc.checkOutputTrialUse(data)
+		fc.deriveOutputMap()
+		fc.buildOutputFromTrials(data, trialvn)
+		fc.ClearActiveOutput()
+		a.count++
+	}
+
 	return 0
 }
 
