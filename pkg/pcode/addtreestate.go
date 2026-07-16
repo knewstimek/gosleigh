@@ -66,6 +66,37 @@ func (vn *Varnode) UpdateType(dt Datatype) {
 	SetVarnodeType(vn, dt)
 }
 
+// UpdateTypeLock changes the Varnode's data-type and lock state under the same
+// guard conditions as C++ Varnode::updateType(ct,lock,override):
+//   - an UNKNOWN data-type is never locked
+//   - a previously locked type is not changed unless override is set
+//   - identical (type,lock) is a no-op
+// Returns true if the type or lock setting changed.
+// C++ parity: varnode.cc Varnode::updateType (L474-489).
+func (vn *Varnode) UpdateTypeLock(ct Datatype, lock, override bool) bool {
+	if vn == nil || ct == nil {
+		return false
+	}
+	if ct.Metatype() == TYPE_UNKNOWN { // Unknown data type is ALWAYS unlocked
+		lock = false
+	}
+	if vn.IsTypeLock() && !override {
+		return false // Type is locked
+	}
+	if vn.Type() == ct && vn.IsTypeLock() == lock {
+		return false // No change
+	}
+	vn.ClearFlags(VarnodeTypeLock)
+	if lock {
+		vn.SetFlags(VarnodeTypeLock)
+	}
+	SetVarnodeType(vn, ct)
+	if hv := vn.High(); hv != nil {
+		hv.SetType(ct) // C++ high->typeDirty()
+	}
+	return true
+}
+
 func BindSpaceConstant(vn *Varnode, spc *address.Space) {
 	if vn == nil {
 		return

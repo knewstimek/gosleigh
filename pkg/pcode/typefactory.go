@@ -88,6 +88,18 @@ func (f *TypeFactory) GetPointer(size int32, to Datatype, wordSize uint32) *Poin
 	return f.internPointer(key, value)
 }
 
+// GetPointerStripArray creates a pointer to pt, stripping an outer array so the
+// result points at the array element data-type. Used when a spacebase constant
+// is retyped onto the pointed-to symbol's data-type.
+// C++ parity: type.cc TypeFactory::getTypePointerStripArray (L4270-4281). The
+// getStripped() typedef step is not modelled (Gosleigh has no typedef layer).
+func (f *TypeFactory) GetPointerStripArray(size int32, pt Datatype, wordSize uint32) *Pointer {
+	if arr, ok := pt.(*Array); ok && arr.Element() != nil {
+		pt = arr.Element() // Strip the first ARRAY type
+	}
+	return f.GetPointer(size, pt, wordSize)
+}
+
 func (f *TypeFactory) GetArray(count int32, elem Datatype) *Array {
 	canonicalElem := f.Intern(elem)
 	value := NewArray(count, canonicalElem)
