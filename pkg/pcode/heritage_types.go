@@ -94,24 +94,29 @@ func (lm *LocationMap) Add(addr address.Address, size int32, pass int32) (int, i
 
 	idx := lm.findIdx(addr)
 
-	// Check if previous entry overlaps or is adjacent
+	// Check if previous entry overlaps (strictly, not merely adjacent).
+	// C++ parity: heritage.cc LocationMap::add uses addr.overlap(0, elem, size),
+	// which is -1 when addr.offset == elem.offset + elem.size (adjacent), so
+	// adjacent ranges stay disjoint. Matches Address::overlap (dist < size).
 	startIdx := idx
 	if idx > 0 {
 		prev := &lm.entries[idx-1]
 		if prev.Addr.Space == addr.Space {
 			prevEnd := prev.Addr.Offset + uint64(prev.SP.Size)
-			if prevEnd >= addr.Offset {
-				// Previous entry overlaps or is adjacent
+			if prevEnd > addr.Offset {
+				// Previous entry overlaps (not merely adjacent)
 				startIdx = idx - 1
 			}
 		}
 	}
 
-	// Find all overlapping entries from startIdx forward
+	// Find all overlapping entries from startIdx forward. A forward entry
+	// overlaps [addr, endOff) only when its start is strictly before endOff;
+	// e.Addr.Offset == endOff is adjacent and does not merge.
 	endIdx := startIdx
 	for endIdx < len(lm.entries) {
 		e := &lm.entries[endIdx]
-		if e.Addr.Space != addr.Space || e.Addr.Offset > endOff {
+		if e.Addr.Space != addr.Space || e.Addr.Offset >= endOff {
 			break
 		}
 		endIdx++
@@ -210,20 +215,24 @@ type TaskList struct {
 	tasks []MemRange
 }
 
-// Add appends a range to the task list. If the last entry overlaps with or is
-// adjacent to the new range in the same space, it is extended and flags are ORed.
+// Add appends a range to the task list. If the last entry overlaps the new
+// range in the same space, it is extended and flags are ORed.
 // C++ parity: heritage.cc TaskList::add (lines 108-123) uses
-// addr.overlap(0, entry.addr, entry.size) >= 0 which is true for overlap AND
-// for the adjacent case (addr == entry.addr + entry.size, overlap=0).
-// Note: the MULTIEQUAL output size is determined by the actual varnode size at
-// the task's start address (via placeMultiequals), NOT the merged task size.
+// addr.overlap(0, entry.addr, entry.size) >= 0. Address::overlap returns the
+// distance dist = addr.offset - entry.addr.offset only when dist < entry.size,
+// and -1 otherwise. For the exactly-adjacent case (addr == entry.addr +
+// entry.size) dist == entry.size, so overlap returns -1: adjacent ranges are
+// NOT merged. Merging adjacent register ranges (e.g. RAX 0x0[8] with RCX 0x8[8])
+// would create an oversized task whose call-site INDIRECT guard (guardCalls,
+// which uses the raw task size before refinement) spans both registers and
+// swallows the second register as a SUBPIECE of the first.
 func (tl *TaskList) Add(addr address.Address, size int32, flags uint32) {
 	if len(tl.tasks) > 0 {
 		last := &tl.tasks[len(tl.tasks)-1]
 		if last.Addr.Space == addr.Space {
 			lastEnd := last.Addr.Offset + uint64(last.Size)
-			if lastEnd >= addr.Offset {
-				// Overlapping or adjacent -- extend
+			if lastEnd > addr.Offset {
+				// Overlapping (not merely adjacent) -- extend
 				newEnd := addr.Offset + uint64(size)
 				if newEnd > lastEnd {
 					last.Size = int32(newEnd - last.Addr.Offset)

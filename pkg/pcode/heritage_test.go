@@ -98,11 +98,13 @@ func TestTaskList_AddDisjoint(t *testing.T) {
 	}
 }
 
-// TestTaskList_AddAdjacent verifies that adjacent ranges ARE merged.
-// C++ parity: TaskList::add uses addr.overlap(0,entry.addr,entry.size) >= 0,
-// which is true (returns 0) when addr == entry.addr+entry.size (adjacent).
-// The MULTIEQUAL output size is corrected by placeMultiequals using the actual
-// varnode size at the task's start address, not the merged task size.
+// TestTaskList_AddAdjacent verifies that exactly-adjacent ranges are NOT merged.
+// C++ parity: TaskList::add uses addr.overlap(0,entry.addr,entry.size) >= 0.
+// Address::overlap returns dist = addr.offset - entry.offset only when
+// dist < entry.size and -1 otherwise; for the adjacent case
+// (addr == entry.addr + entry.size) dist == entry.size, so overlap returns -1
+// and the ranges stay disjoint. Merging them would produce an oversized task
+// whose guardCalls INDIRECT spans both registers (e.g. RAX+RCX -> 0x0[16]).
 func TestTaskList_AddAdjacent(t *testing.T) {
 	var tl TaskList
 	spc := &address.Space{Name: "ram", Index: 1, AddrSize: 4, WordSize: 1}
@@ -110,13 +112,29 @@ func TestTaskList_AddAdjacent(t *testing.T) {
 	tl.Add(address.Address{Space: spc, Offset: 0x100}, 4, MemRangeNewAddresses)
 	tl.Add(address.Address{Space: spc, Offset: 0x104}, 4, MemRangeOldAddresses)
 
-	// Adjacent ranges are merged -- C++ overlap(0, entry.addr, entry.size) == 0 >= 0.
+	// Adjacent ranges stay disjoint -- C++ overlap(0, entry.addr, entry.size) == -1.
+	if tl.Len() != 2 {
+		t.Fatalf("Adjacent add: want 2 (disjoint), got %d", tl.Len())
+	}
+	if tl.Get(0).Size != 4 || tl.Get(1).Size != 4 {
+		t.Fatalf("Disjoint sizes: want 4 and 4, got %d and %d", tl.Get(0).Size, tl.Get(1).Size)
+	}
+}
+
+// TestTaskList_AddTrueOverlap verifies that genuinely overlapping ranges merge.
+func TestTaskList_AddTrueOverlap(t *testing.T) {
+	var tl TaskList
+	spc := &address.Space{Name: "ram", Index: 1, AddrSize: 4, WordSize: 1}
+
+	tl.Add(address.Address{Space: spc, Offset: 0x100}, 4, MemRangeNewAddresses)
+	tl.Add(address.Address{Space: spc, Offset: 0x102}, 4, MemRangeOldAddresses)
+
 	if tl.Len() != 1 {
-		t.Fatalf("Adjacent add: want 1 (merged), got %d", tl.Len())
+		t.Fatalf("Overlap add: want 1 (merged), got %d", tl.Len())
 	}
 	task := tl.Get(0)
-	if task.Size != 8 {
-		t.Fatalf("Merged size: want 8, got %d", task.Size)
+	if task.Size != 6 {
+		t.Fatalf("Merged size: want 6, got %d", task.Size)
 	}
 	if task.Flags != (MemRangeNewAddresses | MemRangeOldAddresses) {
 		t.Fatalf("Merged flags: want 0x3, got 0x%x", task.Flags)
