@@ -67,28 +67,33 @@ type RuleCollapseConstants struct{ batchRule }
 
 func NewRuleCollapseConstants(group string) *RuleCollapseConstants {
 	r := &RuleCollapseConstants{}
-	// RuleCollapseConstants::applyOp -- ruleaction.cc:3874. Faithful subset: folds
-	// a binary op whose inputs are both constant into a COPY of the resulting
-	// constant. Scoped to INT_ADD/INT_MULT (the ops the stack-base offset
-	// accumulation needs -- notably INT_MULT(N,-1) -> -N produced by RuleSub2Add).
-	// known mismatch: the full op::collapse over all collapsible opcodes,
-	// architecture constant-space folding, and constant-symbol propagation are
-	// not ported.
-	r.batchRule = newBatchRule(group, "collapseconstants", []OpCode{CPUI_INT_ADD, CPUI_INT_MULT}, r.apply, func(g string) Rule { return NewRuleCollapseConstants(g) })
+	// RuleCollapseConstants::applyOp -- ruleaction.cc:3874. In C++ this rule
+	// "applies to all opcodes" (ruleaction.hh) and is gated at runtime by
+	// PcodeOp::isCollapsible (all inputs constant, assignment, out size <= 8).
+	// Go dispatches rules by opcode, so we register the full set evalConstOp can
+	// evaluate -- the Go stand-in for op->collapse -> behave->evaluate. Running
+	// in the fixpoint pool (not just the once-per-func ActionConstantFold pass)
+	// is what folds constants materialized late, e.g. the SUB(const,0) and shift
+	// masks in switch/jump-table case bodies.
+	r.batchRule = newBatchRule(group, "collapseconstants", constFoldableOpcodes, r.apply, func(g string) Rule { return NewRuleCollapseConstants(g) })
 	return r
 }
 
-// RuleCollapseConstants::applyOp -- ruleaction.cc:3874 (gated subset).
+// RuleCollapseConstants::applyOp -- ruleaction.cc:3874.
+// evalConstOp performs the op->collapse role: it succeeds only when every input
+// resolves to a constant. The result is masked to the output size, mirroring
+// data.getArch()->getConstant on the collapsed value.
 func (r *RuleCollapseConstants) apply(op *PcodeOp, data *Funcdata) int {
-	if op.Output() == nil || op.NumInput() != 2 {
+	out := op.Output()
+	if out == nil {
 		return 0
 	}
-	a, okA := constantValue(op.Input(0))
-	b, okB := constantValue(op.Input(1))
-	if !okA || !okB {
+	res, ok := evalConstOp(op)
+	if !ok {
 		return 0
 	}
-	return rewriteToConst(data, op, evaluateBinaryConst(op.Code(), a, b, op.Output().Size()))
+	newConst := data.NewConstant(out.Size(), truncateToSize(res, out.Size()))
+	return rewriteToCopy(data, op, newConst)
 }
 
 type RuleCarryElim struct{ batchRule }
