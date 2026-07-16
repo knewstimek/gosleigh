@@ -150,7 +150,10 @@ func newPrintCState(printer *PrintC, fd *Funcdata) *printCState {
 	if printer.ghidraFormat {
 		indentStep = "" // no indentation in Ghidra format
 	}
-	emitter := NewTextEmitterWithIndent(indentStep)
+	// EmitPrettyPrint (Oppen) wrapper: inserts Ghidra-faithful line breaks at
+	// maxlinesize=100. Non-wrapping output stays byte-identical to the previous
+	// TextEmitter path (its sink). C++ parity: EmitPrettyPrint (prettyprint.cc).
+	emitter := NewPrettyEmitter(indentStep, ppMaxLineSizeDefault)
 	decls := NewCDeclRenderer()
 	if printer.ghidraFormat {
 		decls.noCommaSpace = true
