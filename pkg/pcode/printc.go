@@ -133,6 +133,16 @@ type printCState struct {
 	// ghidraFormat mirrors PrintC.ghidraFormat for use during emit.
 	// Controls function brace placement, else newline style, and comma spacing.
 	ghidraFormat bool
+
+	// commentPos maps a basic block index to the warning comments PrintC must
+	// emit within that block, ordered by the intra-block position they precede.
+	// commentCursor tracks how far each block's list has been emitted so a block
+	// visited across multiple emit calls resumes correctly. Both are empty unless
+	// the decompiler recorded warnings, keeping non-warning output byte-identical.
+	// C++ parity: PrintC::commsorter (CommentSorter) driven by emitBlockBasic ->
+	// emitCommentGroup (printc.cc:2816/2844).
+	commentPos    map[int32][]positionedComment
+	commentCursor map[int32]int
 }
 
 func newPrintCState(printer *PrintC, fd *Funcdata) *printCState {
@@ -175,6 +185,12 @@ func (s *printCState) emit() (string, error) {
 	if s.graph == nil || s.graph.GetSize() == 0 {
 		s.graph = s.fd.GetBasicBlocks()
 	}
+	// Position any auto-generated warning comments into their basic blocks so the
+	// statement loop can emit them before the mapped statement. No-op (nil map)
+	// when the decompiler recorded no warnings.
+	// C++ parity: PrintC::docFunction -> commsorter.setupFunctionList (printc.cc:2782).
+	s.commentPos = buildCommentPositions(s.fd)
+	s.commentCursor = make(map[int32]int)
 	s.collectSymbols()
 	retType := s.inferReturnType()
 	s.collectTypeDefs(retType)
@@ -2131,7 +2147,27 @@ func (s *printCState) emitBasicBlock(bl *FlowBlock) error {
 }
 
 func (s *printCState) emitOps(bb *BlockBasic, suppressControl bool) error {
-	for _, op := range bb.Ops() {
+	// emitCommentGroup emits, in order, the warning comments positioned in this
+	// block whose target order is <= limit (all remaining when all==true), and
+	// advances the block cursor. Called just before each printed statement (with
+	// the statement op's order) and once at block end, mirroring PrintC's
+	// emitBlockBasic loop (printc.cc:2844) and the trailing emitCommentGroup(0)
+	// (printc.cc:2874).
+	blkIdx := bb.Index()
+	emitCommentGroup := func(limit int, all bool) {
+		cs := s.commentPos[blkIdx]
+		cur := s.commentCursor[blkIdx]
+		for cur < len(cs) {
+			if !all && cs[cur].order > limit {
+				break
+			}
+			text := cs[cur].text
+			s.lang.Line(func() { s.lang.Token(text) })
+			cur++
+		}
+		s.commentCursor[blkIdx] = cur
+	}
+	for opIndex, op := range bb.Ops() {
 		if op == nil || op.IsDead() || s.inline[op] {
 			continue
 		}
@@ -2229,10 +2265,16 @@ func (s *printCState) emitOps(bb *BlockBasic, suppressControl bool) error {
 		if suppressControl && isControlOpcode(op.Code()) {
 			continue
 		}
+		// Emit any warning comments mapped at or before this statement's position,
+		// then the statement. C++ parity: emitCommentGroup(inst) before emitStatement.
+		emitCommentGroup(opIndex, false)
 		if err := s.emitStatement(op); err != nil {
 			return err
 		}
 	}
+	// Emit any remaining comments for this block. C++ parity: emitBlockBasic's
+	// trailing emitCommentGroup((PcodeOp *)0) (printc.cc:2874).
+	emitCommentGroup(0, true)
 	return nil
 }
 
