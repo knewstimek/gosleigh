@@ -315,11 +315,31 @@ func (t *typeOpPtradd) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 // base output-local type. TODO: port downChain for struct-field PTRSUB output casts.
 // C++ parity: TypeOpPtrsub::getOutputToken (typeop.cc 2351-2366).
 
-// SUBPIECE output token in C++ uses findTruncation for composite fields, else the
-// output's own type (or int when unknown). It is registered as a plain typeOpBase
-// in Gosleigh, so it currently uses the base UNKNOWN token. TODO: give SUBPIECE a
-// dedicated TypeOp with the (int)-truncation token once findTruncation lands; until
-// then the render-time isSubpieceCast path produces the (int) cast.
+// SUBPIECE output token: SUBPIECE prints as a cast to whatever its output type is,
+// so the token is the output Varnode's own def-facing type; when that is unknown a
+// C compiler treats the truncation as a cast to int. Returning the base UNKNOWN
+// token instead (the old typeOpBase behavior) made castOutput see tokenct !=
+// outHighType and, for an implied atomic output, wipe an already-inferred output
+// type (e.g. a shift-count byte) back to undefined -- rendering `(undefined1)x`
+// where Ghidra renders `(byte)x`. C++ parity: TypeOpSubpiece::getOutputToken
+// (typeop.cc 2144-2162).
+//
+// Known simplification: the C++ composite branch (getIn(0) findTruncation to pull a
+// struct/union field type when the input is a composite) is not ported -- Gosleigh
+// has no TypeField truncation model yet, consistent with the other downChain/
+// findTruncation gaps in this file. For atomic inputs findTruncation returns null,
+// so this branch never applied to them. TODO: port findTruncation for composites.
+func (t *typeOpSubpiece) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	if op == nil || op.Output() == nil {
+		return t.OutputTypeLocal(op, cs.tlst)
+	}
+	outvn := op.Output()
+	dt := outvn.TypeDefFacing()
+	if dt != nil && dt.Metatype() != TYPE_UNKNOWN {
+		return dt // SUBPIECE prints as cast to whatever its output is
+	}
+	return cs.tlst.GetBase(outvn.Size(), TYPE_INT, "int") // unknown output -> cast to int
+}
 
 // ---------------------------------------------------------------------------
 // Per-opcode getInputCast overrides.
