@@ -44,6 +44,7 @@ type blockStructInfo struct {
 	children       []*FlowBlock
 	gotoEdge       int
 	gotoTarget     *FlowBlock
+	gotoType       uint32
 	overflowSyntax bool
 }
 
@@ -94,6 +95,18 @@ func (b *FlowBlock) GotoTargetBlock() *FlowBlock {
 
 func (b *FlowBlock) setGotoTargetBlock(tgt *FlowBlock) {
 	getBlockStructInfo(b).gotoTarget = tgt
+}
+
+// GotoType returns the unstructured-branch flavor of a BlockGoto/BlockIf-goto:
+// one of BlockFlagGotoGoto (plain goto), BlockFlagBreakGoto (break;) or
+// BlockFlagContinueGoto (continue;). Assigned by scopeBreak.
+// C++ parity: BlockGoto::getGotoType / BlockIf::getGotoType.
+func (b *FlowBlock) GotoType() uint32 {
+	return getBlockStructInfo(b).gotoType
+}
+
+func (b *FlowBlock) setGotoType(t uint32) {
+	getBlockStructInfo(b).gotoType = t
 }
 
 func (b *FlowBlock) HasOverflowSyntax() bool {
@@ -538,6 +551,7 @@ func (bg *BlockGraph) newBlockGoto(bl *FlowBlock) *FlowBlock {
 	target := bl.getOut(0)
 	res := bg.collapseRegion([]*FlowBlock{bl}, BlockGotoType)
 	res.setGotoTargetBlock(target)
+	res.setGotoType(BlockFlagGotoGoto)
 	res.setGotoEdgeIndex(0)
 	if idx := res.GetOutIndex(target); idx >= 0 {
 		res.RemoveOutEdge(idx)
@@ -558,6 +572,7 @@ func (bg *BlockGraph) newBlockIfGoto(bl *FlowBlock) *FlowBlock {
 	target := bl.getOut(1) // true branch is the goto target
 	res := bg.collapseRegion([]*FlowBlock{bl}, BlockIfType)
 	res.setGotoTargetBlock(target)
+	res.setGotoType(BlockFlagGotoGoto)
 	res.setGotoEdgeIndex(1)
 	res.ForceFalseEdge(out0)
 	if idx := res.GetOutIndex(target); idx >= 0 {
@@ -598,7 +613,108 @@ func (bg *BlockGraph) newBlockSwitch(cases []*FlowBlock, hasExit bool) *FlowBloc
 
 func (bg *BlockGraph) finalizePrinting(*Funcdata) {}
 
-func (bg *BlockGraph) scopeBreak(int, int) {}
+// scopeBreak walks the top-level structured list, assigning a fall-through exit
+// to each block (the next sibling, or the enclosing curexit for the last one),
+// then recurses. curloopexit is the innermost loop's exit block (nil at top).
+// C++ parity: block.cc BlockGraph::scopeBreak (block.cc:1270). Pointers replace
+// C++ int4 indices: the stored goto target and the loop-exit sibling are the
+// same structure-graph FlowBlock object, so identity is equivalent to index
+// equality without depending on post-collapse index reassignment.
+func (bg *BlockGraph) scopeBreak(curexit, curloopexit *FlowBlock) {
+	blocks := bg.blocks
+	for i, curbl := range blocks {
+		var ind *FlowBlock
+		if i+1 < len(blocks) {
+			ind = blocks[i+1]
+		} else {
+			ind = curexit
+		}
+		curbl.scopeBreak(ind, curloopexit)
+	}
+}
+
+// scopeBreak recurses through the structured hierarchy, converting a goto whose
+// target is the current loop exit into a break;. Dispatch mirrors the per-class
+// C++ overrides; a BlockList reuses the sibling-chaining BlockGraph logic.
+// C++ parity: block.cc {BlockGoto,BlockIf,BlockCondition,BlockWhileDo,
+// BlockDoWhile,BlockInfLoop,BlockSwitch,BlockMultiGoto}::scopeBreak.
+func (b *FlowBlock) scopeBreak(curexit, curloopexit *FlowBlock) {
+	children := b.StructuredChildren()
+	switch b.Type() {
+	case BlockListType, BlockGraphType:
+		// BlockGraph::scopeBreak: each child exits to the next sibling.
+		for i, c := range children {
+			var ind *FlowBlock
+			if i+1 < len(children) {
+				ind = children[i+1]
+			} else {
+				ind = curexit
+			}
+			c.scopeBreak(ind, curloopexit)
+		}
+	case BlockGotoType:
+		// BlockGoto::scopeBreak (block.cc:2866).
+		if len(children) > 0 {
+			children[0].scopeBreak(b.GotoTargetBlock(), curloopexit)
+		}
+		if tgt := b.GotoTargetBlock(); tgt != nil && tgt == curloopexit {
+			b.setGotoType(BlockFlagBreakGoto)
+		}
+	case BlockIfType:
+		// BlockIf::scopeBreak (block.cc:3075): condition (child 0) has multiple
+		// exits; the body clauses (1..) share the same exit.
+		if len(children) > 0 {
+			children[0].scopeBreak(nil, curloopexit)
+		}
+		for i := 1; i < len(children); i++ {
+			children[i].scopeBreak(curexit, curloopexit)
+		}
+		if tgt := b.GotoTargetBlock(); tgt != nil && tgt == curloopexit {
+			b.setGotoType(BlockFlagBreakGoto)
+		}
+	case BlockConditionType:
+		// BlockCondition::scopeBreak (block.cc:3034): no fixed exit for either half.
+		for _, c := range children {
+			c.scopeBreak(nil, curloopexit)
+		}
+	case BlockWhileDoType:
+		// BlockWhileDo::scopeBreak (block.cc:3324): new loop scope; the loop's own
+		// exit (curexit passed in) becomes the loop-exit for the body.
+		if len(children) > 0 {
+			children[0].scopeBreak(nil, curexit)
+		}
+		if len(children) > 1 {
+			children[1].scopeBreak(children[0], curexit)
+		}
+	case BlockDoWhileType:
+		// BlockDoWhile::scopeBreak (block.cc:3434).
+		if len(children) > 0 {
+			children[0].scopeBreak(nil, curexit)
+		}
+	case BlockInfLoopType:
+		// BlockInfLoop::scopeBreak (block.cc:3462): exits into itself.
+		if len(children) > 0 {
+			children[0].scopeBreak(children[0], curexit)
+		}
+	case BlockSwitchType:
+		// BlockSwitch::scopeBreak (block.cc:3613): the case gototype -> break
+		// assignment is intentionally omitted; Gosleigh's emitSwitchBlock renders
+		// per-case break; from the terminal BRANCH (caseExits), independent of the
+		// gototype mechanism. Recurse so nested loops/gotos inside cases are still
+		// scoped.
+		if len(children) > 0 {
+			children[0].scopeBreak(nil, curexit)
+		}
+		for i := 1; i < len(children); i++ {
+			children[i].scopeBreak(curexit, curexit)
+		}
+	case BlockMultiGotoType:
+		// BlockMultiGoto::scopeBreak (block.cc:2918).
+		if len(children) > 0 {
+			children[0].scopeBreak(nil, curloopexit)
+		}
+	}
+}
 
 func (bg *BlockGraph) markUnstructured() {}
 

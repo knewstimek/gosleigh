@@ -1515,9 +1515,7 @@ func (s *printCState) emitIfGotoBlock(bl *FlowBlock) error {
 		s.lang.Token(cond)
 		s.lang.Token(")")
 		s.lang.Space()
-		s.lang.Token("goto")
-		s.lang.Space()
-		s.lang.Token(s.labelForBlock(s.gotoTarget(bl)))
+		s.emitGotoStatement(bl)
 	})
 	return nil
 }
@@ -2101,6 +2099,23 @@ func selectorHasDefault(selector *FlowBlock, idx int) bool {
 	return selector.OutEdge(idx).Label&EdgeFlagDefaultSwitch != 0
 }
 
+// emitGotoStatement renders the unstructured-branch keyword for a BlockGoto or
+// BlockIf-goto: break; / continue; / goto label;, selected by the block's
+// gotoType (assigned by scopeBreak). Callers wrap this in s.lang.Statement.
+// C++ parity: printc.cc PrintC::emitGotoStatement (printc.cc:2369).
+func (s *printCState) emitGotoStatement(bl *FlowBlock) {
+	switch bl.GotoType() {
+	case BlockFlagBreakGoto:
+		s.lang.Token("break")
+	case BlockFlagContinueGoto:
+		s.lang.Token("continue")
+	default:
+		s.lang.Token("goto")
+		s.lang.Space()
+		s.lang.Token(s.labelForBlock(s.gotoTarget(bl)))
+	}
+}
+
 func (s *printCState) emitGotoBlock(bl *FlowBlock) error {
 	if basic := s.firstBasicChild(bl); basic != nil {
 		if err := s.emitOps(basic, true); err != nil {
@@ -2108,9 +2123,7 @@ func (s *printCState) emitGotoBlock(bl *FlowBlock) error {
 		}
 	}
 	s.lang.Statement(func() {
-		s.lang.Token("goto")
-		s.lang.Space()
-		s.lang.Token(s.labelForBlock(s.gotoTarget(bl)))
+		s.emitGotoStatement(bl)
 	})
 	return nil
 }
@@ -2122,9 +2135,7 @@ func (s *printCState) emitMultiGotoBlock(bl *FlowBlock) error {
 		}
 	}
 	s.lang.Statement(func() {
-		s.lang.Token("goto")
-		s.lang.Space()
-		s.lang.Token(s.labelForBlock(s.gotoTarget(bl)))
+		s.emitGotoStatement(bl)
 	})
 	return nil
 }
