@@ -1508,18 +1508,29 @@ func (a *ActionConstantPtr) Apply(data *Funcdata) int {
 		// the flag must be sticky whether or not the lookup succeeds.
 		vn.SetAddlFlags(VarnodePtrCheck)
 
-		if scope == nil {
+		global := data.GetGlobalScope()
+		if scope == nil && global == nil {
 			continue
 		}
 		// Look up the constant as an address in the default data space. In
 		// C++ selectInferSpace picks the space using the op context; for the
 		// partial port we search every processor-kind space the varnode's
 		// bank knows about, narrowest-match wins.
-		// C++ parity: Scope::queryContainer via ScopeLocal::getParent.
+		// C++ parity: Scope::queryContainer via ScopeLocal::getParent. The C++
+		// path queries only the parent (global) scope; the global scope here is
+		// empty unless the loader/bridge injects environment symbols, so it is
+		// tried first and the pre-existing local-scope query is kept as a
+		// fallback to preserve behavior when nothing is injected.
 		hit := false
 		for _, sp := range candidatePointerSpaces(data) {
 			probe := address.Address{Space: sp, Offset: vn.Offset()}
-			entry := scope.QueryContainer(probe, 1, address.Address{})
+			var entry *SymbolEntry
+			if global != nil {
+				entry = global.QueryContainer(probe, 1, address.Address{})
+			}
+			if entry == nil && scope != nil {
+				entry = scope.QueryContainer(probe, 1, address.Address{})
+			}
 			if entry == nil {
 				continue
 			}

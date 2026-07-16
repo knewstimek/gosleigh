@@ -52,9 +52,22 @@ func TestX64BreadthGoldenMap(t *testing.T) {
 			t.Logf("[%s] BUILD-ERR: %v", fn.Name, err)
 			continue
 		}
+		// Inject the __ImageBase global symbol the way Ghidra's headless analysis
+		// supplies it to the decompiler core. Source: measured Ghidra 12.0.4
+		// headless debug XML for dispatch (debug_dispatch.xml) --
+		//   <symbol name="__ImageBase" typelock="true" namelock="true" .../>
+		//   <addr space="ram" offset="0x3610" size="1"/> typeref undefined(size 1)
+		// It lets ActionConstantPtr promote the constant image base in dispatch to
+		// a &__ImageBase reference. Harmless for functions that never reference it.
+		undef1 := pcode.NewTypeFactory().GetBase(1, pcode.TYPE_UNKNOWN, "undefined")
+		injected := []bridge.InjectedGlobal{{
+			Name: "__ImageBase", Space: base.Space, Offset: 0x3610, Size: 1,
+			Type: undef1, TypeLock: true, NameLock: true,
+		}}
 		result, err := bridge.Build(engine, bridge.BuildConfig{
 			Name: fn.Name, Entry: base, MaxInstructions: 200,
 			CspecPath: cspec, SymbolName: fn.Name,
+			InjectedGlobals: injected,
 		})
 		if err != nil {
 			t.Logf("[%s] BRIDGE-ERR: %v", fn.Name, err)

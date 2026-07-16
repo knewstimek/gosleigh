@@ -3398,6 +3398,9 @@ func (s *printCState) renderPtrAdd(op *PcodeOp) (ExprFragment, error) {
 func (s *printCState) renderPtrSub(op *PcodeOp) (ExprFragment, error) {
 	base := op.Input(0)
 	off := op.Input(1)
+	if symExpr, ok := s.renderPtrSubGlobalSymbol(base, off); ok {
+		return symExpr, nil
+	}
 	if fieldExpr, ok := s.renderPtrSubField(base, off); ok {
 		return fieldExpr, nil
 	}
@@ -3411,6 +3414,54 @@ func (s *printCState) renderPtrSub(op *PcodeOp) (ExprFragment, error) {
 	}
 	castBase := s.lang.CastExpr("char *", baseExpr)
 	return s.lang.BinaryExpr(castBase, "+", offExpr, cPrecAdd, ExprAssocLeft), nil
+}
+
+// renderPtrSubGlobalSymbol renders a PTRSUB off a global spacebase constant as a
+// reference to the global symbol it resolves to (e.g. "&__ImageBase"). Ghidra's
+// opPtrsub reads the symbol from op->getIn(1)->getHigh()->getSymbol() in the
+// TYPE_SPACEBASE branch; Gosleigh has no global-symbol HighVariable linking yet,
+// so the offset constant is resolved against the injected global scope directly
+// at print time. The '&' is dropped for code/array symbol types, matching the
+// C++ valueon handling. Returns false (falling through to the generic PTRSUB
+// rendering) when the base is not a global spacebase, the offset is not
+// constant, or no global symbol covers the address -- so the default
+// (uninjected) path is unchanged.
+// C++ parity: printc.cc PrintC::opPtrsub, TYPE_SPACEBASE branch (&name / name).
+func (s *printCState) renderPtrSubGlobalSymbol(base, off *Varnode) (ExprFragment, bool) {
+	if base == nil || off == nil || !base.IsSpaceBase() || !off.IsConstant() {
+		return ExprFragment{}, false
+	}
+	if s.fd == nil {
+		return ExprFragment{}, false
+	}
+	gs := s.fd.GetGlobalScope()
+	if gs == nil {
+		return ExprFragment{}, false
+	}
+	spc := base.GetSpaceFromConst()
+	if spc == nil {
+		return ExprFragment{}, false
+	}
+	entry := gs.QueryContainer(address.Address{Space: spc, Offset: off.Offset()}, 1, address.Address{})
+	if entry == nil || entry.Symbol() == nil {
+		return ExprFragment{}, false
+	}
+	sym := entry.Symbol()
+	// Only the whole-symbol case (offset 0) is rendered; a partial-symbol
+	// reference would need pushPartialSymbol, which is not ported.
+	if off.Offset() != entry.Addr().Offset {
+		return ExprFragment{}, false
+	}
+	name := s.lang.Atom(sym.Name())
+	// Drop the '&' when the symbol is a code or array type (its name already
+	// denotes the address). C++ parity: opPtrsub sets valueon for TYPE_CODE /
+	// TYPE_ARRAY.
+	if st := sym.Type(); st != nil {
+		if m := st.Metatype(); m == TYPE_CODE || m == TYPE_ARRAY {
+			return name, true
+		}
+	}
+	return s.lang.UnaryExpr("&", cPrecUnary, name), true
 }
 
 func (s *printCState) renderPtrSubField(base, off *Varnode) (ExprFragment, bool) {
