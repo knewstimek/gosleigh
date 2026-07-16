@@ -170,6 +170,23 @@ func (fd *Funcdata) recoverJumpTable(op *PcodeOp) (*JumpTable, JumpTableRecovery
 	if errors.Is(err, JumptableThunkError) {
 		return nil, JumpTableFailThunk
 	}
+	// When address emulation aborted on an op it could not execute, attach the
+	// faithful "Could not emulate address calculation at <addr>" warning at the
+	// BRANCHIND address, mirroring Ghidra's stageJumpTable catch which calls
+	// warning(err.explain, op->getAddr()) (funcdata_block.cc:542). The message
+	// (with printRaw'd op address) was captured during BuildAddresses.
+	//
+	// KNOWN GAP: for switch functions whose guard is not recovered before
+	// heritage (the pre-heritage single-.text harness case, e.g. dispatch),
+	// RecoverModel bails on range size before BuildAddresses runs, so this
+	// message is not produced. Ghidra recovers the guard on a heritaged partial
+	// clone (stageJumpTable -> truncatedFlow), reaches emulation, and fails there.
+	// That partial-clone heritage arc is unported; until it lands, this warning
+	// stays dormant for such functions while the structural demotion below still
+	// matches. See recoverJumpTable's simplification note above.
+	if jb, ok := jt.jmodel.(*JumpBasic); ok && jb.emulateFailMsg != "" {
+		fd.warning(jb.emulateFailMsg, op.Addr())
+	}
 	return nil, JumpTableFailNormal
 }
 
@@ -199,7 +216,7 @@ func (fd *Funcdata) setupCallindSpecs(op *PcodeOp) *FuncCallSpecs {
 func (fd *Funcdata) TruncateIndirectJump(op *PcodeOp, mode JumpTableRecoveryMode) {
 	if mode == JumpTableFailReturn {
 		fd.OpSetOpcode(op, CPUI_RETURN) // Turn jump into return
-		fd.emitActionMessage("WARNING: Treating indirect jump as return")
+		fd.warning("Treating indirect jump as return", op.Addr())
 		return
 	}
 
@@ -215,13 +232,13 @@ func (fd *Funcdata) TruncateIndirectJump(op *PcodeOp, mode JumpTableRecoveryMode
 	case JumpTableFailCallOther:
 		returnType = PcodeOpNoReturn
 		fc.SetNoReturn(true)
-		fd.emitActionMessage("WARNING: Does not return")
+		fd.warning("Does not return", op.Addr())
 		noParams = true
 	default: // fail_normal
 		returnType = 0
 		noParams = false
 		fc.SetBadJumpTable(true) // Consider using special name for switch variable
-		fd.emitActionMessage("WARNING: Treating indirect jump as call")
+		fd.warning("Treating indirect jump as call", op.Addr())
 	}
 
 	if noParams && fc != nil && !fc.HasModel() {
@@ -240,9 +257,4 @@ func (fd *Funcdata) TruncateIndirectJump(op *PcodeOp, mode JumpTableRecoveryMode
 	// right after the CALLIND in the same basic block -- the equivalent result.
 	truncop := fd.ArtificialHalt(op.Addr(), returnType)
 	fd.OpInsertAfter(truncop, op)
-
-	// The per-op "Could not emulate address calculation" / warning comments that
-	// Ghidra attaches via its Comment database are not rendered by PrintC yet
-	// (comment DB unported), so those inline comments are a known residual
-	// output diff, separate from the structural demotion done here.
 }
