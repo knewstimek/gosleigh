@@ -14,6 +14,20 @@ Ghidra decompiler/Sleigh runtime을 Go로 다시 구현하는 프로젝트. stan
 - 원본 C++ 소스: `ghidra-ref/Ghidra/Features/Decompiler/src/decompile/cpp/`
 - Sleigh 문서: `ghidra-ref/Ghidra/Features/Decompiler/src/main/doc/sleigh.xml`
 
+## 도구 (있는 줄 모르면 못 쓴다 -- 착수 전 확인)
+
+지금 쓸 수 있는 것:
+- `tools/decomp_dbg.exe`: CPUI_DEBUG Ghidra 12.0.4 디컴파일러 CORE 콘솔. C++ 코어 ground truth 온디맨드 실측
+  (`print C`/`print raw`/`print tree varnode`/`print cover high`, `break start <action>`). savefile은
+  `tools/captures/`. 사용법/재빌드 절차 `tools/BUILD_NOTES.md`(SLEIGHHOME 필요). **가설 코드화 전 이걸로 실측.**
+- 인스트루먼트 빌드: ghidra-ref 소스 사본(scratchpad)에 로깅 삽입 후 `tools/build_decomp_dbg.py` 방식으로
+  단일 TU 재컴파일 -> 특정 C++ 가드 발화를 로그로 확정 (isolate 기전 규명에 사용).
+- 골든 파이프라인: `testdata/x64_corpus*/`의 `build.py`+`run_ghidra.py`+`GenGoldens.java`
+  (MSVC `cl /c /Od` -> Ghidra headless -> 골든 JSON).
+
+만들면 레버리지 큰 것(미제작, 상세 `NEXT_SESSION_PROMPT.md` "우선 제작 툴"): 골든 자동생성+갭 자동분류
+원커맨드, p-code SSA 나란히 비교기.
+
 ## 원본 C++ parity
 
 - 원본 Ghidra C++와의 parity가 최우선이다. 속도, 편의, 새로운 설계, 로컬 단순화보다 우선한다.

@@ -75,6 +75,15 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
   (LoopBody.FindExit/ruleBlockWhileDo/isComplex 스텁/PrintC compound-head whiledo). 이 collapse 갭을 먼저
   고친 뒤 이 브랜치를 얹으면 parse_steps가 수렴한다.
 
+## 우선 제작 툴 (레버리지 높음 -- 갭 작업보다 먼저 검토)
+어젯밤 최대 병목 = 갭을 손으로 찾고 C++와 손으로 대조한 것. 아래 2개를 만들면 이후 전 작업이 빨라진다.
+1. **골든 자동생성 + 갭 자동분류 원커맨드**: 지금은 C함수 추가에 MSVC->Ghidra headless->JSON 수동
+   (testdata/x64_corpus*/build.py+run_ghidra.py+GenGoldens.java). 이걸 `add_func "<C코드>"` 하나로 골든 생성 +
+   Gosleigh 대조 + diff를 토큰종류별(구조화/타입/캐스트/rule/미포팅)로 자동 분류까지. **갭 발견이 시간->분.**
+   실전 코퍼스를 30~50개로 값싸게 넓혀 커버리지/갭지도를 자동 갱신. **최고 레버리지.**
+2. **p-code SSA 나란히 비교기**: decomp_dbg `print raw`(C++ 코어) <-> Gosleigh SSA 덤프를 op 단위 정렬 표시.
+   어젯밤 팀원 여럿이 매번 임시 로깅으로 손수 한 걸 상설화. merge/type/heritage 갭 규명 반복노동 제거.
+
 ## 다음 작업 (우선순위)
 ### (A) [자기완결, 중] dispatch `(ulonglong)` ZEXT -> breadth 3/3
 - **현상**: dispatch가 `&__ImageBase + (ulonglong)*(uint *)(...)` vs 골든 `&__ImageBase + *(uint *)(...)`.
