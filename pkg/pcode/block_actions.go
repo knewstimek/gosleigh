@@ -202,7 +202,7 @@ func (a *ActionFinalStructure) Apply(data *Funcdata) int {
 	graph := data.getStructure()
 	graph.OrderBlocks()
 	graph.finalizePrinting(data)
-	graph.scopeBreak(-1, -1)
+	graph.scopeBreak(nil, nil)
 	graph.markUnstructured()
 	graph.markLabelBumpUp(false)
 	return 0
