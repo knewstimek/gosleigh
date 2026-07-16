@@ -43,6 +43,29 @@ type FuncProto struct {
 	params []*HighVariable
 	// output holds the recovered return HighVariable, if any.
 	output *HighVariable
+
+	// outputAddr/outputSize describe the storage of a locked/injected return
+	// value independent of whether a varnode exists at that address yet. This is
+	// the Gosleigh analog of ProtoParameter::getAddress()/getSize() for the
+	// output: C++ reads outparam->getAddress() directly, while Gosleigh otherwise
+	// derives the return storage from an existing HighVariable instance. When an
+	// injected locked prototype supplies the return storage explicitly, the
+	// locked-output path in ActionPrototypeTypes uses these fields.
+	// C++ parity: FuncProto::getOutput() -> ProtoParameter address/size.
+	outputAddr    address.Address
+	outputSize    int32
+	outputHasAddr bool
+
+	// lockedParamTypes maps a register-space byte offset to the type an injected
+	// locked prototype assigns to the parameter stored there. Gosleigh recovers
+	// register parameters by ABI-slot derivation (ScopeLocal.BuildFromVarnodes),
+	// which already converges on the same storage map a locked prototype encodes;
+	// when a locked type is present for a slot, BuildFromVarnodes stamps it with a
+	// type lock instead of the default TYPE_INT seed, so the injected prototype's
+	// parameter types (not type inference) are authoritative. Empty/nil for every
+	// non-injected function, so the default path is unchanged.
+	// C++ parity: FuncProto locked input parameters carry ProtoParameter types.
+	lockedParamTypes map[uint64]Datatype
 	// activeoutput holds the temporary active-return analysis state.
 	activeoutput *ParamActive
 	// locals holds the discovered local HighVariables in order.
@@ -91,6 +114,15 @@ func (fp *FuncProto) Copy(other *FuncProto) {
 	fp.outputLocked = other.outputLocked
 	fp.params = append([]*HighVariable(nil), other.params...)
 	fp.output = other.output
+	fp.outputAddr = other.outputAddr
+	fp.outputSize = other.outputSize
+	fp.outputHasAddr = other.outputHasAddr
+	if other.lockedParamTypes != nil {
+		fp.lockedParamTypes = make(map[uint64]Datatype, len(other.lockedParamTypes))
+		for k, v := range other.lockedParamTypes {
+			fp.lockedParamTypes[k] = v
+		}
+	}
 	fp.activeoutput = other.activeoutput
 	fp.locals = append([]*HighVariable(nil), other.locals...)
 }
@@ -242,6 +274,60 @@ func (fp *FuncProto) SetOutput(hv *HighVariable) {
 		return
 	}
 	fp.output = hv
+}
+
+// SetLockedReturn records an injected locked return value: its storage address,
+// size, and type. It seeds an output HighVariable carrying the type (so the
+// existing output plumbing sees a typed return) and records the explicit storage
+// so the locked-output path can materialize a return carrier without depending on
+// a pre-existing varnode instance. The caller sets the output lock separately.
+// C++ parity: FuncProto::setOutput(ProtoParameter) with an explicit address/type.
+func (fp *FuncProto) SetLockedReturn(addr address.Address, size int32, vt Datatype) {
+	if fp == nil || vt == nil {
+		return
+	}
+	out := NewHighVariable("")
+	out.SetType(vt)
+	fp.output = out
+	fp.outputAddr = addr
+	fp.outputSize = size
+	fp.outputHasAddr = true
+}
+
+// OutputStorage returns the explicit locked-return storage (address, size) when
+// an injected prototype supplied it. The bool is false for the ordinary derived
+// path, in which case the locked-output action falls back to a HighVariable
+// instance address.
+// C++ parity: ProtoParameter::getAddress()/getSize() for the output.
+func (fp *FuncProto) OutputStorage() (address.Address, int32, bool) {
+	if fp == nil || !fp.outputHasAddr {
+		return address.Address{}, 0, false
+	}
+	return fp.outputAddr, fp.outputSize, true
+}
+
+// SetLockedParamType records the type an injected locked prototype assigns to the
+// parameter stored at the given register-space byte offset.
+// C++ parity: ProtoParameter::getType() for a locked input parameter.
+func (fp *FuncProto) SetLockedParamType(regOffset uint64, vt Datatype) {
+	if fp == nil || vt == nil {
+		return
+	}
+	if fp.lockedParamTypes == nil {
+		fp.lockedParamTypes = make(map[uint64]Datatype)
+	}
+	fp.lockedParamTypes[regOffset] = vt
+}
+
+// LockedParamType returns the injected locked type for the parameter at the given
+// register-space byte offset, if any.
+// C++ parity: ProtoParameter::getType() for a locked input parameter.
+func (fp *FuncProto) LockedParamType(regOffset uint64) (Datatype, bool) {
+	if fp == nil || fp.lockedParamTypes == nil {
+		return nil, false
+	}
+	vt, ok := fp.lockedParamTypes[regOffset]
+	return vt, ok
 }
 
 // GetActiveOutput returns the temporary active return analysis state.

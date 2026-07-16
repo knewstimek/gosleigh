@@ -169,6 +169,19 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 		regParamCount = 0
 	}
 	for _, slot := range regParamSlots {
+		// An injected locked prototype may fix this parameter's type. Gosleigh's
+		// ABI-slot derivation converges on the same register storage the locked
+		// prototype encodes, so we stamp the locked type here (with a type lock so
+		// ActionInferTypes leaves it authoritative) instead of the default TYPE_INT
+		// seed. Non-injected functions have no locked types, so this is inert and
+		// the default seeding below runs unchanged.
+		// C++ parity: locked input ProtoParameter type overrides inference.
+		if fp != nil {
+			if lvt, ok := fp.LockedParamType(slot.vn.Offset()); ok {
+				SetVarnodeType(slot.vn, lvt)
+				slot.vn.SetFlags(VarnodeTypeLock)
+			}
+		}
 		// Seed a concrete signed type onto the varnode so normalizedBaseType
 		// renders it as "int" / "long" (not "undefined%d"). Done for entry-point
 		// inputs too so the in_<reg> declaration and the return type infer "long".
