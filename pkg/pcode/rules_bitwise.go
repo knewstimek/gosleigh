@@ -77,27 +77,53 @@ type RuleAndOrLump struct{ batchRule }
 
 func NewRuleAndOrLump(group string) *RuleAndOrLump {
 	r := &RuleAndOrLump{}
-	r.batchRule = newBatchRule(group, "andorlump", []OpCode{CPUI_INT_OR, CPUI_INT_AND}, r.apply, func(g string) Rule { return NewRuleAndOrLump(g) })
+	r.batchRule = newBatchRule(group, "andorlump", []OpCode{CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR}, r.apply, func(g string) Rule { return NewRuleAndOrLump(g) })
 	return r
 }
 
+// apply collapses constants in a chain of identical logical ops:
+//
+//	(V & c) & d  =>  V & (c & d)   (likewise for INT_OR, INT_XOR)
+//
+// This is what lets a shift-count mask chain such as
+// ((byte)param_3 & 0x3f) & 0xff) & 0x1f collapse to (byte)param_3 & 0x1f.
+// C++ parity: ruleaction.cc RuleAndOrLump::applyOp. The constant must sit in
+// slot 1 (RuleAndCommute / commutative normalization guarantees this), the
+// other input must be defined by the same opcode with its own slot-1 constant,
+// and the innermost base must not be free.
 func (r *RuleAndOrLump) apply(op *PcodeOp, data *Funcdata) int {
-	for slot := 0; slot < 2; slot++ {
-		other := op.Input(1 - slot)
-		if def := op.Input(slot).Def(); def != nil {
-			if op.Code() == CPUI_INT_OR && def.Code() == CPUI_INT_AND {
-				if sameValue(def.Input(0), other) || sameValue(def.Input(1), other) {
-					return rewriteToCopy(data, op, other)
-				}
-			}
-			if op.Code() == CPUI_INT_AND && def.Code() == CPUI_INT_OR {
-				if sameValue(def.Input(0), other) || sameValue(def.Input(1), other) {
-					return rewriteToCopy(data, op, other)
-				}
-			}
-		}
+	opc := op.Code()
+	if !op.Input(1).IsConstant() {
+		return 0
 	}
-	return 0
+	vn1 := op.Input(0)
+	if !vn1.IsWritten() {
+		return 0
+	}
+	op2 := vn1.Def()
+	if op2.Code() != opc { // must be the same op
+		return 0
+	}
+	if !op2.Input(1).IsConstant() {
+		return 0
+	}
+	basevn := op2.Input(0)
+	if basevn.IsFree() {
+		return 0
+	}
+	val := op.Input(1).Offset()
+	val2 := op2.Input(1).Offset()
+	switch opc {
+	case CPUI_INT_AND:
+		val &= val2
+	case CPUI_INT_OR:
+		val |= val2
+	case CPUI_INT_XOR:
+		val ^= val2
+	}
+	data.OpSetInput(op, basevn, 0)
+	data.OpSetInput(op, data.NewConstant(basevn.Size(), val), 1)
+	return 1
 }
 
 type RuleNegateIdentity struct{ batchRule }
