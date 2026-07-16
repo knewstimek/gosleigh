@@ -519,13 +519,18 @@ func applyInjectedPrototype(engine *sla.Engine, fd *pcode.Funcdata, spec *Inject
 
 	// Locked parameter types keyed by register byte offset. Only meaningful when
 	// the parameter carries a type lock; a namelock/typelock=false slot leaves the
-	// derived type in place.
+	// derived type in place. The name + namelock are recorded independently so
+	// ScopeLocal.BuildFromVarnodes can create a namelocked parameter Symbol on the
+	// recovered register parameter -- the merge Symbol guard needs that Symbol to
+	// keep param_N distinct from an accumulator carrying a different Symbol.
 	for _, p := range spec.Params {
-		if p.Type == nil || !p.TypeLock {
-			continue
-		}
 		if addr, _, ok := resolveReg(p.Register); ok {
-			fp.SetLockedParamType(addr.Offset, p.Type)
+			if p.Type != nil && p.TypeLock {
+				fp.SetLockedParamType(addr.Offset, p.Type)
+			}
+			if p.Name != "" {
+				fp.SetLockedParamName(addr.Offset, p.Name, p.NameLock)
+			}
 		}
 	}
 

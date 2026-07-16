@@ -203,6 +203,26 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 		sl.paramByVn[slot.vn] = hv
 		if fp != nil {
 			fp.AddParam(hv)
+			// If an injected locked prototype named this register parameter, create a
+			// matching Symbol and attach it to the input Varnode. This gives the
+			// parameter HighVariable a mapped Symbol (namelocked when the prototype
+			// namelocks the slot), which the merge Symbol guard (mergeTestRequired)
+			// needs to keep a named parameter distinct from a same-typed accumulator
+			// that maps to a different Symbol. Non-injected functions carry no locked
+			// name, so this branch is inert and register params get no Symbol.
+			// C++ parity: a locked ProtoParameter produces a ParameterSymbol whose
+			// SymbolEntry is attached to the input Varnode (Funcdata::linkSymbol ->
+			// Varnode::setSymbolEntry).
+			if pname, nlock, ok := fp.LockedParamName(slot.vn.Offset()); ok {
+				sym := NewSymbol(pname, slot.vn.Type())
+				sym.SetCategory(SymbolFunctionParameter, slot.idx)
+				if nlock {
+					sym.SetFlags(VarnodeNameLock)
+				}
+				entry := NewSymbolEntry(sym, 0, slot.vn.Addr(), slot.vn.Size(), 0)
+				sym.attachEntry(entry)
+				slot.vn.SetSymbolEntry(entry)
+			}
 		}
 	}
 
