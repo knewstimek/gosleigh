@@ -287,6 +287,14 @@ func (t *typeOpIntCmp) PropagateType(_ *PcodeOp, slot int, _ Datatype, tf *TypeF
 	return nil
 }
 
+// typeOpSubpiece: SUBPIECE prints as a cast to whatever its output data-type is.
+// A dedicated type is needed so getOutputToken returns the output's own resolved
+// type (byte, int, ...) instead of the base UNKNOWN token; otherwise
+// ActionSetCasts::castOutput wipes an inferred output type back to undefined on
+// an implied SUBPIECE output. See GetOutputToken in typeop_cast.go.
+// C++ parity: TypeOpSubpiece (typeop.cc 2118-2245).
+type typeOpSubpiece struct{ typeOpBase }
+
 // typeOpCast:
 //   slot=0  (input) -> use output varnode size
 //   slot=-1 (reverse from output) -> use input[0] size
@@ -395,7 +403,7 @@ func RegisterTypeOps() []TypeOp {
 
 	// Composite/pointer
 	inst[CPUI_PIECE] = &typeOpBase{CPUI_PIECE, PcodeOpBinary, "CONCAT"}
-	inst[CPUI_SUBPIECE] = &typeOpBase{CPUI_SUBPIECE, PcodeOpBinary, "SUB"}
+	inst[CPUI_SUBPIECE] = &typeOpSubpiece{typeOpBase{CPUI_SUBPIECE, PcodeOpBinary, "SUB"}}
 	inst[CPUI_CAST] = &typeOpCast{typeOpBase{CPUI_CAST, PcodeOpUnary | PcodeOpSpecial | PcodeOpNoCollapse, "CAST"}}
 	inst[CPUI_PTRADD] = &typeOpPtradd{typeOpBase{CPUI_PTRADD, PcodeOpTernary | PcodeOpNoCollapse, "PTRADD"}}
 	inst[CPUI_PTRSUB] = &typeOpPtrsub{typeOpBase{CPUI_PTRSUB, PcodeOpBinary | PcodeOpNoCollapse, "PTRSUB"}}
