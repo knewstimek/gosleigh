@@ -317,6 +317,11 @@ type EmulateFunction struct {
 	varnodeMap map[*Varnode]uint64
 	currentOp  *PcodeOp // op currently being executed
 	lastOp     *PcodeOp // previously executed op (for MULTIEQUAL edge selection)
+	// failMsg holds the faithful warning text when EmulatePath aborts on an op it
+	// cannot execute. It mirrors the LowlevelError message JumpBasic::emulatePath
+	// throws (jumptable.cc:248) so Funcdata::stageJumpTable can attach it as a
+	// warning comment. Empty unless an emulation aborted.
+	failMsg string
 }
 
 // NewEmulateFunction creates an emulator tied to fd.
@@ -600,13 +605,18 @@ func (m *JumpModelTrivial) Clear() {}
 // upgraded in a follow-up batch without needing to re-plumb the JumpTable
 // container.
 type JumpBasic struct {
-	jt            *JumpTable
-	Range         *JumpValuesRange
-	PathMeld      PathMeld
-	SelectGuards  []*GuardRecord
-	VarnodeIndex  int
-	NormalVn      *Varnode
-	SwitchVn      *Varnode
+	jt           *JumpTable
+	Range        *JumpValuesRange
+	PathMeld     PathMeld
+	SelectGuards []*GuardRecord
+	VarnodeIndex int
+	NormalVn     *Varnode
+	SwitchVn     *Varnode
+	// emulateFailMsg captures the faithful warning text produced when address
+	// emulation (BuildAddresses) aborts on an unreadable op. Funcdata's
+	// recoverJumpTable reads it to attach the "Could not emulate address
+	// calculation at <addr>" warning, mirroring Ghidra's stageJumpTable catch.
+	emulateFailMsg string
 }
 
 // NewJumpBasic constructs a JumpBasic bound to jt.
@@ -693,7 +703,10 @@ func (m *JumpBasic) BuildAddresses(fd *Funcdata, indop *PcodeOp, addressTable *[
 		addr, err := emul.EmulatePath(val, &m.PathMeld, m.Range.StartOp(), m.Range.StartVarnode())
 		if err != nil {
 			// Emulation failed (e.g. no load image): report a partial table so
-			// the outer JumpTable fails the sanity check and falls back.
+			// the outer JumpTable fails the sanity check and falls back. Preserve
+			// the faithful warning text so recoverJumpTable can attach it as a
+			// comment, mirroring Ghidra's stageJumpTable catch (funcdata_block.cc:542).
+			m.emulateFailMsg = emul.failMsg
 			return
 		}
 		// AddrSpace::addressToByte scales a word-addressed result to bytes.

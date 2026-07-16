@@ -300,6 +300,12 @@ func (e *EmulateFunction) EmulatePath(val uint64, pathMeld *PathMeld, startop *P
 		i--
 		e.setCurrentOp(curop)
 		if err := e.executeCurrentOp(); err != nil {
+			// Record the faithful warning text (Ghidra JumpBasic::emulatePath throws
+			// LowlevelError("Could not emulate address calculation at " << curop),
+			// which Funcdata::stageJumpTable turns into a warning comment attached to
+			// the BRANCHIND). The address is printed with AddrSpace::printRaw.
+			// C++ parity: jumptable.cc:248.
+			e.failMsg = "Could not emulate address calculation at " + PrintRawAddr(curop.Addr())
 			return 0, fmt.Errorf("could not emulate address calculation at %s: %w", curop.Addr(), err)
 		}
 	}
