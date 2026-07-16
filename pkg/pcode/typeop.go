@@ -79,6 +79,39 @@ func (t *typeOpMultiequal) PropagateType(_ *PcodeOp, _ int, inType Datatype, _ *
 	return inType
 }
 
+// typeOpCallind types the indirect-call target (input slot 0) as a pointer to
+// code, so the call site renders with a (code *) cast and ActionConstantPtr can
+// recognize a constant target as a global code-symbol pointer.
+// C++ parity: typeop.cc TypeOpCallind::getInputLocal (slot 0 branch). The
+// slot>0 locked/this-pointer parameter branch is not ported yet: without it the
+// argument varnodes keep their default local type, which is correct for
+// unlocked call sites. InputTypeLocal is consumed both by ActionInferTypes
+// (inferGetLocalType) to seed the target varnode's type and by getInputCast to
+// decide the printed (code *) cast.
+type typeOpCallind struct{ typeOpBase }
+
+func (t *typeOpCallind) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) Datatype {
+	if slot == 0 && op != nil && op.Input(0) != nil && tf != nil {
+		// td = tlst->getTypeCode(); return getTypePointer(in0.size, td, wordsize).
+		// The Go factory has no nullary getTypeCode(); a nameless TYPE_CODE with
+		// no prototype is the equivalent bare code type (renders as "code").
+		code := tf.GetCode("code", nil, nil, false)
+		ws := uint32(1)
+		if sp := op.Addr().Space; sp != nil && sp.WordSize > 0 {
+			ws = uint32(sp.WordSize)
+		}
+		return tf.GetPointer(op.Input(0).Size(), code, ws)
+	}
+	return t.typeOpBase.InputTypeLocal(op, slot, tf)
+}
+
+// GetInputCast must be overridden (not inherited) so baseGetInputCast receives
+// the typeOpCallind receiver and dispatches to the code-pointer InputTypeLocal
+// above; a promoted typeOpBase.GetInputCast would call the base InputTypeLocal.
+func (t *typeOpCallind) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
+	return baseGetInputCast(t, op, slot, cs)
+}
+
 // typeOpLoad:
 //   slot=1  (addr input)  -> pointee type propagates to output
 //   slot=-1 (from output) -> pointer-to-outType propagates to input[1]
@@ -287,7 +320,7 @@ func RegisterTypeOps() []TypeOp {
 	inst[CPUI_CBRANCH] = &typeOpBase{CPUI_CBRANCH, PcodeOpSpecial | PcodeOpBranch | PcodeOpCodeRef | PcodeOpNoCollapse, "CBRANCH"}
 	inst[CPUI_BRANCHIND] = &typeOpBase{CPUI_BRANCHIND, PcodeOpSpecial | PcodeOpBranch | PcodeOpNoCollapse, "BRANCHIND"}
 	inst[CPUI_CALL] = &typeOpBase{CPUI_CALL, PcodeOpSpecial | PcodeOpCall | PcodeOpHasCallSpec | PcodeOpCodeRef | PcodeOpNoCollapse, "CALL"}
-	inst[CPUI_CALLIND] = &typeOpBase{CPUI_CALLIND, PcodeOpSpecial | PcodeOpCall | PcodeOpHasCallSpec | PcodeOpNoCollapse, "CALLIND"}
+	inst[CPUI_CALLIND] = &typeOpCallind{typeOpBase{CPUI_CALLIND, PcodeOpSpecial | PcodeOpCall | PcodeOpHasCallSpec | PcodeOpNoCollapse, "CALLIND"}}
 	inst[CPUI_CALLOTHER] = &typeOpBase{CPUI_CALLOTHER, PcodeOpSpecial | PcodeOpCall | PcodeOpNoCollapse, "CALLOTHER"}
 	inst[CPUI_RETURN] = &typeOpBase{CPUI_RETURN, PcodeOpSpecial | PcodeOpReturns | PcodeOpNoCollapse | PcodeOpReturnCopy, "RETURN"}
 

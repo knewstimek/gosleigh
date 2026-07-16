@@ -118,6 +118,12 @@ func (r *CDeclRenderer) renderDeclaration(dt Datatype, name string) (string, str
 		inner := name + fmt.Sprintf("[%d]", typed.Count())
 		return r.renderDeclaration(typed.Element(), inner)
 	case *Code:
+		// A prototype-less code type renders by name ("code"), like a base type,
+		// so a pointer to it prints "code *" instead of "void (*)(void)".
+		// C++ parity: PrintC renders a TypeCode with no FuncProto as its name.
+		if !typed.HasPrototype() {
+			return bareCodeName(typed), name
+		}
 		return r.renderCodeDeclaration(typed, name, nil)
 	default:
 		return r.typeSpecifier(dt), name
@@ -144,10 +150,26 @@ func (r *CDeclRenderer) renderCodeDeclaration(fn *Code, name string, paramNames 
 	return r.renderDeclaration(returnType, inner)
 }
 
+// bareCodeName returns the spelling of a prototype-less code type. Ghidra's
+// factory code type is named "code"; fall back to that when the type carries no
+// name of its own.
+func bareCodeName(fn *Code) string {
+	if fn != nil {
+		if n := fn.Name(); n != "" {
+			return n
+		}
+	}
+	return "code"
+}
+
 func needsWrappedDeclarator(dt Datatype) bool {
-	switch dt.(type) {
-	case *Array, *Code:
+	switch typed := dt.(type) {
+	case *Array:
 		return true
+	case *Code:
+		// A prototype-less code type renders as a plain type name, so a pointer
+		// to it needs no "(*)" wrapping ("code *", not "code (*)").
+		return typed.HasPrototype()
 	default:
 		return false
 	}
@@ -168,7 +190,13 @@ func (r *CDeclRenderer) typeSpecifier(dt Datatype) string {
 		return r.unionSpecifier(typed)
 	case *Enum:
 		return r.enumSpecifier(typed)
-	case *Pointer, *Array, *Code:
+	case *Code:
+		if !typed.HasPrototype() {
+			return bareCodeName(typed)
+		}
+		spec, _ := r.renderDeclaration(dt, "")
+		return spec
+	case *Pointer, *Array:
 		spec, _ := r.renderDeclaration(dt, "")
 		return spec
 	default:

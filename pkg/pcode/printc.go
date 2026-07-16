@@ -1217,6 +1217,12 @@ func (s *printCState) normalizeTypeForDecl(dt Datatype) Datatype {
 	case *Array:
 		return sharedTypeFactory.GetArray(typed.Count(), s.normalizeTypeForDecl(typed.Element()))
 	case *Code:
+		// Preserve a prototype-less code type as-is: normalizing its nil return to
+		// void would resurrect a "void (*)(void)" signature and lose the bare
+		// "code" spelling Ghidra uses for unknown-signature indirect-call targets.
+		if !typed.HasPrototype() {
+			return typed
+		}
 		params := typed.ParameterTypes()
 		normalizedParams := make([]Datatype, len(params))
 		for i, param := range params {
