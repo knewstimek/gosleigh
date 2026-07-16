@@ -434,6 +434,19 @@ func (c *Code) ReturnType() Datatype       { return c.returnType }
 func (c *Code) ParameterTypes() []Datatype { return cloneDatatypes(c.params) }
 func (c *Code) IsVariadic() bool           { return c.variadic }
 
+// HasPrototype reports whether this code type carries a resolved function
+// signature. A prototype-less code type (no return, no params, non-variadic) is
+// the bare "code" type Ghidra creates via TypeFactory::getTypeCode() for an
+// indirect-call target of unknown signature; it renders by name ("code") rather
+// than as a synthesized "void (*)(void)".
+// C++ parity: TypeCode with proto==(FuncProto*)0 (type.hh TypeCode::getPrototype).
+func (c *Code) HasPrototype() bool {
+	if c == nil {
+		return false
+	}
+	return c.returnType != nil || len(c.params) > 0 || c.variadic
+}
+
 // PointerRel is a pointer that points \e into a larger container at a known
 // byte offset. Downstream rules use it to recover struct-field style accesses
 // where the raw pointer value is (basePtr + offset).
