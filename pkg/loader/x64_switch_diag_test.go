@@ -96,9 +96,33 @@ func TestX64SwitchGoldenMap(t *testing.T) {
 		t.Fatalf("entry VMA mismatch: got 0x%x want 0x%x", base.Offset, entryVMA)
 	}
 
+	// Inject the fully-locked prototype Ghidra's headless analyzer committed for
+	// this function before decompiling, captured from the core's debug archive
+	// (scratchpad debug_op_switch.xml, <prototype extrapop="8" model="__fastcall"
+	// modellock="true">): return uint@EAX(register:0x0,size4) typelock; params
+	// param_1 undefined4@ECX(0x8), param_2 uint@EDX(0x10), param_3 uint@R8D(0x80),
+	// all typelock+namelock. The output lock is what forces the distinct `uVar1`
+	// return carrier in the golden (without it the return reuses the operand).
+	tf := pcode.NewTypeFactory()
+	uintT := tf.GetBase(4, pcode.TYPE_UINT, "uint")
+	undef4 := tf.GetBase(4, pcode.TYPE_UNKNOWN, "undefined4")
+	injProto := &bridge.InjectedPrototype{
+		Model:     "__fastcall",
+		ModelLock: true,
+		Return: bridge.InjectedProtoParam{
+			Name: "", Register: "EAX", Size: 4, Type: uintT, TypeLock: true,
+		},
+		Params: []bridge.InjectedProtoParam{
+			{Name: "param_1", Register: "ECX", Size: 4, Type: undef4, TypeLock: true, NameLock: true},
+			{Name: "param_2", Register: "EDX", Size: 4, Type: uintT, TypeLock: true, NameLock: true},
+			{Name: "param_3", Register: "R8D", Size: 4, Type: uintT, TypeLock: true, NameLock: true},
+		},
+	}
+
 	result, err := bridge.Build(engine, bridge.BuildConfig{
 		Name: target.Name, Entry: base, MaxInstructions: 200,
 		CspecPath: cspec, SymbolName: target.Name,
+		InjectedPrototype: injProto,
 	})
 	if err != nil {
 		t.Fatalf("bridge.Build: %v", err)
