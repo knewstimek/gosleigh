@@ -1,0 +1,9 @@
+{
+  "source": "Ghidra 12.0.4 headless DecompInterface.enableDebug capture, 2026-07-17. Extracted the <bytechunk> elements from the dispatch debug XML (function 'dispatch' at ram:0x24c0). Ghidra's loadimage fed the decompiler TWO disjoint code chunks: the fall-through body 0x24c0-0x24eb (44 bytes) and the switch default block 0x2524-0x252d (10 bytes), with a 56-byte unmapped gap between them. The single-blob 'bytes' field in x64_breadth_goldens.json packs both chunks contiguously, which places the default block at the wrong VA (0x24ec) so the range-guard default target (ja 0x2524) stays undecoded and the default block ('return 0xffffffff') is lost. This fixture restores the real two-chunk layout so the default block decodes and the guard folds to match the Ghidra golden.",
+  "functions": {
+    "dispatch": [
+      { "vma": 9408, "hex": "894c24084883ec188b442420890424833c2407774f48630424488d0d301100008b8481302500004803c1ffe0" },
+      { "vma": 9508, "hex": "b8ffffffff4883c418c3" }
+    ]
+  }
+}
