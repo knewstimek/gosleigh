@@ -1,0 +1,22 @@
+{
+  "functions": [
+    {
+      "name": "sum_loop",
+      "entry": 9216,
+      "bytes": "8954241048894c24084883ec18c744240400000000c7042400000000eb088b0424ffc08904248b4424283904247d1a48630424488b4c24208b04818b4c240403c88bc189442404ebd58b4424044883c418c3",
+      "c": "\r\nint sum_loop(longlong param_1,int param_2)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  \r\n  local_14 = 0;\r\n  for (local_18 = 0; local_18 < param_2; local_18 = local_18 + 1) {\r\n    local_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "dowhile_count",
+      "entry": 9312,
+      "bytes": "8954241048894c24084883ec18c744240400000000c704240000000048630424488b4c2420833c81007e0a8b442404ffc0894424048b0424ffc08904248b4424283904247cd68b4424044883c418c3",
+      "c": "\r\nint dowhile_count(longlong param_1,int param_2)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  \r\n  local_14 = 0;\r\n  local_18 = 0;\r\n  do {\r\n    if (0 < *(int *)(param_1 + (longlong)local_18 * 4)) {\r\n      local_14 = local_14 + 1;\r\n    }\r\n    local_18 = local_18 + 1;\r\n  } while (local_18 < param_2);\r\n  return local_14;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "sum_pp_walk",
+      "entry": 9408,
+      "bytes": "8954241048894c24084883ec28c7042400000000488b44243048894424084863442438488b4c2430488d04c14889442410488b44241048394424087324488b442408488b008b008b0c2403c88bc1890424488b4424084883c0084889442408ebd08b04244883c428c3",
+      "c": "\r\nint sum_pp_walk(undefined8 *param_1,int param_2)\r\n\r\n{\r\n  int local_28;\r\n  undefined8 *local_20;\r\n  \r\n  local_28 = 0;\r\n  for (local_20 = param_1; local_20 < param_1 + param_2; local_20 = local_20 + 1) {\r\n    local_28 = local_28 + *(int *)*local_20;\r\n  }\r\n  return local_28;\r\n}\r\n\r\n"
+    }
+  ]
+}
