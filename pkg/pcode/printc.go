@@ -1487,7 +1487,39 @@ func (s *printCState) emitListBlock(bl *FlowBlock) error {
 }
 
 func (s *printCState) emitIfBlock(bl *FlowBlock) error {
+	// A BlockIf produced by newBlockIfGoto stores a goto target and has its true
+	// edge removed; it renders as "if (cond) goto label;" with no braced body.
+	// C++ parity: PrintC::emitBlockIf getGotoTarget() != 0 branch (printc.cc:3046).
+	if bl.GotoTargetBlock() != nil {
+		return s.emitIfGotoBlock(bl)
+	}
 	return s.emitIfBlockChain(bl, false)
+}
+
+// emitIfGotoBlock renders a conditional goto: "if (cond) goto label;". The
+// enclosing structure emits the fall-through (false) path as the following block.
+// C++ parity: PrintC::emitBlockIf with getGotoTarget() set (printc.cc:3046-3049).
+func (s *printCState) emitIfGotoBlock(bl *FlowBlock) error {
+	condChild := bl
+	if children := bl.StructuredChildren(); len(children) > 0 {
+		condChild = children[0]
+	}
+	cond := s.mustRenderCondition(condChild)
+	if err := s.emitConditionLead(condChild); err != nil {
+		return err
+	}
+	s.lang.Statement(func() {
+		s.lang.Token("if")
+		s.lang.Space()
+		s.lang.Token("(")
+		s.lang.Token(cond)
+		s.lang.Token(")")
+		s.lang.Space()
+		s.lang.Token("goto")
+		s.lang.Space()
+		s.lang.Token(s.labelForBlock(s.gotoTarget(bl)))
+	})
+	return nil
 }
 
 // isBlockEmpty reports whether a block would produce no visible C output.
@@ -2113,6 +2145,12 @@ func (s *printCState) firstBasicChild(bl *FlowBlock) *BlockBasic {
 func (s *printCState) gotoTarget(bl *FlowBlock) *FlowBlock {
 	if bl == nil {
 		return nil
+	}
+	// A collapsed BlockGoto / BlockIf-goto stores its target directly because the
+	// goto edge was removed from the structure graph. Prefer that; fall back to
+	// the edge for BlockMultiGoto (whose goto edge is retained).
+	if t := bl.GotoTargetBlock(); t != nil {
+		return t
 	}
 	idx := bl.GotoEdgeIndex()
 	if idx >= 0 && idx < bl.SizeOut() {
