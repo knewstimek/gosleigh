@@ -222,6 +222,15 @@ func (fd *Funcdata) warning(txt string, ad address.Address) {
 	fd.commentDB.addCommentNoDuplicate(CommentWarning, fd.baseAddr, ad, msg)
 }
 
+// Warning is the exported entry the bridge staging driver uses to attach the
+// "Could not emulate address calculation" comment -- produced during jump-table
+// recovery on the throwaway partial clone -- onto the main Funcdata at the
+// BRANCHIND address. The main Funcdata is not in jump-table recovery mode, so the
+// "WARNING: " prefix matches the golden (not "WARNING (jumptable): ").
+// C++ parity: Funcdata::stageJumpTable calls warning(err.explain, op->getAddr())
+// on the original data (funcdata_block.cc:516,543).
+func (fd *Funcdata) Warning(txt string, ad address.Address) { fd.warning(txt, ad) }
+
 // GetGlobalScope returns the parent (global) symbol scope, or nil if none was
 // injected. C++ parity: Funcdata::getScopeLocal()->getParent().
 func (fd *Funcdata) GetGlobalScope() *GlobalScope { return fd.globalScope }

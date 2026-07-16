@@ -1349,6 +1349,20 @@ func (jt *JumpTable) LoadPoints() []LoadTable { return jt.loadPoints }
 // C++ parity accessor for jumptable.cc code that reads jmodel directly.
 func (jt *JumpTable) JumpModel() JumpModel { return jt.jmodel }
 
+// EmulateFailMsg returns the faithful "Could not emulate address calculation at
+// <addr>" text captured when this table's JumpBasic model reached address
+// emulation (BuildAddresses) and aborted on an op it could not execute. It is
+// empty unless a JumpBasic model was selected and its emulation failed. The
+// staging driver (Funcdata::stageJumpTable in C++) reads this to attach the
+// warning to the ORIGINAL Funcdata's BRANCHIND via warning(err.explain,
+// op->getAddr()) (funcdata_block.cc:543).
+func (jt *JumpTable) EmulateFailMsg() string {
+	if jb, ok := jt.jmodel.(*JumpBasic); ok {
+		return jb.emulateFailMsg
+	}
+	return ""
+}
+
 // AddBlockToSwitch appends a synthetic destination (used when a guard
 // block should also be recorded as a switch target).
 // C++ parity: jumptable.cc JumpTable::addBlockToSwitch
