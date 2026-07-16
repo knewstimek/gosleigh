@@ -146,6 +146,21 @@ func (hv *HighVariable) IsTypeLock() bool {
 	return false
 }
 
+// IsNameLock returns true if any instance Varnode has the namelock flag set.
+// C++ parity: HighVariable::isNameLock (variable.hh) via updateFlags, which ORs
+// the namelock property across all instance Varnodes.
+func (hv *HighVariable) IsNameLock() bool {
+	if hv == nil {
+		return false
+	}
+	for _, vn := range hv.instances {
+		if vn != nil && vn.IsNameLock() {
+			return true
+		}
+	}
+	return false
+}
+
 // IsPersist returns true if any instance Varnode has the persist flag.
 // C++ parity: HighVariable::isPersist (variable.cc)
 func (hv *HighVariable) IsPersist() bool {
