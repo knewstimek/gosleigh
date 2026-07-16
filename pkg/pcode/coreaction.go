@@ -843,19 +843,32 @@ func (a *ActionPrototypeTypes) Apply(data *Funcdata) int {
 	if fp.IsOutputLocked() {
 		out := fp.GetOutput()
 		if out != nil && out.Type() != nil && out.Type().Metatype() != TYPE_VOID {
+			// Determine the return storage. An injected locked prototype supplies
+			// the address/size explicitly (OutputStorage); otherwise fall back to
+			// the address of an existing output HighVariable instance. C++ reads
+			// outparam->getAddress()/getSize() directly (coreaction.cc:4655).
+			lockAddr, lockSize, hasLockAddr := fp.OutputStorage()
 			for _, op := range data.GetPcodeOpBank().AllOps() {
 				if op == nil || op.IsDead() || op.Code() != CPUI_RETURN || op.HaltType() != 0 {
 					continue
 				}
-				if out.NumInstances() == 0 {
+				var addr address.Address
+				var size int32
+				if hasLockAddr {
+					addr = lockAddr
+					size = lockSize
+				} else if out.NumInstances() > 0 && out.GetInstance(0) != nil {
+					addr = out.GetInstance(0).Addr()
+					size = out.Type().Size()
+				} else {
 					continue
 				}
-				ref := out.GetInstance(0)
-				if ref == nil {
-					continue
-				}
-				vn := data.NewVarnode(out.Type().Size(), ref.Addr())
-				data.OpSetInput(op, vn, op.NumInput())
+				vn := data.NewVarnode(size, addr)
+				// Append the return carrier as a new RETURN input. opInsertInput
+				// grows the input list; opSetInput cannot extend past the current
+				// arity. C++ parity: data.opInsertInput(op,vn,op->numInput())
+				// (coreaction.cc:4656).
+				data.OpInsertInput(op, vn, op.NumInput())
 				SetVarnodeType(vn, out.Type())
 			}
 		}
