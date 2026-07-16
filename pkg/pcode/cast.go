@@ -45,6 +45,11 @@ type CastStrategyC struct {
 	// promoteSize is the size of the C "int" type: the width integers get
 	// promoted to. C++ parity: CastStrategy::promoteSize (set by setTypeFactory).
 	promoteSize int32
+	// fd is the function currently being cast-analyzed. C++ resolves a spacebase
+	// PTRSUB output token through TypeSpacebase::getSubType, which needs the
+	// global/local scope; Gosleigh reaches those scopes through the Funcdata.
+	// Set by ActionSetCasts before the sweep; used by TypeOpPtrsub::getOutputToken.
+	fd *Funcdata
 }
 
 // NewCastStrategyC creates a C cast strategy backed by the given type factory.
