@@ -77,6 +77,15 @@ type Funcdata struct {
 	// C++ parity: funcdata.hh Funcdata::jumpvec
 	jumpTables []*JumpTable
 
+	// commentDB accumulates auto-generated warning comments (e.g. jump-table
+	// recovery failures) so PrintC can render them as inline block comments. In
+	// Ghidra the store is the global Architecture::commentdb keyed by function
+	// address; Gosleigh decompiles one function at a time, so it lives here.
+	// nil until the first warning is recorded, keeping output byte-identical for
+	// functions with no warnings. C++ parity: Architecture::commentdb + funcdata.cc
+	// Funcdata::warning.
+	commentDB *CommentDatabase
+
 	// graph and heritageSpaces let the universal-action tree run analysis actions
 	// (ActionHeritage etc.) without external context. The hand-ordered decompile
 	// driver passes these explicitly; the action-tree path reads them from here.
@@ -194,6 +203,24 @@ func (fd *Funcdata) SetDefaultModel(m *ProtoModel) { fd.defaultModel = m }
 
 // SetScopeLocal attaches a local variable scope.
 func (fd *Funcdata) SetScopeLocal(sl *ScopeLocal) { fd.scopeLocal = sl }
+
+// warning records an auto-generated warning comment in the comment database,
+// indexed by its placement address (the emitter attempts to place it before the
+// source expression mapping most closely to that address). The "WARNING: "
+// prefix (or "WARNING (jumptable): " during jump-table recovery) matches Ghidra
+// exactly, and PrintC wraps the body in "/* ... */".
+// C++ parity: funcdata.cc Funcdata::warning (funcdata.cc:119).
+func (fd *Funcdata) warning(txt string, ad address.Address) {
+	if fd.commentDB == nil {
+		fd.commentDB = &CommentDatabase{}
+	}
+	msg := "WARNING: "
+	if fd.IsJumptableRecoveryOn() {
+		msg = "WARNING (jumptable): "
+	}
+	msg += txt
+	fd.commentDB.addCommentNoDuplicate(CommentWarning, fd.baseAddr, ad, msg)
+}
 
 // GetGlobalScope returns the parent (global) symbol scope, or nil if none was
 // injected. C++ parity: Funcdata::getScopeLocal()->getParent().
