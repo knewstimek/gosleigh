@@ -310,10 +310,40 @@ func (t *typeOpPtradd) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 	return op.Input(0).TypeReadFacing(op)
 }
 
-// PTRSUB output token in C++ walks the pointed-to structure (TypePointer::downChain)
-// to find the sub-field type. downChain is not yet ported, so we fall back to the
-// base output-local type. TODO: port downChain for struct-field PTRSUB output casts.
+// PTRSUB output token: C++ takes the input-0 pointer type and walks one level
+// via TypePointer::downChain to get the pointed-at sub-field type. For a
+// spacebase pointer downChain resolves the referenced symbol
+// (TypeSpacebase::getSubType) and returns a stripped pointer to the symbol's
+// data-type; this is what lets a `&symbol` PTRSUB feed pointer arithmetic without
+// an inserted (undefined1 *) cast. The struct/array field-navigation case of
+// downChain is still not ported (kept as the base output-local fallback).
 // C++ parity: TypeOpPtrsub::getOutputToken (typeop.cc 2351-2366).
+func (t *typeOpPtrsub) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	if op == nil || op.NumInput() < 2 || op.Input(0) == nil || op.Input(1) == nil || op.Output() == nil {
+		return t.OutputTypeLocal(op, cs.tlst)
+	}
+	ptr, ok := op.Input(0).TypeReadFacing(op).(*Pointer)
+	if !ok || ptr.Pointee() == nil {
+		return t.OutputTypeLocal(op, cs.tlst)
+	}
+	// Spacebase pointer: resolve the symbol at the PTRSUB offset. When the offset
+	// lands exactly at the symbol start, the token is a stripped pointer to the
+	// symbol's type; otherwise (interior offset) C++ hands back unknown1 *.
+	if ptr.Pointee().Metatype() == TYPE_SPACEBASE && cs.fd != nil {
+		ws := int64(1)
+		if ptr.WordSize() > 0 {
+			ws = int64(ptr.WordSize())
+		}
+		offBytes := int64(op.Input(1).Offset()) * ws // AddrSpace::addressToByte
+		symType, within := cs.fd.ResolveSpacebaseSymbol(op.Input(0).GetSpaceFromConst(), offBytes)
+		if within == 0 && symType != nil {
+			return cs.tlst.GetPointerStripArray(op.Output().Size(), symType, ptr.WordSize())
+		}
+		return cs.tlst.GetPointer(op.Output().Size(), cs.tlst.GetBase(1, TYPE_UNKNOWN, "unknown"), ptr.WordSize())
+	}
+	// Non-spacebase pointer: struct/array downChain navigation not ported.
+	return t.OutputTypeLocal(op, cs.tlst)
+}
 
 // SUBPIECE output token: SUBPIECE prints as a cast to whatever its output type is,
 // so the token is the output Varnode's own def-facing type; when that is unknown a

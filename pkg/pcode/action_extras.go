@@ -951,7 +951,7 @@ func (fd *Funcdata) OpStackLoad(spc *address.Space, off uint64, sz int32, op *Pc
 // Go port handles the size-equal non-COPY branch only -- which is the only
 // shape ActionConstantPtr currently produces because it filters on opcode
 // before calling here.
-func (fd *Funcdata) SpacebaseConstant(op *PcodeOp, slot int, entryStart address.Address, rampoint address.Address, origval uint64, origsize int32) bool {
+func (fd *Funcdata) SpacebaseConstant(op *PcodeOp, slot int, sym *Symbol, entryStart address.Address, rampoint address.Address, origval uint64, origsize int32) bool {
 	if fd == nil || op == nil || rampoint.Space == nil {
 		return false
 	}
@@ -978,11 +978,19 @@ func (fd *Funcdata) SpacebaseConstant(op *PcodeOp, slot int, entryStart address.
 
 	// Build a fresh constant-zero spacebase varnode. SpaceBase flag plus the
 	// pointer type lets later passes (rules_loadstore) recognise it as a
-	// valid spacebase for LOAD/STORE rewrites.
+	// valid spacebase for LOAD/STORE rewrites. The spacebase pointer type is
+	// type-locked (C++: spacebase_vn->updateType(sb_type,true,true)); this lock
+	// is what keeps it a pointer through every ActionInferTypes pass, so it can
+	// act as the propagation source that re-types the PTRSUB output (via
+	// TypeOpPtrsub::propagateType) each pass. RulePtrsubUndo would normally
+	// collapse a spacebase PTRSUB back to a constant, but its spacebase branch
+	// (TypePointer::isPtrsubMatching TYPE_SPACEBASE) resolves the symbol and
+	// keeps the &symbol form intact.
+	// C++ parity: funcdata.cc spacebaseConstant L391-393.
 	sbVn := fd.NewConstant(sz, 0)
 	sbVn.SetFlags(VarnodeSpaceBase)
 	BindSpaceConstant(sbVn, rampoint.Space)
-	SetVarnodeType(sbVn, ptrType)
+	sbVn.UpdateTypeLock(ptrType, true, true)
 
 	// PTRSUB(sbVn, origval - extra). Both inputs are in address units.
 	newConstVal := origval - extra
@@ -992,6 +1000,25 @@ func (fd *Funcdata) SpacebaseConstant(op *PcodeOp, slot int, entryStart address.
 	fd.OpSetInput(ptrsub, sbVn, 0)
 	fd.OpSetInput(ptrsub, fd.NewConstant(sz, newConstVal), 1)
 	fd.OpInsertBefore(ptrsub, op)
+
+	// Type the PTRSUB output (the &symbol pointer) as a pointer to the symbol's
+	// data-type. Without this the output stays TYPE_INT and RulePtrArith never
+	// fires, so an index added to &symbol keeps an explicit integer-extension
+	// cast instead of collapsing into pointer arithmetic (PTRADD). The lock
+	// follows the symbol's type lock, except an UNKNOWN symbol type is never
+	// locked (leaving the pointer type to be re-derived by TypeOpPtrsub
+	// propagation from the locked spacebase input each InferTypes pass).
+	// C++ parity: funcdata.cc spacebaseConstant L413-419.
+	if sym != nil {
+		if entrytype := sym.Type(); entrytype != nil {
+			ptrentrytype := tf.GetPointerStripArray(sz, entrytype, uint32(rampoint.Space.WordSize))
+			typelock := sym.IsTypeLocked()
+			if typelock && entrytype.Metatype() == TYPE_UNKNOWN {
+				typelock = false
+			}
+			ptrOut.UpdateTypeLock(ptrentrytype, typelock, false)
+		}
+	}
 
 	currOut := ptrOut
 	if extra != 0 {
@@ -1006,5 +1033,78 @@ func (fd *Funcdata) SpacebaseConstant(op *PcodeOp, slot int, entryStart address.
 
 	// Replace the original constant input on op with the chain output.
 	fd.OpSetInput(op, currOut, slot)
+	return true
+}
+
+// ResolveSpacebaseSymbol resolves the symbol containing byte offset off inside
+// space spc and returns the symbol's data-type together with the byte offset
+// within that symbol. It mirrors TypeSpacebase::getSubType (type.cc L3369):
+// getMap()->queryContainer resolves the address-tied symbol; when none is found
+// the C++ code returns undefined1 with newoff 0, which this reproduces. The
+// global scope is queried first (getMap returns the global scope for a non
+// localframe spacebase), then the local scope as a fallback -- matching the
+// two-scope lookup ActionConstantPtr uses.
+// C++ parity: type.cc TypeSpacebase::getSubType + getMap (L3357-3391).
+// TODO known mismatch: Architecture::resolveConstant is approximated as the
+// identity map (byte offset == address offset), the same simplification
+// ActionConstantPtr.isPointer already makes.
+func (fd *Funcdata) ResolveSpacebaseSymbol(spc *address.Space, off int64) (Datatype, int64) {
+	tf := fd.TypeFactory()
+	undef1 := tf.GetBase(1, TYPE_UNKNOWN, "undefined")
+	if spc == nil {
+		return undef1, 0
+	}
+	ws := int64(spc.WordSize)
+	if ws <= 0 {
+		ws = 1
+	}
+	addrOff := off / ws // byteToAddress
+	probe := address.Address{Space: spc, Offset: uint64(addrOff)}
+	var entry *SymbolEntry
+	if g := fd.GetGlobalScope(); g != nil {
+		entry = g.QueryContainer(probe, 1, address.Address{})
+	}
+	if entry == nil {
+		if sl := fd.GetScopeLocal(); sl != nil {
+			entry = sl.QueryContainer(probe, 1, address.Address{})
+		}
+	}
+	if entry == nil {
+		return undef1, 0 // C++ fallback: getBase(1,TYPE_UNKNOWN), newoff 0
+	}
+	sym := entry.Symbol()
+	if sym == nil || sym.Type() == nil {
+		return undef1, 0
+	}
+	within := (int64(probe.Offset) - int64(entry.Addr().Offset)) + int64(entry.Offset())
+	return sym.Type(), within
+}
+
+// spacebasePtrsubMatching mirrors the TYPE_SPACEBASE branch of
+// TypePointer::isPtrsubMatching (type.cc L1264-1273): a spacebase PTRSUB is a
+// valid pointer subtraction when its offset resolves to the exact start of a
+// symbol and any additional constant (extra) stays within that symbol (or the
+// symbol has arrayed slack). Used by RulePtrsubUndo so a &symbol PTRSUB is not
+// collapsed back to a raw constant.
+// C++ parity: type.cc TypePointer::isPtrsubMatching (TYPE_SPACEBASE case).
+func (fd *Funcdata) spacebasePtrsubMatching(spc *address.Space, ptr *Pointer, off, extra int64) bool {
+	ws := int64(1)
+	if ptr != nil && ptr.WordSize() > 0 {
+		ws = int64(ptr.WordSize())
+	}
+	newoffByte := off * ws // addressToByteInt
+	subType, within := fd.ResolveSpacebaseSymbol(spc, newoffByte)
+	if subType == nil || within != 0 {
+		return false
+	}
+	extraByte := extra * ws
+	if extraByte < 0 || extraByte >= int64(subType.Size()) {
+		// testForArraySlack: only arrayed sub-types have slack; the undefined1
+		// / scalar symbols this path currently sees never do (TODO: port
+		// nearestArrayedComponent* when struct/array globals are supported).
+		if subType.Metatype() != TYPE_ARRAY {
+			return false
+		}
+	}
 	return true
 }

@@ -90,7 +90,7 @@ func (a *ActionInferTypes) Apply(data *Funcdata) int {
 		if !inferProcessed(vn) {
 			continue
 		}
-		inferPropagateOneType(tf, vn)
+		inferPropagateOneType(data, tf, vn)
 	}
 	inferPropagateAcrossReturns(data, tf)
 
@@ -274,7 +274,7 @@ func (p *propagationState) step() {
 // inferPropagateOneType pushes a Varnode's tempType as far as possible through
 // the data-flow graph, visiting each Varnode at most once.
 // C++ parity: ActionInferTypes::propagateOneType (coreaction.cc:5183-5209).
-func inferPropagateOneType(tf *TypeFactory, root *Varnode) {
+func inferPropagateOneType(data *Funcdata, tf *TypeFactory, root *Varnode) {
 	stack := []*propagationState{newPropagationState(root)}
 	root.SetMark()
 	for len(stack) > 0 {
@@ -284,7 +284,7 @@ func inferPropagateOneType(tf *TypeFactory, root *Varnode) {
 			stack = stack[:len(stack)-1]
 			continue
 		}
-		if inferPropagateTypeEdge(tf, ptr.op, ptr.inslot, ptr.slot) {
+		if inferPropagateTypeEdge(data, tf, ptr.op, ptr.inslot, ptr.slot) {
 			var nextvn *Varnode
 			if ptr.slot == -1 {
 				nextvn = ptr.op.Output()
@@ -304,7 +304,7 @@ func inferPropagateOneType(tf *TypeFactory, root *Varnode) {
 // and updates the output Varnode's tempType. Returns true if the pushed type is
 // new and the output is not already on the DFS path.
 // C++ parity: ActionInferTypes::propagateTypeEdge (coreaction.cc:5085-5123).
-func inferPropagateTypeEdge(tf *TypeFactory, op *PcodeOp, inslot, outslot int) bool {
+func inferPropagateTypeEdge(data *Funcdata, tf *TypeFactory, op *PcodeOp, inslot, outslot int) bool {
 	var invn *Varnode
 	if inslot == -1 {
 		invn = op.Output()
@@ -346,7 +346,7 @@ func inferPropagateTypeEdge(tf *TypeFactory, op *PcodeOp, inslot, outslot int) b
 			return false
 		}
 	}
-	newtype := inferPropagateEdge(tf, op, invn, outvn, inslot, outslot, alttype)
+	newtype := inferPropagateEdge(data, tf, op, invn, outvn, inslot, outslot, alttype)
 	if newtype == nil {
 		return false
 	}
@@ -370,8 +370,27 @@ func inferPropagateTypeEdge(tf *TypeFactory, op *PcodeOp, inslot, outslot int) b
 // TypeOpEqual/NotEqual/IntLess/IntLessEqual::propagateAcrossCompare(965),
 // TypeOpIntSless(1035)/IntSlessEqual(1061), TypeOpIntAdd(1183), TypeOpMulti(1953),
 // TypeOpIndirect(2007).
-func inferPropagateEdge(tf *TypeFactory, op *PcodeOp, invn, outvn *Varnode, inslot, outslot int, alttype Datatype) Datatype {
+func inferPropagateEdge(data *Funcdata, tf *TypeFactory, op *PcodeOp, invn, outvn *Varnode, inslot, outslot int, alttype Datatype) Datatype {
 	switch op.Code() {
+	case CPUI_PTRSUB:
+		// Mirror TypeOpPtrsub::propagateType (typeop.cc L2368-2380): a pointer
+		// input propagates to the output through propagateAddIn2Out. This is the
+		// mechanism that keeps a spacebase PTRSUB output typed as a pointer to
+		// the referenced symbol across every InferTypes pass (the local seed is
+		// TYPE_INT, so without this the &symbol pointer would be lost).
+		if inslot != -1 && outslot != -1 {
+			return nil // Must propagate input <-> output
+		}
+		if alttype.Metatype() != TYPE_PTR {
+			return nil
+		}
+		if inslot == -1 {
+			return nil // Don't propagate pointer types output -> input
+		}
+		if altPtr, ok := alttype.(*Pointer); ok {
+			return inferPropagateAddIn2Out(data, tf, altPtr, op, inslot)
+		}
+		return nil
 	case CPUI_COPY, CPUI_MULTIEQUAL:
 		if inslot != -1 && outslot != -1 {
 			return nil // Must propagate input <-> output
@@ -475,6 +494,95 @@ func inferPropagateIntAdd(op *PcodeOp, invn, outvn *Varnode, inslot, outslot int
 	// not ported in this slice (array/struct-field pointers are known-mismatch).
 	// C++ parity: propagateAddIn2Out (typeop.cc:1217). TODO.
 	return nil
+}
+
+// inferPropagateAddIn2Out mirrors TypeOpIntAdd::propagateAddIn2Out (typeop.cc
+// L1217-1255) for the case a pointer flows from input slot inslot of an
+// add-like op (PTRSUB/PTRADD/INT_ADD) to the op output. Only the spacebase
+// pointer case is ported: the referenced symbol is resolved (downChain ->
+// TypeSpacebase::getSubType) and a stripped pointer to the symbol's data-type
+// is returned; a still-spacebase result degrades to unknown1 * (C++ L1250-1253).
+// Non-spacebase pointer-forward navigation (struct/array field downChain that
+// builds a TypePointerRel) is left unported -- returning nil (no propagation),
+// which matches the existing inferPropagateIntAdd known mismatch.
+func inferPropagateAddIn2Out(data *Funcdata, tf *TypeFactory, alt *Pointer, op *PcodeOp, inslot int) Datatype {
+	if alt.Pointee() == nil {
+		return nil
+	}
+	off, command := propagateAddPointer(op, inslot, alt.Pointee().AlignSize())
+	if command == 2 {
+		return nil // Doesn't look like a good pointer add
+	}
+	baseVn := op.Input(inslot)
+	if baseVn == nil || !baseVn.IsSpaceBase() {
+		return nil // Only spacebase pointer-forward is ported (TODO)
+	}
+	if command == 3 {
+		return alt // Input data-type propagates through untransformed
+	}
+	// downChain at the spacebase level: convert the address-unit offset to bytes
+	// and resolve the containing symbol.
+	ws := int64(1)
+	if alt.WordSize() > 0 {
+		ws = int64(alt.WordSize())
+	}
+	typeOffset := off * ws // AddrSpace::addressToByteInt
+	symType, within := data.ResolveSpacebaseSymbol(baseVn.GetSpaceFromConst(), typeOffset)
+	if symType == nil {
+		return nil
+	}
+	if within != 0 {
+		// Offset lands in the interior of a struct/array symbol; C++ would build
+		// a TypePointerRel here. Not ported for this slice -- leave the output at
+		// its locally-derived type (TODO).
+		return nil
+	}
+	res := tf.GetPointerStripArray(alt.Size(), symType, alt.WordSize())
+	// Spacebase-to-unknown degrade: if the result still points at a spacebase,
+	// hand back unknown1 *.
+	if res.Pointee() != nil && res.Pointee().Metatype() == TYPE_SPACEBASE {
+		res = tf.GetPointer(alt.Size(), tf.GetBase(1, TYPE_UNKNOWN, "unknown"), alt.WordSize())
+	}
+	return res
+}
+
+// propagateAddPointer mirrors TypeOpIntAdd::propagateAddPointer (typeop.cc
+// L1270-1315): classify how a pointer at input slot propagates through an
+// add-like op, returning the constant offset and a command code:
+//   0 add-zero, 1 add-const, 2 no-propagate, 3 untransformed.
+// Only the PTRSUB and PTRADD slot-0 forms are needed for spacebase propagation;
+// the INT_ADD form (used by TypeOpIntAdd, not yet wired) reports no-propagate.
+func propagateAddPointer(op *PcodeOp, slot int, sz int32) (int64, int) {
+	switch op.Code() {
+	case CPUI_PTRADD:
+		if slot != 0 {
+			return 0, 2
+		}
+		constvn := op.Input(1)
+		mult := int64(op.Input(2).Offset())
+		if constvn.IsConstant() {
+			off := int64(truncateToSize(uint64(int64(constvn.Offset())*mult), constvn.Size()))
+			if off == 0 {
+				return 0, 0
+			}
+			return off, 1
+		}
+		if sz != 0 && mult%int64(sz) != 0 {
+			return 0, 2
+		}
+		return 0, 3
+	case CPUI_PTRSUB:
+		if slot != 0 {
+			return 0, 2
+		}
+		off := int64(op.Input(1).Offset())
+		if off == 0 {
+			return 0, 0
+		}
+		return off, 1
+	default:
+		return 0, 2
+	}
 }
 
 // inferLoadStoreWordSize returns the word size associated with a LOAD/STORE
@@ -581,7 +689,7 @@ func inferPropagateAcrossReturns(data *Funcdata, tf *TypeFactory) {
 				continue
 			}
 			vn.SetTempType(ct)
-			inferPropagateOneType(tf, vn)
+			inferPropagateOneType(data, tf, vn)
 		}
 	}
 }

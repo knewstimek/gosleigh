@@ -1577,7 +1577,7 @@ func (a *ActionConstantPtr) Apply(data *Funcdata) int {
 				// C++ parity (and so the slot index stays consistent if
 				// future passes re-enter the loop).
 				// C++ parity: coreaction.cc ActionConstantPtr::apply L1211.
-				data.SpacebaseConstant(op, slot, entry.Addr(), probe, vn.Offset(), vn.Size())
+				data.SpacebaseConstant(op, slot, entry.Symbol(), entry.Addr(), probe, vn.Offset(), vn.Size())
 				a.count++
 				hit = true
 			}

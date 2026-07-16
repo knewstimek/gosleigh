@@ -465,7 +465,14 @@ func (r *RulePtrsubUndo) apply(op *PcodeOp, data *Funcdata) int {
 	}
 	val := signExtendToInt64(op.Input(1).Offset(), op.Input(1).Size())
 	extra, multiplier := getExtraOffset(op)
-	if ptrsubMatches(ptr, val, extra, multiplier) {
+	// A spacebase pointer resolves its subtype through the symbol table rather
+	// than a structural sub-field walk, so it needs the scope-aware check.
+	// C++ parity: TypePointer::isPtrsubMatching TYPE_SPACEBASE branch.
+	if ptr.Pointee() != nil && ptr.Pointee().Metatype() == TYPE_SPACEBASE {
+		if data.spacebasePtrsubMatching(op.Input(0).GetSpaceFromConst(), ptr, val, extra) {
+			return 0
+		}
+	} else if ptrsubMatches(ptr, val, extra, multiplier) {
 		return 0
 	}
 	data.OpSetOpcode(op, CPUI_INT_ADD)
@@ -559,18 +566,38 @@ func ptrInputSlotOnInput(op *PcodeOp, slot int) bool {
 }
 
 func (r *RulePtrsubCharConstant) apply(op *PcodeOp, data *Funcdata) int {
-	if op.NumInput() < 2 || !op.Input(0).IsConstant() || !op.Input(1).IsConstant() {
+	// C++ parity: RulePtrsubCharConstant::applyOp (ruleaction.cc L7374-7422).
+	if op.NumInput() < 2 {
 		return 0
 	}
-	ptr, _ := op.Input(0).TypeReadFacing(op).(*Pointer)
-	if ptr == nil || ptr.Pointee() == nil || ptr.Pointee().Size() != 1 {
+	// Input 0 must be a pointer to a spacebase.
+	sbPtr, ok := op.Input(0).TypeReadFacing(op).(*Pointer)
+	if !ok || sbPtr.Pointee() == nil || sbPtr.Pointee().Metatype() != TYPE_SPACEBASE {
 		return 0
 	}
+	if !op.Input(1).IsConstant() {
+		return 0
+	}
+	// The PTRSUB output must be a pointer to a char-printable type. This guard
+	// (C++: outtype->getPtrTo()->isCharPrint(), L7386-7389) is what keeps a
+	// non-string spacebase reference -- e.g. &__ImageBase, a pointer to
+	// undefined1 -- from being collapsed to a bare constant here. Without it a
+	// legitimate &symbol form is lost.
+	outPtr, ok := op.Output().TypeDefFacing().(*Pointer)
+	if !ok || outPtr.Pointee() == nil || !isCharPrintLike(outPtr.Pointee()) {
+		return 0
+	}
+	// C++ additionally requires the symbol data to sit in a read-only region and
+	// to look like a string (Scope::isReadOnly + StringManager::isString). Those
+	// facilities are not modelled here yet; the char-print guard above already
+	// prevents the &__ImageBase regression, and only genuine char-pointer
+	// spacebase references reach this point.
+	// TODO known mismatch: read-only + isString gating (ruleaction.cc L7390-7396).
 	base := op.Input(0).Offset()
 	off := op.Input(1).Offset()
 	constant := data.NewConstant(op.Input(0).Size(), truncateToSize(base+off, op.Input(0).Size()))
 	BindSpaceConstant(constant, op.Input(0).GetSpaceFromConst())
-	SetVarnodeType(constant, ptr)
+	SetVarnodeType(constant, outPtr)
 	return rewriteToCopy(data, op, constant)
 }
 

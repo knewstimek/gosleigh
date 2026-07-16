@@ -206,6 +206,10 @@ func (a *ActionSetCasts) Clone(groups ActionGroupList) Action {
 // ActionSetCasts::apply (coreaction.cc 2724-2776).
 func (a *ActionSetCasts) Apply(data *Funcdata) int {
 	cs := sharedCastStrategyC
+	// Give the cast strategy access to the current function's scopes so a
+	// spacebase PTRSUB output token can be resolved to its symbol pointer type.
+	// C++ parity: the CastStrategy is bound to the Architecture/Funcdata.
+	cs.fd = data
 	for _, op := range data.allOpsOrdered() {
 		// Skip NonPrinting ops. C++ parity: ActionSetCasts::apply skips op->notPrinted()
 		// (coreaction.cc 2729). These are redundant internal COPYs marked by
