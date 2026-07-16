@@ -39,6 +39,56 @@ type BuildConfig struct {
 	// injection surface; future locked-FuncProto injection can layer onto the
 	// same BuildConfig without disturbing it.
 	InjectedGlobals []InjectedGlobal
+
+	// InjectedPrototype is an opt-in locked function prototype supplied by the
+	// analysis environment. It mirrors the fully-locked <prototype> Ghidra's
+	// headless analyzer commits to the program database before the decompiler
+	// core runs (model + modellock, typelock return, typelock/namelock params).
+	// When nil, no prototype is attached and the core recovers the prototype
+	// itself -- output stays byte-identical to the un-injected path. C++ parity:
+	// a locked FuncProto decoded via FuncProto::decode/setPieces, consumed by
+	// ActionPrototypeTypes (coreaction.cc:4620-4715).
+	InjectedPrototype *InjectedPrototype
+}
+
+// InjectedProtoParam describes one register storage slot (a parameter or the
+// return value) of an injected locked prototype. Storage is given as a register
+// name so the bridge can resolve it against the engine's register table without
+// the caller holding an address.Space. C++ parity: a locked ProtoParameter
+// (address + size + type + name, typelock/namelock).
+type InjectedProtoParam struct {
+	// Name is documentary (e.g. "param_1"); Gosleigh derives parameter names.
+	Name string
+	// Register is the storage register name, e.g. "EAX", "ECX", "EDX", "R8D".
+	Register string
+	// Size is the storage width in bytes (e.g. 4 for a 32-bit register slot).
+	Size int32
+	// Type is the locked data type for this slot.
+	Type pcode.Datatype
+	// TypeLock/NameLock mirror the Ghidra symbol locks.
+	TypeLock bool
+	NameLock bool
+}
+
+// InjectedPrototype captures a fully-locked function prototype (model + return +
+// parameters). Only the return (output lock) and parameter types (input type
+// locks) drive core behavior in Gosleigh: the load-bearing effect is that an
+// output type-lock forces a distinct return carrier onto each RETURN op
+// (ActionPrototypeTypes locked-output path) instead of reusing an operand. The
+// parameter storage map is reproduced by Gosleigh's register-parameter
+// derivation, so the injected parameter types are stamped onto the recovered
+// parameters (type-locked) rather than re-deriving the input map. C++ parity:
+// FuncProto with isModelLocked/isOutputLocked/isInputLocked true.
+type InjectedPrototype struct {
+	// Model is documentary (e.g. "__fastcall"); the concrete model comes from the
+	// cspec default evaluation model already attached to the Funcdata.
+	Model string
+	// ModelLock mirrors modellock="true".
+	ModelLock bool
+	// Return is the locked return slot; a nil Return.Type means no locked return.
+	Return InjectedProtoParam
+	// Params are the locked input parameters in ABI order.
+	Params []InjectedProtoParam
 }
 
 // InjectedGlobal describes one environment-supplied global symbol to seed into
@@ -366,7 +416,84 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// run. Callers must supply a cspec for stack-frame recovery (see Decompile).
 	fd.SetDefaultModel(buildDefaultModel(engine, result.CspecData, fd, cfg.EntryPoint))
 
+	// Attach an opt-in locked prototype supplied by the analysis environment.
+	// Must run after SetDefaultModel so the locked FuncProto reuses the cspec
+	// evaluation model. No-op when cfg.InjectedPrototype is nil (default path).
+	if cfg.InjectedPrototype != nil {
+		applyInjectedPrototype(engine, fd, cfg.InjectedPrototype)
+	}
+
 	return result, nil
+}
+
+// applyInjectedPrototype attaches a locked FuncProto built from the injected
+// prototype spec. It sets the model lock, the output (return) type lock with
+// explicit register storage, and records the locked parameter types by register
+// offset. The core's ActionPrototypeTypes then forces a return carrier onto each
+// RETURN (locked-output path), while ScopeLocal.BuildFromVarnodes stamps the
+// locked parameter types onto the register parameters it recovers.
+//
+// The input lock flag is intentionally NOT set: Gosleigh recovers the register
+// parameter storage map by ABI-slot derivation, which converges on exactly the
+// storage a locked prototype encodes, so the derivation is allowed to run and the
+// injected types are overlaid on its result. C++ instead skips deriveInputMap and
+// creates the input varnodes from the ProtoParameter storage; the observable
+// result (typed, ABI-ordered register parameters) is identical because the
+// storage maps agree.
+// C++ parity: FuncProto::setPieces + ActionPrototypeTypes::apply (coreaction.cc).
+func applyInjectedPrototype(engine *sla.Engine, fd *pcode.Funcdata, spec *InjectedPrototype) {
+	if engine == nil || fd == nil || spec == nil {
+		return
+	}
+	model := fd.DefaultModel()
+	fp := pcode.NewFuncProto(model)
+	fp.SetModelLock(spec.ModelLock)
+
+	xr := engine.XRefs()
+	// resolveReg maps a register name to its (register-space address, natural
+	// width). The register space pointer is recovered from the function's existing
+	// varnodes by space index (the function references its argument registers, so
+	// the register space is present by this point).
+	resolveReg := func(name string) (address.Address, int32, bool) {
+		si, off, sz, ok := xr.RegisterByName(name)
+		if !ok {
+			return address.Address{}, 0, false
+		}
+		space, _ := registerSpaceByIndex(fd, si)
+		if space == nil {
+			return address.Address{}, 0, false
+		}
+		return address.Address{Space: space, Offset: off}, int32(sz), true
+	}
+
+	// Locked return: explicit storage + type + output lock.
+	if spec.Return.Type != nil {
+		if addr, natSize, ok := resolveReg(spec.Return.Register); ok {
+			size := spec.Return.Size
+			if size <= 0 {
+				size = natSize
+			}
+			fp.SetLockedReturn(addr, size, spec.Return.Type)
+			fp.SetOutputLock(spec.Return.TypeLock)
+		}
+	}
+
+	// Locked parameter types keyed by register byte offset. Only meaningful when
+	// the parameter carries a type lock; a namelock/typelock=false slot leaves the
+	// derived type in place.
+	for _, p := range spec.Params {
+		if p.Type == nil || !p.TypeLock {
+			continue
+		}
+		if addr, _, ok := resolveReg(p.Register); ok {
+			fp.SetLockedParamType(addr.Offset, p.Type)
+		}
+	}
+
+	fd.SetFuncProto(fp)
+	if fd.GetScopeLocal() == nil {
+		fd.SetScopeLocal(pcode.NewScopeLocal(model))
+	}
 }
 
 // buildDefaultModel constructs the architecture evaluation prototype model the
