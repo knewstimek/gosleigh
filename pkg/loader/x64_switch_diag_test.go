@@ -112,10 +112,14 @@ func TestX64SwitchGoldenMap(t *testing.T) {
 		Return: bridge.InjectedProtoParam{
 			Name: "", Register: "EAX", Size: 4, Type: uintT, TypeLock: true,
 		},
+		// merge="false" (isolate) on every committed param -- measured in the
+		// savefile debug_op_switch.xml -- is what makes the C++ core reject the
+		// accumulator<->param_2 speculative merge (mergeTestAdjacent isolated guard),
+		// producing the distinct `uVar1` return carrier.
 		Params: []bridge.InjectedProtoParam{
-			{Name: "param_1", Register: "ECX", Size: 4, Type: undef4, TypeLock: true, NameLock: true},
-			{Name: "param_2", Register: "EDX", Size: 4, Type: uintT, TypeLock: true, NameLock: true},
-			{Name: "param_3", Register: "R8D", Size: 4, Type: uintT, TypeLock: true, NameLock: true},
+			{Name: "param_1", Register: "ECX", Size: 4, Type: undef4, TypeLock: true, NameLock: true, Isolate: true},
+			{Name: "param_2", Register: "EDX", Size: 4, Type: uintT, TypeLock: true, NameLock: true, Isolate: true},
+			{Name: "param_3", Register: "R8D", Size: 4, Type: uintT, TypeLock: true, NameLock: true, Isolate: true},
 		},
 	}
 

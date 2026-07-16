@@ -35,12 +35,13 @@ const (
 //
 // C++ parity: database.hh Symbol (subset)
 type Symbol struct {
-	name     string
-	dataType Datatype
-	flags    uint32 // Varnode-like property flags mirrored into the symbol
-	category int
-	catIndex int
-	symbolId uint64
+	name      string
+	dataType  Datatype
+	flags     uint32 // Varnode-like property flags mirrored into the symbol
+	dispFlags uint32 // display/behavior flags (Symbol::dispflags), e.g. isolate
+	category  int
+	catIndex  int
+	symbolId  uint64
 
 	// mapEntry is the list of storage locations that resolve to this symbol.
 	// C++ parity: Symbol::mapentry (list<list<SymbolEntry>::iterator>).
@@ -170,6 +171,35 @@ func (s *Symbol) SetID(id uint64) {
 	}
 	s.symbolId = id
 }
+
+// Symbol display/behavior flags (Symbol::dispflags subset).
+// C++ parity: database.hh Symbol::DisplayFlags (isolate = 16).
+const (
+	// SymbolIsolate marks a Symbol that must not be speculatively merged with
+	// other Varnodes (required merges still happen). Ghidra sets this when a
+	// committed prototype's parameter is serialized with merge="false".
+	SymbolIsolate uint32 = 16
+)
+
+// SetIsolated marks (or clears) whether this Symbol should be excluded from
+// speculative merging. Setting it also type-locks the Symbol, mirroring the C++
+// contract that an isolated Symbol must be typelocked.
+// C++ parity: database.cc Symbol::setIsolated (lines 255-265).
+func (s *Symbol) SetIsolated(val bool) {
+	if s == nil {
+		return
+	}
+	if val {
+		s.dispFlags |= SymbolIsolate
+		s.flags |= VarnodeTypeLock // isolated Symbol must be typelocked
+	} else {
+		s.dispFlags &^= SymbolIsolate
+	}
+}
+
+// IsIsolated reports whether the Symbol is excluded from speculative merging.
+// C++ parity: database.hh Symbol::isIsolated (dispflags & isolate).
+func (s *Symbol) IsIsolated() bool { return s != nil && s.dispFlags&SymbolIsolate != 0 }
 
 // IsTypeLocked reports whether Varnode::typelock is set on the symbol.
 // C++ parity: Symbol::isTypeLocked
