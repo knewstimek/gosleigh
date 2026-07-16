@@ -255,6 +255,13 @@ func (t *typeOpSext) PropagateType(op *PcodeOp, slot int, inType Datatype, tf *T
 	return nil
 }
 
+// typeOpIntRight / typeOpIntSright: shift ops that force the shifted value (slot
+// 0) to the op's signedness, unlike the base getInputCast which ignores int/uint.
+// Both keep the base (nil) type propagation; only getInputCast differs.
+// C++ parity: typeop.cc TypeOpIntRight/TypeOpIntSright::getInputCast (1545-1600).
+type typeOpIntRight struct{ typeOpBase }
+type typeOpIntSright struct{ typeOpBase }
+
 // typeOpIntMult: integer multiply propagates TYPE_INT bidirectionally.
 // If either operand is TYPE_INT, the result is TYPE_INT; and if the output
 // is TYPE_INT, both inputs are inferred as TYPE_INT.
@@ -352,8 +359,8 @@ func RegisterTypeOps() []TypeOp {
 	inst[CPUI_INT_AND] = &typeOpBase{CPUI_INT_AND, PcodeOpBinary | PcodeOpCommutative, "&"}
 	inst[CPUI_INT_OR] = &typeOpBase{CPUI_INT_OR, PcodeOpBinary | PcodeOpCommutative, "|"}
 	inst[CPUI_INT_LEFT] = &typeOpBase{CPUI_INT_LEFT, PcodeOpBinary, "<<"}
-	inst[CPUI_INT_RIGHT] = &typeOpBase{CPUI_INT_RIGHT, PcodeOpBinary, ">>"}
-	inst[CPUI_INT_SRIGHT] = &typeOpBase{CPUI_INT_SRIGHT, PcodeOpBinary, ">>"}
+	inst[CPUI_INT_RIGHT] = &typeOpIntRight{typeOpBase{CPUI_INT_RIGHT, PcodeOpBinary, ">>"}}
+	inst[CPUI_INT_SRIGHT] = &typeOpIntSright{typeOpBase{CPUI_INT_SRIGHT, PcodeOpBinary, ">>"}}
 	inst[CPUI_INT_MULT] = &typeOpIntMult{typeOpBase{CPUI_INT_MULT, PcodeOpBinary | PcodeOpCommutative, "*"}}
 	inst[CPUI_INT_DIV] = &typeOpBase{CPUI_INT_DIV, PcodeOpBinary, "/"}
 	inst[CPUI_INT_SDIV] = &typeOpBase{CPUI_INT_SDIV, PcodeOpBinary, "/"}

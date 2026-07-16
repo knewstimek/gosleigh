@@ -498,6 +498,39 @@ func (t *typeOpSext) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Data
 	return cs.castStandardRead(reqtype, curtype, true, false)
 }
 
+// INT_RIGHT / INT_SRIGHT getInputCast: the shifted value (slot 0) must carry the
+// op's signedness. Unlike the base getInputCast (careUintInt=false), these use
+// careUintInt=true so a uint operand under an arithmetic shift -- or an int
+// operand under a logical shift -- is cast. The shift-amount operand (slot 1)
+// falls through to the base. C++ parity: typeop.cc TypeOpIntRight::getInputCast
+// (1545-1558, wantExt=UNSIGNED) / TypeOpIntSright::getInputCast (1587-1600,
+// wantExt=SIGNED).
+func (t *typeOpIntRight) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
+	return shiftValueInputCast(t, op, slot, cs, unsignedExtension)
+}
+
+func (t *typeOpIntSright) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
+	return shiftValueInputCast(t, op, slot, cs, signedExtension)
+}
+
+// shiftValueInputCast is the shared slot-0 cast test for INT_RIGHT/INT_SRIGHT.
+// wantExt is the promotion the op's signedness already provides (unsigned for
+// logical, signed for arithmetic); when the natural promotion of the operand
+// does not include it, a cast to the required signed/unsigned type is forced.
+func shiftValueInputCast(t TypeOp, op *PcodeOp, slot int, cs *CastStrategyC, wantExt int) Datatype {
+	if slot != 0 || op == nil || op.NumInput() == 0 || op.Input(0) == nil {
+		return baseGetInputCast(t, op, slot, cs)
+	}
+	vn := op.Input(0)
+	reqtype := t.InputTypeLocal(op, 0, cs.tlst)
+	promoType := cs.intPromotionType(vn)
+	if promoType != noPromotion && (promoType&wantExt) == 0 {
+		return reqtype
+	}
+	curtype := vn.TypeReadFacing(op)
+	return cs.castStandardRead(reqtype, curtype, true, true)
+}
+
 // PTRADD/PTRSUB slot-0 getInputCast in C++ compares the varnode's own type
 // (getTypeReadFacing) against its HighVariable type (getHighTypeReadFacing). In
 // Gosleigh those collapse to vn.TypeReadFacing(op), so the slot-0 cast test is
