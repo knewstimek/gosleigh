@@ -304,6 +304,22 @@ func mergeTestRequired(h1, h2 *HighVariable) bool {
 			return false
 		}
 	}
+	// Symbol guard: two HighVariables that map to different Symbols -- or to
+	// different byte offsets within the same Symbol -- name distinct storage and
+	// must not merge. This is what keeps a namelocked register parameter (e.g.
+	// param_2) from being reused as an accumulator that carries a different
+	// mapped Symbol.
+	// C++ parity: merge.cc Merge::mergeTestRequired lines 157-164.
+	symOut := h1.GetSymbol()
+	symIn := h2.GetSymbol()
+	if symOut != nil && symIn != nil {
+		if symOut != symIn {
+			return false // Map to different symbols
+		}
+		if h1.GetSymbolOffset() != h2.GetSymbolOffset() {
+			return false // Map to different parts of the same symbol
+		}
+	}
 	return true
 }
 
