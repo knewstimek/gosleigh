@@ -516,6 +516,62 @@ func (cs *CastStrategyC) IsSextCast(outtype, intype Datatype) bool {
 	return true
 }
 
+// IsExtensionCastImplied reports whether an INT_ZEXT/INT_SEXT op, whose (implied)
+// output is read by readOp, is an integer promotion that C rendering makes
+// invisible -- so the extension is hidden entirely rather than shown as a cast.
+// This mirrors the print-time decision that is gated on option_hide_exts (on by
+// default). C++ parity: cast.cc CastStrategyC::isExtensionCastImplied (249-298).
+func (cs *CastStrategyC) IsExtensionCastImplied(op *PcodeOp, readOp *PcodeOp) bool {
+	outVn := op.Output()
+	if outVn == nil {
+		return false
+	}
+	// An explicit result names a temporary; the extension is not folded into a
+	// surrounding expression, so it cannot be implied.
+	if outVn.IsExplicit() {
+		return false
+	}
+	if readOp == nil {
+		return false
+	}
+	rt := outVn.TypeReadFacing(readOp)
+	if rt == nil {
+		return false
+	}
+	metatype := rt.Metatype()
+	switch readOp.Code() {
+	case CPUI_PTRADD:
+		// Pointer-index arithmetic always promotes its index implicitly.
+	case CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_MULT, CPUI_INT_DIV,
+		CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR,
+		CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL,
+		CPUI_INT_LESS, CPUI_INT_LESSEQUAL,
+		CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL:
+		slot := readOp.GetSlot(outVn)
+		otherVn := readOp.Input(1 - slot)
+		if otherVn == nil {
+			return false
+		}
+		if otherVn.IsConstant() {
+			// Integer tokens do not indicate their size; a constant wider than
+			// the promotion size is not naturally extended, so the other side's
+			// extension must stay explicit.
+			if otherVn.Size() > cs.promoteSize {
+				return false
+			}
+		} else if !otherVn.IsExplicit() {
+			return false
+		}
+		ot := otherVn.TypeReadFacing(readOp)
+		if ot == nil || ot.Metatype() != metatype {
+			return false
+		}
+	default:
+		return false
+	}
+	return true // Everything is integer promotion
+}
+
 // IsZextCast reports whether an INT_ZEXT from intype to outtype can be rendered
 // as a plain cast. C++ parity: cast.cc CastStrategyC::isZextCast (457-469).
 func (cs *CastStrategyC) IsZextCast(outtype, intype Datatype) bool {
