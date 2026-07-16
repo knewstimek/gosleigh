@@ -58,6 +58,12 @@ type Funcdata struct {
 	scopeLocal *ScopeLocal
 	callSpecs  []*FuncCallSpecs
 
+	// globalScope is the parent (global) symbol scope ScopeLocal defers to. It is
+	// nil unless the loader/bridge injects environment-supplied global symbols
+	// (e.g. __ImageBase); ActionConstantPtr queries it to promote a constant to a
+	// global symbol pointer. C++ parity: Funcdata::localmap->getParent() (global).
+	globalScope *GlobalScope
+
 	// defaultModel is the architecture evaluation prototype model (the C++
 	// Architecture::defaultfp equivalent). The universal-action tree reads it in
 	// ActionPrototypeTypes to attach a FuncProto + ScopeLocal when none is set,
@@ -188,6 +194,13 @@ func (fd *Funcdata) SetDefaultModel(m *ProtoModel) { fd.defaultModel = m }
 
 // SetScopeLocal attaches a local variable scope.
 func (fd *Funcdata) SetScopeLocal(sl *ScopeLocal) { fd.scopeLocal = sl }
+
+// GetGlobalScope returns the parent (global) symbol scope, or nil if none was
+// injected. C++ parity: Funcdata::getScopeLocal()->getParent().
+func (fd *Funcdata) GetGlobalScope() *GlobalScope { return fd.globalScope }
+
+// SetGlobalScope attaches the parent (global) symbol scope.
+func (fd *Funcdata) SetGlobalScope(g *GlobalScope) { fd.globalScope = g }
 
 // NumCalls returns the number of CALL/CALLIND ops currently tracked.
 // C++ parity: Funcdata::numCalls

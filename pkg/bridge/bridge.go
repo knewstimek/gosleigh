@@ -29,6 +29,29 @@ type BuildConfig struct {
 	// in_<reg>). Set this alongside PrintC.SetProcessEntry for the matching
 	// signature annotation. C++ parity: entry points use the processEntry CC.
 	EntryPoint bool
+
+	// InjectedGlobals lists global symbols supplied by the analysis environment
+	// (the way Ghidra's ScopeGhidra answers a symbol query into the global
+	// scope). It is opt-in: when empty no global scope is attached and output is
+	// byte-identical. When populated, each entry becomes a typelock/namelock
+	// SymbolEntry in the Funcdata's global scope, so ActionConstantPtr can
+	// promote a matching constant to a &symbol reference. This is the general
+	// injection surface; future locked-FuncProto injection can layer onto the
+	// same BuildConfig without disturbing it.
+	InjectedGlobals []InjectedGlobal
+}
+
+// InjectedGlobal describes one environment-supplied global symbol to seed into
+// the Funcdata's global scope. C++ parity: a Symbol/SymbolEntry that ScopeGhidra
+// returns for a global-scope query (typelock/namelock preserved).
+type InjectedGlobal struct {
+	Name     string
+	Space    *address.Space
+	Offset   uint64
+	Size     int32
+	Type     pcode.Datatype
+	TypeLock bool
+	NameLock bool
 }
 
 type Result struct {
@@ -298,6 +321,29 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// This sets the display name used by PrintC for the function declaration.
 	if cfg.SymbolName != "" {
 		fd.SetDisplayName(cfg.SymbolName)
+	}
+
+	// Seed environment-supplied global symbols into the Funcdata's global scope.
+	// Opt-in: with no InjectedGlobals the global scope stays nil and every
+	// downstream global-symbol query misses, keeping output byte-identical.
+	// C++ parity: ScopeGhidra populates the global Scope on query response.
+	if len(cfg.InjectedGlobals) > 0 {
+		gs := pcode.NewGlobalScope()
+		for _, ig := range cfg.InjectedGlobals {
+			if ig.Space == nil || ig.Type == nil {
+				continue
+			}
+			var flags uint32
+			if ig.TypeLock {
+				flags |= pcode.VarnodeTypeLock
+			}
+			if ig.NameLock {
+				flags |= pcode.VarnodeNameLock
+			}
+			addr := address.Address{Space: ig.Space, Offset: ig.Offset}
+			gs.AddSymbol(ig.Name, ig.Type, addr, ig.Size, flags)
+		}
+		fd.SetGlobalScope(gs)
 	}
 
 	// Parse cspec if provided. Store in result but do not apply -- callers
