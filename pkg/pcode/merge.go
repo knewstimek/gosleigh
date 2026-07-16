@@ -307,6 +307,36 @@ func mergeTestRequired(h1, h2 *HighVariable) bool {
 	return true
 }
 
+// mergeTestAdjacent performs the required tests plus the additional adjacency
+// tests for merging Varnodes that are input/output to the same p-code op. It
+// performs no Cover tests. Returns true when merging is allowed.
+//
+// C++ parity: merge.cc Merge::mergeTestAdjacent (lines 175-211).
+//
+// Unported guards (known mismatch): the illegal-input test
+// (high.getInputVarnode().isIllegalInput() && !isIndirectOnly()) and the
+// isolated-Symbol test (high.getSymbol().isIsolated()) are omitted because
+// Gosleigh does not yet model illegal inputs or isolated symbols. The
+// VariablePiece overlap guard is likewise omitted (VariablePiece unported).
+// None of these fire for the register/stack HighVariables produced by the
+// current corpus; they are noted so a later port can restore them verbatim.
+func mergeTestAdjacent(hOut, hIn *HighVariable) bool {
+	if !mergeTestRequired(hOut, hIn) {
+		return false
+	}
+	// Both variables name-locked: keep distinct so each keeps its locked name.
+	// C++ parity: merge.cc:180-181.
+	if hIn.IsNameLock() && hOut.IsNameLock() {
+		return false
+	}
+	// Speculative adjacency merge requires identical data-types.
+	// C++ parity: merge.cc:184-185 (high_out->getType() != high_in->getType()).
+	if hOut.Type() != hIn.Type() {
+		return false
+	}
+	return true
+}
+
 func mergeTestBasic(vn *Varnode) bool {
 	if vn == nil {
 		return false
@@ -821,7 +851,7 @@ func (m *Merge) mergeAdjacentCopies() {
 				continue
 			}
 			highIn := invn.High()
-			if !mergeTestRequired(highOut, highIn) {
+			if !mergeTestAdjacent(highOut, highIn) {
 				continue
 			}
 			if m.testCache.Intersection(highIn, highOut) {
