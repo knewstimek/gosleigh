@@ -1,0 +1,82 @@
+{
+  "functions": [
+    {
+      "name": "dowhile_scan",
+      "entry": 9472,
+      "bytes": "8954241048894c24084883ec18c744240800000000c704240000000048630424488b4c24208b0481894424048b0424ffc0890424837c2404007d02eb1c817c2404e70300007502eb198b4424048b4c240803c88bc1894424088b4424283904247cba8b4424084883c418c3",
+      "c": "\r\nint dowhile_scan(longlong param_1,int param_2)\r\n\r\n{\r\n  int iVar1;\r\n  int local_18;\r\n  int local_10;\r\n  \r\n  local_10 = 0;\r\n  local_18 = 0;\r\n  do {\r\n    iVar1 = *(int *)(param_1 + (longlong)local_18 * 4);\r\n    local_18 = local_18 + 1;\r\n    if (-1 < iVar1) {\r\n      if (iVar1 == 999) {\r\n        return local_10;\r\n      }\r\n      local_10 = local_10 + iVar1;\r\n    }\r\n  } while (local_18 < param_2);\r\n  return local_10;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "find_pair",
+      "entry": 9600,
+      "bytes": "44894424188954241048894c24084883ec18c7042400000000eb088b0424ffc08904248b4424283904247d4c8b0424ffc089442404eb0a8b442404ffc0894424048b442428394424047d2b4863042448634c2404488b5424208b0482488b54242003048a3b442430750a6b04246403442404eb09ebc1eba3b8ffffffff4883c418c3",
+      "c": "\r\nint find_pair(longlong param_1,int param_2,int param_3)\r\n\r\n{\r\n  int local_18;\r\n  int local_14;\r\n  \r\n  local_18 = 0;\r\n  do {\r\n    local_14 = local_18;\r\n    if (param_2 <= local_18) {\r\n      return -1;\r\n    }\r\n    while (local_14 = local_14 + 1, local_14 < param_2) {\r\n      if (*(int *)(param_1 + (longlong)local_18 * 4) + *(int *)(param_1 + (longlong)local_14 * 4) ==\r\n          param_3) {\r\n        return local_18 * 100 + local_14;\r\n      }\r\n    }\r\n    local_18 = local_18 + 1;\r\n  } while( true );\r\n}\r\n\r\n"
+    },
+    {
+      "name": "gate",
+      "entry": 9744,
+      "bytes": "44894c2420448944241889542410894c2408837c2408007e07837c2410007f0e837c2418007d15837c242000740e8b4424108b4c240803c88bc1eb0c8b4424208b4c24182bc88bc1c3",
+      "c": "\r\nint gate(int param_1,int param_2,int param_3,int param_4)\r\n\r\n{\r\n  if (((param_1 < 1) || (param_2 < 1)) && ((-1 < param_3 || (param_4 == 0)))) {\r\n    param_1 = param_3 - param_4;\r\n  }\r\n  else {\r\n    param_1 = param_1 + param_2;\r\n  }\r\n  return param_1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "clamp3",
+      "entry": 9824,
+      "bytes": "448944241889542410894c24084883ec188b442428394424207d0a8b44242889442404eb218b442430394424207e098b442430890424eb078b4424208904248b0424894424048b4424044883c418c3",
+      "c": "\r\nint clamp3(int param_1,int param_2,int param_3)\r\n\r\n{\r\n  int local_18;\r\n  int local_14;\r\n  \r\n  local_14 = param_2;\r\n  if (param_2 <= param_1) {\r\n    local_18 = param_1;\r\n    if (param_3 < param_1) {\r\n      local_18 = param_3;\r\n    }\r\n    local_14 = local_18;\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "add_pt",
+      "entry": 9920,
+      "bytes": "488954241048894c24084883ec188b4424288b4c242003c88bc18904248b44242c8b4c242403c88bc189442404488b04244883c418c3",
+      "c": "\r\nundefined8 add_pt(undefined8 param_1,undefined8 param_2)\r\n\r\n{\r\n  undefined4 local_res8;\r\n  undefined4 uStackX_c;\r\n  undefined4 local_res10;\r\n  undefined4 uStackX_14;\r\n  \r\n  local_res10 = (int)param_2;\r\n  local_res8 = (int)param_1;\r\n  uStackX_14 = (int)((ulonglong)param_2 >> 0x20);\r\n  uStackX_c = (int)((ulonglong)param_1 >> 0x20);\r\n  return CONCAT44(uStackX_c + uStackX_14,local_res8 + local_res10);\r\n}\r\n\r\n"
+    },
+    {
+      "name": "bump_scores",
+      "entry": 9984,
+      "bytes": "44894424188954241048894c24084883ec18c744240400000000c7042400000000eb088b0424ffc08904248b4424283904247d3948630424488b4c24208b44c1040344243048630c24488b5424208944ca0448630424488b4c24208b44c1048b4c240403c88bc189442404ebb68b4424044883c418c3",
+      "c": "\r\nint bump_scores(longlong param_1,int param_2,int param_3)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  \r\n  local_14 = 0;\r\n  for (local_18 = 0; local_18 < param_2; local_18 = local_18 + 1) {\r\n    *(int *)(param_1 + 4 + (longlong)local_18 * 8) =\r\n         *(int *)(param_1 + 4 + (longlong)local_18 * 8) + param_3;\r\n    local_14 = local_14 + *(int *)(param_1 + 4 + (longlong)local_18 * 8);\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "sum_via_pp",
+      "entry": 10112,
+      "bytes": "8954241048894c24084883ec28c7042400000000488b44243048894424084863442438488b4c2430488d04c14889442410488b44241048394424087324488b442408488b008b008b0c2403c88bc1890424488b4424084883c0084889442408ebd08b04244883c428c3",
+      "c": "\r\nint sum_via_pp(undefined8 *param_1,int param_2)\r\n\r\n{\r\n  int local_28;\r\n  undefined8 *local_20;\r\n  \r\n  local_28 = 0;\r\n  for (local_20 = param_1; local_20 < param_1 + param_2; local_20 = local_20 + 1) {\r\n    local_28 = local_28 + *(int *)*local_20;\r\n  }\r\n  return local_28;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "divmix",
+      "entry": 10224,
+      "bytes": "89542410894c24084883ec188b44242099b907000000f7f98944240433d28b442428b909000000f7f18bc28904248b04248b4c240403c88bc14883c418c3",
+      "c": "\r\nint divmix(int param_1,uint param_2)\r\n\r\n{\r\n  return param_1 / 7 + param_2 % 9;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "helper_sum",
+      "entry": 10304,
+      "bytes": "44894c2420448944241889542410894c24088b4424108b4c240803c88bc1034424188b4c24200faf4c24282bc1c3",
+      "c": "\r\nint helper_sum(int param_1,int param_2,int param_3,int param_4,int param_5)\r\n\r\n{\r\n  return (param_1 + param_2 + param_3) - param_4 * param_5;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "caller",
+      "entry": 10368,
+      "bytes": "44894c2420448944241889542410894c24084883ec488b44247089442420448b4c2468448b4424608b5424588b4c2450e88bffffff894424308b4c2450894c2420448b4c2458448b4424608b5424688b4c2470e868ffffff8b4c243003c88bc14883c448c3",
+      "c": "\r\nint caller(undefined4 param_1,undefined4 param_2,undefined4 param_3,undefined4 param_4,\r\n          undefined4 param_5)\r\n\r\n{\r\n  int iVar1;\r\n  int iVar2;\r\n  \r\n  iVar1 = helper_sum(param_1,param_2,param_3,param_4,param_5);\r\n  iVar2 = helper_sum(param_5,param_4,param_3,param_2,param_1);\r\n  return iVar1 + iVar2;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "parse_steps",
+      "entry": 10480,
+      "bytes": "8954241048894c24084883ec18c744240400000000c70424000000008b4424283904247d4748630424488b4c2420833c81007d02eb3c48630424488b4c2420813c81e80300007e02eb2848630424488b4c24208b04818b4c240403c88bc1894424048b0424ffc0890424ebb08b442404eb05b8ffffffff4883c418c3",
+      "c": "\r\nint parse_steps(longlong param_1,int param_2)\r\n\r\n{\r\n  int local_18;\r\n  int local_14;\r\n  \r\n  local_14 = 0;\r\n  local_18 = 0;\r\n  while( true ) {\r\n    if (param_2 <= local_18) {\r\n      return local_14;\r\n    }\r\n    if ((*(int *)(param_1 + (longlong)local_18 * 4) < 0) ||\r\n       (1000 < *(int *)(param_1 + (longlong)local_18 * 4))) break;\r\n    local_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\r\n    local_18 = local_18 + 1;\r\n  }\r\n  return -1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "faverage",
+      "entry": 10624,
+      "bytes": "f30f11542418f30f114c2410f30f11442408f30f10442408f30f58442410f30f58442418f30f5e0554faffffc3",
+      "c": "\r\n/* WARNING: Globals starting with '_' overlap smaller symbols at the same address */\r\n\r\nfloat faverage(float param_1,float param_2,float param_3)\r\n\r\n{\r\n  return (param_1 + param_2 + param_3) / ___real_40400000;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "umulhi",
+      "entry": 10688,
+      "bytes": "488954241048894c24084883ec38b8ffffffff488b4c24404823c8488bc14889442408488b44244048c1e8204889442410b8ffffffff488b4c24484823c8488bc148890424488b44244848c1e8204889442418488b442410480faf0424488b4c2408480faf0c2448c1e9204803c14889442420b8ffffffff488b4c24204823c8488bc1488b4c2408480faf4c24184803c14889442428488b442410480faf442418488b4c242048c1e9204803c1488b4c242848c1e9204803c14883c438c3",
+      "c": "\r\nlonglong umulhi(ulonglong param_1,ulonglong param_2)\r\n\r\n{\r\n  ulonglong uVar1;\r\n  \r\n  uVar1 = (param_1 >> 0x20) * (param_2 & 0xffffffff) +\r\n          ((param_1 & 0xffffffff) * (param_2 & 0xffffffff) >> 0x20);\r\n  return (param_1 >> 0x20) * (param_2 >> 0x20) + (uVar1 >> 0x20) +\r\n         ((uVar1 & 0xffffffff) + (param_1 & 0xffffffff) * (param_2 >> 0x20) >> 0x20);\r\n}\r\n\r\n"
+    }
+  ]
+}
