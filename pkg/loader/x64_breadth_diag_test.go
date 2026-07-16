@@ -41,7 +41,13 @@ func TestX64BreadthGoldenMap(t *testing.T) {
 	pass := 0
 	for _, fn := range gf.Functions {
 		prog := hexToBytes(t, fn.Bytes)
-		engine, base, err := (&loader.EngineBuilder{SLAPath: sla, PspecPath: pspec, Bytes: prog}).Build()
+		// Load each function at its true VA from the golden (Ghidra placed the
+		// breadth.obj functions at these addresses during analysis). This matters
+		// for RIP-relative operands: dispatch resolves &__ImageBase and its jump
+		// table via lea [rip+disp], so the absolute constants only match the golden
+		// when the function sits at its real VA. Loading at base 0 shifts every
+		// RIP-derived constant down by fn.Entry.
+		engine, base, err := (&loader.EngineBuilder{SLAPath: sla, PspecPath: pspec, Bytes: prog, BaseAddr: uint64(fn.Entry)}).Build()
 		if err != nil {
 			t.Logf("[%s] BUILD-ERR: %v", fn.Name, err)
 			continue
