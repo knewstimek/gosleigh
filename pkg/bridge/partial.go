@@ -56,7 +56,12 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 		return nil, fmt.Errorf("build partial: end address or max instructions is required")
 	}
 
-	records, _, err := collectInstructions(engine, cfg)
+	// Tolerant collection: a guard branch whose target leaves the loaded image
+	// (e.g. a switch default block the single-function harness never maps) must
+	// not discard the flow already recovered, so the guard CBRANCH still forms a
+	// block boundary. Ghidra's truncatedFlow clones a flow that already handled
+	// the bad target; the recovery clone reproduces that by tolerating it here.
+	records, _, err := collectInstructionsTolerant(engine, cfg, nil, true)
 	if err != nil {
 		return nil, err
 	}
@@ -112,6 +117,43 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 		if err := addInstructionOps(fd, current, record.translation, instructionDefs); err != nil {
 			return nil, err
 		}
+	}
+
+	// Materialize an artificial-halt block for every guard branch whose target
+	// lies outside the decoded set. Without it the guard CBRANCH keeps a single
+	// out-edge and JumpBasic::analyzeGuards cannot recognize it as a guard, so the
+	// switch variable's range is never constrained (getSize > maxtablesize) and
+	// address emulation is never attempted -- exactly the state that suppresses
+	// the "Could not emulate address calculation" warning. Re-point the guard's
+	// terminating branch at the synthetic block so addCFGEdges wires the second
+	// out-edge, giving analyzeGuards the two-successor shape it needs.
+	// C++ parity: flow.cc FlowInfo materializes a bad-instruction block at an
+	// undecodable target (newAddress -> artificialHalt); here only the throwaway
+	// recovery clone needs it.
+	for i := range records {
+		fl := records[i].flow
+		if !fl.hasUndecodedTarget {
+			continue
+		}
+		tgt := fl.undecodedTarget
+		if _, ok := blockByAddr[tgt]; ok {
+			continue // target is a real decoded block; nothing to synthesize
+		}
+		srcbb := instToBlock[records[i].translation.Address]
+		if srcbb == nil {
+			continue
+		}
+		haltbb := graph.NewBlockBasicInGraph()
+		haltop := fd.ArtificialHalt(tgt, pcode.PcodeOpBadInstruction)
+		appendAliveOp(fd, haltbb, haltop)
+		blockByAddr[tgt] = haltbb
+		instToBlock[tgt] = haltbb
+		// Deliberately NOT recorded in lastInBlock: the halt is a RETURN with no
+		// out-edges, so addCFGEdges must skip it as an edge source.
+		rec := lastInBlock[srcbb]
+		rec.flow.directTarget = tgt
+		rec.flow.hasDirect = true
+		lastInBlock[srcbb] = rec
 	}
 
 	bindLoadStoreSpaces(fd, buildSpaceIndex(cfg.Entry.Space, summary))
@@ -197,8 +239,14 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 // (funcdata_block.cc:491): truncatedFlow + setCurrent("jumptable") + perform +
 // jt->recoverAddresses(&partial). The heritage is done once (isJumptableRecoveryOn
 // guard, funcdata_block.cc:494) and reused across the tablelist.
-func recoverLiveJumpTables(engine *sla.Engine, cfg BuildConfig) map[uint64]*pcode.JumpTable {
+func recoverLiveJumpTables(engine *sla.Engine, cfg BuildConfig) (map[uint64]*pcode.JumpTable, map[uint64]string) {
 	recovered := make(map[uint64]*pcode.JumpTable)
+	// emulateFails carries, per BRANCHIND offset, the "Could not emulate address
+	// calculation at <addr>" text produced when recovery on the partial reached
+	// address emulation and aborted on an unreadable op. Build attaches it to the
+	// main Funcdata at the BRANCHIND address, mirroring stageJumpTable's
+	// warning(err.explain, op->getAddr()) (funcdata_block.cc:543).
+	emulateFails := make(map[uint64]string)
 
 	// Build the partial and run the "jumptable" heritage group under a recover
 	// guard. Ghidra's stageJumpTable wraps the perform in try/catch(LowlevelError)
@@ -214,7 +262,7 @@ func recoverLiveJumpTables(engine *sla.Engine, cfg BuildConfig) map[uint64]*pcod
 		return p
 	}()
 	if partial == nil || len(partial.BranchInds) == 0 {
-		return recovered
+		return recovered, emulateFails
 	}
 
 	// One heritage pass over the partial SSA-forms every stack-routed selector ->
@@ -229,15 +277,21 @@ func recoverLiveJumpTables(engine *sla.Engine, cfg BuildConfig) map[uint64]*pcod
 		return true
 	}()
 	if !heritaged {
-		return recovered
+		return recovered, emulateFails
 	}
 
 	for _, bop := range partial.BranchInds {
+		var failMsg string
 		jt := func() *pcode.JumpTable {
 			defer func() { _ = recover() }()
 			t := pcode.NewJumpTable(bop.Addr())
 			t.SetIndirectOp(bop)
-			if err := t.RecoverAddresses(partial.Funcdata); err != nil {
+			err := t.RecoverAddresses(partial.Funcdata)
+			// Capture the emulate-failure text whether or not recovery succeeded:
+			// a table that reached emulation and failed there yields the same
+			// warning Ghidra attaches, even though the address table came back empty.
+			failMsg = t.EmulateFailMsg()
+			if err != nil {
 				return nil
 			}
 			if t.NumEntries() == 0 {
@@ -247,7 +301,9 @@ func recoverLiveJumpTables(engine *sla.Engine, cfg BuildConfig) map[uint64]*pcod
 		}()
 		if jt != nil {
 			recovered[bop.Addr().Offset] = jt
+		} else if failMsg != "" {
+			emulateFails[bop.Addr().Offset] = failMsg
 		}
 	}
-	return recovered
+	return recovered, emulateFails
 }

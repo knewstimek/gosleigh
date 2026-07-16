@@ -126,6 +126,17 @@ type instructionFlow struct {
 	hasFallthrough  bool
 	terminates      bool
 	conditional     bool
+	// undecodedTarget records a BRANCH/CBRANCH direct target that lies outside
+	// the decoded instruction set (e.g. a guard branch to a default block whose
+	// bytes are not in the loaded image). hasDirect stays false for such a target
+	// (the CFG cannot link to a decoded block), but the jump-table recovery
+	// partial needs the address to synthesize an artificial-halt block so the
+	// guard CBRANCH still has two out-edges -- the shape JumpBasic::analyzeGuards
+	// requires. Ghidra reaches the same shape because FlowInfo materializes a
+	// bad-instruction block at an undecodable target (flow.cc FlowInfo::newAddress
+	// -> artificialHalt); Gosleigh only needs it on the throwaway recovery clone.
+	undecodedTarget    address.Address
+	hasUndecodedTarget bool
 }
 
 type varKey struct {
@@ -184,8 +195,17 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	//      are decoded, and remember the seeds as extra block starts + edge sources.
 	var recoveredTables map[uint64]*pcode.JumpTable
 	var caseSeeds []address.Address
+	// emulateFails maps a BRANCHIND instruction offset to the "Could not emulate
+	// address calculation at <addr>" text produced when recovery on the partial
+	// reached emulation and failed there (an unreadable jump table). Build attaches
+	// it to the main Funcdata before truncation so the warning precedes the
+	// "Treating indirect jump as call" comment, matching Ghidra's stageJumpTable ->
+	// truncateIndirectJump order (funcdata_block.cc:543 then flow.cc:727).
+	var emulateFails map[uint64]string
 	if recordsHaveBranchInd(records) {
-		if tables := recoverLiveJumpTables(engine, cfg); len(tables) > 0 {
+		tables, fails := recoverLiveJumpTables(engine, cfg)
+		emulateFails = fails
+		if len(tables) > 0 {
 			// Normalize case targets into the code space the records use so block
 			// lookups (blockByAddr) and worklist seeds share one AddrSpace pointer.
 			codeSpace := records[0].translation.Address.Space
@@ -324,6 +344,25 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// no-op for functions with no BRANCHIND.
 	// C++ parity: flow.cc FlowInfo::generateOps / recoverJumpTables /
 	// truncateIndirectJump.
+
+	// Attach the "Could not emulate address calculation at <addr>" warning to each
+	// BRANCHIND whose recovery on the partial reached emulation and failed there.
+	// This runs BEFORE RecoverJumpTables (which truncates the BRANCHIND and adds
+	// "Treating indirect jump as call"), so the two same-address comments keep the
+	// insertion order the golden expects. Ghidra emits them in this order too:
+	// stageJumpTable's catch warns first (funcdata_block.cc:543), then the
+	// fail_normal path calls truncateIndirectJump (flow.cc:727).
+	if len(emulateFails) > 0 {
+		for _, op := range fd.GetPcodeOpBank().AliveOps() {
+			if op == nil || op.Code() != pcode.CPUI_BRANCHIND {
+				continue
+			}
+			if msg, ok := emulateFails[op.Addr().Offset]; ok {
+				fd.Warning(msg, op.Addr())
+			}
+		}
+	}
+
 	fd.RecoverJumpTables()
 
 	// Convert each recovered jump table's absolute address list into block
@@ -695,6 +734,18 @@ func collectInstructions(engine *sla.Engine, cfg BuildConfig) ([]instructionReco
 // recovered table entry (flow.cc:806-809). With nil seeds this is byte-identical
 // to the original single-root collection.
 func collectInstructionsSeeded(engine *sla.Engine, cfg BuildConfig, seeds []address.Address) ([]instructionRecord, []string, error) {
+	return collectInstructionsTolerant(engine, cfg, seeds, false)
+}
+
+// collectInstructionsTolerant is collectInstructionsSeeded with an option to keep
+// the recovered flow when a followed address cannot be decoded. With
+// tolerateBadFlow=false (the live-build default) an undecodable address aborts the
+// scan exactly as before, so main-path collection is byte-identical. With
+// tolerateBadFlow=true (the jump-table recovery clone) an undecodable branch
+// target or fall-through stops only that path and the already-decoded records are
+// still flow-analyzed, so block boundaries at guard CBRANCHs form even when the
+// guard's other edge leaves the loaded image.
+func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []address.Address, tolerateBadFlow bool) ([]instructionRecord, []string, error) {
 	limit := cfg.MaxInstructions
 	if limit <= 0 {
 		limit = int(^uint(0) >> 1)
@@ -743,6 +794,13 @@ func collectInstructionsSeeded(engine *sla.Engine, cfg BuildConfig, seeds []addr
 
 			translation, err := engine.TranslateInstructionAt(cur)
 			if err != nil {
+				if tolerateBadFlow && len(records) > 0 {
+					// Recovery clone: an undecodable address (a guard branch target
+					// outside the loaded image, or a fall-through past the end) does
+					// not discard the flow already recovered. Stop this path and let
+					// the outer worklist / final flow analysis proceed.
+					break
+				}
 				var unimplErr *sla.UnimplError
 				if errors.As(err, &unimplErr) {
 					warn := fmt.Sprintf("unimplemented at %v: %v", cur, err)
@@ -1100,6 +1158,9 @@ func analyzeInstructionFlow(translation sla.InstructionTranslation, entrySpace *
 			if target, ok := resolveTarget(translation, raw, entrySpace, known); ok {
 				flow.directTarget = target
 				flow.hasDirect = true
+			} else if target, ok := extractBranchTarget(translation, entrySpace); ok {
+				flow.undecodedTarget = target
+				flow.hasUndecodedTarget = true
 			}
 		case pcode.CPUI_CBRANCH:
 			flow.terminates = true
@@ -1109,6 +1170,9 @@ func analyzeInstructionFlow(translation sla.InstructionTranslation, entrySpace *
 			if target, ok := resolveTarget(translation, raw, entrySpace, known); ok {
 				flow.directTarget = target
 				flow.hasDirect = true
+			} else if target, ok := extractBranchTarget(translation, entrySpace); ok {
+				flow.undecodedTarget = target
+				flow.hasUndecodedTarget = true
 			}
 		case pcode.CPUI_BRANCHIND, pcode.CPUI_RETURN:
 			flow.terminates = true
