@@ -66,6 +66,14 @@ type FuncProto struct {
 	// non-injected function, so the default path is unchanged.
 	// C++ parity: FuncProto locked input parameters carry ProtoParameter types.
 	lockedParamTypes map[uint64]Datatype
+	// lockedParamNames maps a register-space byte offset to the injected
+	// prototype's naming metadata (display name + namelock) for the parameter
+	// stored there. BuildFromVarnodes uses it to create a namelocked Symbol on the
+	// recovered register parameter so the merge Symbol guard can keep it distinct
+	// from an accumulator that maps to a different Symbol. Nil for every
+	// non-injected function, so the default path is unchanged.
+	// C++ parity: locked ProtoParameter carries a name and the namelock property.
+	lockedParamNames map[uint64]lockedParamName
 	// activeoutput holds the temporary active-return analysis state.
 	activeoutput *ParamActive
 	// locals holds the discovered local HighVariables in order.
@@ -121,6 +129,12 @@ func (fp *FuncProto) Copy(other *FuncProto) {
 		fp.lockedParamTypes = make(map[uint64]Datatype, len(other.lockedParamTypes))
 		for k, v := range other.lockedParamTypes {
 			fp.lockedParamTypes[k] = v
+		}
+	}
+	if other.lockedParamNames != nil {
+		fp.lockedParamNames = make(map[uint64]lockedParamName, len(other.lockedParamNames))
+		for k, v := range other.lockedParamNames {
+			fp.lockedParamNames[k] = v
 		}
 	}
 	fp.activeoutput = other.activeoutput
@@ -328,6 +342,37 @@ func (fp *FuncProto) LockedParamType(regOffset uint64) (Datatype, bool) {
 	}
 	vt, ok := fp.lockedParamTypes[regOffset]
 	return vt, ok
+}
+
+// lockedParamName carries the injected prototype's naming metadata for one
+// register-parameter storage slot.
+type lockedParamName struct {
+	name     string
+	nameLock bool
+}
+
+// SetLockedParamName records the injected prototype's display name and namelock
+// property for the parameter stored at the given register-space byte offset.
+// C++ parity: ProtoParameter name + Varnode::namelock for a locked parameter.
+func (fp *FuncProto) SetLockedParamName(regOffset uint64, name string, nameLock bool) {
+	if fp == nil || name == "" {
+		return
+	}
+	if fp.lockedParamNames == nil {
+		fp.lockedParamNames = make(map[uint64]lockedParamName)
+	}
+	fp.lockedParamNames[regOffset] = lockedParamName{name: name, nameLock: nameLock}
+}
+
+// LockedParamName returns the injected display name and namelock flag for the
+// parameter at the given register-space byte offset, if any.
+// C++ parity: ProtoParameter name + Varnode::namelock for a locked parameter.
+func (fp *FuncProto) LockedParamName(regOffset uint64) (string, bool, bool) {
+	if fp == nil || fp.lockedParamNames == nil {
+		return "", false, false
+	}
+	info, ok := fp.lockedParamNames[regOffset]
+	return info.name, info.nameLock, ok
 }
 
 // GetActiveOutput returns the temporary active return analysis state.
