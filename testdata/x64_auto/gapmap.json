@@ -1,0 +1,68 @@
+{
+  "functions": [
+    {
+      "name": "sum_loop",
+      "entry": 9216,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "dowhile_count",
+      "entry": 9312,
+      "tags": [
+        "STRUCT",
+        "TYPECAST",
+        "PTR",
+        "TEMP"
+      ],
+      "evidence": {
+        "STRUCT": [
+          "dangling goto target(s) in output: label_0"
+        ],
+        "TYPECAST": [
+          "cast (int): want=1 got=2",
+          "cast (longlong): want=1 got=2"
+        ],
+        "PTR": [
+          "raw pointer scale '* 4': want=1 got=2"
+        ],
+        "TEMP": [
+          "extra temp/local identifiers in output (3 vs 2): iVar1"
+        ]
+      }
+    },
+    {
+      "name": "sum_pp_walk",
+      "entry": 9408,
+      "tags": [
+        "PTR",
+        "TEMP"
+      ],
+      "evidence": {
+        "PTR": [
+          "raw pointer scale '* 8': want=0 got=2"
+        ],
+        "TEMP": [
+          "extra temp/local identifiers in output (3 vs 2): lVar1"
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "total": 3,
+    "match": 1,
+    "tag_counts": {
+      "MATCH": 1,
+      "STRUCT": 1,
+      "TYPECAST": 1,
+      "PTR": 2,
+      "TEMP": 2
+    }
+  }
+}

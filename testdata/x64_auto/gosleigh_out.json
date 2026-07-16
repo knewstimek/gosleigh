@@ -1,0 +1,16 @@
+{
+  "functions": [
+    {
+      "name": "sum_loop",
+      "output": "\nint sum_loop(longlong param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nlocal_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\n}\nreturn local_14;\n}\n"
+    },
+    {
+      "name": "dowhile_count",
+      "output": "\nint dowhile_count(longlong param_1,int param_2)\n\n{\nint iVar1;\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\ndo {\nif (1 \u003c= *(int *)(param_1 + (longlong)local_18 * 4)) {\nlocal_14 = local_14 + 1;\n}\niVar1 = local_18 + 1;\nlocal_18 = iVar1;\nif (iVar1 \u003c param_2) goto label_0;\n} while (1 \u003c= *(int *)(param_1 + (longlong)local_18 * 4));\nreturn local_14;\n}\n"
+    },
+    {
+      "name": "sum_pp_walk",
+      "output": "\nint sum_pp_walk(undefined8 *param_1,int param_2)\n\n{\nlonglong lVar1;\nint local_28;\nundefined8 *local_20;\n\nlocal_28 = 0;\nlVar1 = param_2;\nfor (local_20 = param_1; local_20 \u003c param_1 + lVar1 * 8; local_20 = local_20 + 1 * 8) {\nlocal_28 = local_28 + *(int *)*local_20;\n}\nreturn local_28;\n}\n"
+    }
+  ]
+}

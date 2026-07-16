@@ -1,0 +1,211 @@
+{
+  "functions": [
+    {
+      "name": "dowhile_scan",
+      "entry": 9472,
+      "tags": [
+        "STRUCT",
+        "TYPECAST"
+      ],
+      "evidence": {
+        "STRUCT": [
+          "dangling goto target(s) in output: label_0",
+          "keyword 'break': want=0 got=1"
+        ],
+        "TYPECAST": [
+          "cast (int): want=1 got=2"
+        ]
+      }
+    },
+    {
+      "name": "find_pair",
+      "entry": 9600,
+      "tags": [
+        "STRUCT"
+      ],
+      "evidence": {
+        "STRUCT": [
+          "dangling goto target(s) in output: label_0, label_1, label_2",
+          "keyword 'while': want=2 got=1"
+        ]
+      }
+    },
+    {
+      "name": "gate",
+      "entry": 9744,
+      "tags": [
+        "TEMP"
+      ],
+      "evidence": {
+        "TEMP": [
+          "extra temp/local identifiers in output (1 vs 0): iVar1"
+        ]
+      }
+    },
+    {
+      "name": "clamp3",
+      "entry": 9824,
+      "tags": [
+        "STRUCT"
+      ],
+      "evidence": {
+        "STRUCT": [
+          "dangling goto target(s) in output: label_0, label_1"
+        ]
+      }
+    },
+    {
+      "name": "add_pt",
+      "entry": 9920,
+      "tags": [
+        "TYPECAST",
+        "CALL"
+      ],
+      "evidence": {
+        "TYPECAST": [
+          "cast (int): want=4 got=0",
+          "cast (ulonglong): want=2 got=0",
+          "cast (undefined4): want=0 got=1",
+          "CONCAT/SUBPIECE: want=1 got=0"
+        ],
+        "CALL": [
+          "call(s) present in golden but missing in output: CONCAT44"
+        ]
+      }
+    },
+    {
+      "name": "bump_scores",
+      "entry": 9984,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "sum_via_pp",
+      "entry": 10112,
+      "tags": [
+        "PTR",
+        "TEMP"
+      ],
+      "evidence": {
+        "PTR": [
+          "raw pointer scale '* 8': want=0 got=2"
+        ],
+        "TEMP": [
+          "extra temp/local identifiers in output (3 vs 2): lVar1"
+        ]
+      }
+    },
+    {
+      "name": "divmix",
+      "entry": 10224,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "helper_sum",
+      "entry": 10304,
+      "tags": [
+        "TEMP"
+      ],
+      "evidence": {
+        "TEMP": [
+          "extra temp/local identifiers in output (1 vs 0): tmp_0"
+        ]
+      }
+    },
+    {
+      "name": "caller",
+      "entry": 10368,
+      "tags": [
+        "TYPECAST",
+        "TEMP",
+        "CALL"
+      ],
+      "evidence": {
+        "TYPECAST": [
+          "cast (void): want=0 got=1"
+        ],
+        "TEMP": [
+          "extra temp/local identifiers in output (3 vs 2): local_146, local_92, uVar1"
+        ],
+        "CALL": [
+          "suspicious call target(s) in output: local_146, local_92",
+          "call(s) present in golden but missing in output: helper_sum"
+        ]
+      }
+    },
+    {
+      "name": "parse_steps",
+      "entry": 10480,
+      "tags": [
+        "STRUCT"
+      ],
+      "evidence": {
+        "STRUCT": [
+          "dangling goto target(s) in output: label_0, label_1",
+          "keyword 'while': want=1 got=0",
+          "keyword 'for': want=0 got=1",
+          "keyword 'break': want=1 got=0"
+        ]
+      }
+    },
+    {
+      "name": "faverage",
+      "entry": 10624,
+      "tags": [
+        "TYPECAST",
+        "FP"
+      ],
+      "evidence": {
+        "TYPECAST": [
+          "cast (void): want=0 got=1"
+        ],
+        "FP": [
+          "golden uses float/double, output has none (FP subsystem gap)",
+          "output drastically smaller than golden (9 vs 44 tokens) -- stub/empty body"
+        ]
+      }
+    },
+    {
+      "name": "umulhi",
+      "entry": 10688,
+      "tags": [
+        "TYPECAST",
+        "TEMP"
+      ],
+      "evidence": {
+        "TYPECAST": [
+          "cast (ulonglong): want=0 got=1"
+        ],
+        "TEMP": [
+          "extra temp/local identifiers in output (5 vs 1): uVar2, uVar3, uVar5, uVar6"
+        ]
+      }
+    }
+  ],
+  "summary": {
+    "total": 13,
+    "match": 2,
+    "tag_counts": {
+      "STRUCT": 4,
+      "TYPECAST": 5,
+      "TEMP": 5,
+      "CALL": 2,
+      "MATCH": 2,
+      "PTR": 1,
+      "FP": 1
+    }
+  }
+}
