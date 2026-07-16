@@ -143,6 +143,32 @@ func applyIdentityFold(data *Funcdata, op *PcodeOp) bool {
 	return false
 }
 
+// constFoldableOpcodes lists every opcode evalConstOp can evaluate. It is the
+// dispatch set for the pool-level RuleCollapseConstants so that the same
+// coverage applies both in the once-per-func ActionConstantFold pass and in the
+// fixpoint rule pool (which catches ops materialized after the once pass, e.g.
+// switch/jump-table case bodies). C++ parity: RuleCollapseConstants applies to
+// all opcodes (ruleaction.hh: "applies to all opcodes"), gated by
+// PcodeOp::isCollapsible; evalConstOp is the Go stand-in for op->collapse.
+// Keep this list in sync with the cases in evalConstOp.
+var constFoldableOpcodes = []OpCode{
+	// binary
+	CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_MULT,
+	CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR,
+	CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL,
+	CPUI_INT_LESS, CPUI_INT_LESSEQUAL,
+	CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL,
+	CPUI_INT_CARRY, CPUI_INT_SCARRY, CPUI_INT_SBORROW,
+	CPUI_BOOL_AND, CPUI_BOOL_OR,
+	CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT,
+	CPUI_SUBPIECE, CPUI_PIECE,
+	// unary
+	CPUI_INT_ZEXT, CPUI_INT_SEXT,
+	CPUI_INT_2COMP, CPUI_INT_NEGATE,
+	CPUI_BOOL_NEGATE,
+	CPUI_POPCOUNT,
+}
+
 // evalConstOp attempts to constant-fold op.
 // Returns (result, true) if all inputs are constants (or constant-valued via
 // COPY(const) forwarding) and the opcode is supported.
@@ -156,7 +182,16 @@ func evalConstOp(op *PcodeOp) (uint64, bool) {
 		CPUI_INT_LESS, CPUI_INT_LESSEQUAL,
 		CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL,
 		CPUI_INT_CARRY, CPUI_INT_SCARRY, CPUI_INT_SBORROW,
-		CPUI_BOOL_AND, CPUI_BOOL_OR:
+		CPUI_BOOL_AND, CPUI_BOOL_OR,
+		// Shifts, SUBPIECE, and PIECE are ordinary assignment ops: when every
+		// input is constant they are collapsible just like the arithmetic ops
+		// above. C++ parity: op.cc PcodeOp::isCollapsible folds ANY assignment
+		// op with all-constant inputs (RuleCollapseConstants -> PcodeOp::collapse
+		// -> behave->evaluateBinary). evalBinary already implements each of these.
+		// Without them a constant SUBPIECE such as SUB(0x3f,0) never collapses,
+		// leaving spurious (undefined1)0x3f terms in shift-count masks.
+		CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT,
+		CPUI_SUBPIECE, CPUI_PIECE:
 		if op.NumInput() != 2 {
 			return 0, false
 		}
