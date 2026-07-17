@@ -84,3 +84,7 @@ report 재실행 시 이 섹션은 덮어써지므로 재생성 후 다시 보�
   데이터플로), dowhile_count dangling goto 소멸, find_pair goto 3->2. 신규 소견:
   dowhile_scan accumulator가 param_1(포인터)와 오병합(`(int)param_1 + iVar2`),
   dowhile_count 증가 temp 미병합 + local_18=0 초기화 누락 -- merge/heritage 데이터플로 계열.
+- d190c01 size-1 signed = "char" (type.cc:3645 cacheCoreTypes "Char is preferred"):
+  strlen_style/char_arith_promote의 signed char 표기 갭 제거 (TYPECAST 8->7). 신규 known gap:
+  char-typed 상수의 문자 리터럴 출력('\0') 미구현 -- 상수 출력 전역 경로라 별도 슬라이스 권장.
+  strlen_style의 CAST+SEXT 잉여 op 전제는 재실측 결과 이미 해소 상태(잔여는 for/while 구조화).
