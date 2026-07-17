@@ -15,14 +15,14 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-17 세션5 오후, master `3204bb3`+, origin 푸시, 전 게이트 green 실측 재검증)
+## 현재 상태 (2026-07-17 세션5 오후, master `ee9d0c1`, origin 푸시, 전 게이트 green 실측 재검증)
 
 **권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`** (세션5 성과/다음작업 전부). 요약:
 - 게이트: tree **10/10**, x64 corpus **8/8**, **op_switch byte-MATCH**, breadth **3/3**,
   corpus2 **6/13**(+find_pair/clamp3), x64_auto **20/32**(15->20: dowhile_count/nested_if_ladder_grade/
   param_reuse_accum/char_arith_promote/bit_mask_shift_combo), production 전부 PASS, `go test ./...` green.
 - 세션5 착지(상세 CHANGELOG 세션5): **GenGoldens bodyHex 손상 버그**(dead-code island 누락으로 분기 변위
-  파괴 -- 전 코퍼스 감사로 x64_auto 2건만 손상 확정, 붕괴형 mismatch는 입력 무결성부터) + 엔진 8건
+  파괴 -- 전 코퍼스 감사로 x64_auto 2건만 손상 확정, 붕괴형 mismatch는 입력 무결성부터) + 엔진 9건
   (cover 인덱스=블록위치, LoopBody 포인터 안정성, InfLoop do/while(true), RuleCollectTerms 포팅,
   RuleShift2Mult 컨텍스트 게이트, RuleDoubleShift 완전 포팅, PTRADD 렌더 스케일 제거, heritage BuildADT
   faithful 포팅(clamp3 완결), **param-recovery overcount 수정(phantom R8 param 제거 -- ActionInputPrototype
@@ -37,10 +37,10 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 다음 작업 (우선순위)
 
-> **[최신] 2026-07-17 세션5 오후 (엔진 tip `652fc3f`, 이후 docs 커밋 포함 origin 동기화): 골든 무결성 감사 + 엔진 8건, corpus2 6/13 +
-> x64_auto 20/32. 다음 최우선 = param-recovery 발산(reverse_bytes_inplace/gate, heritage 데이터플로 공통
-> 계열). 권위 있는 다음-작업/현재상태는 저장소 루트 `NEXT_SESSION_PROMPT.md` + CHANGELOG 2026-07-17
-> 세션5 참조. 갭 지도 = `testdata/x64_auto/GAPMAP.md`(자동 갱신) + `testdata/x64_corpus2/README.md`.**
+> **[최신] 2026-07-17 세션5 오후 (엔진 tip `06489d0`, docs 포함 `ee9d0c1` origin 동기화): 골든 무결성 감사 + 엔진 9건, corpus2 6/13 +
+> x64_auto 20/32. 다음 최우선 = param-recovery undercount(helper_sum 스택 param/add_pt struct =
+> resolveModel/deriveInputMap 포팅). 권위 있는 다음-작업/현재상태는 저장소 루트 `NEXT_SESSION_PROMPT.md`
+> + CHANGELOG 2026-07-17 세션5 참조. 갭 지도 = `testdata/x64_auto/GAPMAP.md` + `testdata/x64_corpus2/README.md`.**
 
 ## 잔여 부채 (2026-07-17 세션5 실측 검증 -- 다음 작업의 권위는 루트 NEXT_SESSION_PROMPT.md)
 

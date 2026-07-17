@@ -1,4 +1,4 @@
-# 다음 세션 프롬프트 (2026-07-17 세션5 오후 작성, 엔진 tip `652fc3f` + docs 후속)
+# 다음 세션 프롬프트 (2026-07-17 세션5 오후 작성, 엔진 tip `06489d0`, docs 포함 `ee9d0c1`)
 
 ## THE mission (절대 잊지 말 것)
 Ghidra C++ 디컴파일러 엔진을 Go로 **byte-identical** 포팅. 실제 .sla(x86/x64/ARM) 로드해 임의 실제 함수를
@@ -10,15 +10,16 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (엔진 tip `652fc3f`, origin 푸시됨, 전 게이트 green -- docsync 시점 실측 재검증 완료)
+## 현재 상태 (엔진 tip `06489d0`, docs 포함 `ee9d0c1` origin 푸시, 전 게이트 green -- docsync 시점 실측 재검증)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **6/13**
   (bump_scores/divmix/parse_steps/dowhile_scan/find_pair/clamp3), x64_auto **20/32**, production PASS,
   `go test ./...` green.
 - 세션5 착지 = 골든 손상 수정(GenGoldens bodyHex 연속 span) + 전 코퍼스 무결성 감사(손상은 x64_auto 2건뿐,
-  corpus1/2 무결) + 엔진 8건: cover 인덱스=블록위치(97084fa), LoopBody 포인터 안정성(e19d788), InfLoop
+  corpus1/2 무결) + 엔진 9건: cover 인덱스=블록위치(97084fa), LoopBody 포인터 안정성(e19d788), InfLoop
   do/while(true)(0af54ad), RuleCollectTerms 포팅(e908beb), RuleShift2Mult 컨텍스트 게이트(75c6db5),
-  RuleDoubleShift 완전 포팅(3fbf15c), PTRADD 렌더 스케일 제거(caf44a2), **heritage BuildADT faithful
-  포팅(cd42ccb -- Bilardi-Pingali z-chain, 중첩 다이아몬드 phi 배치 복원, clamp3 완결)**.
+  RuleDoubleShift 완전 포팅(3fbf15c), PTRADD 렌더 스케일 제거(caf44a2), heritage BuildADT faithful
+  포팅(cd42ccb -- Bilardi-Pingali z-chain, clamp3 완결), **param-recovery overcount(ee592a9 -- phantom R8
+  param 제거, ActionInputPrototype input-only trial + deadcode 후)**.
   상세 = CHANGELOG 2026-07-17 세션5. stale 워커 worktree 40개 전수 검증 후 일괄 삭제(현재 main뿐).
 - 세션4 핸드오프의 (A) dowhile_count/find_pair, (D) 1바이트 반환 캐리어는 전부 완료.
 
