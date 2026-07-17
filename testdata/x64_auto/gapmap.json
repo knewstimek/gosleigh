@@ -167,7 +167,7 @@
           "raw pointer scale '* 4': want=0 got=2"
         ],
         "TEMP": [
-          "extra temp/local identifiers in output (4 vs 2): local_428, local_8"
+          "extra temp/local identifiers in output (4 vs 2): local_423, local_8"
         ]
       }
     },
