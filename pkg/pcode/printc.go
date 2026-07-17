@@ -2558,14 +2558,28 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 	case CPUI_BRANCH:
 		return nil
 	case CPUI_CBRANCH:
+		// A raw CBRANCH reaching the statement emitter means structuring left this
+		// conditional branch unfolded. This is a Gosleigh fallback: Ghidra's
+		// CollapseStructure always resolves a conditional branch into a BlockIf or
+		// BlockGoto, and PrintC only ever emits a goto through emitGotoStatement/
+		// emitLabel (printc.cc:2369,3299), where the goto and its address-derived
+		// label are produced symmetrically so the label is always defined.
+		//
+		// Emit "if (cond) goto label" only when the true-edge target block is still
+		// present, so labelForBlock resolves to a real block. When analysis has
+		// removed the branch's out-edges (SizeOut()<2 or a nil true target -- e.g.
+		// a return-carrier recovery gap that killed the block's live ops and left an
+		// orphan CBRANCH with no successors), the branch target is unrecoverable
+		// here; drop the branch rather than emit "goto label_missing", which is an
+		// undefined label that does not compile. C++ never reaches this state.
+		if op.Parent() == nil || op.Parent().SizeOut() <= 1 || op.Parent().TrueOut() == nil {
+			return nil
+		}
 		cond, err := s.renderBranchConditionFrag(op)
 		if err != nil {
 			return err
 		}
-		target := "label_missing"
-		if op.Parent() != nil && op.Parent().SizeOut() > 1 {
-			target = s.labelForBlock(op.Parent().TrueOut())
-		}
+		target := s.labelForBlock(op.Parent().TrueOut())
 		s.lang.Statement(func() {
 			s.lang.Token("if")
 			s.lang.Space()
