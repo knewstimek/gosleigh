@@ -98,7 +98,7 @@
     },
     {
       "name": "cond_assign_abs",
-      "output": "\nint cond_assign_abs(int param_1)\n\n{\nlocal_18 = param_1;\nif (param_1 \u003c 0) {\nlocal_18 = -param_1;\n}\nreturn local_18;\n}\n"
+      "output": "\nint cond_assign_abs(int param_1)\n\n{\nundefined4 local_18;\n\nlocal_18 = param_1;\nif (param_1 \u003c 0) {\nlocal_18 = -param_1;\n}\nreturn local_18;\n}\n"
     },
     {
       "name": "minmax_chain4",
