@@ -71,7 +71,13 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 ### (C) [소~중] x64_auto/corpus2 잔여 (20/32 이후)
 - switch_dense: 세션5 바이트 정정으로 실바이트 디코드 정상화 -- 잔여는 TYPECAST(cast int/uint/ulonglong
   want/got 불일치) + TEMP uVar2. 기존 "range-check idiom" 설명은 손상 바이트 시절 것이라 stale -- 재실측부터.
-- strlen_style STRUCT(for/while, loop-variable phi depth-3, (B)와 얽힘). multi_return_early TYPECAST.
+- strlen_style STRUCT(for/while, loop-variable phi depth-3, (B)와 얽힘).
+- **multi_return_early: TYPECAST 태그는 오분류(세션5 진단)** -- 캐스트는 골든과 동일하고 진짜 갭은
+  ActionReturnSplit: 4개 return이 한 블록(0x74)에 몰려 조건 분기 2개(`return -1`/`return 0`)가 통째로
+  소실 + 루프-exit `return 2`가 `return 0`으로 오출력. C++은 return별 값-블록 분리(RAX = const) 후 0x70
+  MULTIEQUAL -> 단일 return RAX. corpus2의 add_pt/sum_via_pp/helper_sum/caller 반환-캐리어 클러스터와
+  같은 계열 -- (A) 착수 시 함께 지도에 넣어라. GAPMAP 휴리스틱이 캐스트 토큰 수만 세는 한계도 확인
+  (블록 소실을 TYPECAST로 오분류 -- 툴 개선 후보).
 - sum_pp_walk TEMP(lVar1 -- SEXT48 implied 실패, (B) 클러스터). array_init_then_sum PTR `* 4`+local_428
   (스택 배열 미복구 근본 -- PTRADD를 안 거침). longlong_combo/sign_extend_boundary
   TYPECAST. bit_rotate_left 리터럴 U 접미사. while_countdown/popcount_loop/swap_via_temp TEMP((B) 계열).
