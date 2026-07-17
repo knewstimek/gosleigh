@@ -1344,7 +1344,16 @@ func normalizedBaseType(base *Base, longSize int) Datatype {
 	case TYPE_INT:
 		switch base.Size() {
 		case 1:
-			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "signed char")
+			// A size-1 signed integer is spelled "char", not "signed char":
+			// Ghidra registers an ASCII "char" core type (TYPE_INT size 1,
+			// chartype) that is preferred over any non-char int1 when filling
+			// the size-1 TYPE_INT cache slot, so getBase(1,TYPE_INT) resolves
+			// to "char" and that is the name every plain 1-byte signed value
+			// prints with (golden never emits "signed char").
+			// C++ parity: TypeFactory::cacheCoreTypes (type.cc:3645-3646, the
+			// "Char is preferred over other int types" branch) plus the
+			// setCoreType("char",1,TYPE_INT,true) registration (ghidra_arch.cc:340).
+			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "char")
 		case 2:
 			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "short")
 		case 4:
