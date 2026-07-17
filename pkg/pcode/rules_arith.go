@@ -370,16 +370,59 @@ func NewRuleShift2Mult(group string) *RuleShift2Mult {
 }
 
 func (r *RuleShift2Mult) apply(op *PcodeOp, data *Funcdata) int {
+	// C++ parity: RuleShift2Mult::applyOp (ruleaction.cc:3734).
 	shift, ok := constantValue(op.Input(1))
-	if !ok || shift == 0 || shift >= 63 {
+	if !ok { // Shift amount must be a constant
+		return 0
+	}
+	// FIXME(C++): cutoff of 32 is arbitrary; anything this big is probably not
+	// an arithmetic multiply. Matches "if (val >= 32) return 0" at line 3749.
+	if shift >= 32 {
+		return 0
+	}
+	// Arithmetic-context gate (ruleaction.cc:3752-3766): only convert when the
+	// shift participates in an INT_ADD/INT_SUB/INT_MULT expression. C++ checks
+	// the defining op of the shift's input first, then scans the output's
+	// descendants; the first arithmetic op found sets the flag. Without a match
+	// the shift is left as INT_LEFT (e.g. bitwise-OR context keeps `x << c`,
+	// which lets the (x>>c)<<c => x&mask rule fire downstream).
+	if !shift2MultArithContext(op) {
 		return 0
 	}
 	size := outputOrInputSize(op)
-	if shift >= uint64(size*8) {
-		return 0
-	}
 	rewriteOp(data, op, CPUI_INT_MULT, op.Input(0), data.NewConstant(size, uint64(1)<<shift))
 	return 1
+}
+
+// shift2MultArithContext reports whether op's shift result is adjacent to an
+// arithmetic operation. C++ parity: the arithop/beginDescend scan in
+// RuleShift2Mult::applyOp (ruleaction.cc:3752-3764).
+func shift2MultArithContext(op *PcodeOp) bool {
+	isArith := func(o *PcodeOp) bool {
+		if o == nil {
+			return false
+		}
+		switch o.Code() {
+		case CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_MULT:
+			return true
+		}
+		return false
+	}
+	// arithop = op->getIn(0)->getDef()
+	if in0 := op.Input(0); in0 != nil && isArith(in0.Def()) {
+		return true
+	}
+	// Scan descendants of the output varnode.
+	out := op.Output()
+	if out == nil {
+		return false
+	}
+	for _, d := range out.DescendIter() {
+		if isArith(d) {
+			return true
+		}
+	}
+	return false
 }
 
 type RuleAddMultCollapse struct{ batchRule }
