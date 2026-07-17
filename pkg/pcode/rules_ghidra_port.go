@@ -301,18 +301,13 @@ func NewRuleIntLessEqual(group string) *RuleIntLessEqual {
 	return r
 }
 
-// RuleIntLessEqual::applyOp -- ruleaction.cc.
-// C++ parity note: C++ converts both constant-left (c <= V => c-1 < V) and
-// constant-right (V <= c => V < c+1) forms. We skip constant-on-left here
-// because that form with PcodeOpBooleanFlip=true (set by ActionBlockStructure
-// on while-loop CBRANCHes) renders as V <= c-1 instead of V < c, diverging
-// from golden. C++ avoids this via ActionNormalizeBranches (not yet ported)
-// which re-normalizes c-1 < V back to V < c after structuring.
+// RuleIntLessEqual::applyOp -- ruleaction.cc:611.
+// Faithful port: unconditionally delegate to replaceLessequal, which handles
+// both constant-left (c <= V => c-1 < V) and constant-right (V <= c => V < c+1)
+// forms. ActionNormalizeBranches (blockaction.cc:2117, ported in
+// action_nodejoin.go) re-normalizes CBRANCH conditions after structuring, so
+// the constant-left form no longer needs to be skipped here.
 func (r *RuleIntLessEqual) apply(op *PcodeOp, data *Funcdata) int {
-	// Skip constant-on-left: requires ActionNormalizeBranches to fix rendering.
-	if op.NumInput() < 1 || op.Input(0) == nil || op.Input(0).IsConstant() {
-		return 0
-	}
 	if replaceLessequal(data, op) {
 		return 1
 	}
