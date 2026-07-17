@@ -14,7 +14,6 @@ import ghidra.app.decompiler.DecompiledFunction;
 import ghidra.program.model.listing.Function;
 import ghidra.program.model.listing.FunctionManager;
 import ghidra.program.model.address.Address;
-import ghidra.program.model.address.AddressRange;
 import ghidra.program.model.address.AddressSetView;
 import ghidra.program.model.mem.Memory;
 
@@ -76,17 +75,26 @@ public class GenGoldens extends GhidraScript {
 	}
 
 	private String bodyHex(Function func) throws Exception {
+		// Read the whole function image contiguously from the body's minimum
+		// to maximum address, NOT range-by-range. func.getBody() is an
+		// AddressSetView that excludes unreachable dead-code islands (e.g. the
+		// redundant "jmp epilogue" fillers MSVC /Od emits after each early
+		// return in an if-else-if ladder); concatenating its disjoint ranges
+		// drops those bytes and corrupts every relative branch displacement
+		// that spans a dropped island -- the resulting slice disassembles with
+		// jl/jmp targets landing mid-instruction or past the end. Emitting the
+		// full [min,max] span preserves the real on-disk byte layout so the
+		// slice decodes identically to the original binary.
 		AddressSetView body = func.getBody();
+		Address min = body.getMinAddress();
+		Address max = body.getMaxAddress();
 		Memory mem = currentProgram.getMemory();
+		int n = (int) (max.subtract(min) + 1);
+		byte[] buf = new byte[n];
+		mem.getBytes(min, buf);
 		StringBuilder hex = new StringBuilder();
-		for (AddressRange r : body) {
-			Address a = r.getMinAddress();
-			int n = (int) (r.getMaxAddress().subtract(a) + 1);
-			byte[] buf = new byte[n];
-			mem.getBytes(a, buf);
-			for (byte b : buf) {
-				hex.append(String.format("%02x", b & 0xff));
-			}
+		for (byte b : buf) {
+			hex.append(String.format("%02x", b & 0xff));
 		}
 		return hex.toString();
 	}
