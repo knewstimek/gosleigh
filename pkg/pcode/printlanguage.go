@@ -57,6 +57,17 @@ type ExprFragment struct {
 	Text       string
 	Precedence ExprPrecedence
 	op         string
+	// leftText/rightText are the already-parenthesized operand strings of a
+	// binary fragment (empty for non-binary fragments). They let the emitter
+	// re-split a top-level binary expression into separate content tokens with a
+	// whitespace break around the operator, so the pretty-printer can wrap at the
+	// operator boundary instead of at an implied parenthesis. C++ parity: the
+	// Ghidra emitter never flattens an expression -- PrintLanguage::emitOp emits
+	// spaces(spacing,bump) break tokens around every operator (printlanguage.cc:
+	// 333-338); retaining the operands lets Gosleigh reproduce that break point
+	// for the outermost operator of a coarse (flat-string) fragment.
+	leftText  string
+	rightText string
 }
 
 // associativeBinaryOps are the binary operators Ghidra marks associative in its
@@ -210,6 +221,28 @@ func (pl *PrintLanguage) EmitExpr(expr ExprFragment) {
 	pl.Token(expr.Text)
 }
 
+// EmitBrokenExpr emits a fragment as a token stream, splitting its outermost
+// binary operator into separate content tokens with a whitespace break on each
+// side. This reproduces Ghidra's emitOp binary emission -- spaces(spacing,bump),
+// operator, spaces(spacing,bump) (printlanguage.cc:333-338) -- so the Oppen
+// pretty-printer can insert a line break at the operator boundary when the line
+// overflows, exactly as the C++ does. The operands are emitted as flat content
+// tokens (their own operators are not further split), so only the outermost
+// break point is reproduced; this matches Ghidra for expressions that wrap at
+// their top-level operator. A fragment with no recorded binary operator is
+// emitted unchanged as a single content token.
+func (pl *PrintLanguage) EmitBrokenExpr(expr ExprFragment) {
+	if expr.op == "" || (expr.leftText == "" && expr.rightText == "") {
+		pl.Token(expr.Text)
+		return
+	}
+	pl.Token(expr.leftText)
+	pl.Space()
+	pl.Token(expr.op)
+	pl.Space()
+	pl.Token(expr.rightText)
+}
+
 func (pl *PrintLanguage) EmitChildExpr(expr ExprFragment, parent ExprPrecedence, pos ExprPosition, assoc ExprAssociativity) {
 	pl.Token(pl.ExprString(expr, parent, pos, assoc))
 }
@@ -222,13 +255,15 @@ func (pl *PrintLanguage) UnaryExpr(op string, precedence ExprPrecedence, expr Ex
 }
 
 func (pl *PrintLanguage) BinaryExpr(left ExprFragment, op string, right ExprFragment, precedence ExprPrecedence, assoc ExprAssociativity) ExprFragment {
-	var builder strings.Builder
-	builder.WriteString(pl.binaryChildString(left, op, precedence))
-	builder.WriteByte(' ')
-	builder.WriteString(op)
-	builder.WriteByte(' ')
-	builder.WriteString(pl.binaryChildString(right, op, precedence))
-	return ExprFragment{Text: builder.String(), Precedence: precedence, op: op}
+	leftStr := pl.binaryChildString(left, op, precedence)
+	rightStr := pl.binaryChildString(right, op, precedence)
+	return ExprFragment{
+		Text:       leftStr + " " + op + " " + rightStr,
+		Precedence: precedence,
+		op:         op,
+		leftText:   leftStr,
+		rightText:  rightStr,
+	}
 }
 
 // binaryChildString parenthesizes a binary operand following Ghidra's rule

@@ -1510,16 +1510,14 @@ func (s *printCState) emitIfGotoBlock(bl *FlowBlock) error {
 	if children := bl.StructuredChildren(); len(children) > 0 {
 		condChild = children[0]
 	}
-	cond := s.mustRenderCondition(condChild)
+	cond := s.mustRenderConditionFrag(condChild)
 	if err := s.emitConditionLead(condChild); err != nil {
 		return err
 	}
 	s.lang.Statement(func() {
 		s.lang.Token("if")
 		s.lang.Space()
-		s.lang.Token("(")
-		s.lang.Token(cond)
-		s.lang.Token(")")
+		s.emitConditionParen(cond)
 		s.lang.Space()
 		s.emitGotoStatement(bl)
 	})
@@ -1601,7 +1599,7 @@ func (s *printCState) emitIfBlockChain(bl *FlowBlock, isElseIf bool) error {
 	if len(children) < 2 {
 		return s.emitListBlock(bl)
 	}
-	cond := s.mustRenderCondition(children[0])
+	cond := s.mustRenderConditionFrag(children[0])
 	if isElseIf {
 		if s.ghidraFormat {
 			// Ghidra format: close brace on own line, then "else if (cond) {" on next line.
@@ -1611,9 +1609,7 @@ func (s *printCState) emitIfBlockChain(bl *FlowBlock, isElseIf bool) error {
 			s.lang.Space()
 			s.lang.Token("if")
 			s.lang.Space()
-			s.lang.Token("(")
-			s.lang.Token(cond)
-			s.lang.Token(")")
+			s.emitConditionParen(cond)
 			s.lang.Space()
 			s.lang.Token("{")
 			s.lang.Newline()
@@ -1625,9 +1621,7 @@ func (s *printCState) emitIfBlockChain(bl *FlowBlock, isElseIf bool) error {
 				s.lang.Space()
 				s.lang.Token("if")
 				s.lang.Space()
-				s.lang.Token("(")
-				s.lang.Token(cond)
-				s.lang.Token(")")
+				s.emitConditionParen(cond)
 				s.lang.Space()
 				s.lang.Token("{")
 				s.lang.Indent()
@@ -1649,9 +1643,7 @@ func (s *printCState) emitIfBlockChain(bl *FlowBlock, isElseIf bool) error {
 		s.lang.OpenBlockAfter(func() {
 			s.lang.Token("if")
 			s.lang.Space()
-			s.lang.Token("(")
-			s.lang.Token(cond)
-			s.lang.Token(")")
+			s.emitConditionParen(cond)
 		})
 	}
 	if err := s.emitBlock(children[1]); err != nil {
@@ -1783,13 +1775,11 @@ func (s *printCState) emitWhileBlockOverflow(children []*FlowBlock) error {
 	if err := s.emitConditionLead(branchBl); err != nil {
 		return err
 	}
-	cond := s.mustRenderCondition(branchBl)
+	cond := s.mustRenderConditionFrag(branchBl)
 	s.lang.Statement(func() {
 		s.lang.Token("if")
 		s.lang.Space()
-		s.lang.Token("(")
-		s.lang.Token(cond)
-		s.lang.Token(")")
+		s.emitConditionParen(cond)
 		s.lang.Space()
 		s.lang.Token("break")
 	})
@@ -2469,7 +2459,7 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 	case CPUI_BRANCH:
 		return nil
 	case CPUI_CBRANCH:
-		cond, err := s.renderBranchCondition(op)
+		cond, err := s.renderBranchConditionFrag(op)
 		if err != nil {
 			return err
 		}
@@ -2480,9 +2470,7 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 		s.lang.Statement(func() {
 			s.lang.Token("if")
 			s.lang.Space()
-			s.lang.Token("(")
-			s.lang.Token(cond)
-			s.lang.Token(")")
+			s.emitConditionParen(cond)
 			s.lang.Space()
 			s.lang.Token("goto")
 			s.lang.Space()
@@ -2785,8 +2773,20 @@ func booleanFlipToken(opc OpCode) (token string, prec ExprPrecedence, reorder bo
 }
 
 func (s *printCState) renderBranchCondition(op *PcodeOp) (string, error) {
+	frag, err := s.renderBranchConditionFrag(op)
+	if err != nil {
+		return "", err
+	}
+	return frag.Text, nil
+}
+
+// renderBranchConditionFrag renders a CBRANCH condition as an ExprFragment,
+// preserving the outermost operator (and its operand strings) so the emit path
+// can wrap at the operator boundary. renderBranchCondition is the flat-string
+// wrapper for callers that only need the text.
+func (s *printCState) renderBranchConditionFrag(op *PcodeOp) (ExprFragment, error) {
 	if op == nil {
-		return "0", nil
+		return s.lang.Atom("0"), nil
 	}
 	var cond *Varnode
 	if op.NumInput() >= 2 {
@@ -2803,9 +2803,9 @@ func (s *printCState) renderBranchCondition(op *PcodeOp) (string, error) {
 			// !(BOOL_NEGATE(x)) = x
 			inner, err := s.renderVarnodeExpr(defOp.Input(0))
 			if err != nil {
-				return "", err
+				return ExprFragment{}, err
 			}
-			return inner.Text, nil
+			return inner, nil
 		}
 		if negTok, prec, reorder, ok := booleanFlipToken(defOp.Code()); ok {
 			var left, right ExprFragment
@@ -2814,18 +2814,18 @@ func (s *printCState) renderBranchCondition(op *PcodeOp) (string, error) {
 				// !(a op b) expressed with negated op and swapped inputs.
 				left, err = s.renderVarnodeExpr(defOp.Input(1))
 				if err != nil {
-					return "", err
+					return ExprFragment{}, err
 				}
 				right, err = s.renderVarnodeExpr(defOp.Input(0))
 			} else {
 				left, err = s.renderVarnodeExpr(defOp.Input(0))
 				if err != nil {
-					return "", err
+					return ExprFragment{}, err
 				}
 				right, err = s.renderVarnodeExpr(defOp.Input(1))
 			}
 			if err != nil {
-				return "", err
+				return ExprFragment{}, err
 			}
 			// Null pointer comparison: apply null cast even in the BooleanFlip path.
 			// C++ parity: PrintC pointer comparison rendering with explicit null cast.
@@ -2848,17 +2848,17 @@ func (s *printCState) renderBranchCondition(op *PcodeOp) (string, error) {
 					}
 				}
 			}
-			return s.lang.BinaryExpr(left, negTok, right, prec, ExprAssocLeft).Text, nil
+			return s.lang.BinaryExpr(left, negTok, right, prec, ExprAssocLeft), nil
 		}
 	}
 	frag, err := s.renderVarnodeExpr(cond)
 	if err != nil {
-		return "", err
+		return ExprFragment{}, err
 	}
 	if op.HasFlag(PcodeOpBooleanFlip) {
 		frag = s.lang.UnaryExpr("!", cPrecUnary, frag)
 	}
-	return frag.Text, nil
+	return frag, nil
 }
 
 func (s *printCState) renderBranchIndirect(op *PcodeOp) (string, error) {
@@ -3710,11 +3710,15 @@ func (s *printCState) renderPtrSubField(base, off *Varnode) (ExprFragment, bool)
 }
 
 func (s *printCState) renderConditionOp(op *PcodeOp) (ExprFragment, error) {
-	cond, err := s.renderBranchCondition(op)
+	frag, err := s.renderBranchConditionFrag(op)
 	if err != nil {
 		return ExprFragment{}, err
 	}
-	return s.lang.Expr(cond, cPrecLowest), nil
+	// Force lowest precedence so an enclosing compound condition parenthesizes
+	// this operand (unchanged behaviour), while keeping the operator/operand
+	// strings so the emit path can break at the operator boundary.
+	frag.Precedence = cPrecLowest
+	return frag, nil
 }
 
 func (s *printCState) renderBranchIndirectExpr(op *PcodeOp) (ExprFragment, error) {
@@ -3731,6 +3735,28 @@ func (s *printCState) mustRenderCondition(bl *FlowBlock) string {
 		return "0"
 	}
 	return expr.Text
+}
+
+// mustRenderConditionFrag is the fragment form of mustRenderCondition: it keeps
+// the outermost operator so emitConditionParen can wrap at the operator boundary.
+func (s *printCState) mustRenderConditionFrag(bl *FlowBlock) ExprFragment {
+	expr, err := s.renderCondition(bl)
+	if err != nil {
+		return s.lang.Atom("0")
+	}
+	return expr
+}
+
+// emitConditionParen emits a parenthesized condition, "(" cond ")", feeding the
+// condition through EmitBrokenExpr so the pretty-printer can break at the
+// outermost operator instead of at the parenthesis. C++ parity: PrintC emits the
+// condition via emitExpression, whose operator break tokens (spaces(spacing,bump)
+// in emitOp) are what Ghidra wraps at; the surrounding parens are openParen /
+// closeParen groups that never themselves become the chosen break.
+func (s *printCState) emitConditionParen(frag ExprFragment) {
+	s.lang.Token("(")
+	s.lang.EmitBrokenExpr(frag)
+	s.lang.Token(")")
 }
 
 func (s *printCState) renderCondition(bl *FlowBlock) (ExprFragment, error) {
@@ -3775,11 +3801,15 @@ func (s *printCState) renderCondition(bl *FlowBlock) (ExprFragment, error) {
 		for i := len(basic.Ops()) - 1; i >= 0; i-- {
 			op := basic.Ops()[i]
 			if op.Code() == CPUI_CBRANCH {
-				cond, err := s.renderBranchCondition(op)
+				frag, err := s.renderBranchConditionFrag(op)
 				if err != nil {
 					return ExprFragment{}, err
 				}
-				return s.lang.Expr(cond, cPrecLowest), nil
+				// Keep the operator/operand strings (for operator-boundary line
+				// wrapping) but force lowest precedence so a compound parent
+				// parenthesizes this operand (unchanged behaviour).
+				frag.Precedence = cPrecLowest
+				return frag, nil
 			}
 			if op.Output() != nil {
 				return s.renderVarnodeExpr(op.Output())
