@@ -75,3 +75,6 @@ report 재실행 시 이 섹션은 덮어써지므로 재생성 후 다시 보�
   ("사이 op 전부 branch/dead") 대체 -> popcount_loop/reverse_bytes_inplace for-루프 복구
   (STRUCT 해소, 잔여는 TEMP 명명/param-recovery). strlen_style은 known gap: CAST+INT_SEXT
   잉여로 loop-variable phi가 depth-3 한계(block.cc path[4]) 밖 -- cast 경로 선행 필요.
+- ebb21ad 반환 타입 recovery: C++은 ActionOutputPrototype(coreaction.cc:4776, casts보다 선행)이
+  시그니처를 확정하고 SetCasts 부호 승격은 시그니처에 미반영 -- Gosleigh print-시점 재파생에
+  같은 결과가 나오도록 FuncProto output(INT) 우선 가드. umulhi 시그니처 longlong 골든 일치.
