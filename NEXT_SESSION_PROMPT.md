@@ -1,4 +1,4 @@
-# 다음 세션 프롬프트 (2026-07-17 세션5 오후 작성, master `652fc3f`)
+# 다음 세션 프롬프트 (2026-07-17 세션5 오후 작성, 엔진 tip `652fc3f` + docs 후속)
 
 ## THE mission (절대 잊지 말 것)
 Ghidra C++ 디컴파일러 엔진을 Go로 **byte-identical** 포팅. 실제 .sla(x86/x64/ARM) 로드해 임의 실제 함수를
@@ -10,7 +10,7 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (master `652fc3f`, origin 푸시됨, 전 게이트 green)
+## 현재 상태 (엔진 tip `652fc3f`, origin 푸시됨, 전 게이트 green -- docsync 시점 실측 재검증 완료)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **6/13**
   (bump_scores/divmix/parse_steps/dowhile_scan/find_pair/clamp3), x64_auto **20/32**, production PASS,
   `go test ./...` green.
