@@ -3737,14 +3737,14 @@ func (s *printCState) renderPtrAdd(op *PcodeOp) (ExprFragment, error) {
 	if err != nil {
 		return ExprFragment{}, err
 	}
-	right := index
-	if op.NumInput() > 2 {
-		scale := s.lang.Atom(s.renderConstant(op.Input(2)))
-		if scale.Text != "1" {
-			right = s.lang.BinaryExpr(index, "*", scale, cPrecMultiply, ExprAssocLeft)
-		}
-	}
-	return s.lang.BinaryExpr(base, "+", right, cPrecAdd, ExprAssocLeft), nil
+	// C++ parity: PrintC::opPtradd (printc.cc:899). The non-value context emits a
+	// plain pointer addition (binary_plus) of only getIn(0) and getIn(1); the
+	// element scale getIn(2) is never printed, because C pointer arithmetic
+	// scales by the pointee size implicitly and a surviving PTRADD always carries
+	// scale == pointee AlignSize (RulePtraddUndo removes mismatched ones). The
+	// value/subscript context (print_load_value/print_store_value -> '[]') is
+	// handled in renderLoad's tryRenderSubscript, not here.
+	return s.lang.BinaryExpr(base, "+", index, cPrecAdd, ExprAssocLeft), nil
 }
 
 func (s *printCState) renderPtrSub(op *PcodeOp) (ExprFragment, error) {
