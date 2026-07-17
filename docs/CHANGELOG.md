@@ -64,6 +64,12 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
     C++ oneInstruction의 pos 생존 계약을 pin으로 명시화(풀 크기 불변) + 회귀 테스트
     TestPinContextSurvivesReuseWrap. **dowhile_scan 골든 byte-identical -> corpus2 4/13.**
 
+12. **미정의 라벨 방출 근절** (`2c5ccbc`): raw CPUI_CBRANCH 문장 fallback(C++ 무대응 Gosleigh crutch)이
+    엣지 소실 시 `goto label_missing` placeholder를 방출하던 것 -- 타깃 블록이 실존할 때만 방출, 아니면
+    드롭(라벨 날조 금지; C++은 bare CBRANCH를 절대 방출 안 함, CollapseStructure가 항상 접음). 출현 2->0.
+    근본(known gap): nested_if_ladder_grade의 1바이트(AL/char) 반환 캐리어 recovery 실패 -> mov al 이
+    dead -> 블록 붕괴. 반환-recovery upstream은 별도 goal.
+
 **게이트 (최종)**: tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 4/13, x64_auto
 15/32, production 전부 PASS, `go test ./...` green, goldengap 2회 산출 byte-diff 없음(디코드 결정성).
 
