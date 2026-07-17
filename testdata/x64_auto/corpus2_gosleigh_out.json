@@ -6,7 +6,7 @@
     },
     {
       "name": "find_pair",
-      "output": "\nint find_pair(longlong param_1,int param_2,int param_3)\n\n{\nint local_18;\nint local_14;\n\nlocal_18 = 0;\nlocal_14 = local_18;\nif (local_18 \u003c param_2) {\ndo {\nlocal_14 = local_14 + 1;\nif (param_2 \u003c= local_14) goto label_0;\nif (\n*(int *)(param_1 + (longlong)local_18 * 4) + *(int *)(param_1 + (longlong)local_14 * 4) == param_3\n) goto label_1;\n} while (param_2 \u003c= local_14);\nlocal_14 = local_18 * 100 + local_14;\n}\nelse {\nlocal_14 = -1;\n}\nreturn local_14;\nlocal_18 = local_18 + 1;\ngoto label_2;\n}\n"
+      "output": "\nint find_pair(longlong param_1,int param_2,int param_3)\n\n{\nint local_18;\nint local_14;\n\nlocal_18 = 0;\nlocal_14 = local_18;\nif (local_18 \u003c param_2) {\ndo {\nlocal_14 = local_14 + 1;\nif (param_2 \u003c= local_14) goto label_0;\nif (*(int *)(param_1 + (longlong)local_18 * 4) + *(int *)(param_1 + (longlong)local_14 * 4) ==\nparam_3) goto label_1;\n} while (param_2 \u003c= local_14);\nlocal_14 = local_18 * 100 + local_14;\n}\nelse {\nlocal_14 = -1;\n}\nreturn local_14;\nlocal_18 = local_18 + 1;\ngoto label_2;\n}\n"
     },
     {
       "name": "gate",
@@ -42,7 +42,7 @@
     },
     {
       "name": "parse_steps",
-      "output": "\nint parse_steps(longlong param_1,int param_2)\n\n{\nint local_18;\nint local_14;\n\nlocal_14 = 0;\nlocal_18 = 0;\nwhile( true ) {\nif (param_2 \u003c= local_18) {\nreturn local_14;\n}\nif (\n(*(int *)(param_1 + (longlong)local_18 * 4) \u003c 0) || (1000 \u003c *(int *)(param_1 + (longlong)local_18 * 4))\n) break;\nlocal_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\nlocal_18 = local_18 + 1;\n}\nreturn -1;\n}\n"
+      "output": "\nint parse_steps(longlong param_1,int param_2)\n\n{\nint local_18;\nint local_14;\n\nlocal_14 = 0;\nlocal_18 = 0;\nwhile( true ) {\nif (param_2 \u003c= local_18) {\nreturn local_14;\n}\nif ((*(int *)(param_1 + (longlong)local_18 * 4) \u003c 0) ||\n(1000 \u003c *(int *)(param_1 + (longlong)local_18 * 4))) break;\nlocal_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\nlocal_18 = local_18 + 1;\n}\nreturn -1;\n}\n"
     },
     {
       "name": "faverage",
