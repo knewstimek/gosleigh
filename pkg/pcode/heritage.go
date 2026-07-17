@@ -1,8 +1,6 @@
 package pcode
 
 import (
-	"sort"
-
 	"gosleigh/pkg/address"
 )
 
@@ -17,6 +15,7 @@ type Heritage struct {
 	disjoint       TaskList
 	domChild       [][]int32 // domChild[blockIndex] = child block indices
 	augment        [][]int32 // augment[blockIndex] = augmented edge target indices
+	idomIdx        []int32   // idomIdx[blockIndex] = immediate dominator index (-1 for root)
 	heritageFlags  []uint32  // per-block flags
 	depth          []int32   // dominator depth per block
 	maxDepth       int32     // -1 means needs rebuild
@@ -241,78 +240,93 @@ func (h *Heritage) BuildADT(graph *BlockGraph) {
 		}
 	}
 
-	// 3. Collect up-edges: for each block v, for each predecessor u,
-	// if u != v.immedDom, the edge u->v is an up-edge.
-	type upEdge struct {
-		from, to int32
-	}
-	var upEdges []upEdge
+	// Cache immediate-dominator indices for visitIncr's ancestor test.
+	h.idomIdx = make([]int32, n)
 	for i := 0; i < n; i++ {
-		bl := graph.GetBlock(i)
-		idom := bl.ImmedDom()
-		for j := 0; j < bl.SizeIn(); j++ {
-			pred := bl.InEdge(j).Point
-			if pred != idom {
-				upEdges = append(upEdges, upEdge{from: pred.Index(), to: bl.Index()})
+		idom := graph.GetBlock(i).ImmedDom()
+		if idom == nil || idom == graph.GetBlock(i) {
+			h.idomIdx[i] = -1
+		} else {
+			h.idomIdx[i] = idom.Index()
+		}
+	}
+
+	h.heritageFlags = make([]uint32, n)
+	h.augment = make([][]int32, n)
+
+	// 3. Collect up-edges and the b[]/t[] counters of the Bilardi-Pingali ADT.
+	// An edge u->v is an up-edge when u is not the immediate dominator of v.
+	// b[u] counts up-edges leaving u; t[x] counts up-edges whose target is a
+	// dominator-tree child of x. C++ parity: heritage.cc Heritage::buildADT
+	// (2339-2353) -- do NOT simplify to "augment at idom(v)": that misses phis
+	// at merge blocks whose idom is an intermediate (non-entry, non-write) block.
+	a := make([]int32, n)
+	b := make([]int32, n)
+	t := make([]int32, n)
+	z := make([]int32, n)
+	var upstart, upend []int32
+	for i := 0; i < n; i++ {
+		for _, vIdx := range h.domChild[i] {
+			v := graph.GetBlock(int(vIdx))
+			for k := 0; k < v.SizeIn(); k++ {
+				u := v.InEdge(k).Point
+				if u != v.ImmedDom() {
+					upstart = append(upstart, u.Index())
+					upend = append(upend, vIdx)
+					b[u.Index()]++
+					t[i]++
+				}
 			}
 		}
 	}
 
-	// 4. Initialize flags and augment arrays
-	h.heritageFlags = make([]uint32, n)
-	h.augment = make([][]int32, n)
-
-	if len(upEdges) == 0 {
-		// No up-edges means no merge points needed
-		return
-	}
-
-	// Build augment edges: for each up-edge (u -> v), add v to the
-	// augment list of v's immediate dominator. This is a simplified
-	// version of the Bilardi-Pingali algorithm sufficient for Phase 3.
-	// The augment edge from idom(v) to v means "if there is a definition
-	// reaching idom(v), then v needs a phi node".
-	for _, ue := range upEdges {
-		v := ue.to
-		bl := graph.GetBlock(int(v))
-		idom := bl.ImmedDom()
-		if idom == nil || idom == bl {
-			continue
+	// 4. Compute a[], z[] and boundary nodes bottom-up over the dominator tree.
+	// A node is a boundary node when it is a leaf or z[i] > a[i]+1. Children have
+	// larger RPO indices than their idom, so a high-to-low sweep visits children
+	// first. C++ parity: heritage.cc Heritage::buildADT (2354-2367).
+	for i := n - 1; i >= 0; i-- {
+		var k, l int32
+		for _, c := range h.domChild[i] {
+			k += a[c]
+			l += z[c]
 		}
-		idomIdx := idom.Index()
-		h.augment[idomIdx] = append(h.augment[idomIdx], v)
-	}
-
-	// Sort and deduplicate augment edges, sort by depth (descending)
-	for i := range h.augment {
-		if len(h.augment[i]) > 0 {
-			sort.Slice(h.augment[i], func(a, b int) bool {
-				return h.depth[h.augment[i][a]] > h.depth[h.augment[i][b]]
-			})
-			h.augment[i] = dedupInt32(h.augment[i])
-		}
-	}
-
-	// Mark boundary nodes
-	for i := 0; i < n; i++ {
-		if len(h.augment[i]) > 0 {
+		a[i] = b[i] - t[i] + k
+		z[i] = 1 + l
+		if len(h.domChild[i]) == 0 || z[i] > a[i]+1 {
 			h.heritageFlags[i] |= heritageBoundaryNode
+			z[i] = 1
 		}
 	}
-}
 
-// dedupInt32 removes adjacent duplicates from a sorted slice.
-func dedupInt32(s []int32) []int32 {
-	if len(s) <= 1 {
-		return s
-	}
-	out := s[:1]
-	for i := 1; i < len(s); i++ {
-		if s[i] != out[len(out)-1] {
-			out = append(out, s[i])
+	// 5. Re-purpose z[] as the "next boundary ancestor" skip pointer used to walk
+	// augment edges up the dominator tree. C++ parity: buildADT (2368-2375).
+	z[0] = -1
+	for i := 1; i < n; i++ {
+		j := h.idomIdx[i]
+		if j >= 0 && h.heritageFlags[j]&heritageBoundaryNode != 0 {
+			z[i] = j
+		} else if j >= 0 {
+			z[i] = z[j]
+		} else {
+			z[i] = -1
 		}
 	}
-	return out
+
+	// 6. Attach each up-edge target v to augment[k] for every k on the z-chain
+	// from the up-edge source up to (but not including) idom(v). This is the
+	// step the previous simplification dropped. C++ parity: buildADT (2376-2384).
+	for e := range upstart {
+		v := upend[e]
+		j := h.idomIdx[v]
+		k := upstart[e]
+		for j < k {
+			h.augment[k] = append(h.augment[k], v)
+			k = z[k]
+			if k < 0 {
+				break
+			}
+		}
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -371,10 +385,13 @@ func (h *Heritage) CalcMultiequals(graph *BlockGraph, writes []*Varnode) {
 // visitIncr recursively traverses the ADT for phi-node placement.
 // C++ parity: heritage.cc Heritage::visitIncr
 func (h *Heritage) visitIncr(qnodeIdx, vnodeIdx int32) {
-	// Process augment edges for this node
+	// Process augment edges for this node. An augment target v yields a phi only
+	// when idom(v) is a strict ancestor of qnode; augment[] is built in ascending
+	// idom-index order so we can stop at the first non-qualifying entry.
+	// C++ parity: heritage.cc Heritage::visitIncr (2405-2419) -- the test is on the
+	// idom index, not dominator depth (equal-depth siblings would be mis-skipped).
 	for _, v := range h.augment[vnodeIdx] {
-		// Augment targets are sorted by depth (descending).
-		if h.depth[v] <= h.depth[qnodeIdx] {
+		if h.idomIdx[v] >= qnodeIdx {
 			break
 		}
 		if h.heritageFlags[v]&heritageMergedNode == 0 {
