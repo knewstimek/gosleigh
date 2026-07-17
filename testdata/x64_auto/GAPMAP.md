@@ -71,3 +71,7 @@ report 재실행 시 이 섹션은 덮어써지므로 재생성 후 다시 보�
   (ssadiff 17/18 match, 0 mismatch), C 출력 캐스트 소거. 신규 known gap: 함수 시그니처
   반환 타입이 반환 varnode 타입에서 파생됨 -- C++은 별도 return-recovery (umulhi 시그니처
   longlong vs ulonglong). 후속: 반환 타입 recovery 분리.
+- f8a2674 PcodeOp::isMoveable(op.cc:178) faithful 포팅: 기존 isOpMoveableToLast 오휴리스틱
+  ("사이 op 전부 branch/dead") 대체 -> popcount_loop/reverse_bytes_inplace for-루프 복구
+  (STRUCT 해소, 잔여는 TEMP 명명/param-recovery). strlen_style은 known gap: CAST+INT_SEXT
+  잉여로 loop-variable phi가 depth-3 한계(block.cc path[4]) 밖 -- cast 경로 선행 필요.
