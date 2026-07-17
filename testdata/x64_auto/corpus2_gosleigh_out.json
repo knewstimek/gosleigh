@@ -2,11 +2,11 @@
   "functions": [
     {
       "name": "dowhile_scan",
-      "output": "\nint dowhile_scan(longlong param_1,int param_2)\n\n{\nint iVar2;\nint local_18;\nint local_10;\n\nlocal_10 = 0;\nlocal_18 = 0;\ndo {\niVar2 = *(int *)(param_1 + (longlong)local_18 * 4);\nlocal_18 = local_18 + 1;\nif (-1 \u003c iVar2) {\nif (iVar2 == 999) {\nreturn local_10;\n}\nlocal_10 = (int)param_1 + iVar2;\n}\nif (local_18 \u003c param_2) goto label_0;\n} while (-1 \u003c iVar2);\nreturn local_10;\n}\n"
+      "output": "\nint dowhile_scan(longlong param_1,int param_2)\n\n{\nint iVar2;\nint local_18;\nint local_10;\n\nlocal_10 = 0;\nlocal_18 = 0;\ndo {\niVar2 = *(int *)(param_1 + (longlong)local_18 * 4);\nlocal_18 = local_18 + 1;\nif (-1 \u003c iVar2) {\nif (iVar2 == 999) {\nreturn local_10;\n}\nlocal_10 = (int)param_1 + iVar2;\n}\n} while (local_18 \u003c param_2);\nreturn local_10;\n}\n"
     },
     {
       "name": "find_pair",
-      "output": "\nint find_pair(longlong param_1,int param_2,int param_3)\n\n{\nint local_18;\nint local_14;\n\nlocal_18 = 0;\nlocal_14 = local_18;\nif (local_18 \u003c param_2) {\ndo {\nlocal_14 = local_14 + 1;\nif (param_2 \u003c= local_14) goto label_0;\nif (*(int *)(param_1 + (longlong)local_18 * 4) + *(int *)(param_1 + (longlong)local_14 * 4) ==\nparam_3) goto label_1;\n} while (param_2 \u003c= local_14);\nlocal_14 = local_18 * 100 + local_14;\n}\nelse {\nlocal_14 = -1;\n}\nreturn local_14;\nlocal_18 = local_18 + 1;\ngoto label_2;\n}\n"
+      "output": "\nint find_pair(longlong param_1,int param_2,int param_3)\n\n{\nint local_18;\nint local_14;\n\nlocal_18 = 0;\nlocal_14 = local_18;\nif (local_18 \u003c param_2) {\ndo {\nlocal_14 = local_14 + 1;\nif (param_2 \u003c= local_14) goto label_0;\n} while (\n*(int *)(param_1 + (longlong)local_18 * 4) + *(int *)(param_1 + (longlong)local_14 * 4) ==\nparam_3);\nlocal_14 = local_18 * 100 + local_14;\n}\nelse {\nlocal_14 = -1;\n}\nreturn local_14;\nlocal_18 = local_18 + 1;\ngoto label_1;\n}\n"
     },
     {
       "name": "gate",
@@ -50,7 +50,7 @@
     },
     {
       "name": "umulhi",
-      "output": "\nulonglong umulhi(ulonglong param_1,ulonglong param_2)\n\n{\nulonglong uVar1;\nulonglong uVar2;\nulonglong uVar3;\nulonglong uVar5;\nulonglong uVar6;\n\nuVar5 = param_1 \u0026 0xffffffff;\nuVar1 = param_1 \u003e\u003e 0x20;\nuVar6 = param_2 \u0026 0xffffffff;\nuVar2 = param_2 \u003e\u003e 0x20;\nuVar3 = uVar1 * uVar6 + (uVar5 * uVar6 \u003e\u003e 0x20);\nreturn uVar1 * uVar2 + (uVar3 \u003e\u003e 0x20) + ((uVar3 \u0026 0xffffffff) + uVar5 * uVar2 \u003e\u003e 0x20);\n}\n"
+      "output": "\nlonglong umulhi(ulonglong param_1,ulonglong param_2)\n\n{\nulonglong uVar1;\nulonglong uVar2;\nulonglong uVar3;\nulonglong uVar5;\nulonglong uVar6;\n\nuVar5 = param_1 \u0026 0xffffffff;\nuVar1 = param_1 \u003e\u003e 0x20;\nuVar6 = param_2 \u0026 0xffffffff;\nuVar2 = param_2 \u003e\u003e 0x20;\nuVar3 = uVar1 * uVar6 + (uVar5 * uVar6 \u003e\u003e 0x20);\nreturn uVar1 * uVar2 + (uVar3 \u003e\u003e 0x20) + ((uVar3 \u0026 0xffffffff) + uVar5 * uVar2 \u003e\u003e 0x20);\n}\n"
     }
   ]
 }

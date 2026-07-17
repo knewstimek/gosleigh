@@ -78,3 +78,9 @@ report 재실행 시 이 섹션은 덮어써지므로 재생성 후 다시 보�
 - ebb21ad 반환 타입 recovery: C++은 ActionOutputPrototype(coreaction.cc:4776, casts보다 선행)이
   시그니처를 확정하고 SetCasts 부호 승격은 시그니처에 미반영 -- Gosleigh print-시점 재파생에
   같은 결과가 나오도록 FuncProto output(INT) 우선 가드. umulhi 시그니처 longlong 골든 일치.
+- ccbef67 do-while emit faithful (printc.cc:3200 emitBlockDoWhile no_branch/only_branch):
+  이전 세션 "LoopBody exit 선택 버그" 진단은 실측으로 반증 -- collapse는 정확했고 emit이
+  front leaf에서 조건을 뽑던 것. dowhile_scan 루프 구조 골든 일치(잔여 = param-reuse
+  데이터플로), dowhile_count dangling goto 소멸, find_pair goto 3->2. 신규 소견:
+  dowhile_scan accumulator가 param_1(포인터)와 오병합(`(int)param_1 + iVar2`),
+  dowhile_count 증가 temp 미병합 + local_18=0 초기화 누락 -- merge/heritage 데이터플로 계열.
