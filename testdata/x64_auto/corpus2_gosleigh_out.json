@@ -50,7 +50,7 @@
     },
     {
       "name": "umulhi",
-      "output": "\nlonglong umulhi(ulonglong param_1,ulonglong param_2)\n\n{\nulonglong uVar1;\nulonglong uVar2;\nulonglong uVar3;\nulonglong uVar5;\nulonglong uVar6;\n\nuVar5 = param_1 \u0026 0xffffffff;\nuVar1 = param_1 \u003e\u003e 0x20;\nuVar6 = param_2 \u0026 0xffffffff;\nuVar2 = param_2 \u003e\u003e 0x20;\nuVar3 = uVar1 * uVar6 + ((ulonglong)(uVar5 * uVar6) \u003e\u003e 0x20);\nreturn uVar1 * uVar2 + (uVar3 \u003e\u003e 0x20) + ((uVar3 \u0026 0xffffffff) + uVar5 * uVar2 \u003e\u003e 0x20);\n}\n"
+      "output": "\nulonglong umulhi(ulonglong param_1,ulonglong param_2)\n\n{\nulonglong uVar1;\nulonglong uVar2;\nulonglong uVar3;\nulonglong uVar5;\nulonglong uVar6;\n\nuVar5 = param_1 \u0026 0xffffffff;\nuVar1 = param_1 \u003e\u003e 0x20;\nuVar6 = param_2 \u0026 0xffffffff;\nuVar2 = param_2 \u003e\u003e 0x20;\nuVar3 = uVar1 * uVar6 + (uVar5 * uVar6 \u003e\u003e 0x20);\nreturn uVar1 * uVar2 + (uVar3 \u003e\u003e 0x20) + ((uVar3 \u0026 0xffffffff) + uVar5 * uVar2 \u003e\u003e 0x20);\n}\n"
     }
   ]
 }
