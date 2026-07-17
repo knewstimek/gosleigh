@@ -438,7 +438,12 @@ func FindLoopBody(looptop *FlowBlock, looporder []*LoopBody) *LoopBody {
 	return nil
 }
 
-func SortLoopBodiesByDepth(loopbodies []LoopBody) {
+// SortLoopBodiesByDepth reorders loop bodies so the deepest (most nested) come
+// first. It sorts a slice of pointers, so the LoopBody objects themselves keep
+// stable addresses and any immedContainer pointers set earlier stay valid.
+// C++ parity: list<LoopBody>::sort (blockaction.cc orderLoopBodies), which is a
+// stable node relink; the objects never move.
+func SortLoopBodiesByDepth(loopbodies []*LoopBody) {
 	sort.SliceStable(loopbodies, func(i, j int) bool {
 		return loopbodies[i].depth > loopbodies[j].depth
 	})

@@ -753,7 +753,13 @@ type CollapseStructure struct {
 	likelylistfull      bool
 	likelygoto          []FloatingEdge
 	likelyIndex         int
-	loopbody            []LoopBody
+	// loopbody holds pointers, not values. C++ uses list<LoopBody>, whose nodes
+	// keep stable addresses when loopbody.sort() relinks them, so the
+	// LoopBody::immed_container pointers set by labelContainments survive the
+	// depth sort. A []LoopBody value slice would move elements during
+	// SortLoopBodiesByDepth and leave immedContainer dangling (pointing at a
+	// different loop), which mislabels a nested loop's exit block.
+	loopbody            []*LoopBody
 	loopbodyIndex       int
 	graph               *BlockGraph
 	dataflowChangeCount int
@@ -835,8 +841,8 @@ func (c *CollapseStructure) labelLoops(looporder *[]*LoopBody) {
 			if bl.isBackEdgeIn(j) {
 				body := NewLoopBody(bl)
 				body.AddTail(bl.getIn(j))
-				c.loopbody = append(c.loopbody, *body)
-				*looporder = append(*looporder, &c.loopbody[len(c.loopbody)-1])
+				c.loopbody = append(c.loopbody, body)
+				*looporder = append(*looporder, body)
 			}
 		}
 	}
@@ -865,7 +871,7 @@ func (c *CollapseStructure) orderLoopBodies() {
 		c.loopbody = filtered
 		looporder = make([]*LoopBody, 0, len(c.loopbody))
 		for i := range c.loopbody {
-			looporder = append(looporder, &c.loopbody[i])
+			looporder = append(looporder, c.loopbody[i])
 		}
 		sort.Slice(looporder, func(i, j int) bool {
 			return CompareLoopEnds(looporder[i], looporder[j])
@@ -898,7 +904,7 @@ func (c *CollapseStructure) updateLoopBody() bool {
 	var loopbottom *FlowBlock
 	var looptop *FlowBlock
 	for c.loopbodyIndex < len(c.loopbody) {
-		curBody := &c.loopbody[c.loopbodyIndex]
+		curBody := c.loopbody[c.loopbodyIndex]
 		loopbottom = curBody.Update(&c.graph.FlowBlock)
 		if loopbottom != nil {
 			looptop = curBody.GetHead()
