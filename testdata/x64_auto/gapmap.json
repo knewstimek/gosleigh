@@ -92,17 +92,12 @@
       "name": "switch_dense",
       "entry": 10176,
       "tags": [
-        "STRUCT",
         "TYPECAST",
         "TEMP"
       ],
       "evidence": {
-        "STRUCT": [
-          "dangling goto target(s) in output: label_missing"
-        ],
         "TYPECAST": [
           "cast (int): want=1 got=0",
-          "cast (uint): want=1 got=2",
           "cast (ulonglong): want=0 got=1"
         ],
         "TEMP": [
@@ -381,13 +376,9 @@
       "name": "nested_if_ladder_grade",
       "entry": 12240,
       "tags": [
-        "STRUCT",
         "TEMP"
       ],
       "evidence": {
-        "STRUCT": [
-          "dangling goto target(s) in output: label_missing"
-        ],
         "TEMP": [
           "fewer temp/local identifiers than golden (0 vs 1), missing: uVar1"
         ]
@@ -425,9 +416,9 @@
       "MATCH": 15,
       "TEMP": 9,
       "PTR": 3,
-      "STRUCT": 3,
       "TYPECAST": 6,
-      "UNKNOWN": 3
+      "UNKNOWN": 3,
+      "STRUCT": 1
     }
   }
 }
