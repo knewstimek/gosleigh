@@ -57,3 +57,4 @@ local/
 # Local launcher scripts (personal, keep on disk only)
 /Gosleigh.bat
 /Gosleigh-codex.bat
+__pycache__/
