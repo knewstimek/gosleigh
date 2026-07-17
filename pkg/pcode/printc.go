@@ -2075,29 +2075,93 @@ func (s *printCState) renderForPartOp(op *PcodeOp) (string, error) {
 	}
 }
 
+// emitDoWhileBlock renders a BlockDoWhile as do { body } while (cond);.
+//
+// C++ parity: PrintC::emitBlockDoWhile (printc.cc:3200). Ghidra emits getBlock(0)
+// twice: once under no_branch -- the loop body, with its terminal back-edge branch
+// suppressed -- and once under only_branch -- the loop condition. The condition
+// therefore comes from the block that actually carries the back-edge branch, which
+// is the last leaf of getBlock(0), not its front. getBlock(0) is frequently a
+// BlockList (the loop's inner if-blocks concatenated with the incrementing tail),
+// so rendering the condition from the front leaf would pick up an inner if's test
+// and leaving the tail branch unsuppressed would print it as a dangling if-goto.
 func (s *printCState) emitDoWhileBlock(bl *FlowBlock) error {
 	children := bl.StructuredChildren()
 	if len(children) == 0 {
 		return nil
 	}
+	body := children[0]
 	s.lang.OpenBlockAfter(func() {
 		s.lang.Token("do")
 	})
-	if basic := toBasic(children[0]); basic != nil {
-		if err := s.emitOps(basic, true); err != nil {
-			return err
-		}
-	} else if err := s.emitBlock(children[0]); err != nil {
+	// no_branch emission: emit the body with the terminal loop branch suppressed.
+	if err := s.emitDoWhileBody(body); err != nil {
 		return err
 	}
+	// only_branch emission: the loop condition is the last-leaf's branch condition.
+	cond := s.mustRenderConditionFrag(lastBranchLeaf(body))
 	s.lang.CloseBlockWithSuffix(func() {
 		s.lang.Token("while")
 		s.lang.Space()
-		s.lang.Token("(")
-		s.lang.Token(s.mustRenderCondition(children[0]))
-		s.lang.Token(");")
+		s.emitConditionParen(cond)
+		s.lang.Token(";")
 	})
 	return nil
+}
+
+// lastBranchLeaf descends to the block that carries the terminal branch of a
+// structured block: for a BlockList/BlockCopy it is the last child (recursively),
+// otherwise the block itself. C++ parity: BlockList::emit under only_branch emits
+// only its final sub-block, so the branch condition originates from that leaf.
+func lastBranchLeaf(bl *FlowBlock) *FlowBlock {
+	for bl != nil {
+		switch bl.Type() {
+		case BlockListType, BlockCopyType:
+			children := bl.StructuredChildren()
+			if len(children) == 0 {
+				return bl
+			}
+			bl = children[len(children)-1]
+		default:
+			return bl
+		}
+	}
+	return bl
+}
+
+// emitDoWhileBody emits a do-while body (getBlock(0)) with its terminal loop
+// branch suppressed. C++ parity: PrintC::emitBlockDoWhile emits getBlock(0) under
+// no_branch (printc.cc:3200). For a BlockList the leading sub-blocks are emitted
+// in full and only the final sub-block's branch is suppressed.
+func (s *printCState) emitDoWhileBody(bl *FlowBlock) error {
+	if bl == nil {
+		return nil
+	}
+	switch bl.Type() {
+	case BlockListType, BlockCopyType:
+		children := bl.StructuredChildren()
+		if len(children) == 0 {
+			if basic := toBasic(bl); basic != nil {
+				return s.emitOps(basic, true)
+			}
+			return nil
+		}
+		for i := 0; i+1 < len(children); i++ {
+			if err := s.emitBlock(children[i]); err != nil {
+				return err
+			}
+		}
+		return s.emitDoWhileBody(children[len(children)-1])
+	case BlockBasicType, BlockPlain:
+		if basic := toBasic(bl); basic != nil {
+			return s.emitOps(basic, true)
+		}
+		return nil
+	default:
+		// A structured last leaf (e.g. a compound BlockCondition) carries no body
+		// statement past its branch; emit its no_branch lead only.
+		return s.emitConditionLead(bl)
+	}
 }
 
 func (s *printCState) emitInfLoopBlock(bl *FlowBlock) error {
