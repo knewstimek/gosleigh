@@ -2,7 +2,7 @@
 
 goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldengap/goldengap.py report`로 재생성).
 
-14/32 MATCH (indent-insensitive).
+15/32 MATCH (indent-insensitive).
 
 ## 함수별 분류
 
@@ -21,7 +21,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `switch_fallthrough` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `array_2d_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `array_init_then_sum` | TYPECAST, PTR, TEMP | TYPECAST: cast (int): want=0 got=2<br>TYPECAST: cast (longlong): want=0 got=2<br>PTR: raw pointer scale '* 4': want=0 got=2<br>TEMP: extra temp/local identifiers in output (4 vs 2): local_428, local_8 |
-| `array_reverse_sum` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
+| `array_reverse_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `reverse_bytes_inplace` | STRUCT, TYPECAST | STRUCT: keyword 'while': want=0 got=1<br>STRUCT: keyword 'for': want=1 got=0<br>TYPECAST: cast (longlong): want=0 got=2 |
 | `bit_mask_shift_combo` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
 | `popcount_loop` | STRUCT, TEMP | STRUCT: keyword 'while': want=0 got=1<br>STRUCT: keyword 'for': want=1 got=0<br>TEMP: extra temp/local identifiers in output (2 vs 1): local_8 |
@@ -43,33 +43,31 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 
 ## 태그 분포
 
-- MATCH: 14
+- MATCH: 15
 - PTR: 4
 - STRUCT: 6
 - TEMP: 9
 - TYPECAST: 8
-- UNKNOWN: 4
+- UNKNOWN: 3
 
 
-## 수동 요약 (세션4 갱신 2차, 2026-07-17)
+## 수동 요약 (세션4 갱신 3차, 2026-07-17)
 
 report 재실행 시 이 섹션은 덮어써지므로 재생성 후 다시 보강할 것 (툴 개선 후보: 수동 섹션 보존).
 
-### 상태: 14/32 MATCH (세션 시작 시점 대비 +14, T2 확장 직후 12 -> 14)
-- +cond_assign_abs (d6b7df4 phi 선언 억제 가드)
-- +loop_forever_break (852efc3 overflow while(true) 신택스). multi_return_early는
-  STRUCT -> TYPECAST로 완화 (3dc1479 ReturnSplit이 dangling goto 4개 제거).
-- STRUCT 잔여 6: dowhile_count, switch_dense, reverse_bytes_inplace, popcount_loop,
-  strlen_style, nested_if_ladder_grade.
+### 상태: 15/32 MATCH (12 -> 13 -> 14 -> 15)
+- +cond_assign_abs (d6b7df4 phi 선언 가드), +loop_forever_break (852efc3 overflow while(true)),
+  +array_reverse_sum (3c5f21a INT_LESSEQUAL 정준화 + replaceLessequal 마스크 수정).
+- a693eaa에서 C++에 없던 invented rule(RuleSLessEqual2Constant) 제거 -- RuleIntLessEqual
+  faithful 포팅으로 대체.
 
 ### 유효한 다음 후보 (우선순위 소견)
-1. 비교 정준형 + radix: parse_steps 잔여(`0x3e9 <=` vs 골든 `1000 <`)와 x64_auto
-   array_reverse_sum(`-1 <` vs `0 <=`)이 같은 계열 -- INT_LESSEQUAL<->INT_LESS 정준화
-   (C++ RuleLessEqual) + 10진 radix 선택. 여러 함수 동시 수렴 가능성.
-2. register 캐리어-param 저장소 공유 선언 소실 (gate iVar1, reverse_bytes_inplace iVar2)
-   -- 선언 대표가 param 입력이라 isParamName 스킵 + 캐리어 phi 억제 겹침. 스택 가드와 별건.
-3. dowhile_scan 루프 back-edge 오구조화 (LoopBody/CollapseStructure 루프-exit 선택) +
-   별건 param-reuse 데이터플로 버그.
-4. BlockBasic::isComplex leaf faithful (40d00a3에서 명시적 known gap 스텁) --
-   전제조건이 큼: Ghidra는 구조화 전에 ActionDeadCode/MarkImplied가 끝나 있는데 Gosleigh는
-   print 시점으로 미룸. pre-structure SSA 상태 정합화가 선행돼야 하는 대형 작업.
+1. register 캐리어-param 선언 소실 (gate iVar1, reverse_bytes_inplace iVar2) -- 진행 중.
+2. parse_steps 잔여 = EmitPrettyPrint 연산자 우선순위 개행 (prettyprint.cc) -- 비교/radix는
+   골든 일치 완료, 개행만 남음.
+3. umulhi P3: SSA 비교기 실측으로 "INT_RIGHT 앞 여분 CAST op 1개"로 특정됨 (tools/ssadiff
+   캘리브레이션 참조). 같은 실측에서 byte-MATCH 함수도 SSA 계통 차이 3건 확인:
+   (a) phi op SeqNum 주소가 블록 진입 주소 아닌 스택 오프셋, (b) 루프 증분+비교 블록 병합
+   차이, (c) return 캐리어 COPY 부재. print C는 같아도 SSA parity 부채 -- 후속 작업 후보.
+4. switch_dense: range-check idiom (x-cU < n) 미포팅. dowhile_count: do-while 구조화 +
+   변수명. strlen_style/popcount_loop/nested_if_ladder_grade: STRUCT 잔여.

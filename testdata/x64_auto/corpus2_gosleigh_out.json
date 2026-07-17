@@ -2,7 +2,7 @@
   "functions": [
     {
       "name": "dowhile_scan",
-      "output": "\nint dowhile_scan(longlong param_1,int param_2)\n\n{\nint iVar2;\nundefined4 local_18;\nundefined4 local_10;\n\nlocal_10 = 0;\nlocal_18 = 0;\ndo {\niVar2 = *(int *)(param_1 + (longlong)local_18 * 4);\nlocal_18 = local_18 + 1;\nif (0 \u003c= iVar2) {\nif (iVar2 == 999) break;\nlocal_10 = (int)param_1 + iVar2;\n}\nif (local_18 \u003c param_2) goto label_0;\n} while (0 \u003c= iVar2);\nreturn local_10;\n}\n"
+      "output": "\nint dowhile_scan(longlong param_1,int param_2)\n\n{\nint iVar2;\nint local_18;\nint local_10;\n\nlocal_10 = 0;\nlocal_18 = 0;\ndo {\niVar2 = *(int *)(param_1 + (longlong)local_18 * 4);\nlocal_18 = local_18 + 1;\nif (-1 \u003c iVar2) {\nif (iVar2 == 999) {\nreturn local_10;\n}\nlocal_10 = (int)param_1 + iVar2;\n}\nif (local_18 \u003c param_2) goto label_0;\n} while (-1 \u003c iVar2);\nreturn local_10;\n}\n"
     },
     {
       "name": "find_pair",
@@ -10,7 +10,7 @@
     },
     {
       "name": "gate",
-      "output": "\nint gate(int param_1,int param_2,int param_3,int param_4)\n\n{\nif ((1 \u003c= param_1) \u0026\u0026 (0 \u003c param_2) || (param_3 \u003c 0) \u0026\u0026 (param_4 != 0)) {\niVar1 = param_1 + param_2;\n}\nelse {\niVar1 = param_3 - param_4;\n}\nreturn iVar1;\n}\n"
+      "output": "\nint gate(int param_1,int param_2,int param_3,int param_4)\n\n{\nif ((0 \u003c param_1) \u0026\u0026 (0 \u003c param_2) || (param_3 \u003c 0) \u0026\u0026 (param_4 != 0)) {\niVar1 = param_1 + param_2;\n}\nelse {\niVar1 = param_3 - param_4;\n}\nreturn iVar1;\n}\n"
     },
     {
       "name": "clamp3",
@@ -42,7 +42,7 @@
     },
     {
       "name": "parse_steps",
-      "output": "\nint parse_steps(longlong param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nif (\n(*(int *)(param_1 + (longlong)local_18 * 4) \u003c 0) || (0x3e9 \u003c= *(int *)(param_1 + (longlong)local_18 * 4))\n) goto label_0;\nlocal_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\n}\nreturn local_14;\nlocal_14 = -1;\ngoto label_1;\n}\n"
+      "output": "\nint parse_steps(longlong param_1,int param_2)\n\n{\nint local_18;\nint local_14;\n\nlocal_14 = 0;\nlocal_18 = 0;\nwhile( true ) {\nif (param_2 \u003c= local_18) {\nreturn local_14;\n}\nif (\n(*(int *)(param_1 + (longlong)local_18 * 4) \u003c 0) || (1000 \u003c *(int *)(param_1 + (longlong)local_18 * 4))\n) break;\nlocal_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\nlocal_18 = local_18 + 1;\n}\nreturn -1;\n}\n"
     },
     {
       "name": "faverage",

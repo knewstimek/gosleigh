@@ -6,7 +6,7 @@
     },
     {
       "name": "dowhile_count",
-      "output": "\nint dowhile_count(longlong param_1,int param_2)\n\n{\nint iVar1;\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\ndo {\nif (1 \u003c= *(int *)(param_1 + (longlong)local_18 * 4)) {\nlocal_14 = local_14 + 1;\n}\niVar1 = local_18 + 1;\nlocal_18 = iVar1;\nif (iVar1 \u003c param_2) goto label_0;\n} while (1 \u003c= *(int *)(param_1 + (longlong)local_18 * 4));\nreturn local_14;\n}\n"
+      "output": "\nint dowhile_count(longlong param_1,int param_2)\n\n{\nint iVar1;\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\ndo {\nif (0 \u003c *(int *)(param_1 + (longlong)local_18 * 4)) {\nlocal_14 = local_14 + 1;\n}\niVar1 = local_18 + 1;\nlocal_18 = iVar1;\nif (iVar1 \u003c param_2) goto label_0;\n} while (0 \u003c *(int *)(param_1 + (longlong)local_18 * 4));\nreturn local_14;\n}\n"
     },
     {
       "name": "sum_pp_walk",
@@ -26,11 +26,11 @@
     },
     {
       "name": "while_countdown",
-      "output": "\nint while_countdown(int param_1)\n\n{\nundefined4 local_8;\nundefined4 local_18;\n\nlocal_18 = 0;\nfor (local_8 = param_1; 1 \u003c= local_8; local_8 = local_8 - 2) {\nlocal_18 = local_18 + local_8;\n}\nreturn local_18;\n}\n"
+      "output": "\nint while_countdown(int param_1)\n\n{\nundefined4 local_8;\nundefined4 local_18;\n\nlocal_18 = 0;\nfor (local_8 = param_1; 0 \u003c local_8; local_8 = local_8 - 2) {\nlocal_18 = local_18 + local_8;\n}\nreturn local_18;\n}\n"
     },
     {
       "name": "switch_dense",
-      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nint uVar1;\nundefined8 uVar2;\n\nuVar1 = param_1 - 10U;\nif (8 \u003c= (uint)uVar1) goto label_missing;\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar2 = (*(code *)((ulonglong)*(uint *)((longlong)uVar1 * 4 + 0x4258) + 0x1a20))();\nreturn uVar2;\n}\n"
+      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nint uVar1;\nundefined8 uVar2;\n\nuVar1 = param_1 - 10U;\nif (7 \u003c (uint)uVar1) goto label_missing;\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar2 = (*(code *)((ulonglong)*(uint *)((longlong)uVar1 * 4 + 0x4258) + 0x1a20))();\nreturn uVar2;\n}\n"
     },
     {
       "name": "switch_sparse",
@@ -50,11 +50,11 @@
     },
     {
       "name": "array_init_then_sum",
-      "output": "\nint array_init_then_sum(int param_1)\n\n{\nundefined4 local_8;\nundefined4 local_58;\nundefined4 local_54;\n\nlocal_8 = param_1;\nif (0x11 \u003c= param_1) {\nlocal_8 = 0x10;\n}\nfor (local_58 = 0; local_58 \u003c local_8; local_58 = local_58 + 1) {\n*(int *)((local_428 - 0x48U) + (longlong)local_58 * 4) = local_58 * local_58;\n}\nlocal_54 = 0;\nfor (local_58 = 0; local_58 \u003c local_8; local_58 = local_58 + 1) {\nlocal_54 = local_54 + *(int *)((local_428 - 0x48U) + (longlong)local_58 * 4);\n}\nreturn local_54;\n}\n"
+      "output": "\nint array_init_then_sum(int param_1)\n\n{\nundefined4 local_8;\nundefined4 local_58;\nundefined4 local_54;\n\nlocal_8 = param_1;\nif (0x10 \u003c param_1) {\nlocal_8 = 0x10;\n}\nfor (local_58 = 0; local_58 \u003c local_8; local_58 = local_58 + 1) {\n*(int *)((local_428 - 0x48U) + (longlong)local_58 * 4) = local_58 * local_58;\n}\nlocal_54 = 0;\nfor (local_58 = 0; local_58 \u003c local_8; local_58 = local_58 + 1) {\nlocal_54 = local_54 + *(int *)((local_428 - 0x48U) + (longlong)local_58 * 4);\n}\nreturn local_54;\n}\n"
     },
     {
       "name": "array_reverse_sum",
-      "output": "\nint array_reverse_sum(longlong param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\nwhile (local_18 = param_2 + -1, 0 \u003c= local_18) {\nlocal_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\nparam_2 = local_18;\n}\nreturn local_14;\n}\n"
+      "output": "\nint array_reverse_sum(longlong param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\nwhile (local_18 = param_2 + -1, -1 \u003c local_18) {\nlocal_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\nparam_2 = local_18;\n}\nreturn local_14;\n}\n"
     },
     {
       "name": "reverse_bytes_inplace",
@@ -114,7 +114,7 @@
     },
     {
       "name": "multi_return_early",
-      "output": "\nundefined8 multi_return_early(longlong param_1,int param_2)\n\n{\nint local_18;\n\nlocal_18 = 0;\nwhile( true ) {\nif (param_2 \u003c= local_18) {\nreturn 0;\n}\nif (0x3e9 \u003c= *(int *)(param_1 + (longlong)local_18 * 4)) break;\nlocal_18 = local_18 + 1;\n}\nreturn 1;\n}\n"
+      "output": "\nundefined8 multi_return_early(longlong param_1,int param_2)\n\n{\nint local_18;\n\nlocal_18 = 0;\nwhile( true ) {\nif (param_2 \u003c= local_18) {\nreturn 0;\n}\nif (1000 \u003c *(int *)(param_1 + (longlong)local_18 * 4)) break;\nlocal_18 = local_18 + 1;\n}\nreturn 1;\n}\n"
     },
     {
       "name": "nested_if_ladder_grade",
