@@ -239,15 +239,113 @@ type RuleDoubleShift struct{ batchRule }
 
 func NewRuleDoubleShift(group string) *RuleDoubleShift {
 	r := &RuleDoubleShift{}
-	r.batchRule = newBatchRule(group, "doubleshift", []OpCode{CPUI_INT_LEFT, CPUI_INT_RIGHT}, r.apply, func(g string) Rule { return NewRuleDoubleShift(g) })
+	r.batchRule = newBatchRule(group, "doubleshift", []OpCode{CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_MULT}, r.apply, func(g string) Rule { return NewRuleDoubleShift(g) })
 	return r
 }
 
+// apply simplifies chained INT_LEFT/INT_RIGHT shifts, treating a power-of-2
+// INT_MULT as an INT_LEFT. Same-direction shifts combine (or zero out); opposite
+// directions cancel into an INT_AND mask, possibly leaving a residual shift.
+// C++ parity: ruleaction.cc RuleDoubleShift::applyOp (lines 1842-1930).
 func (r *RuleDoubleShift) apply(op *PcodeOp, data *Funcdata) int {
-	if op.Code() != CPUI_INT_LEFT && op.Code() != CPUI_INT_RIGHT {
+	if !op.Input(1).IsConstant() {
 		return 0
 	}
-	return combineNestedShift(op, data, op.Code())
+	secvn := op.Input(0)
+	if !secvn.IsWritten() {
+		return 0
+	}
+	secop := secvn.Def()
+	opc2 := secop.Code()
+	if opc2 != CPUI_INT_LEFT && opc2 != CPUI_INT_RIGHT && opc2 != CPUI_INT_MULT {
+		return 0
+	}
+	if !secop.Input(1).IsConstant() {
+		return 0
+	}
+	opc1 := op.Code()
+	size := secvn.Size()
+	if !secop.Input(0).IsHeritageKnown() {
+		return 0
+	}
+
+	var sa1, sa2 int
+	if opc1 == CPUI_INT_MULT {
+		val := op.Input(1).Offset()
+		sa1 = leastSigBitSet(val)
+		if (val >> uint(sa1)) != 1 { // Not multiplying by a power of 2
+			return 0
+		}
+		opc1 = CPUI_INT_LEFT
+	} else {
+		sa1 = int(op.Input(1).Offset())
+	}
+	if opc2 == CPUI_INT_MULT {
+		val := secop.Input(1).Offset()
+		sa2 = leastSigBitSet(val)
+		if (val >> uint(sa2)) != 1 { // Not multiplying by a power of 2
+			return 0
+		}
+		opc2 = CPUI_INT_LEFT
+	} else {
+		sa2 = int(secop.Input(1).Offset())
+	}
+
+	if opc1 == opc2 { // Shifts in the same direction
+		if sa1+sa2 < 8*int(size) {
+			newvn := data.NewConstant(4, uint64(sa1+sa2))
+			data.OpSetOpcode(op, opc1)
+			data.OpSetInput(op, secop.Input(0), 0)
+			data.OpSetInput(op, newvn, 1)
+		} else {
+			newvn := data.NewConstant(size, 0)
+			data.OpSetOpcode(op, CPUI_COPY)
+			data.OpSetInput(op, newvn, 0)
+			data.OpRemoveInput(op, 1)
+		}
+	} else { // Shifts in opposite directions
+		if int(size) > 8 { // FIXME: precision (sizeof(uintb))
+			return 0
+		}
+		mask := maskForSize(size)
+		var diffsa int // Bits (to the left) after cancellation
+		if opc1 == CPUI_INT_LEFT {
+			// The INT_LEFT is highly likely to be a multiply
+			if secvn.LoneDescend() == nil {
+				return 0
+			}
+			mask = (mask << uint(sa2)) & mask // Most significant bits remain after initial INT_RIGHT
+			diffsa = sa1 - sa2
+			if diffsa != 0 { // Don't collapse unless shift amounts are identical
+				return 0
+			}
+		} else {
+			mask = (mask >> uint(sa2)) & mask // Least significant bits remain after initial INT_LEFT
+			diffsa = sa2 - sa1
+		}
+		if diffsa == 0 { // Opposite shifts exactly cancel
+			newvn := data.NewConstant(size, mask)
+			data.OpSetOpcode(op, CPUI_INT_AND)
+			data.OpSetInput(op, secop.Input(0), 0)
+			data.OpSetInput(op, newvn, 1)
+		} else { // Shifts only partly cancel
+			newAnd := data.NewOp(2, op.Addr())
+			data.OpSetOpcode(newAnd, CPUI_INT_AND)
+			data.OpSetInput(newAnd, secop.Input(0), 0)
+			data.OpSetInput(newAnd, data.NewConstant(size, mask), 1)
+			newOut := data.NewUniqueOut(size, newAnd)
+			data.OpInsertBefore(newAnd, op)
+			finalopc := CPUI_INT_LEFT
+			if diffsa < 0 {
+				finalopc = CPUI_INT_RIGHT
+				diffsa = -diffsa
+			}
+			data.OpSetOpcode(op, finalopc)
+			data.OpSetInput(op, newOut, 0)
+			data.OpSetInput(op, data.NewConstant(4, uint64(diffsa)), 1)
+		}
+	}
+	return 1
 }
 
 type RuleDoubleArithShift struct{ batchRule }
