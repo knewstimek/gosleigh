@@ -28,13 +28,9 @@
       "name": "sum_pp_walk",
       "entry": 9664,
       "tags": [
-        "PTR",
         "TEMP"
       ],
       "evidence": {
-        "PTR": [
-          "raw pointer scale '* 8': want=0 got=2"
-        ],
         "TEMP": [
           "extra temp/local identifiers in output (3 vs 2): lVar1"
         ]
@@ -411,9 +407,9 @@
     "match": 20,
     "tag_counts": {
       "MATCH": 20,
-      "PTR": 2,
       "TEMP": 7,
       "TYPECAST": 4,
+      "PTR": 1,
       "UNKNOWN": 2,
       "STRUCT": 1
     }
