@@ -335,7 +335,7 @@ func findLoopVariable(cbranch *PcodeOp, head, tail *BlockBasic, lastOp *PcodeOp)
 				if possibleIter.IsMarker() {
 					continue
 				}
-				if isOpMoveableToLast(possibleIter, tail, lastOp) {
+				if isMoveable(possibleIter, lastOp) {
 					return possibleIter, defOp, s
 				}
 			}
@@ -354,38 +354,131 @@ func findLoopVariable(cbranch *PcodeOp, head, tail *BlockBasic, lastOp *PcodeOp)
 	return nil, nil, -1
 }
 
-// isOpMoveableToLast reports whether op can be considered the "last" statement
-// in its block (ignoring trailing BRANCH ops).
-// C++ parity: PcodeOp::isMoveable(lastOp) -- simplified: true if op == lastOp
-// or all ops between op and lastOp are branches or dead.
-func isOpMoveableToLast(op *PcodeOp, bb *BlockBasic, lastOp *PcodeOp) bool {
-	if op == lastOp {
-		return true
+// isMoveable reports whether op can be moved to occur immediately after point
+// within the same basic block while preserving equivalent data flow. The order
+// of operations may be rearranged as long as reads of op's output and any
+// address-tied storage are not violated. This is a faithful port of the C++
+// data-flow test, not the earlier "all intervening ops are branches" heuristic
+// (which wrongly rejected e.g. the popcount iterator move past a non-conflicting
+// counter increment).
+//
+// C++ parity: PcodeOp::isMoveable (op.cc:178).
+func isMoveable(op, point *PcodeOp) bool {
+	if op == point {
+		return true // No movement necessary
 	}
-	ops := bb.Ops()
-	opIdx := -1
-	lastIdx := -1
-	for i, o := range ops {
-		if o == op {
-			opIdx = i
-		}
-		if o == lastOp {
-			lastIdx = i
+	movingLoad := false
+	if op.EvalType() == PcodeOpSpecial {
+		if op.Code() == CPUI_LOAD {
+			movingLoad = true // Allow LOAD to be moved with additional restrictions
+		} else {
+			return false // Don't move special ops
 		}
 	}
-	if opIdx < 0 || lastIdx < 0 || opIdx > lastIdx {
+	parent := op.Parent()
+	if parent == nil || parent != point.Parent() {
+		return false // Not in the same block
+	}
+	ops := parent.Ops()
+	orderOf := func(target *PcodeOp) int {
+		for i, o := range ops {
+			if o == target {
+				return i
+			}
+		}
+		return -1
+	}
+	opIdx := orderOf(op)
+	pointIdx := orderOf(point)
+	if opIdx < 0 || pointIdx < 0 || opIdx > pointIdx {
+		// The forward walk below assumes op precedes point; callers guarantee
+		// this (point is the block's last non-branch op).
 		return false
 	}
-	// All ops between opIdx+1 and lastIdx must be branches or dead.
-	for i := opIdx + 1; i <= lastIdx; i++ {
-		o := ops[i]
-		if o == nil || o.IsDead() {
-			continue
+
+	out := op.Output()
+	if out != nil {
+		// Output cannot be moved past an op that reads it: reject if any
+		// same-block reader is ordered at or before point.
+		for _, readOp := range out.DescendIter() {
+			if readOp.Parent() != parent {
+				continue
+			}
+			if orderOf(readOp) <= pointIdx {
+				return false
+			}
 		}
-		if o.IsBranch() {
-			continue
+	}
+
+	// Only allow this op to be moved across a CALL in very restrictive
+	// circumstances: a normal op whose inputs and output are not address tied.
+	crossCalls := false
+	if op.EvalType() != PcodeOpSpecial {
+		if out != nil && !out.IsAddrTied() && !out.IsPersist() {
+			i := 0
+			for ; i < op.NumInput(); i++ {
+				vn := op.Input(i)
+				if vn != nil && (vn.IsAddrTied() || vn.IsPersist()) {
+					break
+				}
+			}
+			if i == op.NumInput() {
+				crossCalls = true
+			}
 		}
-		return false
+	}
+
+	var tiedList []*Varnode
+	for i := 0; i < op.NumInput(); i++ {
+		vn := op.Input(i)
+		if vn != nil && vn.IsAddrTied() {
+			tiedList = append(tiedList, vn)
+		}
+	}
+
+	// Walk from the op immediately after op through point (inclusive),
+	// rejecting any intervening op that conflicts with the move.
+	for i := opIdx + 1; i <= pointIdx; i++ {
+		cur := ops[i]
+		if cur.EvalType() == PcodeOpSpecial {
+			switch cur.Code() {
+			case CPUI_LOAD:
+				if out != nil && out.IsAddrTied() {
+					return false
+				}
+			case CPUI_STORE:
+				if movingLoad {
+					return false
+				}
+				if len(tiedList) != 0 {
+					return false
+				}
+				if out != nil && out.IsAddrTied() {
+					return false
+				}
+			case CPUI_INDIRECT, CPUI_SEGMENTOP, CPUI_CPOOLREF:
+				// Let thru; INDIRECTed storage is handled separately.
+			case CPUI_CALL, CPUI_CALLIND, CPUI_NEW:
+				if !crossCalls {
+					return false
+				}
+			default:
+				return false
+			}
+		}
+		if curOut := cur.Output(); curOut != nil {
+			if movingLoad && curOut.IsAddrTied() {
+				return false
+			}
+			for _, vn := range tiedList {
+				if vn.Overlap(curOut) >= 0 {
+					return false
+				}
+				if curOut.Overlap(vn) >= 0 {
+					return false
+				}
+			}
+		}
 	}
 	return true
 }
