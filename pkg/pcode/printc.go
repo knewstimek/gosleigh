@@ -956,6 +956,32 @@ func (s *printCState) inferReturnType() Datatype {
 			}
 		}
 		dt := vn.TypeReadFacing(op)
+		// Signature output type keeps the pre-cast signedness. In Ghidra the
+		// function return type is fixed by ActionOutputPrototype
+		// (coreaction.cc:4776 -> FuncProto::updateOutputTypes) from the return
+		// Varnode's HighVariable type BEFORE ActionSetCasts runs
+		// (universalAction order: outputprototype at coreaction.cc:5747, casts at
+		// :5752). ActionSetCasts::castOutput may then promote the return Varnode's
+		// display type from signed (TYPE_INT, e.g. an INT_ADD/INT_MULT
+		// output-local) to unsigned (TYPE_UINT) so the body reads cast-free when
+		// the value feeds an unsigned consumer -- but the signature is already
+		// committed and does not follow that promotion. Measured on umulhi (Ghidra
+		// 12.0.4): return Varnode high type is longlong at outputprototype and
+		// ulonglong at end; signature stays `longlong`. Gosleigh derives the
+		// signature at print time from the post-cast read-facing type, so undo the
+		// SetCasts signedness promotion here by preferring the type captured on the
+		// FuncProto output (ActionOutputPrototype, coreaction.go). Only the
+		// signed->unsigned same-size case is corrected; a genuinely unsigned return
+		// (e.g. INT_AND output-local TYPE_UINT) has an unsigned FuncProto output and
+		// is left untouched.
+		if dt != nil && dt.Metatype() == TYPE_UINT {
+			if fp := s.fd.GetFuncProto(); fp != nil && fp.GetOutput() != nil {
+				if fpOut := fp.GetOutput().Type(); fpOut != nil &&
+					fpOut.Metatype() == TYPE_INT && fpOut.Size() == dt.Size() {
+					dt = fpOut
+				}
+			}
+		}
 		// For unique-space varnodes (SSA intermediates), TypeReadFacing returns
 		// TYPE_UNKNOWN when the committed type was never set (e.g. ActionInferTypes
 		// ran in a different iteration order). In that case, follow the defining op
