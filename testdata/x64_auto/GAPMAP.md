@@ -2,14 +2,14 @@
 
 goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldengap/goldengap.py report`로 재생성).
 
-16/32 MATCH (indent-insensitive).
+17/32 MATCH (indent-insensitive).
 
 ## 함수별 분류
 
 | 함수 | 태그 | 근거 |
 |---|---|---|
 | `sum_loop` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `dowhile_count` | TEMP | TEMP: extra temp/local identifiers in output (3 vs 2): iVar1 |
+| `dowhile_count` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `sum_pp_walk` | PTR, TEMP | PTR: raw pointer scale '* 8': want=0 got=2<br>TEMP: extra temp/local identifiers in output (3 vs 2): lVar1 |
 | `while_pretest_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `loop_forever_break` | MATCH | MATCH: byte-identical (indent-insensitive) |
@@ -22,7 +22,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `array_2d_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `array_init_then_sum` | TYPECAST, PTR, TEMP | TYPECAST: cast (int): want=0 got=2<br>TYPECAST: cast (longlong): want=0 got=2<br>PTR: raw pointer scale '* 4': want=0 got=2<br>TEMP: extra temp/local identifiers in output (4 vs 2): local_428, local_8 |
 | `array_reverse_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `reverse_bytes_inplace` | TYPECAST | TYPECAST: cast (longlong): want=0 got=2 |
+| `reverse_bytes_inplace` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
 | `bit_mask_shift_combo` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
 | `popcount_loop` | TEMP | TEMP: extra temp/local identifiers in output (2 vs 1): local_8 |
 | `xor_swap_pair` | MATCH | MATCH: byte-identical (indent-insensitive) |
@@ -43,10 +43,10 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 
 ## 태그 분포
 
-- MATCH: 16
+- MATCH: 17
 - PTR: 3
 - STRUCT: 1
-- TEMP: 8
-- TYPECAST: 6
-- UNKNOWN: 3
+- TEMP: 7
+- TYPECAST: 5
+- UNKNOWN: 4
 

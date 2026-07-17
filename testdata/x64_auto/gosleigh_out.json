@@ -6,7 +6,7 @@
     },
     {
       "name": "dowhile_count",
-      "output": "\nint dowhile_count(longlong param_1,int param_2)\n\n{\nint iVar1;\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\ndo {\nif (0 \u003c *(int *)(param_1 + (longlong)local_18 * 4)) {\nlocal_14 = local_14 + 1;\n}\niVar1 = local_18 + 1;\nlocal_18 = iVar1;\n} while (iVar1 \u003c param_2);\nreturn local_14;\n}\n"
+      "output": "\nint dowhile_count(longlong param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\nlocal_18 = 0;\ndo {\nif (0 \u003c *(int *)(param_1 + (longlong)local_18 * 4)) {\nlocal_14 = local_14 + 1;\n}\nlocal_18 = local_18 + 1;\n} while (local_18 \u003c param_2);\nreturn local_14;\n}\n"
     },
     {
       "name": "sum_pp_walk",
@@ -58,7 +58,7 @@
     },
     {
       "name": "reverse_bytes_inplace",
-      "output": "\nvoid reverse_bytes_inplace(longlong param_1,int param_2,longlong param_3)\n\n{\nundefined4 local_14;\nundefined4 local_10;\n\nfor (local_14 = 0; local_14 \u003c local_10; local_14 = local_14 + 1) {\n*(undefined1 *)(param_1 + (longlong)local_14) = *(undefined1 *)(param_1 + local_10);\n*(undefined1 *)(param_1 + local_10) = *(undefined1 *)(param_1 + (longlong)local_14);\niVar2 = local_10;\n}\nreturn;\n}\n"
+      "output": "\nvoid reverse_bytes_inplace(longlong param_1,int param_2,longlong param_3)\n\n{\nundefined4 local_14;\nundefined4 local_10;\n\nfor (local_14 = 0; local_14 \u003c local_10; local_14 = local_14 + 1) {\n*(undefined1 *)(param_1 + local_14) = *(undefined1 *)(param_1 + local_10);\n*(undefined1 *)(param_1 + local_10) = *(undefined1 *)(param_1 + local_14);\niVar1 = local_10;\n}\nreturn;\n}\n"
     },
     {
       "name": "bit_mask_shift_combo",

@@ -16,11 +16,11 @@
       "name": "dowhile_count",
       "entry": 9568,
       "tags": [
-        "TEMP"
+        "MATCH"
       ],
       "evidence": {
-        "TEMP": [
-          "extra temp/local identifiers in output (3 vs 2): iVar1"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -190,11 +190,11 @@
       "name": "reverse_bytes_inplace",
       "entry": 10976,
       "tags": [
-        "TYPECAST"
+        "UNKNOWN"
       ],
       "evidence": {
-        "TYPECAST": [
-          "cast (longlong): want=0 got=2"
+        "UNKNOWN": [
+          "no heuristic matched -- manual review needed"
         ]
       }
     },
@@ -411,13 +411,13 @@
   ],
   "summary": {
     "total": 32,
-    "match": 16,
+    "match": 17,
     "tag_counts": {
-      "MATCH": 16,
-      "TEMP": 8,
+      "MATCH": 17,
       "PTR": 3,
-      "TYPECAST": 6,
-      "UNKNOWN": 3,
+      "TEMP": 7,
+      "TYPECAST": 5,
+      "UNKNOWN": 4,
       "STRUCT": 1
     }
   }
