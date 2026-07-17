@@ -287,15 +287,11 @@
       "name": "char_arith_promote",
       "entry": 11632,
       "tags": [
-        "TYPECAST",
-        "PTR"
+        "MATCH"
       ],
       "evidence": {
-        "TYPECAST": [
-          "cast (int): want=1 got=0"
-        ],
-        "PTR": [
-          "raw pointer scale '* 2': want=0 got=1"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -412,12 +408,12 @@
   ],
   "summary": {
     "total": 32,
-    "match": 18,
+    "match": 19,
     "tag_counts": {
-      "MATCH": 18,
-      "PTR": 3,
+      "MATCH": 19,
+      "PTR": 2,
       "TEMP": 7,
-      "TYPECAST": 5,
+      "TYPECAST": 4,
       "UNKNOWN": 3,
       "STRUCT": 1
     }
