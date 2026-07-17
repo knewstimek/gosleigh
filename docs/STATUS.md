@@ -15,12 +15,17 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-17 세션4, master `65b57f1`, origin 푸시, 전 게이트 green)
+## 현재 상태 (2026-07-17 세션5 오후, master `d416002`, origin 푸시, 전 게이트 green)
 
-**권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`** (세션4 성과/다음작업 전부). 요약:
-- 게이트: tree **10/10**, x64 corpus **8/8**, **op_switch byte-MATCH**, breadth **3/3**(dispatch ZEXT 착지),
-  corpus2 **4/13**(bump_scores/divmix/parse_steps/dowhile_scan), x64_auto(신규 자동 코퍼스) **15/32**,
-  production 전부 PASS, `go test ./...` green.
+**권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`** (세션5 성과/다음작업 전부). 요약:
+- 게이트: tree **10/10**, x64 corpus **8/8**, **op_switch byte-MATCH**, breadth **3/3**,
+  corpus2 **5/13**(+find_pair), x64_auto **19/32**(15->19: dowhile_count/nested_if_ladder_grade/
+  param_reuse_accum/char_arith_promote), production 전부 PASS, `go test ./...` green.
+- 세션5 착지(상세 CHANGELOG 세션5): **GenGoldens bodyHex 손상 버그**(dead-code island 누락으로 분기 변위
+  파괴 -- 전 코퍼스 감사로 x64_auto 2건만 손상 확정, 붕괴형 mismatch는 입력 무결성부터) + 엔진 5건
+  (cover 인덱스=블록위치, LoopBody 포인터 안정성, InfLoop do/while(true), RuleCollectTerms 포팅,
+  RuleShift2Mult 컨텍스트 게이트). **clamp3 진단 완결**: dangling goto의 근본은 collapse가 아니라
+  heritage/stackvars(bare 조정-SP 슬롯의 RSP def 3중 복제 -> phi 미형성) -- (B) param-recovery와 같은 계열.
 - **툴 2종 착지(핸드오프 우선 제작 툴 완성)**: `tools/goldengap/`(원커맨드 골든 생성+갭 자동분류,
   `testdata/x64_auto/` 32함수 discovery 코퍼스) + `tools/ssadiff/`(C++ 코어 decomp_dbg <-> Gosleigh
   최종 SSA를 op 단위 나란히 비교, savefile 템플릿 생성 포함).
@@ -104,10 +109,10 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ## 다음 작업 (우선순위)
 
-> **[최신] 2026-07-17 세션4 (master `65b57f1`): 세션3의 (A) dispatch ZEXT -> breadth 3/3 과 (B) collapse/
-> ReturnSplit 착지 완료, corpus2 4/13 + x64_auto 15/32. 권위 있는 다음-작업/현재상태는 저장소 루트
-> `NEXT_SESSION_PROMPT.md` + 메모리 `project_gosleigh` 상단 "2026-07-17 (세션4)" + CHANGELOG 2026-07-17
-> 세션4 참조. 갭 지도 = `testdata/x64_auto/GAPMAP.md`(자동 갱신) + `testdata/x64_corpus2/README.md`.**
+> **[최신] 2026-07-17 세션5 오후 (master `d416002`): 골든 무결성 감사 + 엔진 5건, corpus2 5/13 +
+> x64_auto 19/32. 다음 최우선 = heritage/stackvars 데이터플로(clamp3 진단 완결 + (B) param-recovery 공통
+> 계열). 권위 있는 다음-작업/현재상태는 저장소 루트 `NEXT_SESSION_PROMPT.md` + CHANGELOG 2026-07-17
+> 세션5 참조. 갭 지도 = `testdata/x64_auto/GAPMAP.md`(자동 갱신) + `testdata/x64_corpus2/README.md`.**
 >
 > <details><summary>이전 세션2 포인터 (접힘)</summary>
 > - **process 완료(8/8)**: 아래 미시작 (b)와 (a-2)의 process 관련 항목은 **DONE**. 5개 faithful 조각으로 착지 --

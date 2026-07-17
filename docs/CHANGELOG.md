@@ -5,6 +5,67 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-17 (세션5, 오후): 골든 무결성 감사 + 엔진 5건 -- x64_auto 19/32, corpus2 5/13 (master `d416002`, 10 커밋)
+감독관 세션(전 워커 Opus, worktree 격리, 병렬 2슬롯, 매 landing 스팟체크 + 전매트릭스 -count=1 2회 +
+cherry-pick + push). 세션4 핸드오프 (A)와 (D) 지목 항목에서 출발, 골든 파이프라인 자체의 손상 버그를 발견해
+전 코퍼스 무결성 감사까지 확장.
+
+**골든 파이프라인 (착지 중 최대 발견)**:
+- **GenGoldens bodyHex 손상 버그** (`8c72c0e`,`fc330aa`): 핸드오프의 "1바이트(AL) 반환 캐리어 recovery 실패"
+  (nested_if_ladder_grade, 빈 void 붕괴)는 엔진 버그가 아니었다. `func.getBody()`는 unreachable dead-code
+  island(MSVC /Od가 early return마다 방출하는 2바이트 `jmp epilogue` filler)을 제외하는 AddressSetView인데
+  bodyHex가 disjoint range들을 그대로 이어붙여 island을 가로지르는 상대 분기 변위가 전부 깨진 골든 bytes를
+  생성(51 vs 실제 59바이트). **C++ 코어(decomp_dbg)도 같은 손상 바이트에서 동일 실패** -- 실제 바이트로는
+  Gosleigh가 이미 byte-identical(AL phi 병합 + char 반환 정상)이었다. 수정 = bodyHex를 [min,max] 연속 span
+  읽기로(GenGoldens 3개 복사본 전부).
+- **전 코퍼스 바이트 무결성 감사** (`619db58`): capstone 분기-타깃 검사(경계 밖/명령어 중간 착지) +
+  수정된 추출기로 x64_auto 32함수 전체 Ghidra headless 재생성. 손상은 x64_auto 2건뿐
+  (nested_if_ladder_grade, switch_dense 63->119바이트 -- 이제 실바이트에서 TYPECAST/TEMP 갭으로 정상 분류).
+  corpus1 8, corpus2 13함수는 전부 무결(caller의 past-end call 2건은 정상 함수간 reloc).
+  **교훈: 골든 대조 실패가 엔진 갭이 아니라 골든 입력 손상일 수 있다 -- 붕괴형 mismatch는 입력 무결성부터.**
+
+**엔진 착지 (전부 faithful, 전 게이트 -count=1 2회 무회귀)**:
+1. **cover 인덱스 = 블록 실행 위치** (`97084fa`,`1d1ed17`): 핸드오프 (A) dowhile_count 잔여(`local_18 = 0`
+   초기화 누락 + 증가 temp 미병합)의 근본. getOpUIndex가 cover 교차 비교에 raw SeqNum.Order(명령어별 decode
+   서브인덱스, 명령어마다 리셋 -- 블록 내 비교 불가)를 사용, 루프 증가 op의 cover가 전 predecessor로 역확장
+   -> MergeOp가 루프유도 phi와 back-edge 증가 사이 가짜 교차 -> trimOpInput COPY로 iVar1 분리. Ghidra는
+   BlockBasic::insert(block.cc:2255/2638)가 order=블록 위치를 유지하고 cover가 그 불변식에 의존 -- Gosleigh는
+   이 유지를 미포팅. 수정 = 비교용 인덱스를 부모 블록 내 실제 위치에서 유도(SeqNum 자체는 opTree 키라 불변).
+   dowhile_count MATCH + reverse_bytes_inplace spurious (longlong) 캐스트 소멸. 잔여 부채: 다른 Order
+   소비자들(double.go, funcdata.go:1483, rules_misc.go:2745, merge.go:1304 정렬)은 여전히 stale decode order
+   -- 측정된 실패 없어 미수정, 완전 포팅은 Order를 opTree 키에서 분리하는 별도 세션 규모.
+2. **LoopBody 포인터 안정성** (`e19d788`): corpus2 find_pair dangling goto 2개의 근본 = Go 고유 포팅 버그.
+   CollapseStructure가 `[]LoopBody` 값 슬라이스를 SortLoopBodiesByDepth(sort.SliceStable)로 재배치 ->
+   LabelContainments가 심어둔 `immedContainer` 포인터(`&c.loopbody[i]`)가 정렬 후 다른 루프를 지시 ->
+   extendToContainer가 엉뚱한 블록셋 마킹 -> 내부 루프 exitblock=nil -> 자연 exit이 goto 방출 -> 바깥 무한루프
+   미형성 -> MULTIEQUAL 병합 return이 if-else로 구조화돼 ActionReturnSplit 미발동. C++은 `list<LoopBody>` +
+   `loopbody.sort()`(노드 relink, 객체 불이동)라 유효. 수정 = `[]*LoopBody`로 객체 주소 안정화.
+3. **BlockInfLoop 방출** (`0af54ad`): `for (;;)` -> `do { } while( true );` (printc.cc:3229
+   PrintC::emitBlockInfLoop). 2번과 합쳐 find_pair MATCH, **corpus2 4/13 -> 5/13**.
+4. **RuleCollectTerms 포팅** (`e908beb`,`65505b4`): noop stub이던 대수 항 정리를 충실 포팅 --
+   TermOrder collect/sortTerms(expression.cc:237), Varnode::termOrder(varnode.cc:1153), getMultCoeff +
+   RuleCollectTerms::applyOp(ruleaction.cc:107), Funcdata::distributeIntMultAdd(funcdata_op.cc:1073).
+   param_reuse_accum `(p1+p2)*2 - p2` -> `p1*2 + p2` 골든 일치.
+5. **RuleShift2Mult arithmetic-context 게이트** (`75c6db5`,`d416002`): 모든 `<<c`를 무조건 `*2^c`로 바꾸던
+   것을 C++ 조건(ruleaction.cc:3734-3771)으로 게이트 -- shift 입력 def 우선, 출력 descendant 순회로
+   INT_ADD/SUB/MULT 인접 시에만 변환 + cutoff `>=63` -> `>=32` 정정. bitwise 컨텍스트가 shift를 유지
+   (bit_mask_shift_combo `* 0x100` -> `<< 8`), char_arith_promote MATCH.
+
+**진단만 (착지 없음, 차기 세션 지도)**:
+- **clamp3 dangling goto = heritage/stackvars 결함 (구조화 무죄)**: read-only 진단 워커가 decomp_dbg +
+  단계별 DumpSSA로 확정. `sub rsp,N` 후 bare 조정 SP(offset 0) 스택 슬롯(local_18)의 조정-RSP def가 접근마다
+  3중 복제(`0x0d:38/39/3a RSP = RSP(i) + -0x18`) -> 스토어/로드가 서로 다른 버전 사용 -> MULTIEQUAL 미형성 ->
+  스토어 dead 제거 -> 미초기화 read + CBRANCH 양edge 동일 퇴화 -> collapse가 정직하게 goto 방출. C++은 단일
+  조정 RSP + phi 형성으로 중첩 if 구조화(goto 0). 수정 지점 = pkg/pcode/heritage.go(guardStores/guardLoads
+  미포팅, ProtectFreeStores:1213) / rules_loadstore.go stackvars 경로. param-recovery 발산(B)과 같은
+  데이터플로 계열.
+- **RuleDoubleShift opposite-direction 브랜치 미포팅**: bit_mask_shift_combo 잔여 `(x>>0x10)<<0x10` ->
+  `x & 0xffff0000` 소거 미발동. C++ ruleaction.cc:1890-1928(diffsa==0, loneDescend 요구) vs Go
+  rules_misc.go:777 combineNestedShift는 same-direction만 구현 + getOpList INT_MULT 항목 누락. 소형 자기완결.
+
+게이트(최종, master `d416002`): tree 10/10, x64 8/8, op_switch byte-MATCH, breadth 3/3, **corpus2 5/13**,
+**x64_auto 19/32**(15->19), production 전부 PASS, `go test ./...` green.
+
 ### 2026-07-17 (세션4): 툴 2종 + breadth 3/3 + ReturnSplit 착지 + corpus2 4/13 + 디코드 오염 근절 (master `65b57f1`, 23 커밋)
 감독관 세션(Opus/Sonnet 서브에이전트, worktree 격리, 병렬 2슬롯, 매 landing 스팟체크+전매트릭스 2회
 +cherry-pick+push). 세션3 핸드오프의 우선 제작 툴 2종과 (A)(B) 과제를 전부 착지.
