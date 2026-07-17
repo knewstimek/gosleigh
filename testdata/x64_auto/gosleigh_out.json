@@ -90,7 +90,7 @@
     },
     {
       "name": "char_arith_promote",
-      "output": "\nint char_arith_promote(signed char param_1,signed char param_2)\n\n{\nreturn (signed char)(param_1 + param_2) * 2;\n}\n"
+      "output": "\nint char_arith_promote(char param_1,char param_2)\n\n{\nreturn (char)(param_1 + param_2) * 2;\n}\n"
     },
     {
       "name": "short_arith_trunc",
@@ -106,7 +106,7 @@
     },
     {
       "name": "strlen_style",
-      "output": "\nint strlen_style(longlong param_1)\n\n{\nundefined4 local_18;\n\nlocal_18 = 0;\nwhile (*(signed char *)(param_1 + local_18) != 0) {\nlocal_18 = local_18 + 1;\n}\nreturn local_18;\n}\n"
+      "output": "\nint strlen_style(longlong param_1)\n\n{\nundefined4 local_18;\n\nlocal_18 = 0;\nwhile (*(char *)(param_1 + local_18) != 0) {\nlocal_18 = local_18 + 1;\n}\nreturn local_18;\n}\n"
     },
     {
       "name": "memcpy_style",

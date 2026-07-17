@@ -296,7 +296,6 @@
       ],
       "evidence": {
         "TYPECAST": [
-          "cast (char): want=1 got=0",
           "cast (int): want=1 got=0"
         ],
         "PTR": [
@@ -344,16 +343,12 @@
       "name": "strlen_style",
       "entry": 11952,
       "tags": [
-        "STRUCT",
-        "TYPECAST"
+        "STRUCT"
       ],
       "evidence": {
         "STRUCT": [
           "keyword 'while': want=0 got=1",
           "keyword 'for': want=1 got=0"
-        ],
-        "TYPECAST": [
-          "cast (char): want=1 got=0"
         ]
       }
     },
@@ -431,7 +426,7 @@
       "TEMP": 9,
       "PTR": 3,
       "STRUCT": 3,
-      "TYPECAST": 7,
+      "TYPECAST": 6,
       "UNKNOWN": 3
     }
   }
