@@ -2,7 +2,7 @@
   "functions": [
     {
       "name": "dowhile_scan",
-      "output": "\nint dowhile_scan(longlong param_1,int param_2)\n\n{\nint iVar2;\nint local_18;\nint local_10;\n\nlocal_10 = 0;\nlocal_18 = 0;\ndo {\niVar2 = *(int *)(param_1 + (longlong)local_18 * 4);\nlocal_18 = local_18 + 1;\nif (-1 \u003c iVar2) {\nif (iVar2 == 999) {\nreturn local_10;\n}\nlocal_10 = (int)param_1 + iVar2;\n}\n} while (local_18 \u003c param_2);\nreturn local_10;\n}\n"
+      "output": "\nint dowhile_scan(longlong param_1,int param_2)\n\n{\nint iVar1;\nint local_18;\nint local_10;\n\nlocal_10 = 0;\nlocal_18 = 0;\ndo {\niVar1 = *(int *)(param_1 + (longlong)local_18 * 4);\nlocal_18 = local_18 + 1;\nif (-1 \u003c iVar1) {\nif (iVar1 == 999) {\nreturn local_10;\n}\nlocal_10 = local_10 + iVar1;\n}\n} while (local_18 \u003c param_2);\nreturn local_10;\n}\n"
     },
     {
       "name": "find_pair",
