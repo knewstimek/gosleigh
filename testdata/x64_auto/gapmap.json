@@ -389,11 +389,11 @@
       "name": "param_reuse_accum",
       "entry": 12320,
       "tags": [
-        "UNKNOWN"
+        "MATCH"
       ],
       "evidence": {
-        "UNKNOWN": [
-          "no heuristic matched -- manual review needed"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -412,13 +412,13 @@
   ],
   "summary": {
     "total": 32,
-    "match": 17,
+    "match": 18,
     "tag_counts": {
-      "MATCH": 17,
+      "MATCH": 18,
       "PTR": 3,
       "TEMP": 7,
       "TYPECAST": 5,
-      "UNKNOWN": 4,
+      "UNKNOWN": 3,
       "STRUCT": 1
     }
   }

@@ -122,7 +122,7 @@
     },
     {
       "name": "param_reuse_accum",
-      "output": "\nint param_reuse_accum(int param_1,int param_2)\n\n{\nreturn (param_1 + param_2) * 2 - param_2;\n}\n"
+      "output": "\nint param_reuse_accum(int param_1,int param_2)\n\n{\nreturn param_1 * 2 + param_2;\n}\n"
     },
     {
       "name": "swap_via_temp",
