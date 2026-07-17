@@ -51,23 +51,19 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 - UNKNOWN: 3
 
 
-## 수동 요약 (세션4 갱신 3차, 2026-07-17)
+## 수동 요약 (세션4 갱신 4차, 2026-07-17)
 
 report 재실행 시 이 섹션은 덮어써지므로 재생성 후 다시 보강할 것 (툴 개선 후보: 수동 섹션 보존).
 
-### 상태: 15/32 MATCH (12 -> 13 -> 14 -> 15)
-- +cond_assign_abs (d6b7df4 phi 선언 가드), +loop_forever_break (852efc3 overflow while(true)),
-  +array_reverse_sum (3c5f21a INT_LESSEQUAL 정준화 + replaceLessequal 마스크 수정).
-- a693eaa에서 C++에 없던 invented rule(RuleSLessEqual2Constant) 제거 -- RuleIntLessEqual
-  faithful 포팅으로 대체.
+### 상태: x64_auto 15/32 MATCH, corpus2 3/13 MATCH (bump_scores/divmix/parse_steps)
+- f0a7a7d 연산자 경계 개행(printlanguage.cc:333 emitOp 대응 EmitBrokenExpr)으로 parse_steps
+  corpus2 MATCH. known gap: 최외곽 연산자만 분할 -- 접은 후에도 100자 초과하는 조건(코퍼스에
+  없음)은 안쪽 연산자로 더 못 접음. 완전 faithful은 표현식 전체 pushOp/emitOp 토큰 스트림
+  포팅 필요 (15 MATCH 회귀 위험, 별도 대형 슬라이스).
+- find_pair는 개행이 아니라 collapse(goto->구조화) 잔여.
 
 ### 유효한 다음 후보 (우선순위 소견)
-1. register 캐리어-param 선언 소실 (gate iVar1, reverse_bytes_inplace iVar2) -- 진행 중.
-2. parse_steps 잔여 = EmitPrettyPrint 연산자 우선순위 개행 (prettyprint.cc) -- 비교/radix는
-   골든 일치 완료, 개행만 남음.
-3. umulhi P3: SSA 비교기 실측으로 "INT_RIGHT 앞 여분 CAST op 1개"로 특정됨 (tools/ssadiff
-   캘리브레이션 참조). 같은 실측에서 byte-MATCH 함수도 SSA 계통 차이 3건 확인:
-   (a) phi op SeqNum 주소가 블록 진입 주소 아닌 스택 오프셋, (b) 루프 증분+비교 블록 병합
-   차이, (c) return 캐리어 COPY 부재. print C는 같아도 SSA parity 부채 -- 후속 작업 후보.
-4. switch_dense: range-check idiom (x-cU < n) 미포팅. dowhile_count: do-while 구조화 +
-   변수명. strlen_style/popcount_loop/nested_if_ladder_grade: STRUCT 잔여.
+1. umulhi 여분 CAST (진행 중), 2. reverse_bytes_inplace 파라미터 복구 발산(spurious RDX sz8 +
+   phantom R8 -- ActionActiveParam/heritage sub-register 폭, 고위험이라 SSA 비교기 병행 권장),
+3. switch_dense range-check idiom, 4. dowhile_count do-while 구조화, 5. SSA parity 부채 3건
+   (phi SeqNum 주소/블록 병합/return 캐리어 COPY -- ssadiff 캘리브레이션 발견).
