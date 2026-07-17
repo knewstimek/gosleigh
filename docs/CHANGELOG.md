@@ -5,7 +5,7 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
-### 2026-07-17 (세션5, 오후): 골든 무결성 감사 + 엔진 6건 -- x64_auto 20/32, corpus2 5/13 (master `be19010`, 13 커밋)
+### 2026-07-17 (세션5, 오후): 골든 무결성 감사 + 엔진 8건 -- x64_auto 20/32, corpus2 6/13 (master `652fc3f`, 20 커밋)
 감독관 세션(전 워커 Opus, worktree 격리, 병렬 2슬롯, 매 landing 스팟체크 + 전매트릭스 -count=1 2회 +
 cherry-pick + push). 세션4 핸드오프 (A)와 (D) 지목 항목에서 출발, 골든 파이프라인 자체의 손상 버그를 발견해
 전 코퍼스 무결성 감사까지 확장.
@@ -55,17 +55,28 @@ cherry-pick + push). 세션4 핸드오프 (A)와 (D) 지목 항목에서 출발,
    opposite-direction 브랜치(`(V>>c)<<c` -> `V & mask`, 부분 상쇄는 INT_AND + 잔여 shift, INT_LEFT-outer는
    loneDescend + 동일 shift량 요구), same-direction total>=8*size는 COPY 0. combineNestedShift는
    RuleDoubleArithShift(INT_SRIGHT) 전용으로 존치. bit_mask_shift_combo MATCH -- **x64_auto 19 -> 20/32**.
+7. **PTRADD 렌더 스케일 제거** (`caf44a2`,`3aef0ee`): renderPtrAdd가 `base + index * scale`로 스케일을
+   노출하던 것을 C++ PrintC::opPtradd(printc.cc:899)대로 in(0)+in(1)만 방출 -- C 포인터 산술이 pointee
+   크기로 암묵 스케일하고, 살아남은 PTRADD는 항상 scale==pointee AlignSize(RulePtraddUndo가 불일치 제거).
+   선행 가설(PTRADD 미형성/타입전파)은 op-bank 실측으로 반증 -- 형성은 정상, 출력이 범인. sum_pp_walk
+   PTR 갭 해소(잔여 TEMP lVar1은 MarkImplied 타이밍 클러스터).
+8. **heritage BuildADT faithful 포팅 -- clamp3 완결** (`cd42ccb`,`652fc3f`): 오전 진단의 "RSP 3중 복제"는
+   재실측으로 반증(스토어/로드는 이미 단일 스택 슬롯으로 정규화됨) -- 진짜 근본은 BuildADT가 Bilardi-Pingali
+   의 단순화판이라 **merge 블록의 idom이 write 없는 중간 블록이면 phi가 배치되지 않던 것**(augment를
+   idom(v)에만 붙이고 z-chain 전파 생략 + visitIncr가 depth 비교로 등깊이 형제 오스킵). heritage.cc
+   buildADT(2316-2385)의 a/b/t/z 카운터, leaf-or-(z>a+1) 경계 기준, z-chain augment 부착, visitIncr
+   idom-index 게이트(2405-2419)를 그대로 포팅. clamp3 중첩 if 완전 구조화(`int local_18` 선언 복원,
+   goto 0) -- **corpus2 5 -> 6/13**. 전 heritage 공유 경로인데 전 게이트 무회귀.
 
 **진단만 (착지 없음, 차기 세션 지도)**:
-- **clamp3 dangling goto = heritage/stackvars 결함 (구조화 무죄)**: read-only 진단 워커가 decomp_dbg +
-  단계별 DumpSSA로 확정. `sub rsp,N` 후 bare 조정 SP(offset 0) 스택 슬롯(local_18)의 조정-RSP def가 접근마다
-  3중 복제(`0x0d:38/39/3a RSP = RSP(i) + -0x18`) -> 스토어/로드가 서로 다른 버전 사용 -> MULTIEQUAL 미형성 ->
-  스토어 dead 제거 -> 미초기화 read + CBRANCH 양edge 동일 퇴화 -> collapse가 정직하게 goto 방출. C++은 단일
-  조정 RSP + phi 형성으로 중첩 if 구조화(goto 0). 수정 지점 = pkg/pcode/heritage.go(guardStores/guardLoads
-  미포팅, ProtectFreeStores:1213) / rules_loadstore.go stackvars 경로. param-recovery 발산(B)과 같은
-  데이터플로 계열.
-게이트(최종, master `be19010`): tree 10/10, x64 8/8, op_switch byte-MATCH, breadth 3/3, **corpus2 5/13**,
-**x64_auto 20/32**(15->20), production 전부 PASS, `go test ./...` green.
+- **clamp3 1차 진단 (같은 날 8번 착지로 대체)**: read-only 워커가 "heritage/stackvars 결함, 구조화 무죄"까지는
+  정확히 특정했으나 기전으로 지목한 "조정-RSP def 3중 복제"는 수정 워커의 재실측으로 반증됨(스토어/로드는
+  이미 단일 슬롯 정규화, 진짜 근본은 BuildADT phi 배치 -- 8번 참조). **read-only 진단도 수정 착수 시 재실측
+  검증이 유효함을 재확인한 사례.** guardStores/guardLoads 미포팅(heritage.go ~1077)은 이번 케이스와 무관하나
+  여전히 미포팅 부채로 남음.
+게이트(최종, master `652fc3f`): tree 10/10, x64 8/8, op_switch byte-MATCH, breadth 3/3, **corpus2 6/13**,
+**x64_auto 20/32**(15->20), production 전부 PASS, `go test ./...` green. 부수 정리: 이전 세션 잔존
+stale 워커 worktree/브랜치 40개 전수 검증(git cherry 패치 대조) 후 일괄 삭제.
 
 ### 2026-07-17 (세션4): 툴 2종 + breadth 3/3 + ReturnSplit 착지 + corpus2 4/13 + 디코드 오염 근절 (master `65b57f1`, 23 커밋)
 감독관 세션(Opus/Sonnet 서브에이전트, worktree 격리, 병렬 2슬롯, 매 landing 스팟체크+전매트릭스 2회

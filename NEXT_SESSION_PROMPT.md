@@ -1,4 +1,4 @@
-# 다음 세션 프롬프트 (2026-07-17 세션5 오후 작성, master `be19010`)
+# 다음 세션 프롬프트 (2026-07-17 세션5 오후 작성, master `652fc3f`)
 
 ## THE mission (절대 잊지 말 것)
 Ghidra C++ 디컴파일러 엔진을 Go로 **byte-identical** 포팅. 실제 .sla(x86/x64/ARM) 로드해 임의 실제 함수를
@@ -10,14 +10,16 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (master `be19010`, origin 푸시됨, 전 게이트 green)
-- tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **5/13**
-  (bump_scores/divmix/parse_steps/dowhile_scan/find_pair), x64_auto **20/32**, production PASS,
+## 현재 상태 (master `652fc3f`, origin 푸시됨, 전 게이트 green)
+- tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **6/13**
+  (bump_scores/divmix/parse_steps/dowhile_scan/find_pair/clamp3), x64_auto **20/32**, production PASS,
   `go test ./...` green.
 - 세션5 착지 = 골든 손상 수정(GenGoldens bodyHex 연속 span) + 전 코퍼스 무결성 감사(손상은 x64_auto 2건뿐,
-  corpus1/2 무결) + 엔진 6건: cover 인덱스=블록위치(97084fa), LoopBody 포인터 안정성(e19d788), InfLoop
+  corpus1/2 무결) + 엔진 8건: cover 인덱스=블록위치(97084fa), LoopBody 포인터 안정성(e19d788), InfLoop
   do/while(true)(0af54ad), RuleCollectTerms 포팅(e908beb), RuleShift2Mult 컨텍스트 게이트(75c6db5),
-  RuleDoubleShift 완전 포팅(3fbf15c -- bit_mask_shift_combo MATCH). 상세 = CHANGELOG 2026-07-17 세션5.
+  RuleDoubleShift 완전 포팅(3fbf15c), PTRADD 렌더 스케일 제거(caf44a2), **heritage BuildADT faithful
+  포팅(cd42ccb -- Bilardi-Pingali z-chain, 중첩 다이아몬드 phi 배치 복원, clamp3 완결)**.
+  상세 = CHANGELOG 2026-07-17 세션5. stale 워커 worktree 40개 전수 검증 후 일괄 삭제(현재 main뿐).
 - 세션4 핸드오프의 (A) dowhile_count/find_pair, (D) 1바이트 반환 캐리어는 전부 완료.
 
 ## 툴 (있는 줄 모르면 못 쓴다 -- 착수 전 확인)
@@ -39,24 +41,20 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 
 ## 다음 작업 (우선순위)
 
-### (A) [대형, 고위험, 최우선] heritage/stackvars 데이터플로 -- clamp3 + (B) param-recovery 공통 계열
-- 현상 1 (corpus2 clamp3, **진단 완결 -- 세션5 read-only 워커, 실측 신뢰 높음**): dangling goto는 구조화
-  무죄. `sub rsp,N` 후 bare 조정 SP(offset 0)로 접근하는 스택 슬롯(local_18)의 조정-RSP def가 접근마다
-  3중 복제(`0x0d:38/39/3a RSP = RSP(i) + 0xffffffffffffffe8`) -> 스토어 2개/로드 1개가 서로 다른 버전 사용
-  -> MULTIEQUAL 미형성 -> deadcode가 스토어 제거 -> 미초기화 read(local_306) + CBRANCH 양edge 동일 퇴화 ->
-  collapse가 정직하게 goto 방출. C++ 코어는 단일 조정 RSP + phi 2단 형성(`s..ffe8 = R8D ? ECX`)으로 중첩 if
-  구조화(goto 0). 반면 `RSP_in + (-0x14)` 형태(local_14)는 정상.
-- 현상 2 (x64_auto reverse_bytes_inplace, 세션4 진단): spurious full-width RDX(sz8) + phantom R8 입력으로
-  param_2가 실 캐리어 EDX(sz4)가 아닌 RDX에 바인딩 -> 캐리어 iVar2 유출 + 선언 소실. C++ 입력은 RCX+EDX 둘뿐.
-  corpus2 gate의 iVar1도 같은 계열 추정.
-- C++ 참조: heritage.cc guardStores/guardLoads(Gosleigh 미포팅 -- pkg/pcode/heritage.go ~1077 주석 참조,
-  ProtectFreeStores:1213은 부분 대체물), coreaction.cc ActionActiveParam/trial, merge.cc mergeMarker.
-- 수정 대상: pkg/pcode/heritage.go, rules_loadstore.go(stackvars 경로), scopelocal.go:171.
-- 주의: 전 코퍼스 공유 최고위험 경로. read-only 진단(위 완결분 재확인 포함) -> 수정 분리 + ssadiff 함수별
-  입력 varnode 집합 대조 필수. 세션5 워커 제안: 3중 RSP def 통합 또는 guardStores 포팅으로 STORE를 -0x18
-  슬롯 def로 등록해 phi 형성.
-- 성공 기준: clamp3 goto 소멸 + `int local_18` 선언 복원(corpus2 6/13), reverse_bytes_inplace spurious
-  입력 소멸(ssadump 실측), 전 게이트 무회귀.
+### (A) [대형, 고위험, 최우선] param-recovery 발산 -- reverse_bytes_inplace/gate 계열
+- (clamp3는 세션5 오후 heritage BuildADT faithful 포팅 `cd42ccb`로 **완결** -- corpus2 6/13. 당시 1차 진단
+  "RSP 3중 복제"는 반증됐고 진짜 근본은 phi 배치였다. **진단 완결분도 수정 착수 시 재실측하라.**)
+- 현상 (x64_auto reverse_bytes_inplace, 세션4 진단): spurious full-width RDX(sz8) + phantom R8 입력으로
+  param_2가 실 캐리어 EDX(sz4)가 아닌 RDX에 바인딩 -> 캐리어 iVar2 유출 + 선언 소실(현 태그 UNKNOWN).
+  C++ 코어 입력은 RCX+EDX 둘뿐(decomp_dbg 실측). corpus2 gate의 iVar1도 같은 계열 추정. corpus2 잔여
+  add_pt/sum_via_pp/helper_sum/caller(반환 캐리어/call-site)도 인접 계열 후보.
+- C++ 참조: coreaction.cc ActionActiveParam/param trial, heritage sub-register 폭 결정, merge.cc
+  mergeMarker. heritage.cc guardStores/guardLoads는 여전히 미포팅 부채(heritage.go ~1077 주석) --
+  clamp3와는 무관했지만 LOAD/STORE 많은 함수에서 발화할 수 있다.
+- 수정 대상: pkg/pcode/scopelocal.go:171(BuildFromVarnodes 슬롯 대표), heritage/param trial 경로.
+- 주의: 전 코퍼스 공유 최고위험 경로. read-only 진단 -> 수정 분리 + ssadiff 함수별 입력 varnode 집합
+  대조 필수.
+- 성공 기준: reverse_bytes_inplace spurious 입력 소멸(ssadump 실측) + 선언 복원, 전 게이트 무회귀.
 
 ### (B) [대형, 시스템, 단독 세션 권장] pre-structure SSA 정합 -- deadcode/MarkImplied 타이밍
 - 세션4 지도 유지: Ghidra는 구조화 전에 ActionDeadCode/ActionMarkImplied 완료, Gosleigh는 print 시점으로
@@ -74,9 +72,10 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 - switch_dense: 세션5 바이트 정정으로 실바이트 디코드 정상화 -- 잔여는 TYPECAST(cast int/uint/ulonglong
   want/got 불일치) + TEMP uVar2. 기존 "range-check idiom" 설명은 손상 바이트 시절 것이라 stale -- 재실측부터.
 - strlen_style STRUCT(for/while, loop-variable phi depth-3, (B)와 얽힘). multi_return_early TYPECAST.
-- sum_pp_walk/array_init_then_sum PTR(포인터 스케일 `* 8` raw 출력). longlong_combo/sign_extend_boundary
+- sum_pp_walk TEMP(lVar1 -- SEXT48 implied 실패, (B) 클러스터). array_init_then_sum PTR `* 4`+local_428
+  (스택 배열 미복구 근본 -- PTRADD를 안 거침). longlong_combo/sign_extend_boundary
   TYPECAST. bit_rotate_left 리터럴 U 접미사. while_countdown/popcount_loop/swap_via_temp TEMP((B) 계열).
-- corpus2 잔여 8건: gate(&&/|| 그룹핑 + param-as-return, De Morgan P4), clamp3((A)로 이관), add_pt/
+- corpus2 잔여 7건: gate(&&/|| 그룹핑 + param-as-return, De Morgan P4), add_pt/
   sum_via_pp/helper_sum/caller(반환 캐리어/call-site), faverage(FP), umulhi(spurious CAST). P5-P8은
   corpus2 README 지도 유지.
 
@@ -85,7 +84,7 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 - `X64_CORPUS=1 go test -count=1 ./pkg/loader/ -run TestX64CorpusGoldenMap -v` (8/8)
 - `X64_SWITCH=1 go test -count=1 ./pkg/loader/ -run TestX64Switch -v` (op_switch byte-MATCH 사수)
 - `X64_BREADTH=1 go test -count=1 ./pkg/loader/ -run TestX64BreadthGoldenMap -v` (3/3 사수)
-- `X64_CORPUS2=1 go test -count=1 ./pkg/loader/ -run TestX64Corpus2 -v` (**5/13 사수**)
+- `X64_CORPUS2=1 go test -count=1 ./pkg/loader/ -run TestX64Corpus2 -v` (**6/13 사수**)
 - `py -3 tools/goldengap/goldengap.py run && py -3 tools/goldengap/goldengap.py report` (**MATCH 20 사수**;
   bare `go run ./cmd/goldengap`은 파일 미갱신 주의)
 - `go test ./pkg/loader/ -run 'TestMSVC|TestAARCH64|TestX8664|TestX64RegParam|TestPELoader|TestX86PEDecompile'`
