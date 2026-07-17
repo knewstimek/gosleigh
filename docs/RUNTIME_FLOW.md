@@ -111,6 +111,12 @@
 2. miss면 circular slot을 재사용한다
 3. 재사용 슬롯은 `addr`를 바꾸고 `parser state = uninitialized`로 reset한다
 4. `N2Addr`는 address reassignment 시 invalid로 되돌린다
+5. **(세션4, `8b23afa`) in-flight pin**: `TranslateSubtable()`이 pcode 빌드 구간 동안 자기 컨텍스트를
+   `PinContext()`로 고정하고, `nextReuseSlotLocked()`가 핀 슬롯을 재사용에서 건너뛴다. eager inst_next2
+   해석(`translateRuntimeContext`)이 같은 풀에서 `ObtainContext()`를 호출해 빌드 중인 슬롯을 recycle ->
+   naddr/ops 오염 -> 다음 명령어 삼킴(디코드 순서 의존 비결정 오염)을 일으키던 버그의 근절. C++
+   `Sleigh::oneInstruction()`이 `pos`를 build 전체에 걸쳐 살려두는 계약(minimumreuse window)의 명시화.
+   회귀 테스트: `pkg/sla/discache_test.go TestPinContextSurvivesReuseWrap`.
 
 `ObtainContext()` 내부에서 cache hit 시 단락(short-circuit) 경로가 추가됐다.
 
