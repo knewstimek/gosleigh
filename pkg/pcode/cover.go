@@ -34,7 +34,22 @@ const (
 //   - end sentinel (blockEndSentinel) -> MaxUint64
 //   - MULTIEQUAL is considered block-begin (index 0)
 //   - INDIRECT has the index of its causing op
-//   - otherwise: op.Seq().Order
+//   - otherwise: the op's execution position within its parent block
+//
+// The returned value must be monotonic with execution order within a single
+// basic block: cover intersection compares ops purely by this index, so a read
+// that executes after a def must yield a strictly larger index. Ghidra
+// guarantees this by maintaining SeqNum::order = block position on every
+// BlockBasic::insert (block.cc BlockBasic::insert / setOrder). Gosleigh never
+// ported that maintenance -- its SeqNum.Order is a per-instruction decode
+// sub-index (0,1,2,... reset each instruction), which is NOT comparable across
+// instructions in the same block. Using that raw Order made a later read appear
+// to precede an earlier def (e.g. a loop increment read at a higher address but
+// lower decode sub-index), over-extending the def's cover backward through every
+// predecessor and producing spurious merge conflicts (dowhile_count loop
+// induction phi). We therefore derive the index from the op's live position in
+// its parent block, which reproduces Ghidra's order-is-block-position semantics
+// exactly for the comparison, without mutating SeqNum (the opTree map key).
 func getOpUIndex(op *PcodeOp) uint64 {
 	if op == nil {
 		return coverIndexBegin
@@ -50,6 +65,25 @@ func getOpUIndex(op *PcodeOp) uint64 {
 	if op.IsMarker() {
 		if op.Code() == CPUI_MULTIEQUAL {
 			return coverIndexBegin
+		}
+	}
+	return opBlockUIndex(op)
+}
+
+// opBlockUIndex returns a 1-based execution index for op within its parent
+// basic block. 1-based so that no real op collides with the block-begin
+// sentinel (0). Falls back to the stored SeqNum.Order when the op is not
+// attached to a block (detached/free ops never participate in cover, so this is
+// only a defensive default).
+// C++ parity: the value of SeqNum::order that BlockBasic::insert maintains.
+func opBlockUIndex(op *PcodeOp) uint64 {
+	bb := op.Parent()
+	if bb == nil {
+		return op.Seq().Order
+	}
+	for i, o := range bb.opSlice() {
+		if o == op {
+			return uint64(i) + 1
 		}
 	}
 	return op.Seq().Order
