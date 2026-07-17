@@ -5,7 +5,7 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
-### 2026-07-17 (세션5, 오후): 골든 무결성 감사 + 엔진 5건 -- x64_auto 19/32, corpus2 5/13 (master `d416002`, 10 커밋)
+### 2026-07-17 (세션5, 오후): 골든 무결성 감사 + 엔진 6건 -- x64_auto 20/32, corpus2 5/13 (master `be19010`, 13 커밋)
 감독관 세션(전 워커 Opus, worktree 격리, 병렬 2슬롯, 매 landing 스팟체크 + 전매트릭스 -count=1 2회 +
 cherry-pick + push). 세션4 핸드오프 (A)와 (D) 지목 항목에서 출발, 골든 파이프라인 자체의 손상 버그를 발견해
 전 코퍼스 무결성 감사까지 확장.
@@ -50,6 +50,11 @@ cherry-pick + push). 세션4 핸드오프 (A)와 (D) 지목 항목에서 출발,
    것을 C++ 조건(ruleaction.cc:3734-3771)으로 게이트 -- shift 입력 def 우선, 출력 descendant 순회로
    INT_ADD/SUB/MULT 인접 시에만 변환 + cutoff `>=63` -> `>=32` 정정. bitwise 컨텍스트가 shift를 유지
    (bit_mask_shift_combo `* 0x100` -> `<< 8`), char_arith_promote MATCH.
+6. **RuleDoubleShift 완전 포팅** (`3fbf15c`,`be19010`): same-direction만 있던 combineNestedShift 경로를
+   C++ applyOp 전체(ruleaction.cc:1842-1930)로 교체 -- getOpList INT_MULT 추가(2^n MULT를 INT_LEFT로 정규화),
+   opposite-direction 브랜치(`(V>>c)<<c` -> `V & mask`, 부분 상쇄는 INT_AND + 잔여 shift, INT_LEFT-outer는
+   loneDescend + 동일 shift량 요구), same-direction total>=8*size는 COPY 0. combineNestedShift는
+   RuleDoubleArithShift(INT_SRIGHT) 전용으로 존치. bit_mask_shift_combo MATCH -- **x64_auto 19 -> 20/32**.
 
 **진단만 (착지 없음, 차기 세션 지도)**:
 - **clamp3 dangling goto = heritage/stackvars 결함 (구조화 무죄)**: read-only 진단 워커가 decomp_dbg +
@@ -59,12 +64,8 @@ cherry-pick + push). 세션4 핸드오프 (A)와 (D) 지목 항목에서 출발,
   조정 RSP + phi 형성으로 중첩 if 구조화(goto 0). 수정 지점 = pkg/pcode/heritage.go(guardStores/guardLoads
   미포팅, ProtectFreeStores:1213) / rules_loadstore.go stackvars 경로. param-recovery 발산(B)과 같은
   데이터플로 계열.
-- **RuleDoubleShift opposite-direction 브랜치 미포팅**: bit_mask_shift_combo 잔여 `(x>>0x10)<<0x10` ->
-  `x & 0xffff0000` 소거 미발동. C++ ruleaction.cc:1890-1928(diffsa==0, loneDescend 요구) vs Go
-  rules_misc.go:777 combineNestedShift는 same-direction만 구현 + getOpList INT_MULT 항목 누락. 소형 자기완결.
-
-게이트(최종, master `d416002`): tree 10/10, x64 8/8, op_switch byte-MATCH, breadth 3/3, **corpus2 5/13**,
-**x64_auto 19/32**(15->19), production 전부 PASS, `go test ./...` green.
+게이트(최종, master `be19010`): tree 10/10, x64 8/8, op_switch byte-MATCH, breadth 3/3, **corpus2 5/13**,
+**x64_auto 20/32**(15->20), production 전부 PASS, `go test ./...` green.
 
 ### 2026-07-17 (세션4): 툴 2종 + breadth 3/3 + ReturnSplit 착지 + corpus2 4/13 + 디코드 오염 근절 (master `65b57f1`, 23 커밋)
 감독관 세션(Opus/Sonnet 서브에이전트, worktree 격리, 병렬 2슬롯, 매 landing 스팟체크+전매트릭스 2회
