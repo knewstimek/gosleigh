@@ -301,6 +301,17 @@ func (t *typeOpIntAdd) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 	return cs.arithmeticOutputStandard(op)
 }
 
+// INT_MULT output token uses the arithmetic typing rules, like INT_ADD: the
+// product's token type is the most-specific of the operand read-facing types,
+// not the base TYPE_INT output-local. Without this override the implied product
+// is stamped TYPE_INT (longlong) by castOutput, forcing a spurious (uintN) cast
+// when the result feeds an unsigned consumer (e.g. INT_RIGHT in the umulhi
+// double-word multiply). C++ parity: TypeOpIntMult::getOutputToken -> castStrategy
+// ->arithmeticOutputStandard (typeop.cc:1627-1631).
+func (t *typeOpIntMult) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	return cs.arithmeticOutputStandard(op)
+}
+
 // PTRADD output token is the input-0 pointer type (the op casts to it).
 // C++ parity: TypeOpPtradd::getOutputToken (typeop.cc 2246-2250).
 func (t *typeOpPtradd) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
