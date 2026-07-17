@@ -241,8 +241,36 @@ func (b *FlowBlock) isInteriorGotoTarget() bool {
 	return false
 }
 
+// isComplex reports whether this block is too complex to be emitted as a single
+// conditional clause. The base FlowBlock is always complex; only leaf blocks and
+// boolean-condition chains can be simple. C++ parity:
+//   - FlowBlock::isComplex (block.hh:250)      -> true
+//   - BlockBasic::isComplex (block.cc:2388)    -> statement count
+//   - BlockCopy::isComplex (block.hh:536)      -> copy->isComplex()
+//   - BlockCondition::isComplex (block.hh:635) -> getBlock(0)->isComplex()
+// In Gosleigh the structure-graph leaf is a *BlockBasic carrying srcDelegate, so
+// the BlockCopy case is folded into the *BlockBasic branch.
 func (b *FlowBlock) isComplex() bool {
-	return false
+	switch b.Concrete().(type) {
+	case *BlockBasic:
+		// KNOWN GAP: BlockBasic::isComplex faithfully counts statements, but at
+		// CollapseStructure time Gosleigh's basic blocks still carry ops that Ghidra
+		// has already removed via ActionDeadCode / marked implied via
+		// ActionMarkImplied (Gosleigh defers that cleanup to print time). Counting
+		// those inflates the statement total and wrongly forces overflow syntax on
+		// simple loops. Until the pre-structure SSA state is faithful, a leaf block
+		// is treated as non-complex (matching prior behavior).
+		return false
+	case *BlockCondition:
+		// BlockCondition::isComplex -> getBlock(0)->isComplex().
+		children := b.StructuredChildren()
+		if len(children) > 0 {
+			return children[0].isComplex()
+		}
+		return true
+	default:
+		return true
+	}
 }
 
 func (b *FlowBlock) preferComplement(*Funcdata) bool {
