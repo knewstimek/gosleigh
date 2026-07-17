@@ -67,3 +67,7 @@ report 재실행 시 이 섹션은 덮어써지므로 재생성 후 다시 보�
    phantom R8 -- ActionActiveParam/heritage sub-register 폭, 고위험이라 SSA 비교기 병행 권장),
 3. switch_dense range-check idiom, 4. dowhile_count do-while 구조화, 5. SSA parity 부채 3건
    (phi SeqNum 주소/블록 병합/return 캐리어 COPY -- ssadiff 캘리브레이션 발견).
+- b9aff6e TypeOpIntMult getOutputToken(typeop.cc:1627) 착지: umulhi SSA 0x67 여분 CAST 소멸
+  (ssadiff 17/18 match, 0 mismatch), C 출력 캐스트 소거. 신규 known gap: 함수 시그니처
+  반환 타입이 반환 varnode 타입에서 파생됨 -- C++은 별도 return-recovery (umulhi 시그니처
+  longlong vs ulonglong). 후속: 반환 타입 recovery 분리.
