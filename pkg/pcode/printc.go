@@ -4151,6 +4151,15 @@ func (s *printCState) markPhiReturnOnly() {
 		if out == nil || s.prologueVarnodes[out] {
 			continue
 		}
+		// A phi output backed by a real ScopeLocal stack Symbol is always
+		// declared by Ghidra regardless of varnode liveness: declarations are
+		// Symbol-driven (PrintC::emitScopeVarDecls, printc.cc:2650 walks the
+		// Symbol map). Suppressing it here would drop the declaration while the
+		// body still names the variable (compile-broken C). Keep suppression
+		// for register live-throughs (ESP_phi/EIP_phi) only.
+		if s.stackSymbolType(out) != nil {
+			continue
+		}
 		allTransparent := true
 		hasReturnOrInline := false
 		hasNonSelfConsumer := false
