@@ -58,7 +58,7 @@
     },
     {
       "name": "reverse_bytes_inplace",
-      "output": "\nvoid reverse_bytes_inplace(longlong param_1,int param_2,longlong param_3)\n\n{\nundefined4 local_14;\nundefined4 local_10;\n\nwhile (local_10 = iVar2 + -1, local_14 \u003c local_10) {\n*(undefined1 *)(param_1 + (longlong)local_14) = *(undefined1 *)(param_1 + local_10);\n*(undefined1 *)(param_1 + local_10) = *(undefined1 *)(param_1 + (longlong)local_14);\nlocal_14 = local_14 + 1;\niVar2 = local_10;\n}\nreturn;\n}\n"
+      "output": "\nvoid reverse_bytes_inplace(longlong param_1,int param_2,longlong param_3)\n\n{\nundefined4 local_14;\nundefined4 local_10;\n\nfor (local_14 = 0; local_14 \u003c local_10; local_14 = local_14 + 1) {\n*(undefined1 *)(param_1 + (longlong)local_14) = *(undefined1 *)(param_1 + local_10);\n*(undefined1 *)(param_1 + local_10) = *(undefined1 *)(param_1 + (longlong)local_14);\niVar2 = local_10;\n}\nreturn;\n}\n"
     },
     {
       "name": "bit_mask_shift_combo",
@@ -66,7 +66,7 @@
     },
     {
       "name": "popcount_loop",
-      "output": "\nint popcount_loop(uint param_1)\n\n{\nundefined4 local_8;\nundefined4 local_18;\n\nlocal_18 = 0;\nlocal_8 = param_1;\nwhile (local_8 != 0) {\nlocal_8 = local_8 \u0026 local_8 + 0xffffffff;\nlocal_18 = local_18 + 1;\n}\nreturn local_18;\n}\n"
+      "output": "\nint popcount_loop(uint param_1)\n\n{\nundefined4 local_8;\nundefined4 local_18;\n\nlocal_18 = 0;\nfor (local_8 = param_1; local_8 != 0; local_8 = local_8 \u0026 local_8 + 0xffffffff) {\nlocal_18 = local_18 + 1;\n}\nreturn local_18;\n}\n"
     },
     {
       "name": "xor_swap_pair",
