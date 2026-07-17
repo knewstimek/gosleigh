@@ -15,18 +15,24 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-17 세션3, master `db12bfc`, 전 게이트 green)
+## 현재 상태 (2026-07-17 세션4, master `65b57f1`, origin 푸시, 전 게이트 green)
 
-**권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`** (세션3 성과/다음작업/보존브랜치 전부). 요약:
-- **op_switch byte-MATCH 달성**(`X64_SWITCH`): uVar1 = Ghidra CORE 동작으로 재확정(세션2 "headless 아티팩트"
-  폐기, decomp_dbg 실측), 기전 = savefile `merge="false"` -> Symbol isolate -> mergeTestAdjacent 가드.
-- tree **10/10**, x64 corpus **8/8**, breadth **2/3**(dispatch는 골든과 `(ulonglong)` 한 토큰 차이),
-  corpus2(신규 discovery) **2/13**. production 전부 PASS, `go test ./...` green.
-- 자산: `tools/decomp_dbg.exe`(재빌드 CPUI_DEBUG core 콘솔) + `tools/captures/` -> C++ 코어 ground truth 실측.
-- 보존 브랜치 `worktree-agent-a31599a51b280b836`@`42522d9`: faithful ActionReturnSplit(split 엔진 correct,
-  하류 collapse 갭 때문에 미착지). 상세 NEXT_SESSION_PROMPT.md + CHANGELOG 2026-07-17.
-- 다음: (A) dispatch ZEXT type-model -> breadth 3/3, (B) collapse multi-exit-loop 구조화 -> ReturnSplit 착지,
-  (C) corpus2 P3-P8.
+**권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`** (세션4 성과/다음작업 전부). 요약:
+- 게이트: tree **10/10**, x64 corpus **8/8**, **op_switch byte-MATCH**, breadth **3/3**(dispatch ZEXT 착지),
+  corpus2 **4/13**(bump_scores/divmix/parse_steps/dowhile_scan), x64_auto(신규 자동 코퍼스) **15/32**,
+  production 전부 PASS, `go test ./...` green.
+- **툴 2종 착지(핸드오프 우선 제작 툴 완성)**: `tools/goldengap/`(원커맨드 골든 생성+갭 자동분류,
+  `testdata/x64_auto/` 32함수 discovery 코퍼스) + `tools/ssadiff/`(C++ 코어 decomp_dbg <-> Gosleigh
+  최종 SSA를 op 단위 나란히 비교, savefile 템플릿 생성 포함).
+- **엔진 착지 11건**(전부 faithful + 전 게이트 무회귀, 상세 CHANGELOG 2026-07-17 세션4): dispatch
+  spacebase-PTRSUB 포인터 타이핑(breadth 3/3), phi 선언 억제 가드, collapse isComplex-compound +
+  **ActionReturnSplit 착지(세션3 보존브랜치 부채 해소)** + overflow while(true), 비교 정준화
+  RuleIntLessEqual(+invented rule 제거), 연산자 경계 개행, TypeOpIntMult getOutputToken, isMoveable
+  faithful(for-루프), 반환 타입 pre-cast signedness, do-while emit(no_branch/only_branch), char
+  코어타입명, **파서-컨텍스트 in-flight pin(pkg/sla 디코드 순서 의존 명령어-삼킴 오염 근절)**.
+- 다음: NEXT_SESSION_PROMPT.md 우선순위 (A) dowhile_count/find_pair 잔여 데이터플로/collapse,
+  (B) param-recovery 발산(reverse_bytes_inplace, 고위험), (C) pre-structure SSA 정합(deadcode/
+  MarkImplied 타이밍 -- TEMP 클러스터 + BlockBasic::isComplex leaf 공통 선행조건).
 
 <details><summary>이전 상태 (2026-06-30~07-03, 접힘)</summary>
 
@@ -98,11 +104,10 @@ x86-32 cdecl)의 모든 가용 골든에 Ghidra와 byte-identical. 이번 세션
 
 ## 다음 작업 (우선순위)
 
-> **[최신] 2026-07-17 세션3 (master `db12bfc`): op_switch byte-MATCH 달성, dispatch 한 토큰 근접. 권위 있는
-> 다음-작업/현재상태/보존브랜치는 저장소 루트 `NEXT_SESSION_PROMPT.md` + 메모리 `project_gosleigh` 상단
-> "2026-07-17 (세션3)" + CHANGELOG 2026-07-17 참조. 우선순위: (A) dispatch `(ulonglong)` ZEXT type-model 부채
-> -> breadth 3/3 ; (B) collapse multi-exit-loop 구조화 -> 보존브랜치 ReturnSplit 착지 + corpus2 P1 ; (C)
-> corpus2 갭 P3-P8(testdata/x64_corpus2/README.md).**
+> **[최신] 2026-07-17 세션4 (master `65b57f1`): 세션3의 (A) dispatch ZEXT -> breadth 3/3 과 (B) collapse/
+> ReturnSplit 착지 완료, corpus2 4/13 + x64_auto 15/32. 권위 있는 다음-작업/현재상태는 저장소 루트
+> `NEXT_SESSION_PROMPT.md` + 메모리 `project_gosleigh` 상단 "2026-07-17 (세션4)" + CHANGELOG 2026-07-17
+> 세션4 참조. 갭 지도 = `testdata/x64_auto/GAPMAP.md`(자동 갱신) + `testdata/x64_corpus2/README.md`.**
 >
 > <details><summary>이전 세션2 포인터 (접힘)</summary>
 > - **process 완료(8/8)**: 아래 미시작 (b)와 (a-2)의 process 관련 항목은 **DONE**. 5개 faithful 조각으로 착지 --

@@ -5,6 +5,73 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-17 (세션4): 툴 2종 + breadth 3/3 + ReturnSplit 착지 + corpus2 4/13 + 디코드 오염 근절 (master `65b57f1`, 23 커밋)
+감독관 세션(Opus/Sonnet 서브에이전트, worktree 격리, 병렬 2슬롯, 매 landing 스팟체크+전매트릭스 2회
++cherry-pick+push). 세션3 핸드오프의 우선 제작 툴 2종과 (A)(B) 과제를 전부 착지.
+
+**툴 (핸드오프 "우선 제작 툴" 완성)**:
+- **goldengap** (`6064b6e`,`ac6b0ec`,`d57ebcd`): `py -3 tools/goldengap/goldengap.py all` 원커맨드 --
+  corpus.c -> MSVC -> Ghidra 12 headless 골든 -> `cmd/goldengap`(bridge 파이프라인 CLI) -> indent-insensitive
+  대조 -> 토큰종류별 갭 자동분류(MATCH/WRAP/STRUCT/TYPECAST/PTR/TEMP/NAMING/CALL/FP/UNKNOWN) ->
+  GAPMAP.md/gapmap.json 갱신. corpus2 13함수 사람 분류 대비 11/12 일치 검증. **갭 발견 시간->분.**
+  주의: `report`가 GAPMAP.md 수동 섹션을 덮어씀(툴 개선 후보).
+- **x64_auto 32함수 discovery 코퍼스** (`68f9748`,`42afbf6`): 기존 코퍼스와 비중복 신규 C 구조 29개 배치
+  추가(while 변형/switch 4종/2D배열/비트연산/좁은타입/문자열류/조기return 등). 신규 갭 신호: 선언 소실
+  (cond_assign_abs), 시프트->곱 출력, 대수 항정리 누락, 비교 정준형, 리터럴 U 접미사.
+- **ssadiff** (`53e811c`,`9288822`,`b617aab`,`45f1392`): C++ 코어(decomp_dbg `print raw`) <-> Gosleigh 최종
+  SSA(신규 pkg/pcode/ssadump.go + cmd/ssadump)를 op 단위 정렬 비교. savefile XML 템플릿 생성(capture.py)
+  포함, unlocked-prototype 함수 즉시 동작. 캘리브레이션 부산물: byte-MATCH 함수도 SSA 계통 차이 3건
+  (phi SeqNum 주소, 루프 증분+비교 블록 병합, return 캐리어 COPY 부재) = SSA parity 부채로 기록.
+
+**엔진 착지 (전부 faithful, 전 게이트 -count=1 2회 무회귀)**:
+1. **dispatch `(ulonglong)` ZEXT -> breadth 3/3** (`4faff43`,`9a64a8f`): spacebase-constant 포인터 타이핑
+   (funcdata.cc:391-419) + TypeOpPtrsub propagateType/propagateAddIn2Out(typeop.cc:1217/2368, PTRSUB 출력이
+   매 InferTypes 패스마다 포인터로 재유도 -- 전 세션 "직접 락" 함정 회피) + isPtrsubMatching spacebase 분기
+   (type.cc:1264) + RulePtrsubCharConstant isCharPrint 가드(ruleaction.cc:7374) + TypeOpPtrsub.getOutputToken
+   (typeop.cc:2351).
+2. **phi 선언 억제 가드** (`d6b7df4`): markPhiReturnOnly(Gosleigh 고유 휴리스틱)가 실제 스택 심볼 phi의
+   선언까지 삼켜 컴파일 불가 C 방출(x64_auto cond_assign_abs 발견). Ghidra는 선언이 Symbol 주도
+   (printc.cc:2650 emitScopeVarDecls) -- 스택 심볼이면 억제 금지. read-only 진단 에이전트 근본규명 후 착지.
+3. **collapse + ReturnSplit** (`40d00a3`,`3dc1479`,`852efc3`): FlowBlock.isComplex compound/condition 디스패치
+   (block.hh:250/635; BlockBasic leaf는 known gap -- Gosleigh가 deadcode/MarkImplied를 print 시점으로 미뤄
+   pre-structure SSA에 잔여 op이 많아 faithful 통계가 과발화, 선행 정합 필요) + **세션3 보존브랜치
+   ActionReturnSplit(NodeSplit/CloneBlockOps funcdata_block.cc:824-1093) 본착지** + PrintC emitBlockWhileDo
+   overflow while(true) 신택스(printc.cc:3149-3176). parse_steps가 가드 보존 + 조기 return 보존으로 의미
+   무손상 수렴(세션3 착지금지 사유 해소). x64_auto loop_forever_break MATCH.
+4. **비교 정준화** (`3c5f21a`,`a693eaa`): RuleIntLessEqual 충실화(ruleaction.cc:611) -- const-on-left skip
+   워커라운드 제거(ActionNormalizeBranches 기포팅으로 불필요) + replaceLessequal `& calc_mask` 누락 수정
+   (funcdata_op.cc:1029). C++에 없는 invented rule RuleSLessEqual2Constant 삭제. parse_steps `1000 <` /
+   array_reverse_sum MATCH.
+5. **연산자 경계 개행** (`f0a7a7d`): PrintLanguage::emitOp의 연산자 양쪽 break 토큰(printlanguage.cc:333-338)
+   대응 -- 조건식을 최외곽 연산자에서 분할 방출해 Oppen 프린터가 `||` 경계에서 접음. **parse_steps corpus2
+   MATCH.** known gap: 최외곽만 분할(코퍼스 내 무영향).
+6. **TypeOpIntMult.getOutputToken** (`b9aff6e`): arithmeticOutputStandard(typeop.cc:1627) 오버라이드 누락 ->
+   implied 곱셈 출력이 TYPE_INT로 stamp돼 unsigned 소비자 앞 여분 CAST. ssadiff로 op 단위 특정 후 11줄 수정,
+   umulhi SSA가 C++과 0 mismatch.
+7. **PcodeOp::isMoveable** (`f8a2674`): op.cc:178 충실 포팅(기존 "사이 op 전부 branch/dead" 오휴리스틱 대체,
+   데이터플로 검사) -> for-루프 인정 under-firing 해소. popcount_loop/reverse_bytes_inplace for 복구.
+8. **반환 타입 pre-cast signedness** (`ebb21ad`): C++은 ActionOutputPrototype(coreaction.cc:4776 ->
+   fspec.cc:4136)이 casts 이전에 시그니처를 확정 -- SetCasts의 signed->unsigned 승격이 시그니처에 미반영.
+   Gosleigh print-시점 재파생에 FuncProto output 우선 가드. umulhi 시그니처 longlong 골든 일치.
+9. **do-while emit** (`ccbef67`): PrintC::emitBlockDoWhile(printc.cc:3200) no_branch body + only_branch
+   condition 포팅. **세션 전 진단("LoopBody exit 선택 버그")은 실측으로 반증 -- collapse는 정확했고 emit이
+   front leaf에서 조건을 뽑던 것.** dowhile_scan 루프 구조 골든 일치, dangling goto 소멸.
+10. **char 코어타입명** (`d190c01`): size-1 signed = `char`(type.cc:3645 cacheCoreTypes "Char is preferred").
+11. **파서-컨텍스트 in-flight pin** (`8b23afa`): pkg/sla discache 8슬롯 재사용 풀이 빌드 중 in-flight
+    컨텍스트 슬롯을 recycle해 naddr/ops 오염 -> 4바이트 명령어가 len=8로 다음 명령어를 삼킴(디코드 순서
+    의존 비결정 오염, dowhile_scan `(int)param_1` 의미 손상의 근본 -- merge 오진을 read-only 진단이 반증).
+    기전: translateRuntimeContext의 eager inst_next2 해석이 같은 풀에서 ObtainContext -> 슬롯 덮어씀. 수정:
+    C++ oneInstruction의 pos 생존 계약을 pin으로 명시화(풀 크기 불변) + 회귀 테스트
+    TestPinContextSurvivesReuseWrap. **dowhile_scan 골든 byte-identical -> corpus2 4/13.**
+
+**게이트 (최종)**: tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 4/13, x64_auto
+15/32, production 전부 PASS, `go test ./...` green, goldengap 2회 산출 byte-diff 없음(디코드 결정성).
+
+**known gap 신규 기록**(상세 GAPMAP.md 수동 섹션 + NEXT_SESSION_PROMPT.md): reverse_bytes_inplace
+param-recovery 발산(spurious RDX sz8 + phantom R8 -> 캐리어 EDX가 iVar2로 새어 선언 소실; 선언 경로 수정은
+증상 봉합이라 기각), dowhile_count 초기화 누락+증가 temp 미병합(디코드 버그와 무관 확인), BlockBasic
+isComplex leaf(pre-structure SSA 정합 선행), 다중 레벨 개행, char 리터럴('\0') 미구현, SSA parity 부채 3건.
+
 ### 2026-07-17 (세션3): op_switch byte-MATCH + dispatch 근접 + discovery 코퍼스 (master `db12bfc`, 28 커밋)
 감독관 세션(Opus 서브에이전트 근본규명+구현, worktree 격리, 병렬 2슬롯[사용자 승인], 매 landing C++
 스팟체크+전매트릭스+cherry-pick+push). 핵심 성과: **op_switch byte-MATCH 완전 착지** + dispatch 골든과 한
