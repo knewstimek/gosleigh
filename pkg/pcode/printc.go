@@ -2173,18 +2173,35 @@ func (s *printCState) emitDoWhileBody(bl *FlowBlock) error {
 	}
 }
 
+// emitInfLoopBlock renders a BlockInfLoop as:
+//
+//	do {
+//	  <block 0>
+//	} while( true );
+//
+// C++ parity: PrintC::emitBlockInfLoop (printc.cc:3229). Ghidra prints the loop
+// as a do/while(true), not a for(;;); the body (getBlock(0)) emits normally
+// because an infinite loop has no terminal loop-condition branch to suppress.
 func (s *printCState) emitInfLoopBlock(bl *FlowBlock) error {
 	s.lang.OpenBlockAfter(func() {
-		s.lang.Token("for")
-		s.lang.Space()
-		s.lang.Token("(;;)")
+		s.lang.Token("do")
 	})
 	for _, child := range bl.StructuredChildren() {
 		if err := s.emitBlock(child); err != nil {
 			return err
 		}
 	}
-	s.lang.CloseBlock()
+	// "while( true )": no space between keyword and paren, spaces inside, matching
+	// PrintC::emitBlockInfLoop and the overflow while(true) rendering above.
+	s.lang.CloseBlockWithSuffix(func() {
+		s.lang.Token("while")
+		s.lang.Token("(")
+		s.lang.Space()
+		s.lang.Token("true")
+		s.lang.Space()
+		s.lang.Token(")")
+		s.lang.Token(";")
+	})
 	return nil
 }
 
