@@ -764,10 +764,22 @@ func ApplyActiveParamModel(fd *Funcdata) bool {
 		if vn == nil || vn.Space() == nil {
 			continue
 		}
-		if isParamLocation(vn, model) {
+		// C++ parity: ActionInputPrototype::apply (coreaction.cc:4728-4741) only ever
+		// considers INPUT varnodes as parameter-trial candidates -- it iterates
+		// data.beginDef(Varnode::input)..endDef(Varnode::input), never the full
+		// varnode bank. A non-input varnode that merely lives at a parameter register
+		// (e.g. a spurious register:0x80/R8 MULTIEQUAL output with one leftover
+		// descendant) is NOT a function input and must never seed a trial. The former
+		// unguarded isParamLocation loop promoted exactly such a phantom R8 into the
+		// recovered prototype. Restricting to vn.IsInput() matches beginDef(input).
+		if isParamLocation(vn, model) && vn.IsInput() {
 			active.RegisterTrial(vn.Addr(), vn.Size())
 			cur := active.Trial(active.NumTrials() - 1)
-			if vn.IsInput() || vn.NumDescend() > 0 {
+			// C++ parity: coreaction.cc:4737 -- "if (!vn->hasNoDescend())
+			// active.getTrial(slot).markActive()". An input register with no
+			// descendants (a free input that never feeds the body) registers a trial
+			// but is left inactive, so deriveInputMap drops it from the prototype.
+			if vn.NumDescend() > 0 {
 				cur.MarkUsed()
 				cur.MarkActive()
 				activeParamKeys[newTrialKey(vn)] = struct{}{}
