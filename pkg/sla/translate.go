@@ -432,6 +432,14 @@ func TranslateSubtable(subtable *SubtableBoundary, input TranslateInput) ([]pcod
 	if input.PcodeContext != nil {
 		*input.PcodeContext = ctx
 	}
+	// Pin the in-flight context so the reuse pool cannot recycle its slot while
+	// this instruction is being built. Eager inst_next2/delay-slot obtainContext
+	// calls during the build draw from the same circular pool; without the pin a
+	// stale hash-cached slot could be handed back and clobber the live context's
+	// address/naddr and constructor tree. Mirrors Sleigh::oneInstruction() holding
+	// pos live across build()/resolveRelatives()/emit() (sleigh.cc).
+	prevPin := cache.PinContext(ctx)
+	defer cache.UnpinContext(prevPin)
 	if input.Symbols != nil && ctx.GetSymbolTable() == nil {
 		ctx.SetSymbolTable(input.Symbols)
 	}

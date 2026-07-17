@@ -1121,3 +1121,49 @@ func TestRawBuildStateAllocateInstructionCalledPerIssuedOp(t *testing.T) {
 		}
 	}
 }
+
+// TestPinContextSurvivesReuseWrap verifies that a pinned in-flight parser context
+// is never recycled by the circular reuse pool, even when enough distinct-address
+// obtains occur to wrap the round-robin index back onto the pinned slot.
+//
+// This locks the parser-context naddr corruption fix: TranslateSubtable pins the
+// context it is building so that eager inst_next2 / delay-slot obtainContext calls
+// (drawn from the same DisassemblyCache::list) cannot clobber the live context's
+// address and constructor tree. Mirrors the Sleigh::oneInstruction() guarantee
+// that pos survives its own build (sleigh.cc getParserContext window contract).
+func TestPinContextSurvivesReuseWrap(t *testing.T) {
+	ram := &address.Space{Name: "ram", Kind: address.SpaceKindProcessor, Index: 1, AddrSize: 8, WordSize: 1, Physical: true}
+	cs := &address.Space{Name: "const", Kind: address.SpaceKindConstant, Index: 0, AddrSize: 8, WordSize: 1}
+	cache := NewDisassemblyCache()
+
+	pinAddr := address.Address{Space: ram, Offset: 0x2000}
+	pinned, err := cache.ObtainParserContext(pinAddr, cs)
+	if err != nil {
+		t.Fatalf("ObtainParserContext(pin) error: %v", err)
+	}
+	prev := cache.PinContext(pinned)
+
+	// Obtain more distinct addresses than the reuse pool has slots so the
+	// round-robin index wraps fully at least twice.
+	for i := 0; i < 3*defaultParserContextReuse; i++ {
+		other := address.Address{Space: ram, Offset: 0x100 + uint64(i)}
+		if _, err := cache.ObtainParserContext(other, cs); err != nil {
+			t.Fatalf("ObtainParserContext(other %d) error: %v", i, err)
+		}
+		if pinned.GetAddr() != pinAddr {
+			t.Fatalf("pinned context recycled after %d obtains: addr=%v want %v", i+1, pinned.GetAddr(), pinAddr)
+		}
+	}
+
+	// After unpinning, the slot becomes eligible for reuse again.
+	cache.UnpinContext(prev)
+	for i := 0; i < 3*defaultParserContextReuse; i++ {
+		other := address.Address{Space: ram, Offset: 0x900 + uint64(i)}
+		if _, err := cache.ObtainParserContext(other, cs); err != nil {
+			t.Fatalf("ObtainParserContext(post-unpin %d) error: %v", i, err)
+		}
+	}
+	if pinned.GetAddr() == pinAddr {
+		t.Fatal("expected unpinned context slot to be recycled, but it still holds the pinned address")
+	}
+}
