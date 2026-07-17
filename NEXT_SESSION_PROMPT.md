@@ -1,4 +1,4 @@
-# 다음 세션 프롬프트 (2026-07-17 세션5 오후 작성, master `d416002`)
+# 다음 세션 프롬프트 (2026-07-17 세션5 오후 작성, master `be19010`)
 
 ## THE mission (절대 잊지 말 것)
 Ghidra C++ 디컴파일러 엔진을 Go로 **byte-identical** 포팅. 실제 .sla(x86/x64/ARM) 로드해 임의 실제 함수를
@@ -10,14 +10,14 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (master `d416002`, origin 푸시됨, 전 게이트 green)
+## 현재 상태 (master `be19010`, origin 푸시됨, 전 게이트 green)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **5/13**
-  (bump_scores/divmix/parse_steps/dowhile_scan/find_pair), x64_auto **19/32**, production PASS,
+  (bump_scores/divmix/parse_steps/dowhile_scan/find_pair), x64_auto **20/32**, production PASS,
   `go test ./...` green.
 - 세션5 착지 = 골든 손상 수정(GenGoldens bodyHex 연속 span) + 전 코퍼스 무결성 감사(손상은 x64_auto 2건뿐,
-  corpus1/2 무결) + 엔진 5건: cover 인덱스=블록위치(97084fa), LoopBody 포인터 안정성(e19d788), InfLoop
-  do/while(true)(0af54ad), RuleCollectTerms 포팅(e908beb), RuleShift2Mult 컨텍스트 게이트(75c6db5).
-  상세 = CHANGELOG 2026-07-17 세션5.
+  corpus1/2 무결) + 엔진 6건: cover 인덱스=블록위치(97084fa), LoopBody 포인터 안정성(e19d788), InfLoop
+  do/while(true)(0af54ad), RuleCollectTerms 포팅(e908beb), RuleShift2Mult 컨텍스트 게이트(75c6db5),
+  RuleDoubleShift 완전 포팅(3fbf15c -- bit_mask_shift_combo MATCH). 상세 = CHANGELOG 2026-07-17 세션5.
 - 세션4 핸드오프의 (A) dowhile_count/find_pair, (D) 1바이트 반환 캐리어는 전부 완료.
 
 ## 툴 (있는 줄 모르면 못 쓴다 -- 착수 전 확인)
@@ -58,15 +58,7 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 - 성공 기준: clamp3 goto 소멸 + `int local_18` 선언 복원(corpus2 6/13), reverse_bytes_inplace spurious
   입력 소멸(ssadump 실측), 전 게이트 무회귀.
 
-### (B) [소형, 자기완결] RuleDoubleShift opposite-direction 브랜치 포팅
-- 현상: bit_mask_shift_combo 잔여 -- `(param_1 >> 0x10) << 0x10`이 골든 `param_1 & 0xffff0000`으로 접히지
-  않음(shift 보존까지는 세션5 게이트 착지로 해결됨).
-- C++ 참조: ruleaction.cc:1890-1928 RuleDoubleShift의 opc1==INT_LEFT 반대방향 브랜치(`diffsa==0` 케이스,
-  `loneDescend()!=0` 요구) + getOpList의 INT_MULT 항목(1837-1839).
-- 수정 대상: pkg/pcode/rules_misc.go:777 combineNestedShift (현재 same-direction만 구현).
-- 성공 기준: bit_mask_shift_combo 마스크 fold (x64_auto 20/32 후보), 전 게이트 무회귀.
-
-### (C) [대형, 시스템, 단독 세션 권장] pre-structure SSA 정합 -- deadcode/MarkImplied 타이밍
+### (B) [대형, 시스템, 단독 세션 권장] pre-structure SSA 정합 -- deadcode/MarkImplied 타이밍
 - 세션4 지도 유지: Ghidra는 구조화 전에 ActionDeadCode/ActionMarkImplied 완료, Gosleigh는 print 시점으로
   미룸 -> (1) BlockBasic::isComplex leaf faithful 포팅 6게이트 회귀(40d00a3 known gap 스텁), (2) TEMP
   클러스터(umulhi/sum_via_pp/swap_via_temp/popcount_loop 등 임시 인라인 실패), (3) SSA parity 부채(phi
@@ -78,12 +70,12 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
   insert/setOrder.
 - 착수 전 ssadiff로 현 SSA 갭 지도를 함수별로 뽑아 범위 확정.
 
-### (D) [소~중] x64_auto/corpus2 잔여 (19/32 이후)
+### (C) [소~중] x64_auto/corpus2 잔여 (20/32 이후)
 - switch_dense: 세션5 바이트 정정으로 실바이트 디코드 정상화 -- 잔여는 TYPECAST(cast int/uint/ulonglong
   want/got 불일치) + TEMP uVar2. 기존 "range-check idiom" 설명은 손상 바이트 시절 것이라 stale -- 재실측부터.
-- strlen_style STRUCT(for/while, loop-variable phi depth-3, (C)와 얽힘). multi_return_early TYPECAST.
+- strlen_style STRUCT(for/while, loop-variable phi depth-3, (B)와 얽힘). multi_return_early TYPECAST.
 - sum_pp_walk/array_init_then_sum PTR(포인터 스케일 `* 8` raw 출력). longlong_combo/sign_extend_boundary
-  TYPECAST. bit_rotate_left 리터럴 U 접미사. while_countdown/popcount_loop/swap_via_temp TEMP((C) 계열).
+  TYPECAST. bit_rotate_left 리터럴 U 접미사. while_countdown/popcount_loop/swap_via_temp TEMP((B) 계열).
 - corpus2 잔여 8건: gate(&&/|| 그룹핑 + param-as-return, De Morgan P4), clamp3((A)로 이관), add_pt/
   sum_via_pp/helper_sum/caller(반환 캐리어/call-site), faverage(FP), umulhi(spurious CAST). P5-P8은
   corpus2 README 지도 유지.
@@ -94,7 +86,7 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 - `X64_SWITCH=1 go test -count=1 ./pkg/loader/ -run TestX64Switch -v` (op_switch byte-MATCH 사수)
 - `X64_BREADTH=1 go test -count=1 ./pkg/loader/ -run TestX64BreadthGoldenMap -v` (3/3 사수)
 - `X64_CORPUS2=1 go test -count=1 ./pkg/loader/ -run TestX64Corpus2 -v` (**5/13 사수**)
-- `py -3 tools/goldengap/goldengap.py run && py -3 tools/goldengap/goldengap.py report` (**MATCH 19 사수**;
+- `py -3 tools/goldengap/goldengap.py run && py -3 tools/goldengap/goldengap.py report` (**MATCH 20 사수**;
   bare `go run ./cmd/goldengap`은 파일 미갱신 주의)
 - `go test ./pkg/loader/ -run 'TestMSVC|TestAARCH64|TestX8664|TestX64RegParam|TestPELoader|TestX86PEDecompile'`
 - `go test ./...`
