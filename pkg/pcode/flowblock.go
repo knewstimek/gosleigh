@@ -81,7 +81,21 @@ type FlowBlock struct {
 	// recover the concrete block type without unsafe pointer math.
 	// Not part of C++ parity -- Go embedding workaround.
 	concrete interface{}
+	// copymap is the back-reference from a basic-block-graph node to its
+	// structure-graph clone leaf, set by cloneBlockGraph (the analog of C++
+	// BlockGraph::buildCopy storing basic->BlockCopy). ActionReturnSplit's
+	// gatherReturnGotos walks this to reach the structured wrapper of a
+	// predecessor and test whether it gotos the RETURN block.
+	// C++ parity: block.hh FlowBlock::copymap / getCopyMap.
+	copymap *FlowBlock
 }
+
+// GetCopyMap returns the structure-graph clone leaf mapped to this block, or nil.
+// C++ parity: block.hh FlowBlock::getCopyMap.
+func (b *FlowBlock) GetCopyMap() *FlowBlock { return b.copymap }
+
+// setCopyMap records the structure-graph clone leaf for this block.
+func (b *FlowBlock) setCopyMap(c *FlowBlock) { b.copymap = c }
 
 // Concrete returns the concrete block that owns this FlowBlock, or nil.
 func (b *FlowBlock) Concrete() interface{} { return b.concrete }

@@ -1386,7 +1386,10 @@ func (fd *Funcdata) NodeJoinCreateBlock(
 	return newblock
 }
 
-// NodeSplit duplicates a basic block and retargets one incoming edge.
+// NodeSplit splits control-flow into a basic block, duplicating its p-code into
+// a new block. Control-flow is modified so the new block takes over flow from
+// one input edge to the original block. Only blocks with no out-flow are
+// supported (the RETURN-block case ActionReturnSplit needs).
 // C++ parity: Funcdata::nodeSplit (funcdata_block.cc:845)
 func (fd *Funcdata) NodeSplit(b *BlockBasic, inedge int) {
 	if fd == nil || b == nil {
@@ -1399,59 +1402,71 @@ func (fd *Funcdata) NodeSplit(b *BlockBasic, inedge int) {
 	if inedge < 0 || inedge >= b.SizeIn() {
 		return
 	}
+	// C++ throws on these; here they gate the same preconditions.
 	if b.SizeOut() != 0 || b.SizeIn() <= 1 {
 		return
 	}
-
+	// Reject redundant in-edges (two edges from the same source), which would
+	// desync the MULTIEQUAL slot removal in patchInputs.
+	// C++ parity: nodeSplit's isMark() redundancy check (funcdata_block.cc:852).
 	for i := 0; i < b.SizeIn(); i++ {
 		inbl := b.InEdge(i).Point
 		if inbl == nil {
 			continue
 		}
 		if inbl.HasFlag(BlockFlagMark) {
+			for j := 0; j < b.SizeIn(); j++ {
+				if p := b.InEdge(j).Point; p != nil {
+					p.ClearFlag(BlockFlagMark)
+				}
+			}
 			return
 		}
 		inbl.SetFlag(BlockFlagMark)
 	}
 	for i := 0; i < b.SizeIn(); i++ {
-		inbl := b.InEdge(i).Point
-		if inbl != nil {
+		if inbl := b.InEdge(i).Point; inbl != nil {
 			inbl.ClearFlag(BlockFlagMark)
 		}
 	}
 
-	src := b.InEdge(inedge).Point
-	if src == nil {
-		return
-	}
-	label := b.InEdge(inedge).Label
+	// Create the duplicate block and move the one in-edge to it.
+	bprime := fd.nodeSplitBlockEdge(b, inedge)
+	// Copy b's ops into bprime with faithful SSA surgery.
+	cloner := newCloneBlockOps(fd)
+	cloner.cloneBlock(b, bprime, inedge)
+
+	fd.StructureReset()
+}
+
+// nodeSplitBlockEdge splits b along the given in-edge: a duplicate block bprime
+// is created that inherits the same out-edges but only the one indicated in-edge
+// (removed from b). Data-flow is not touched here (cloneBlockOps does that).
+// C++ parity: Funcdata::nodeSplitBlockEdge (funcdata_block.cc:824).
+func (fd *Funcdata) nodeSplitBlockEdge(b *BlockBasic, inedge int) *BlockBasic {
+	bg := fd.GetBasicBlocks()
+	a := b.InEdge(inedge).Point
 
 	bprime := bg.NewBlockBasicInGraph()
 	bprime.SetFlag(BlockFlagDuplicateBlock)
-	bprime.SetType(b.Type())
-	bprime.SetIndex(b.Index())
-	bprime.SetNumDesc(b.NumDesc())
-	bprime.ops = make([]*PcodeOp, 0, len(b.ops))
-	for _, op := range b.ops {
-		if op == nil {
-			continue
-		}
-		dup := *op
-		if len(op.inputs) > 0 {
-			dup.inputs = append([]*Varnode(nil), op.inputs...)
-		}
-		dup.parent = bprime
-		bprime.ops = append(bprime.ops, &dup)
-	}
+	// copyRange(b): Gosleigh's BlockBasic tracks no address cover, so nothing to
+	// copy. Index/numDesc are recomputed by the following structureReset.
 
-	bg.RemoveEdge(src, &b.FlowBlock)
-	bg.AddEdge(src, &bprime.FlowBlock, label)
+	// switchEdge(a, b, bprime): retarget a's out-edge(s) to b onto bprime,
+	// preserving the out-edge slot on a (so a's true/false ordering is kept) and
+	// sliding b's remaining in-edges down in order.
+	// C++ parity: BlockGraph::switchEdge (block.cc:1489).
+	for i := 0; i < a.SizeOut(); i++ {
+		if a.OutEdge(i).Point == &b.FlowBlock {
+			a.ReplaceOutEdge(i, &bprime.FlowBlock)
+		}
+	}
+	// bprime inherits b's out-edges (none in the supported case).
 	for i := 0; i < b.SizeOut(); i++ {
 		outEdge := b.OutEdge(i)
 		bg.AddEdge(&bprime.FlowBlock, outEdge.Point, outEdge.Label)
 	}
-
-	fd.StructureReset()
+	return bprime
 }
 
 // CseFindInBlock finds a duplicate of op in basic block bl that reads vn,
