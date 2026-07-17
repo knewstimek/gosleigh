@@ -69,14 +69,11 @@
       "name": "loop_forever_break",
       "entry": 9872,
       "tags": [
-        "STRUCT"
+        "MATCH"
       ],
       "evidence": {
-        "STRUCT": [
-          "dangling goto target(s) in output: label_0",
-          "keyword 'while': want=1 got=0",
-          "keyword 'for': want=0 got=1",
-          "keyword 'break': want=1 got=0"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -399,18 +396,12 @@
       "name": "multi_return_early",
       "entry": 12112,
       "tags": [
-        "STRUCT",
-        "TEMP"
+        "TYPECAST"
       ],
       "evidence": {
-        "STRUCT": [
-          "dangling goto target(s) in output: label_0, label_1, label_2, label_3",
-          "keyword 'while': want=1 got=0",
-          "keyword 'for': want=0 got=1",
-          "keyword 'break': want=1 got=0"
-        ],
-        "TEMP": [
-          "extra temp/local identifiers in output (2 vs 1): uVar1"
+        "TYPECAST": [
+          "cast (int): want=3 got=1",
+          "cast (longlong): want=3 got=1"
         ]
       }
     },
@@ -457,13 +448,13 @@
   ],
   "summary": {
     "total": 32,
-    "match": 13,
+    "match": 14,
     "tag_counts": {
-      "MATCH": 13,
-      "STRUCT": 8,
-      "TYPECAST": 7,
+      "MATCH": 14,
+      "STRUCT": 6,
+      "TYPECAST": 8,
       "PTR": 4,
-      "TEMP": 10,
+      "TEMP": 9,
       "UNKNOWN": 4
     }
   }

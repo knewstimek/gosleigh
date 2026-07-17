@@ -18,7 +18,7 @@
     },
     {
       "name": "loop_forever_break",
-      "output": "\nint loop_forever_break(longlong param_1,int param_2,int param_3)\n\n{\nundefined4 local_18;\n\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nif (*(int *)(param_1 + (longlong)local_18 * 4) == param_3) goto label_0;\n}\nlocal_18 = -1;\nreturn local_18;\n}\n"
+      "output": "\nint loop_forever_break(longlong param_1,int param_2,int param_3)\n\n{\nint local_18;\n\nlocal_18 = 0;\nwhile( true ) {\nif (param_2 \u003c= local_18) {\nreturn -1;\n}\nif (*(int *)(param_1 + (longlong)local_18 * 4) == param_3) break;\nlocal_18 = local_18 + 1;\n}\nreturn local_18;\n}\n"
     },
     {
       "name": "nested_while_matrix",
@@ -114,7 +114,7 @@
     },
     {
       "name": "multi_return_early",
-      "output": "\nundefined8 multi_return_early(longlong param_1,int param_2)\n\n{\nundefined8 uVar1;\nundefined4 local_18;\n\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nif (*(int *)(param_1 + (longlong)local_18 * 4) \u003c 0) goto label_0;\nif (*(int *)(param_1 + (longlong)local_18 * 4) == 0) goto label_1;\nif (0x3e9 \u003c= *(int *)(param_1 + (longlong)local_18 * 4)) goto label_2;\n}\nuVar1 = 2;\nreturn uVar1;\nuVar1 = 0xffffffff;\ngoto label_3;\nuVar1 = 0;\ngoto label_3;\nuVar1 = 1;\ngoto label_3;\n}\n"
+      "output": "\nundefined8 multi_return_early(longlong param_1,int param_2)\n\n{\nint local_18;\n\nlocal_18 = 0;\nwhile( true ) {\nif (param_2 \u003c= local_18) {\nreturn 0;\n}\nif (0x3e9 \u003c= *(int *)(param_1 + (longlong)local_18 * 4)) break;\nlocal_18 = local_18 + 1;\n}\nreturn 1;\n}\n"
     },
     {
       "name": "nested_if_ladder_grade",
