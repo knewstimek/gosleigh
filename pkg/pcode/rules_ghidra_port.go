@@ -1,6 +1,9 @@
 package pcode
 
-import "math/bits"
+import (
+	"math/bits"
+	"sort"
+)
 
 func newKnownMismatchBatchRule(group string, name string, opcodes []OpCode, cloneFn func(string) Rule) batchRule {
 	return newBatchRule(group, name, opcodes, nil, cloneFn)
@@ -10,10 +13,274 @@ type RuleCollectTerms struct{ batchRule }
 
 func NewRuleCollectTerms(group string) *RuleCollectTerms {
 	r := &RuleCollectTerms{}
-	// RuleCollectTerms::applyOp -- ruleaction.cc.
-	// known mismatch: TermOrder/AdditiveEdge/distributeIntMultAdd are not ported.
-	r.batchRule = newKnownMismatchBatchRule(group, "collect_terms", []OpCode{CPUI_INT_ADD}, func(g string) Rule { return NewRuleCollectTerms(g) })
+	// RuleCollectTerms::applyOp -- ruleaction.cc:107. Collect additive terms in a
+	// sum, combining coefficients of the same underlying Varnode:
+	//   V*c + V*d  =>  V*(c+d), and lump constant terms together.
+	r.batchRule = newBatchRule(group, "collect_terms", []OpCode{CPUI_INT_ADD}, r.apply, func(g string) Rule { return NewRuleCollectTerms(g) })
 	return r
+}
+
+// additiveEdge represents a single term in an additive expression tree.
+// C++ parity: expression.hh AdditiveEdge.
+type additiveEdge struct {
+	op   *PcodeOp // Lone descendant reading the term
+	slot int      // The input slot of the term
+	vn   *Varnode // The term Varnode
+	mult *PcodeOp // The optional multiplier PcodeOp being applied to the term
+}
+
+// termOrderState collects and sorts the terms of an additive expression rooted
+// at a given INT_ADD PcodeOp. C++ parity: expression.hh/cc TermOrder.
+type termOrderState struct {
+	root   *PcodeOp
+	terms  []additiveEdge
+	sorter []*additiveEdge
+}
+
+// collect performs the depth-first traversal of the ADD tree, gathering every
+// additive term. C++ parity: expression.cc TermOrder::collect.
+func (t *termOrderState) collect() {
+	opstack := []*PcodeOp{t.root}
+	multstack := []*PcodeOp{nil}
+	for len(opstack) > 0 {
+		curop := opstack[len(opstack)-1]
+		multop := multstack[len(multstack)-1]
+		opstack = opstack[:len(opstack)-1]
+		multstack = multstack[:len(multstack)-1]
+		for i := 0; i < curop.NumInput(); i++ {
+			curvn := curop.Input(i)
+			if curvn == nil || !curvn.IsWritten() {
+				t.terms = append(t.terms, additiveEdge{curop, i, curvn, multop})
+				continue
+			}
+			if curvn.LoneDescend() == nil { // more than one use, treat as a leaf term
+				t.terms = append(t.terms, additiveEdge{curop, i, curvn, multop})
+				continue
+			}
+			subop := curvn.Def()
+			if subop.Code() != CPUI_INT_ADD {
+				// A term of the form (V + W) * c: descend into the ADD carrying
+				// the multiplier so its coefficient can be distributed later.
+				if subop.Code() == CPUI_INT_MULT && subop.Input(1) != nil && subop.Input(1).IsConstant() {
+					in0 := subop.Input(0)
+					if in0 != nil && in0.IsWritten() {
+						addop := in0.Def()
+						if addop != nil && addop.Code() == CPUI_INT_ADD && addop.Output() != nil && addop.Output().LoneDescend() != nil {
+							opstack = append(opstack, addop)
+							multstack = append(multstack, subop)
+							continue
+						}
+					}
+				}
+				t.terms = append(t.terms, additiveEdge{curop, i, curvn, multop})
+				continue
+			}
+			opstack = append(opstack, subop)
+			multstack = append(multstack, multop)
+		}
+	}
+}
+
+// sortTerms orders the collected terms using additiveCompare, which groups
+// constants last and ignores multiplicative coefficients when comparing.
+// C++ parity: expression.cc TermOrder::sortTerms.
+func (t *termOrderState) sortTerms() {
+	t.sorter = make([]*additiveEdge, len(t.terms))
+	for i := range t.terms {
+		t.sorter[i] = &t.terms[i]
+	}
+	sort.SliceStable(t.sorter, func(a, b int) bool {
+		return vnTermOrder(t.sorter[a].vn, t.sorter[b].vn) == -1
+	})
+}
+
+// vnTermOrder compares two Varnode terms for additive ordering, stripping a
+// constant multiplicative coefficient so terms over the same underlying value
+// group together. C++ parity: varnode.cc Varnode::termOrder.
+func vnTermOrder(vn, op *Varnode) int {
+	if vn.IsConstant() {
+		if !op.IsConstant() {
+			return 1
+		}
+		return 0
+	}
+	if op.IsConstant() {
+		return -1
+	}
+	if vn.IsWritten() && vn.Def().Code() == CPUI_INT_MULT && vn.Def().Input(1) != nil && vn.Def().Input(1).IsConstant() {
+		vn = vn.Def().Input(0)
+	}
+	if op.IsWritten() && op.Def().Code() == CPUI_INT_MULT && op.Def().Input(1) != nil && op.Def().Input(1).IsConstant() {
+		op = op.Def().Input(0)
+	}
+	if vn.Addr().Less(op.Addr()) {
+		return -1
+	}
+	if op.Addr().Less(vn.Addr()) {
+		return 1
+	}
+	return 0
+}
+
+// getMultCoeff extracts a constant multiplicative coefficient from a term. If
+// the term is V*c (with c constant) it returns V and c; otherwise it returns
+// the term unchanged with coefficient 1.
+// C++ parity: ruleaction.cc RuleCollectTerms::getMultCoeff.
+func getMultCoeff(vn *Varnode, coef *uint64) *Varnode {
+	if !vn.IsWritten() {
+		*coef = 1
+		return vn
+	}
+	testop := vn.Def()
+	if testop.Code() != CPUI_INT_MULT || testop.Input(1) == nil || !testop.Input(1).IsConstant() {
+		*coef = 1
+		return vn
+	}
+	*coef = testop.Input(1).Offset()
+	return testop.Input(0)
+}
+
+// apply -- C++ parity: ruleaction.cc RuleCollectTerms::applyOp (L107).
+func (r *RuleCollectTerms) apply(op *PcodeOp, data *Funcdata) int {
+	out := op.Output()
+	if out == nil {
+		return 0
+	}
+	// Only act on the root of an ADD tree (its output does not feed another ADD).
+	if nextop := out.LoneDescend(); nextop != nil && nextop.Code() == CPUI_INT_ADD {
+		return 0
+	}
+
+	to := &termOrderState{root: op}
+	to.collect()
+	to.sortTerms()
+	order := to.sorter
+	if len(order) == 0 {
+		return 0
+	}
+
+	i := 0
+	if !order[0].vn.IsConstant() {
+		for i = 1; i < len(order); i++ {
+			vn1 := order[i-1].vn
+			vn2 := order[i].vn
+			if vn2.IsConstant() {
+				break
+			}
+			var coef1, coef2 uint64
+			vn1 = getMultCoeff(vn1, &coef1)
+			vn2 = getMultCoeff(vn2, &coef2)
+			if vn1 != vn2 { // Terms cannot be combined
+				continue
+			}
+			// If either term carries a multiplier over an ADD, distribute it
+			// first and let a later pass re-collect the flattened terms.
+			if order[i-1].mult != nil {
+				if data.distributeIntMultAdd(order[i-1].mult) {
+					return 1
+				}
+				return 0
+			}
+			if order[i].mult != nil {
+				if data.distributeIntMultAdd(order[i].mult) {
+					return 1
+				}
+				return 0
+			}
+			coef1 = (coef1 + coef2) & maskForSize(vn1.Size()) // The new coefficient
+			newcoeff := data.NewConstant(vn1.Size(), coef1)
+			zerocoeff := data.NewConstant(vn1.Size(), 0)
+			data.OpSetInput(order[i-1].op, zerocoeff, order[i-1].slot)
+			if coef1 == 0 {
+				data.OpSetInput(order[i].op, newcoeff, order[i].slot)
+			} else {
+				multop := data.NewOp(2, order[i].op.Addr())
+				newvn := data.NewUniqueOut(vn1.Size(), multop)
+				data.OpSetOpcode(multop, CPUI_INT_MULT)
+				data.OpSetInput(multop, vn1, 0)
+				data.OpSetInput(multop, newcoeff, 1)
+				data.OpInsertBefore(multop, order[i].op)
+				data.OpSetInput(order[i].op, newvn, order[i].slot)
+			}
+			return 1
+		}
+	}
+
+	// Lump all non-zero constant terms into a single Varnode.
+	var coef1 uint64
+	nonzerocount := 0
+	lastconst := 0
+	for j := len(order) - 1; j >= i; j-- {
+		if order[j].mult != nil {
+			continue
+		}
+		val := order[j].vn.Offset()
+		if val != 0 {
+			nonzerocount++
+			coef1 += val
+			lastconst = j
+		}
+	}
+	if nonzerocount <= 1 { // Must sum at least two things
+		return 0
+	}
+	vn1 := order[lastconst].vn
+	coef1 &= maskForSize(vn1.Size())
+	for j := lastconst + 1; j < len(order); j++ {
+		if order[j].mult == nil {
+			data.OpSetInput(order[j].op, data.NewConstant(vn1.Size(), 0), order[j].slot)
+		}
+	}
+	data.OpSetInput(order[lastconst].op, data.NewConstant(vn1.Size(), coef1), order[lastconst].slot)
+	return 1
+}
+
+// distributeIntMultAdd distributes a constant coefficient over an additive
+// input: (V + W) * c  =>  V*c + W*c. The given op is an INT_MULT whose second
+// input is constant and whose first input is an INT_ADD.
+// C++ parity: funcdata_op.cc Funcdata::distributeIntMultAdd (L1073).
+func (fd *Funcdata) distributeIntMultAdd(op *PcodeOp) bool {
+	addop := op.Input(0).Def()
+	if addop == nil {
+		return false
+	}
+	vn0 := addop.Input(0)
+	vn1 := addop.Input(1)
+	if vn0.IsFree() && !vn0.IsConstant() {
+		return false
+	}
+	if vn1.IsFree() && !vn1.IsConstant() {
+		return false
+	}
+	coeff := op.Input(1).Offset()
+	sz := op.Output().Size()
+
+	var newvn0, newvn1 *Varnode
+	if vn0.IsConstant() {
+		newvn0 = fd.NewConstant(sz, truncateToSize(coeff*vn0.Offset(), sz))
+	} else {
+		newop0 := fd.NewOp(2, op.Addr())
+		fd.OpSetOpcode(newop0, CPUI_INT_MULT)
+		newvn0 = fd.NewUniqueOut(sz, newop0)
+		fd.OpSetInput(newop0, vn0, 0)
+		fd.OpSetInput(newop0, fd.NewConstant(sz, coeff), 1)
+		fd.OpInsertBefore(newop0, op)
+	}
+	if vn1.IsConstant() {
+		newvn1 = fd.NewConstant(sz, truncateToSize(coeff*vn1.Offset(), sz))
+	} else {
+		newop1 := fd.NewOp(2, op.Addr())
+		fd.OpSetOpcode(newop1, CPUI_INT_MULT)
+		newvn1 = fd.NewUniqueOut(sz, newop1)
+		fd.OpSetInput(newop1, vn1, 0)
+		fd.OpSetInput(newop1, fd.NewConstant(sz, coeff), 1)
+		fd.OpInsertBefore(newop1, op)
+	}
+
+	fd.OpSetInput(op, newvn0, 0)
+	fd.OpSetInput(op, newvn1, 1)
+	fd.OpSetOpcode(op, CPUI_INT_ADD)
+	return true
 }
 
 type RuleTermOrder struct{ batchRule }
