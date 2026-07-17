@@ -2,7 +2,7 @@
 
 goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldengap/goldengap.py report`로 재생성).
 
-15/32 MATCH (indent-insensitive).
+16/32 MATCH (indent-insensitive).
 
 ## 함수별 분류
 
@@ -37,16 +37,16 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `strlen_style` | STRUCT | STRUCT: keyword 'while': want=0 got=1<br>STRUCT: keyword 'for': want=1 got=0 |
 | `memcpy_style` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `multi_return_early` | TYPECAST | TYPECAST: cast (int): want=3 got=1<br>TYPECAST: cast (longlong): want=3 got=1 |
-| `nested_if_ladder_grade` | TEMP | TEMP: fewer temp/local identifiers than golden (0 vs 1), missing: uVar1 |
+| `nested_if_ladder_grade` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `param_reuse_accum` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
 | `swap_via_temp` | TEMP | TEMP: fewer temp/local identifiers than golden (0 vs 1), missing: uVar1 |
 
 ## 태그 분포
 
-- MATCH: 15
+- MATCH: 16
 - PTR: 3
 - STRUCT: 1
-- TEMP: 9
+- TEMP: 8
 - TYPECAST: 6
 - UNKNOWN: 3
 
