@@ -64,8 +64,9 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 - **대형 재작업이라 단독 세션 권장. 착수 전 ssadiff로 현 SSA 갭 지도를 함수별로 뽑아 범위 확정.**
 
 ### (D) [소~중, 자기완결 후보들] x64_auto/corpus2 잔여
-- switch_dense: range-check idiom(`param_1 - 10U < 8`) 미포팅. nested_if_ladder_grade: `label_missing`
-  dangling(미정의 라벨 방출 = correctness). gate: De Morgan/분기 반전(P4). bit_mask_shift_combo: 상수
+- switch_dense: range-check idiom(`param_1 - 10U < 8`) 미포팅. nested_if_ladder_grade: **1바이트(AL/char)
+  반환 캐리어 recovery 실패**(mov al dead -> 블록 붕괴; 미정의 라벨 방출은 `2c5ccbc`로 근절, 반환
+  recovery upstream이 잔여). gate: De Morgan/분기 반전(P4). bit_mask_shift_combo: 상수
   시프트가 곱(`* 0x100`)으로 출력 + 마스크 단순화. param_reuse_accum: 대수 항 정리(term-collecting).
   bit_rotate_left: 리터럴 U 접미사. char 리터럴('\0') 렌더(상수 출력 전역 경로 -- 신중). strlen_style
   for/while(loop-variable phi depth-3, (C)와 얽힘). P5-P8(corpus2 README: struct CONCAT44/스택 파라미터/
