@@ -1711,6 +1711,13 @@ func (s *printCState) emitWhileBlock(bl *FlowBlock) error {
 	if wdo, ok := bl.Concrete().(*BlockWhileDo); ok && wdo.IterateOp() != nil {
 		return s.emitForBlock(wdo, children)
 	}
+	// Overflow (while(true)) syntax: the condition head is too complex to be a
+	// plain while-condition, so the loop is printed as while(true) with the
+	// condition body and its exit test moved inside as "if (cond) break;".
+	// C++ parity: PrintC::emitBlockWhileDo hasOverflowSyntax() branch (printc.cc:3149).
+	if bl.HasOverflowSyntax() {
+		return s.emitWhileBlockOverflow(children)
+	}
 	// Render the condition block in comma_separate mode if it contains printable
 	// ops before the CBRANCH (e.g. iVar1 = param_4 produced by NodeJoin).
 	// C++ parity: PrintC::emitBlockWhileDo sets setMod(comma_separate) for condBlock
@@ -1723,6 +1730,70 @@ func (s *printCState) emitWhileBlock(bl *FlowBlock) error {
 		s.lang.Token(condStr)
 		s.lang.Token(")")
 	})
+	if err := s.emitBlock(children[1]); err != nil {
+		return err
+	}
+	s.lang.CloseBlock()
+	return nil
+}
+
+// emitWhileBlockOverflow renders a BlockWhileDo whose condition head is too
+// complex to be a plain while-condition (hasOverflowSyntax). It emits:
+//
+//	while( true ) {
+//	  <condition-body statements>   // condBlock emitted with no_branch
+//	  if (<exit condition>) break;  // condBlock's terminal branch as an if-break
+//	  <loop body>                   // getBlock(1)
+//	}
+//
+// C++ parity: PrintC::emitBlockWhileDo hasOverflowSyntax() branch (printc.cc:3149-3176).
+// The condition head (children[0]) is a leaf, a BlockCondition, or a BlockList
+// whose final sub-block carries the loop-exit branch. Its leading statements are
+// emitted via emitConditionLead (the C++ no_branch emission), and the branch
+// condition is rendered via mustRenderCondition (the C++ only_branch emission).
+func (s *printCState) emitWhileBlockOverflow(children []*FlowBlock) error {
+	condBlock := children[0]
+	s.lang.OpenBlockAfter(func() {
+		// C++ emits "while( true )": no space between keyword and paren.
+		s.lang.Token("while")
+		s.lang.Token("(")
+		s.lang.Space()
+		s.lang.Token("true")
+		s.lang.Space()
+		s.lang.Token(")")
+	})
+	// The block that carries the terminal (loop-exit) branch. For a BlockList
+	// head the earlier sub-blocks are structured statements emitted in full; the
+	// final sub-block holds the exit condition.
+	branchBl := condBlock
+	if condBlock.Type() == BlockListType {
+		subs := condBlock.StructuredChildren()
+		for i := 0; i+1 < len(subs); i++ {
+			if err := s.emitBlock(subs[i]); err != nil {
+				return err
+			}
+		}
+		if len(subs) > 0 {
+			branchBl = subs[len(subs)-1]
+		}
+	}
+	// Emit the exit-condition block's leading (non-branch) statements, then the
+	// "if (cond) break;". C++: condBlock->emit(no_branch) then emitGotoStatement
+	// with f_break_goto.
+	if err := s.emitConditionLead(branchBl); err != nil {
+		return err
+	}
+	cond := s.mustRenderCondition(branchBl)
+	s.lang.Statement(func() {
+		s.lang.Token("if")
+		s.lang.Space()
+		s.lang.Token("(")
+		s.lang.Token(cond)
+		s.lang.Token(")")
+		s.lang.Space()
+		s.lang.Token("break")
+	})
+	// Loop body (getBlock(1)); its own back-edge branch is already suppressed.
 	if err := s.emitBlock(children[1]); err != nil {
 		return err
 	}
