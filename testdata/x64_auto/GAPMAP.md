@@ -88,3 +88,7 @@ report 재실행 시 이 섹션은 덮어써지므로 재생성 후 다시 보�
   strlen_style/char_arith_promote의 signed char 표기 갭 제거 (TYPECAST 8->7). 신규 known gap:
   char-typed 상수의 문자 리터럴 출력('\0') 미구현 -- 상수 출력 전역 경로라 별도 슬라이스 권장.
   strlen_style의 CAST+SEXT 잉여 op 전제는 재실측 결과 이미 해소 상태(잔여는 for/while 구조화).
+- 8b23afa 파서-컨텍스트 in-flight pin (sleigh.cc oneInstruction pos 생존 계약 명시화):
+  8슬롯 재사용 풀이 빌드 중 슬롯을 recycle해 naddr/ops 오염 -> 명령어 삼킴(디코드 순서
+  의존 비결정 오염). dowhile_scan 골든 byte-identical -> corpus2 4/13. 회귀 테스트
+  TestPinContextSurvivesReuseWrap 추가. dowhile_count 증상은 별개(스택 reload/merge 계열).
