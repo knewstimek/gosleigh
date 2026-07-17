@@ -2,7 +2,7 @@
 
 goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldengap/goldengap.py report`로 재생성).
 
-19/32 MATCH (indent-insensitive).
+20/32 MATCH (indent-insensitive).
 
 ## 함수별 분류
 
@@ -23,7 +23,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `array_init_then_sum` | TYPECAST, PTR, TEMP | TYPECAST: cast (int): want=0 got=2<br>TYPECAST: cast (longlong): want=0 got=2<br>PTR: raw pointer scale '* 4': want=0 got=2<br>TEMP: extra temp/local identifiers in output (4 vs 2): local_428, local_8 |
 | `array_reverse_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `reverse_bytes_inplace` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
-| `bit_mask_shift_combo` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
+| `bit_mask_shift_combo` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `popcount_loop` | TEMP | TEMP: extra temp/local identifiers in output (2 vs 1): local_8 |
 | `xor_swap_pair` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `bit_rotate_left` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
@@ -43,10 +43,10 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 
 ## 태그 분포
 
-- MATCH: 19
+- MATCH: 20
 - PTR: 2
 - STRUCT: 1
 - TEMP: 7
 - TYPECAST: 4
-- UNKNOWN: 3
+- UNKNOWN: 2
 
