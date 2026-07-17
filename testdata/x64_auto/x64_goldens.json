@@ -45,7 +45,7 @@
     {
       "name": "switch_dense",
       "entry": 10176,
-      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0df71900008b8481382800004803c1ffe0b8ffffffff4883c418c3",
+      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0df71900008b8481382800004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
       "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000027e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x6a18)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
     },
     {

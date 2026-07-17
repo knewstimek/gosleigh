@@ -30,7 +30,7 @@
     },
     {
       "name": "switch_dense",
-      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nint uVar1;\nundefined8 uVar2;\n\nuVar1 = param_1 - 10U;\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar2 = (*(code *)((ulonglong)*(uint *)((longlong)uVar1 * 4 + 0x4258) + 0x1a20))();\nreturn uVar2;\n}\n"
+      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nint uVar1;\nundefined8 uVar2;\n\nuVar1 = param_1 - 10U;\nif ((uint)uVar1 \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar2 = (*(code *)((ulonglong)*(uint *)((longlong)uVar1 * 4 + 0x4258) + 0x1a20))();\nreturn uVar2;\n}\nreturn 0xffffffff;\n}\n"
     },
     {
       "name": "switch_sparse",

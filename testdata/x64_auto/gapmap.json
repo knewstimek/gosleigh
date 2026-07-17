@@ -98,6 +98,7 @@
       "evidence": {
         "TYPECAST": [
           "cast (int): want=1 got=0",
+          "cast (uint): want=1 got=2",
           "cast (ulonglong): want=0 got=1"
         ],
         "TEMP": [
