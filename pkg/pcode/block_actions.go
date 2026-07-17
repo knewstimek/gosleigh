@@ -126,6 +126,10 @@ func cloneBlockGraph(src *BlockGraph) *BlockGraph {
 		orig := src.GetBlock(i)
 		dup := cloneFlowBlock(orig)
 		mapping[orig] = dup
+		// Record basic-block -> structure-clone map so ActionReturnSplit's
+		// gatherReturnGotos can reach a predecessor's structured wrapper.
+		// C++ parity: BlockGraph::buildCopy sets (*iter)->copymap = copyblock.
+		orig.setCopyMap(dup)
 		clone.AddBlock(dup)
 	}
 	for i := 0; i < src.GetSize(); i++ {

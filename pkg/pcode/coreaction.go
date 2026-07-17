@@ -1376,22 +1376,67 @@ func isReturnSplitSplittable(b *BlockBasic) bool {
 	return true
 }
 
-// Apply splits return blocks that have multiple incoming edges.
-// C++ parity: blockaction.cc ActionReturnSplit::apply
+// returnSplitTask records one queued node split: the RETURN block to split and
+// the in-edge index that moves to the duplicate. Splits are queued for every
+// RETURN before any is applied, because gatherReturnGotos reads the structure
+// graph (via getCopyMap) which nodeSplit's structureReset invalidates.
+// C++ parity: the parallel splitedge / retnode vectors in ActionReturnSplit::apply.
+type returnSplitTask struct {
+	parent *BlockBasic
+	edge   int
+}
+
+// gatherReturnGotos collects the structured BlockGoto/BlockIf wrappers that have
+// a goto edge to the RETURN block parent, marking each. It walks up the
+// structure tree from every predecessor's clone leaf (getCopyMap), matching a
+// wrapper whose goto target resolves to parent.
+// C++ parity: blockaction.cc ActionReturnSplit::gatherReturnGotos (2205).
+func (a *ActionReturnSplit) gatherReturnGotos(parent *BlockBasic, vec *[]*FlowBlock) {
+	for i := 0; i < parent.SizeIn(); i++ {
+		bl := parent.getIn(i).GetCopyMap()
+		for bl != nil {
+			if !bl.isMark() {
+				var ret *FlowBlock
+				switch bl.Type() {
+				case BlockGotoType:
+					if bl.gotoPrints() {
+						ret = bl.GotoTargetBlock()
+					}
+				case BlockIfType:
+					// An if-goto block yields its target; a structural if (no
+					// goto target) yields nil.
+					ret = bl.GotoTargetBlock()
+				}
+				if ret != nil {
+					ret = structuredGotoTargetBasic(ret)
+					if ret == &parent.FlowBlock {
+						bl.setMark()
+						*vec = append(*vec, bl)
+					}
+				}
+			}
+			bl = bl.Parent()
+		}
+	}
+}
+
+// Apply splits shared RETURN blocks so each unstructured (goto) path gets its
+// own return statement, restoring the distinct returned values a MULTIEQUAL had
+// merged. C++ parity: blockaction.cc ActionReturnSplit::apply (2264).
 func (a *ActionReturnSplit) Apply(data *Funcdata) int {
 	if data == nil {
 		return 0
 	}
 	if data.GetStructure().GetSize() == 0 {
-		return 0
+		return 0 // Some other restructuring happened first
 	}
 	if data.GetBasicBlocks() == nil {
 		return 0
 	}
 
-	changed := 0
+	var tasks []returnSplitTask
 	for _, op := range data.GetPcodeOpBank().AllOps() {
-		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN || op.HaltType() != 0 {
+		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN {
 			continue
 		}
 		parent := op.Parent()
@@ -1401,34 +1446,43 @@ func (a *ActionReturnSplit) Apply(data *Funcdata) int {
 		if !isReturnSplitSplittable(parent) {
 			continue
 		}
-		// Only split in-edges that reach this RETURN via a goto (an unstructured
-		// jump). C++ gatherReturnGotos marks exactly these by walking the structured
-		// tree for BlockGoto/BlockIf nodes whose goto-target is this return; a return
-		// reached only by structured edges (e.g. gcd's if-guard plus loop fall-through)
-		// has no goto in-edges and must NOT be split, otherwise the single shared
-		// return is duplicated and the loop can no longer be structured as one while.
-		// Gosleigh has no getCopyMap (basic-block -> structured-copy) link, so this is
-		// approximated by the block's own goto in-edge flags set during structuring.
-		// C++ parity: blockaction.cc ActionReturnSplit::apply + gatherReturnGotos.
-		var gotoEdges []int
+		var gotoblocks []*FlowBlock
+		a.gatherReturnGotos(parent, &gotoblocks)
+		if len(gotoblocks) == 0 {
+			continue
+		}
+
+		// splitedge will contain edges to be split, in the order they will be
+		// split -- biggest index first, so removing an edge doesn't shift the
+		// index of a remaining edge in the same block.
+		splitcount := 0
+		start := len(tasks)
 		for i := parent.SizeIn() - 1; i >= 0; i-- {
-			if parent.IsGotoIn(i) {
-				gotoEdges = append(gotoEdges, i)
+			bl := parent.getIn(i).GetCopyMap()
+			for bl != nil {
+				if bl.isMark() {
+					tasks = append(tasks, returnSplitTask{parent: parent, edge: i})
+					bl = nil
+					splitcount++
+				} else {
+					bl = bl.Parent()
+				}
 			}
 		}
-		// Can't split ALL in-edges (one must remain as the original block).
-		// C++ pops the last queued split when splitcount == sizeIn.
-		if len(gotoEdges) > 0 && len(gotoEdges) == parent.SizeIn() {
-			gotoEdges = gotoEdges[:len(gotoEdges)-1]
+
+		for _, bl := range gotoblocks { // Clear our marks
+			bl.clearMark()
 		}
-		for _, i := range gotoEdges {
-			data.NodeSplit(parent, i)
-			changed++
+
+		// Can't split ALL in-edges (one must remain as the original block).
+		if parent.SizeIn() == splitcount && len(tasks) > start {
+			tasks = tasks[:len(tasks)-1]
 		}
 	}
 
-	if changed > 0 {
-		a.count += changed
+	for _, t := range tasks {
+		data.NodeSplit(t.parent, t.edge)
+		a.count++
 	}
 	return 0
 }
