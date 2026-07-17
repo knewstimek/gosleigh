@@ -431,39 +431,11 @@ func (r *RuleLessEqual) apply(op *PcodeOp, data *Funcdata) int {
 	return 1
 }
 
-// RuleSLessEqual2Constant normalizes INT_SLESSEQUAL(x, C) -> INT_SLESS(x, C+1)
-// when C+1 does not overflow the varnode size. This avoids the <= operator in
-// C output and matches Ghidra's preference for strict-less comparisons.
-// C++ parity: Ghidra normalizes SLESSEQUAL-with-constant during type/rule passes
-// so that PrintC always emits < rather than <= for constant RHS comparisons.
-type RuleSLessEqual2Constant struct{ batchRule }
-
-func NewRuleSLessEqual2Constant(group string) *RuleSLessEqual2Constant {
-	r := &RuleSLessEqual2Constant{}
-	r.batchRule = newBatchRule(group, "slessequal2const", []OpCode{CPUI_INT_SLESSEQUAL}, r.apply, func(g string) Rule { return NewRuleSLessEqual2Constant(g) })
-	return r
-}
-
-func (r *RuleSLessEqual2Constant) apply(op *PcodeOp, data *Funcdata) int {
-	rhs := op.Input(1)
-	if rhs == nil || !rhs.IsConstant() {
-		return 0
-	}
-	c := rhs.Offset()
-	sz := rhs.Size()
-	// Max signed value for this size: (1 << (sz*8-1)) - 1.
-	// If c equals the max signed value, C+1 would overflow (signed).
-	maxSigned := uint64((1 << (uint(sz)*8 - 1)) - 1)
-	if c == maxSigned {
-		return 0
-	}
-	newConst := data.NewConstant(sz, c+1)
-	data.OpUnsetInput(op, 1)
-	data.OpSetInput(op, newConst, 1)
-	data.OpSetOpcode(op, CPUI_INT_SLESS)
-	return 1
-}
-
+// RuleSLessEqual2Constant was an invented (non-C++) rule that rewrote
+// INT_SLESSEQUAL(x, C) -> INT_SLESS(x, C+1) for a constant RHS only. It is now
+// removed: RuleIntLessEqual (ruleaction.cc RuleIntLessEqual, via replaceLessequal)
+// faithfully handles both constant-left and constant-right SLESSEQUAL/LESSEQUAL,
+// making this special case redundant.
 
 type RuleThreeWayCompare struct{ batchRule }
 
