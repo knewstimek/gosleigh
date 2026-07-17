@@ -118,7 +118,7 @@
     },
     {
       "name": "nested_if_ladder_grade",
-      "output": "\nvoid nested_if_ladder_grade(int param_1)\n\n{\n}\n"
+      "output": "\nundefined1 nested_if_ladder_grade(int param_1)\n\n{\nundefined1 uVar1;\n\nif (param_1 \u003c 0x5a) {\nif (param_1 \u003c 0x50) {\nif (param_1 \u003c 0x46) {\nif (param_1 \u003c 0x3c) {\nuVar1 = 0x46;\n}\nelse {\nuVar1 = 0x44;\n}\n}\nelse {\nuVar1 = 0x43;\n}\n}\nelse {\nuVar1 = 0x42;\n}\n}\nelse {\nuVar1 = 0x41;\n}\nreturn uVar1;\n}\n"
     },
     {
       "name": "param_reuse_accum",

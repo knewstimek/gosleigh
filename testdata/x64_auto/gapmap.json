@@ -376,11 +376,11 @@
       "name": "nested_if_ladder_grade",
       "entry": 12240,
       "tags": [
-        "TEMP"
+        "MATCH"
       ],
       "evidence": {
-        "TEMP": [
-          "fewer temp/local identifiers than golden (0 vs 1), missing: uVar1"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -411,10 +411,10 @@
   ],
   "summary": {
     "total": 32,
-    "match": 15,
+    "match": 16,
     "tag_counts": {
-      "MATCH": 15,
-      "TEMP": 9,
+      "MATCH": 16,
+      "TEMP": 8,
       "PTR": 3,
       "TYPECAST": 6,
       "UNKNOWN": 3,
