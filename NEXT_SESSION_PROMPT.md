@@ -41,20 +41,30 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 
 ## 다음 작업 (우선순위)
 
-### (A) [대형, 고위험, 최우선] param-recovery 발산 -- reverse_bytes_inplace/gate 계열
-- (clamp3는 세션5 오후 heritage BuildADT faithful 포팅 `cd42ccb`로 **완결** -- corpus2 6/13. 당시 1차 진단
-  "RSP 3중 복제"는 반증됐고 진짜 근본은 phi 배치였다. **진단 완결분도 수정 착수 시 재실측하라.**)
-- 현상 (x64_auto reverse_bytes_inplace, 세션4 진단): spurious full-width RDX(sz8) + phantom R8 입력으로
-  param_2가 실 캐리어 EDX(sz4)가 아닌 RDX에 바인딩 -> 캐리어 iVar2 유출 + 선언 소실(현 태그 UNKNOWN).
-  C++ 코어 입력은 RCX+EDX 둘뿐(decomp_dbg 실측). corpus2 gate의 iVar1도 같은 계열 추정. corpus2 잔여
-  add_pt/sum_via_pp/helper_sum/caller(반환 캐리어/call-site)도 인접 계열 후보.
-- C++ 참조: coreaction.cc ActionActiveParam/param trial, heritage sub-register 폭 결정, merge.cc
-  mergeMarker. heritage.cc guardStores/guardLoads는 여전히 미포팅 부채(heritage.go ~1077 주석) --
-  clamp3와는 무관했지만 LOAD/STORE 많은 함수에서 발화할 수 있다.
-- 수정 대상: pkg/pcode/scopelocal.go:171(BuildFromVarnodes 슬롯 대표), heritage/param trial 경로.
-- 주의: 전 코퍼스 공유 최고위험 경로. read-only 진단 -> 수정 분리 + ssadiff 함수별 입력 varnode 집합
-  대조 필수.
-- 성공 기준: reverse_bytes_inplace spurious 입력 소멸(ssadump 실측) + 선언 복원, 전 게이트 무회귀.
+### (A) [대형, 고위험, 최우선] param-recovery 발산 -- 세션5 read-only 진단으로 3갈래 분해됨
+공통 상위 원인: `pkg/pcode/paramactive.go` `ApplyActiveParamModel`이 C++ `ActionInputPrototype`
+(coreaction.cc:4718, fixateproto 그룹, deadcode 다수 통과 이후)의 **조기·축약 대체품**이다. 세션4의
+"spurious RDX(sz8)"는 이미 해소됨(param_2는 int 정확). 세 갈래는 별개 근본:
+
+**(A1) overcount -- phantom R8 [세션5 착지 완료 `ee592a9`]**: reverse_bytes_inplace 시그니처 param 3->2
+정확화. 근본 = `ApplyActiveParamModel`이 C++ `ActionInputPrototype::apply`(coreaction.cc:4728-4741)와 달리
+(1) 전체 varnode bank 순회(C++은 `beginDef(input)..endDef(input)` = **input varnode만**) + (2) 활성 조건
+`vn.IsInput() ||` 잉여 절 + (3) deadcode 前 발화. 수정 = 후보를 `isParamLocation && vn.IsInput()`으로 제한
++ 활성 조건 `NumDescend()>0`만(coreaction.cc:4737 `!hasNoDescend()`) + ActionActiveParam을 ActionDeadCode
+**뒤로** 재배치(구조적으로 "deadcode 실행됨" 보장). 무회귀 수렴 확인. **잔여**: body `iVar1 = local_10`
+(골든 `param_2 = local_10`) carrier는 A2 undercount 계열 -- MATCH는 아직 20(body gap).
+
+**(A2) undercount -- 스택/struct param [중위험, 큰 작업]**: helper_sum param_5(스택 param) 누락 +
+미선언 tmp_0, add_pt struct-by-value hi/lo 분할 + CONCAT44 반환 미복구. 근본 = `FuncProto.resolveModel`
++ `deriveInputMap`(fspec.cc) 미포팅 -- 트라이얼을 모델 slot에 채워 레지스터 세트 밖 스택 param 복구 +
+미참조 input 생성(coreaction.cc:4745-4759). caller의 전 param 소실 + `local_92()` call-target 실패는
+helper_sum 프로토가 고쳐지면 연쇄 재확인.
+
+**(A3) 무관 트랙 [별개, param 아님]**: sum_via_pp 잉여 `lVar1 = param_2` copy(copy-coalesce),
+multi_return_early return 분기 2개 드롭(ActionReturnSplit -- control-flow 구조화). param 라인과 분리 처리.
+
+권장 순서: A1(검증완료, 저위험) -> 전 게이트 -> A2(resolveModel/deriveInputMap) -> A3.
+- 성공 기준: reverse_bytes_inplace param 2개로(ssadump 실측), helper_sum param_5 복구, 전 게이트 무회귀.
 
 ### (B) [대형, 시스템, 단독 세션 권장] pre-structure SSA 정합 -- deadcode/MarkImplied 타이밍
 - 세션4 지도 유지: Ghidra는 구조화 전에 ActionDeadCode/ActionMarkImplied 완료, Gosleigh는 print 시점으로

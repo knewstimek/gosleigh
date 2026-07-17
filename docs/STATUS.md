@@ -24,8 +24,10 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 - 세션5 착지(상세 CHANGELOG 세션5): **GenGoldens bodyHex 손상 버그**(dead-code island 누락으로 분기 변위
   파괴 -- 전 코퍼스 감사로 x64_auto 2건만 손상 확정, 붕괴형 mismatch는 입력 무결성부터) + 엔진 8건
   (cover 인덱스=블록위치, LoopBody 포인터 안정성, InfLoop do/while(true), RuleCollectTerms 포팅,
-  RuleShift2Mult 컨텍스트 게이트, RuleDoubleShift 완전 포팅, PTRADD 렌더 스케일 제거, **heritage BuildADT
-  faithful 포팅 -- clamp3 완결**). 다음 최우선 = param-recovery 발산(reverse_bytes_inplace/gate 계열).
+  RuleShift2Mult 컨텍스트 게이트, RuleDoubleShift 완전 포팅, PTRADD 렌더 스케일 제거, heritage BuildADT
+  faithful 포팅(clamp3 완결), **param-recovery overcount 수정(phantom R8 param 제거 -- ActionInputPrototype
+  input-only trial + deadcode 후 발화)**). 다음 최우선 = param-recovery undercount(helper_sum 스택 param/
+  add_pt struct = resolveModel/deriveInputMap 포팅) -- NEXT_SESSION_PROMPT (A2).
 - **툴 2종 착지(핸드오프 우선 제작 툴 완성)**: `tools/goldengap/`(원커맨드 골든 생성+갭 자동분류,
   `testdata/x64_auto/` 32함수 discovery 코퍼스) + `tools/ssadiff/`(C++ 코어 decomp_dbg <-> Gosleigh
   최종 SSA를 op 단위 나란히 비교, savefile 템플릿 생성 포함).

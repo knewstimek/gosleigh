@@ -5,7 +5,7 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
-### 2026-07-17 (세션5, 오후): 골든 무결성 감사 + 엔진 8건 -- x64_auto 20/32, corpus2 6/13 (엔진 tip `652fc3f`, 23 커밋 + docs 후속)
+### 2026-07-17 (세션5, 오후): 골든 무결성 감사 + 엔진 9건 -- x64_auto 20/32, corpus2 6/13 (엔진 tip `06489d0`, 25 커밋 + docs 후속)
 감독관 세션(전 워커 Opus, worktree 격리, 병렬 2슬롯, 매 landing 스팟체크 + 전매트릭스 -count=1 2회 +
 cherry-pick + push). 세션4 핸드오프 (A)와 (D) 지목 항목에서 출발, 골든 파이프라인 자체의 손상 버그를 발견해
 전 코퍼스 무결성 감사까지 확장.
@@ -74,7 +74,18 @@ cherry-pick + push). 세션4 핸드오프 (A)와 (D) 지목 항목에서 출발,
   이미 단일 슬롯 정규화, 진짜 근본은 BuildADT phi 배치 -- 8번 참조). **read-only 진단도 수정 착수 시 재실측
   검증이 유효함을 재확인한 사례.** guardStores/guardLoads 미포팅(heritage.go ~1077)은 이번 케이스와 무관하나
   여전히 미포팅 부채로 남음.
-게이트(최종, master `652fc3f`): tree 10/10, x64 8/8, op_switch byte-MATCH, breadth 3/3, **corpus2 6/13**,
+9. **param-recovery overcount 수정 -- phantom R8 param 제거** (`ee592a9`,`06489d0`): reverse_bytes_inplace가
+   R8(offset 0x80)을 유령 param_3으로 승격하던 것을 제거해 시그니처를 `(longlong,int,longlong)` ->
+   `(longlong,int)`로 정확화. 근본 = `ApplyActiveParamModel`이 C++ `ActionInputPrototype::apply`
+   (coreaction.cc:4728-4741)와 달리 (1) 전체 varnode bank 순회(C++은 `beginDef(input)..endDef(input)` =
+   input varnode만) + (2) 활성 조건에 `vn.IsInput() ||` 잉여 절 + (3) deadcode 前 발화. 수정 = 후보를
+   `isParamLocation && vn.IsInput()`으로 제한 + 활성 조건 `NumDescend()>0`만(coreaction.cc:4737
+   `!hasNoDescend()`) + ActionActiveParam을 ActionDeadCode 뒤로 재배치(구조적으로 "deadcode 실행됨" 보장 --
+   임의 pass-count 아님). read-only 진단 워커가 3갈래(A1 overcount/A2 스택·struct undercount/A3 무관)로
+   분해한 것 중 A1. **잔여**: body carrier(`iVar1`->`param_2`)는 A2 undercount 계열이라 reverse_bytes는
+   아직 UNKNOWN(MATCH 20 유지). 세션4 "spurious RDX(sz8)"는 이번 재실측서 이미 해소 확인.
+
+게이트(최종, 엔진 tip `06489d0`): tree 10/10, x64 8/8, op_switch byte-MATCH, breadth 3/3, **corpus2 6/13**,
 **x64_auto 20/32**(15->20), production 전부 PASS, `go test ./...` green. 부수 정리: 이전 세션 잔존
 stale 워커 worktree/브랜치 40개 전수 검증(git cherry 패치 대조) 후 일괄 삭제.
 
