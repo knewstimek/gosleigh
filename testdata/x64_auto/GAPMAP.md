@@ -10,7 +10,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 |---|---|---|
 | `sum_loop` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `dowhile_count` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `sum_pp_walk` | PTR, TEMP | PTR: raw pointer scale '* 8': want=0 got=2<br>TEMP: extra temp/local identifiers in output (3 vs 2): lVar1 |
+| `sum_pp_walk` | TEMP | TEMP: extra temp/local identifiers in output (3 vs 2): lVar1 |
 | `while_pretest_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `loop_forever_break` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `nested_while_matrix` | MATCH | MATCH: byte-identical (indent-insensitive) |
@@ -44,7 +44,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 ## 태그 분포
 
 - MATCH: 20
-- PTR: 2
+- PTR: 1
 - STRUCT: 1
 - TEMP: 7
 - TYPECAST: 4
