@@ -28,6 +28,22 @@ type DisassemblyCache struct {
 	parserHash []*ParserContext
 	parserNext int
 	parserMask uint64
+
+	// pinnedCtx is the parser context of the instruction currently being
+	// translated (obtained for pcode, its p-code being built). The circular
+	// reuse pool never recycles this slot while it is pinned.
+	//
+	// C++ correspondence: Sleigh::oneInstruction() holds one ParserContext *pos
+	// live across build()/resolveRelatives()/emit(). Any inst_next2 or delay-slot
+	// obtainContext() call made during that build draws from the same
+	// DisassemblyCache::list, but the minimumreuse window contract (sleigh.cc
+	// getParserContext doc: n distinct addresses <= minimumreuse are never
+	// reused) guarantees pos survives its own build. Gosleigh eagerly resolves
+	// inst_next2 while lowering every op (translateRuntimeContext), so a stale
+	// hash-cached in-flight context can land exactly on nextfree and be clobbered
+	// mid-build. Pinning the in-flight slot restores the C++ survival guarantee
+	// without altering the reuse-window size (band-aid pool growth is avoided).
+	pinnedCtx *ParserContext
 }
 
 // rawBuildState mirrors PcodeCacher (sleigh.hh / sleigh.cc) pool ownership.
@@ -216,11 +232,7 @@ func (c *DisassemblyCache) ObtainParserContext(addr address.Address, constSpace 
 		return hit, nil
 	}
 
-	slot := c.parserNext
-	c.parserNext++
-	if c.parserNext >= len(c.parserList) {
-		c.parserNext = 0
-	}
+	slot := c.nextReuseSlotLocked()
 	ctx := c.parserList[slot]
 	if ctx == nil {
 		ctx = NewParserContext(addr, constSpace)
@@ -243,6 +255,54 @@ func (c *DisassemblyCache) ObtainParserContext(addr address.Address, constSpace 
 	}
 	c.parserHash[c.hashIndexLocked(addr)] = ctx
 	return ctx, nil
+}
+
+// nextReuseSlotLocked advances the circular reuse index (DisassemblyCache::nextfree
+// in sleigh.cc getParserContext) and returns the slot to recycle, skipping the
+// pinned in-flight context so it survives its own build. With at most one pinned
+// slot the loop always finds a free slot when len(parserList) >= 2; a size-1 pool
+// cannot pin (no other slot exists), so pinning is a no-op there.
+func (c *DisassemblyCache) nextReuseSlotLocked() int {
+	slot := c.parserNext
+	for i := 0; i < len(c.parserList); i++ {
+		if c.pinnedCtx == nil || c.parserList[slot] != c.pinnedCtx {
+			break
+		}
+		slot++
+		if slot >= len(c.parserList) {
+			slot = 0
+		}
+	}
+	c.parserNext = slot + 1
+	if c.parserNext >= len(c.parserList) {
+		c.parserNext = 0
+	}
+	return slot
+}
+
+// PinContext marks ctx as the in-flight instruction context so the reuse pool
+// will not recycle its slot until UnpinContext restores the previous pin.
+// It returns the previously pinned context for nested restore. Mirrors the
+// C++ oneInstruction() guarantee that pos is never recycled during its build.
+func (c *DisassemblyCache) PinContext(ctx *ParserContext) *ParserContext {
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	prev := c.pinnedCtx
+	c.pinnedCtx = ctx
+	c.mu.Unlock()
+	return prev
+}
+
+// UnpinContext restores the pin returned by a prior PinContext call.
+func (c *DisassemblyCache) UnpinContext(prev *ParserContext) {
+	if c == nil {
+		return
+	}
+	c.mu.Lock()
+	c.pinnedCtx = prev
+	c.mu.Unlock()
 }
 
 func (c *DisassemblyCache) hashIndexLocked(addr address.Address) uint64 {
