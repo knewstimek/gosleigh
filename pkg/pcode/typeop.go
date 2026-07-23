@@ -262,6 +262,12 @@ func (t *typeOpSext) PropagateType(op *PcodeOp, slot int, inType Datatype, tf *T
 type typeOpIntRight struct{ typeOpBase }
 type typeOpIntSright struct{ typeOpBase }
 
+// typeOpIntSub only overrides the output token to use arithmetic typing rules
+// (like INT_ADD/INT_MULT); it has no propagateType override.
+// C++ parity: TypeOpIntSub (typeop.cc:1320-1332) -- getOutputToken ->
+// arithmeticOutputStandard, no propagateType.
+type typeOpIntSub struct{ typeOpBase }
+
 // typeOpIntMult: integer multiply propagates TYPE_INT bidirectionally.
 // If either operand is TYPE_INT, the result is TYPE_INT; and if the output
 // is TYPE_INT, both inputs are inferred as TYPE_INT.
@@ -357,7 +363,7 @@ func RegisterTypeOps() []TypeOp {
 
 	// Integer arithmetic
 	inst[CPUI_INT_ADD] = &typeOpIntAdd{typeOpBase{CPUI_INT_ADD, PcodeOpBinary | PcodeOpCommutative, "+"}}
-	inst[CPUI_INT_SUB] = &typeOpBase{CPUI_INT_SUB, PcodeOpBinary, "-"}
+	inst[CPUI_INT_SUB] = &typeOpIntSub{typeOpBase{CPUI_INT_SUB, PcodeOpBinary, "-"}}
 	inst[CPUI_INT_CARRY] = &typeOpBase{CPUI_INT_CARRY, PcodeOpBinary | PcodeOpBoolOutput | PcodeOpCommutative, "CARRY"}
 	inst[CPUI_INT_SCARRY] = &typeOpBase{CPUI_INT_SCARRY, PcodeOpBinary | PcodeOpBoolOutput | PcodeOpCommutative, "SCARRY"}
 	inst[CPUI_INT_SBORROW] = &typeOpBase{CPUI_INT_SBORROW, PcodeOpBinary | PcodeOpBoolOutput, "SBORROW"}

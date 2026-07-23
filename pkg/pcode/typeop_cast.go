@@ -301,6 +301,15 @@ func (t *typeOpIntAdd) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 	return cs.arithmeticOutputStandard(op)
 }
 
+// INT_SUB output token uses the arithmetic typing rules, so a subtraction of two
+// unsigned bytes yields a byte (not the static TYPE_INT output-local). Without
+// this, castOutput retypes the result to int and markExplicitUnsigned then emits
+// a spurious 'U' on the other operand of a downstream mask. C++ parity:
+// TypeOpIntSub::getOutputToken -> arithmeticOutputStandard (typeop.cc:1328-1332).
+func (t *typeOpIntSub) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	return cs.arithmeticOutputStandard(op)
+}
+
 // INT_MULT output token uses the arithmetic typing rules, like INT_ADD: the
 // product's token type is the most-specific of the operand read-facing types,
 // not the base TYPE_INT output-local. Without this override the implied product
