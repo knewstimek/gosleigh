@@ -17,6 +17,53 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
   corpus2 잔여 4건 = **add_pt** / **caller** / **faverage** / **umulhi**.
 - 세션8 상세는 아래 "[2026-07-24 세션8 결과]" 블록 + CHANGELOG 세션8-1~12.
 
+### [세션8 룰 전수 감사] 동명 다른 룰이 **12건 더** 있다 -- 다음 세션 최우선 광맥
+
+세션8에 `RuleSubRight`/`RulePushPtr` 2건이 "이름만 같고 완전히 다른 룰"로 드러나 포팅했는데, read-only 감사
+워커가 **Go 룰 156개를 C++ `getOpList`와 기계 대조**한 결과 같은 유형이 **12건 더** 나왔다. **전부 `action.go`
+`actprop`에 실제 등록되어 실행 중이다**(RulePushMulti 제외). 대조 총계: opcode 집합 일치 117, 불일치 31,
+Go-only 19, C++-only 21(그중 11은 명시적 stub).
+
+| # | 룰 | C++이 하는 일 (위치) | Go가 하는 일 | 우선순위 |
+|---|---|---|---|---|
+| 1 | `RuleXorCollapse` | `{INT_EQUAL,NOTEQUAL}` `(V^W)==0 => V==W` (ruleaction.cc:4058) | `{INT_XOR}` 항등원 정리 | **최상** |
+| 2 | `RuleZextEliminate` | `{EQUAL,NOTEQUAL,LESS,LESSEQUAL}` `zext(V)==c => V==c` (2491) | `{INT_ZEXT}` COPY/fold | **최상** |
+| 3 | `RuleShiftPiece` | `{INT_ADD,OR,XOR}` `(zext(V)<<16)+zext(W) => concat` (3773) | `{INT_LEFT,RIGHT}` -- **RuleConcatShift와 본체 완전 동일(중복)** | **최상** |
+| 4 | `RuleDoubleSub` | `{SUBPIECE}` `sub(sub(V,c),d) => sub(V,c+d)` (1798) | `{INT_SUB}` 산술 뺄셈 접기 | 상 |
+| 5 | `RuleRightShiftAnd` | `{INT_RIGHT,SRIGHT}` 시프트 **안쪽** 마스크 제거 (568) | `{INT_AND}` 시프트 **바깥** 마스크 제거(방향 반대) | 상 |
+| 6 | `RuleNotDistribute` | `{BOOL_NEGATE}` 불리언 드모르간 (1139) | `{INT_NEGATE}` **비트** 드모르간 | 상 |
+| 7 | `RuleHumptyOr` | `{INT_OR}` `(V&W)|(V&X) => V&(W|X)` (5339) | `{PIECE}` 조각 재결합 | 중 |
+| 8 | `RuleOrCompare` | `{INT_OR}` `(V|W)==0 => (V==0)&&(W==0)` (10805) | `{BOOL_OR}` `<`+`==` => `<=` | 중 |
+| 9 | `Rule2Comp2Mult` | `{INT_2COMP}` `-V => V*-1` (3979) | `{INT_MULT}` 상수 접기 | 중 |
+| 10 | `RuleZextCommute` | `{INT_RIGHT}` `zext(V)>>W => zext(V>>W)` (4844) | `{ZEXT,SEXT}` COPY 우회(RulePropagateCopy와 중복) | 중 |
+| 11 | `RuleBoolZext` | `{INT_ZEXT}` `zext(V)*-1` 계열 5형 (3001) | `{EQUAL,NOTEQUAL}` bool 비교만 | 중 |
+| 12 | `RulePushMulti` | `{MULTIEQUAL}` 2-branch phi CSE (1062) | phi 입력 동일 치환 -- **Go판은 미등록 死코드**(진짜는 `RulePushMultiME`로 포팅됨) | 하(정리) |
+
+**위험 1건 (되돌리기 권장)**: Go의 `RuleNotDistribute`는 비트 드모르간으로 식을 **전개**한다(1 op -> 3 op).
+그런데 Ghidra에서 되접는 `RuleBitUndistribute`는 Gosleigh에서 **stub**이다. 되돌릴 경로가 없는 **편도 발산**이라
+`~(a&b)`가 `~a|~b`로 출력될 위험이 있다. **제거 단독 실험을 먼저 돌려볼 것**(제거만으로 개선일 가능성 높음).
+
+**인접 결함(트리거만 역방향, 변환은 동일 -- 기록만)**: `Rule2Comp2Sub`가 C++의 `loneDescend` 요구를 빠뜨려
+2COMP 다중 사용 시 부정 연산이 복제될 수 있음(코퍼스 발화 미확인). `RuleNegateIdentity`에 `INT_XOR` 누락.
+`RuleConcatShift`는 `INT_LEFT`를 등록해놓고 본체 첫 줄이 `if op.Code()!=INT_RIGHT return 0`이라 **등록이 死**.
+
+**死코드 (먼저 걷어내면 이후 감사 노이즈가 크게 준다)**: `newLoadStoreRuleSet`(rules_loadstore.go:286)과
+`newPointerRuleSet`(rules_pointer.go:850)이 **어디서도 호출되지 않아** 그 안의 룰 14건(`RuleLoadConstAddr`,
+`RulePtrsubCollapse` 등)이 전부 도달 불가. Go `RulePushMulti`도 미등록.
+
+**가장 오해를 부른 지점(문서화 필수)**: **`action.go`의 명시적 `actprop.AddRule(...)` 목록이 유일한 authority**다.
+`AddBatchARules`/`AddBatchC*Rules` factory 목록은 **테스트에서만** 호출된다.
+
+**Go 전용 발명**: `RuleSubRight.applyIntSub`(세션8-10이 남긴 부채, 분리/제거 대상), `RuleOrSextForm`(packed `.sla`가
+IDIV를 PIECE 대신 INT_OR로 내는 걸 보정 -- **정당한 발명**, 주석에 의도 명시).
+**개명 포팅(기능 갭 아님)**: `RuleSubZextMask`=C++ `RuleSubZext`, `RulePushMultiME`=C++ `RulePushMulti`,
+`RuleLessNotEqualBoolAnd`=C++ `RuleLessNotEqual`, `RuleTransformCPool`=C++ `RuleTransformCpool`.
+
+**미확인**: 위 12건의 "예상 영향"은 코드 근거(등록 여부+opcode 집합+본체) 기반이고 **실제 코퍼스 발화 횟수는
+미계측**이다. 필요하면 `RuleBase`에 이미 있는 `Rule.GetNumApply()` 카운터에 덤프 훅만 붙이면 된다.
+
+---
+
 ### [착지 대기] `varmap-wip-session8` 브랜치 (origin 푸시됨, commit `767ef6f`)
 `array_init_then_sum`의 **varmap 절반이 완성돼 있으나 master에 안 넣었다.** 이유: 그것만 넣으면 렌더 텍스트에서
 `* 4` 스케일이 사라져 **C로 읽을 때 의미가 틀린 줄**이 된다(SSA는 오히려 정확해짐). 프로젝트 규칙
