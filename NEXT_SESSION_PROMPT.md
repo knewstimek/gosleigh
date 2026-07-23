@@ -10,9 +10,12 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (엔진 tip `53fce49` origin 푸시, 전 게이트 green -- 감독관 재검증)
-- tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **8/13**
-  (+sum_via_pp), x64_auto **24/32**(+sum_pp_walk +strlen_style), production PASS, `go test ./...` green.
+## 현재 상태 (master `2f08090` origin 푸시, 전 게이트 green -- 감독관 재검증)
+- tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **8/13**,
+  x64_auto **29/32**, production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
+- x64_auto 잔여 3건 = array_init_then_sum / reverse_bytes_inplace / switch_dense.
+  corpus2 잔여 5건 = gate / add_pt / caller / faverage / umulhi.
+- 세션8 상세는 아래 "[2026-07-24 세션8 결과]" 블록 + CHANGELOG 세션8-1~8.
 - **세션6 후속5 착지(`53fce49`) = char 리터럴 렌더**: `renderConstant`(printc.go)에 char-print 분기 추가
   (size-1 signed int -> `'\0'`, C++ type.cc:3642 cacheCoreTypes 재현). strlen_style strict MATCH. 상세 CHANGELOG 세션6 후속5.
 - **세션6 후속4 착지(`4759d8e`) = (B) print-inline 일부**: `shouldInline`이 nd>1 implied 식을 term-dup
@@ -61,7 +64,52 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 
 ## 다음 작업 (우선순위)
 
-### [2026-07-24 세션8 read-only 진단으로 확정된 근본 지도 -- 이게 최신 권위]
+### [2026-07-24 세션8 결과 -- 이게 최신 권위] master `2f08090`, x64_auto **29/32**, corpus2 8/13
+
+**착지 8건** (상세 = CHANGELOG 2026-07-24 세션8-1~8):
+`365aa20` markImplied cover parity / `636f820` INT_SUB 출력토큰(bit_rotate MATCH) / `f3dc442` **detached op**
+(swap_via_temp MATCH) / `09e5cbc` local_res 네이밍 / `8a76c71` RuleAddUnsigned(while_countdown+popcount MATCH) /
+`c54d295` **스택 heritage space 등록 + refinement**(sign_extend MATCH) / `2460b6b` 재대입 param 네이밍 /
+`3afb5cd` free varnode 스킵(add_pt 구조) / `2f08090` **call-site 입력 trial 포팅**(caller 5-param).
+
+**아래 N1/N2/N3 중 N1/N2는 착지 완료, N3도 착지 완료.** 남은 것은 그 아래 "세션8 이후 남은 작업" 참조.
+
+#### 세션8 이후 남은 작업 (우선순위)
+1. **array_init_then_sum 상류 3단** [중~대] -- 아래 (N2') 상세. 이게 뚫려야 varmap/ScopeLocal 작업이 의미를 가진다.
+2. **reverse_bytes_inplace** [소?] -- for 헤더 comma 식 `local_10 = param_2 + -1,` 하나만 남음. gcd가 이미
+   `while (iVar1 = param_4, ...)`를 내므로 기계는 존재. C++ `PrintC::emitForLoop`/`setMod(comma_separate)`.
+3. **gate** [소~중] -- De Morgan 조건형 + then/else 스왑. C++ `BlockCondition` 구성 / `opFlipCondition`의 선택 규칙.
+4. **caller 죽은 문장 제거** [중] -- `uVar2 = (ulonglong)param_N;` 누출. C++이 하류 consume-bit deadcode /
+   SubvariableFlow로 얻는 8->4바이트 인자 축소가 없어서. call-site trial 포팅과는 별개 근본.
+5. **add_pt strict MATCH** [중] -- SUBPIECE(x,4) -> `(int)((ulonglong)x >> 0x20)`, PIECE -> `CONCAT44` 렌더 +
+   `uStackX_c`/`uStackX_14` 네이밍(= C++ 코어 `ScopeLocal::buildVariableName`, Java DB 변수가 없는 슬롯).
+6. **umulhi** [대, 단독세션] -- printc 표현식 렌더를 flat-string -> 그룹토큰스트림으로 재아키텍처.
+7. **faverage** [대] FP 서브시스템 / **switch_dense** [대] imagebase·reloc.
+8. **부채**: `ActionInputPrototype`이 fixateproto에서 input map을 재유도하도록(coreaction.cc:4718) +
+   `ProtoStoreSymbol::setInput` Symbol 재생성 -- 세션8-6이 naming 계층으로 우회한 부분의 진짜 근본.
+
+#### (N2') array_init_then_sum 상류 3단 [세션8에 probe로 확인, 미착지]
+1. `Funcdata.Spacebase()`가 `vn.UpdateType(ptr)`만 한다 -- C++ `funcdata.cc:264`는 `updateType(ptr,true,true)`
+   (**lock + override**). 그래서 RSP input의 pointer 타입이 `ActionInferTypes`에 덮여 `int`가 된다.
+   probe로 lock을 주면 TYPE_PTR로 유지됨을 확인했다.
+2. `action_infertypes.go`의 `inferPropagateIntAdd`가 pointer-forward에서 `return nil`이고 `propagateAddPointer`에
+   **`CPUI_INT_ADD` 케이스 자체가 없다**(C++ `typeop.cc:1291-1313` `TypeOpIntAdd::propagateType` /
+   `propagateAddIn2Out` / `propagateAddPointer`). 그래서 `RSP + -0x48`의 출력이 포인터가 안 되고
+   `RulePtrArith`(`rules_pointer.go:419`)의 `ptrInputSlot`이 실패 -> `AddTreeState` 미진입 -> PTRSUB/PTRADD 없음.
+3. 1+2를 probe로 뚫어도 여전히 PTRSUB이 없다 -- `ActionSetCasts`가 `CAST(ptr->int)`를 끼워 체인을 끊는다
+   (downChain / TypePointerRel 미포팅 포함).
+**증명**: 골든과 동일한 심볼(`stack:-0x48`, size 0x48, `int[18]`, 이름 `aiStack_48`)을 ScopeLocal에 손으로 주입해도
+출력이 **바이트 무변화**였다. 즉 상류가 안 뚫리면 varmap(MapState/RangeHint/AliasChecker) 포팅은 출력에 0의 영향.
+상류 착지 후 varmap 쪽에서 할 일: `AliasChecker::gatherAdditiveBase/gatherOffset`(varmap.cc:741/817) ->
+`MapState::addRange(offset, ptrTo(type), open, minItems=3)`(varmap.cc:1221-1238) -> `ScopeLocal::restructure`의
+open 확장 `cur.size = next->sstart - cur.sstart`(varmap.cc:1315) -> `createEntry`가 `0x48/4 = 18 > 1`이라
+`getTypeArray`(varmap.cc:617-628) -> `buildVariableName`(varmap.cc:548-581)이 `aiStack_48`.
+(참고: `MapState::addGuard` LoadGuard 경로는 사용 불가 -- `heritage.go`의 `loadGuards`/`storeGuards` 필드를
+아무도 채우지 않고 `Funcdata.GetLoadGuards()`도 없다.)
+
+---
+
+### [세션8 착수 시점의 read-only 진단 기록 -- N1/N2/N3는 모두 착지 완료]
 진단 워커가 decomp_dbg(C++ ground truth, 하네스와 **동일 입력**: 단일 함수 바이트/base 0/unlocked proto) +
 계측 사본으로 실측 확정. 착수 순서는 아래 표 순.
 

@@ -5,7 +5,35 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
-### 2026-07-24 (세션8): 병렬 2슬롯 Opus -- merge cover parity + INT_SUB 출력토큰 (master `636f820`)
+### 2026-07-24 (세션8 총괄): x64_auto 25 -> 29/32, 자율주행 감독관 + Opus 병렬 2슬롯 (master `2f08090`)
+감독관 세션. 워커는 worktree 격리 + 파일 비중첩 분할 + 실측 우선(decomp_dbg/ssadiff/ssadump) + STOP 경계 +
+커밋금지(diff 보고). 감독관이 매 건 **C++ 원문 직접 대조** -> 파일 복사 -> 전 매트릭스 `-count=1` 2회 -> 커밋 -> push.
+
+**착지 8건** (아래 개별 항목에 상세):
+| 커밋 | 내용 | 효과 |
+|---|---|---|
+| `365aa20` | markImpliedCheckCover LOAD-crossing-STORE cover parity | swap explicit 마킹 선행조건 |
+| `636f820` | INT_SUB 출력토큰 arithmeticOutputStandard | bit_rotate_left MATCH (24->25) |
+| `f3dc442` | **detached op 수정**(NewOpBefore 미삽입 + buildTree 잉여 COPY) + printc nd==1 플래그 충실화 | swap_via_temp MATCH, reverse_bytes swap 의미 복구 (25->26) |
+| `09e5cbc` | `local_res<hex>` 스택 네이밍(Ghidra Java 규칙) | 5함수 이름 정정 |
+| `8a76c71` | RuleAddUnsigned TYPE_UINT 게이트 + cleanup 풀 전용 | while_countdown + popcount_loop MATCH (26->28) |
+| `c54d295` | **스택을 heritage space로 등록** + refinement 계열 포팅 | sign_extend_boundary MATCH (28->29) |
+| `2460b6b` | 재대입 param이 `param_N` 유지(미선언 변수 버그 소멸) | reverse_bytes/gate 정정 |
+| `3afb5cd` | RestructureVarnode가 free varnode 스킵 | add_pt 구조 복구(의미 파괴 소멸) |
+| `2f08090` | **call-site 입력 trial 복구 포팅**(768줄) | caller 5-param + 인자 4개 복구 |
+
+**방법론에서 얻은 것**: 감독관이 goal에 적은 근본 후보가 **워커 실측으로 반증된 사례가 5건**이다 --
+(a) bit_rotate의 U 접미사는 cast.go 게이트가 아니라 INT_SUB 출력토큰, (b) swap의 latch COPY는 merge 게이트가
+아니라 detached op, (c) popcount 상수는 렌더가 아니라 룰(+풀 배치는 이미 정상), (d) `local_res`는 정렬이 아니라
+오프셋 부호(워커가 Ghidra Java 원본을 찾아냄), (e) sign_extend는 refinement이 아니라 normalizeRange 미경유.
+**"가설을 코드로 박기 전 실측"이 매번 이겼다.**
+
+**미선언 변수 방출 버그 2건 발견/수정**: `iVar1`(재대입 param, `2460b6b`)과 add_pt 슬롯 이름 충돌(`3afb5cd`).
+둘 다 컴파일 불가능한 C를 내고 있었다. `local_423`(array_init_then_sum)은 같은 부류이나 상류 미해결로 잔존.
+
+---
+
+### 2026-07-24 (세션8-1): merge cover parity + INT_SUB 출력토큰 (master `636f820`)
 감독관 + Opus 2워커 병렬(worktree 격리, 파일 비중첩: merge vs typeop/render). 실측 우선(decomp_dbg/ssadiff/ssadump)
 + STOP 경계 + 전 게이트 -count=1 2회.
 
@@ -25,7 +53,8 @@ plain typeOpBase로 등록 -> GetOutputToken이 static TYPE_INT. C++ `TypeOpIntS
 arithmeticOutputStandard 오버라이드. INT_ADD/INT_MULT 선례대로 typeOpIntSub 신설. **bit_rotate_left MATCH,
 x64_auto 24->25/32.** 완전 격리(gosleigh_out.json에서 bit_rotate_left만 변경). 전 게이트 무회귀.
 
-**진단 후 STOP 2건 (다음 스코프 세션)**:
+**당시 STOP 2건은 같은 세션 안에서 전부 해소됐다** (swap 렌더 절반 = `f3dc442` detached op, popcount 상수 =
+`8a76c71` RuleAddUnsigned). 아래는 당시 시점의 진단 기록:
 - swap_via_temp 렌더 절반: `printc.go shouldInline` nd==1 경로가 IsExplicit 무시 무조건 인라인(코드 주석 875-881이
   명시 -- flag-faithful화 시 loop-carried PTRADD/CAST가 phantom 선언 누수, 세션6/7 반복 STOP 경계). explicit LOAD
   타겟팅 + array_2d_sum/array_reverse_sum 인덱싱 게이트 재검 필요한 고위험 단독 세션.
@@ -34,6 +63,142 @@ x64_auto 24->25/32.** 완전 격리(gosleigh_out.json에서 bit_rotate_left만 �
   (rules_copy.go:315,332)해 all-ones 제외(무한 cycle 가드). 충실 수정 = RuleAddUnsigned를 cleanup 풀 전용으로 +
   조건 재작성(slot-1/TYPE_UINT/top-quarter-bits, all-ones 제외 삭제). 게다가 popcount는 네이밍(local_8 vs
   local_res8)으로 어차피 non-MATCH. cross-file 고위험 별도 세션.
+
+---
+
+### 2026-07-24 (세션8-2): detached op -- NewOpBefore 미삽입 + buildTree 잉여 COPY (master `f3dc442`)
+swap_via_temp의 사라진 `uVar1`을 추적하다 나온 **구조적 버그**. 감독관 가설(merge 게이트/cover 교차/액션 순서)은
+전부 오답이었고, 워커가 op-bank 덤프로 진짜 근본을 특정했다.
+1. `Funcdata.NewOpBefore`가 `OpMarkAlive`로 끝나서 **AddTreeState/SplitFlow가 만든 모든 op가 detached**
+   (`parent == nil`). C++ `Funcdata::newOpBefore`(funcdata_op.cc:670)는 `opInsertBefore(newop,follow)`로 끝난다.
+   detached op도 렌더는 되지만(PrintC가 def 체인을 따라감) 블록 인덱스가 없어 Cover/HighVariable liveness가
+   nil parent 기준으로 계산되고, merge가 보상용 trim COPY를 **3개** 만든다(C++은 1개). 그 잉여 latch COPY가
+   loop-carried PTRADD를 별도 HighVariable로 갈라놨다.
+2. `AddTreeState.buildTree`가 extra 항이 없을 때 `CPUI_COPY`를 덧붙였다. C++(ruleaction.cc:6513-6551)은
+   `buildMultiples`/`buildExtra`를 **둘 다 선행 실행**하고 **마지막 생성 op**(PTRADD/PTRSUB/INT_ADD)에 `baseOp`의
+   출력을 넘길 뿐 COPY가 없으며, 아무것도 안 만들어졌으면 "ptrarith problems" 경고 후 return한다.
+3. `RuleSub2Add`가 (1)의 우회책으로 mulOp를 수동 재삽입 -> (1) 수정 후 이중 삽입. `RulePropagateCopy`의
+   detached dead COPY eager reap 반창고도 같은 뿌리라 제거(C++처럼 ActionDeadCode에 맡김).
+
+**연쇄 효과**: SSA가 C++과 노드 단위로 일치하자 `printc.go shouldInline`의 nd==1 default-inline 프록시가
+불필요해져 `isImplied()` 게이트를 양쪽 경로 위로 올렸다(C++ `PrintLanguage::pushVn`). 세션6/7이 반복 STOP했던
+"phantom 선언 누수" 경계가 **구조를 고치자 사라졌다**.
+**결과**: swap_via_temp MATCH(기존 출력은 swap이 통째로 사라진 **틀린 코드**), reverse_bytes swap 의미 복구,
+sum_pp_walk MATCH 유지. **25->26**. fixture 2건 갱신(printc_test는 ActionMarkImplied를 안 도는 합성 fixture라
+implied 명시, rules_pointer_test는 버그를 인코딩했던 COPY 기대치를 PTRADD로 정정).
+
+---
+
+### 2026-07-24 (세션8-3): local_res 스택 네이밍 (master `09e5cbc`)
+스택 로컬 **이름**은 C++ 코어가 아니라 **Ghidra Java 층**이 붙인다(decomp_dbg는 `uStackX_8`/`uStack_18`, 골든은
+`local_res8`/`local_18`; ghidra-ref C++에 `_res` 문자열 없음). 워커가 로컬 Ghidra 설치본에서 **Java 원본**을 찾아
+규칙을 확정했다 -- `SymbolUtilities.getDefaultLocalName`:
+```
+reservedArea = stackGrowsNegative ? (stackOffset >= 0) : (stackOffset < 0);
+name = (reservedArea ? "local_res" : "local_") + hex(abs(stackOffset));
+```
+**정렬이 아니라 오프셋 부호만** 본다(감독관의 "home 슬롯 정렬" 가설은 반증). 아키텍처 분기 불필요.
+**중요한 판단**: `localHexName`을 확장하지 **않고 분리**했다. `Funcdata.mapGlobals`가 그 함수를 전역(persist)
+varnode에 쓰고 있어(주소가 대부분 양수) 그냥 넓혔으면 전역이 전부 `local_res140003000`으로 오염됐을 것이다.
+**부수 확정**: 골든은 네이밍 소스가 **둘**이다. Program-DB 스택 변수가 있는 슬롯만 Java 이름을 받고
+(`varmap.cc:1507 recoverNameRecommendationsForSymbols`가 **주소 정확 일치**일 때만 재부착), 나머지는 C++ 코어
+`ScopeLocal::buildVariableName` 이름(`uStackX_c`, `aiStack_48`)이 살아남는다.
+
+---
+
+### 2026-07-24 (세션8-4): RuleAddUnsigned TYPE_UINT 게이트 + cleanup 풀 전용 (master `8a76c71`)
+`while_countdown`과 `popcount_loop`가 **정반대 방향**으로 틀렸고 그게 게이트를 특정했다:
+```
+while_countdown  EAX = s0x08:4 + #0xfffffffe:4  (INT_ADD 유지) -> "+ -2"
+popcount_loop    EAX = s0x08:4 - #0x1:4         (INT_SUB)      -> "- 1"
+```
+상수의 `TypeReadFacing` 메타타입을 계측하니 Gosleigh 타입 추론은 **이미 정확**했다(0xfffffffe=TYPE_INT,
+0xffffffff=TYPE_UINT). 룰만 그걸 안 보고 있었다. C++ `ruleaction.cc:7202-7234`대로 재작성: **슬롯 1 전용**,
+**TYPE_UINT 게이트**, isCharPrint 게이트, **top-quarter-bits 테스트**(`sa = size*6`), enum `hasNamedValue` 가드,
+`opSetOpcode(INT_SUB)` + 슬롯 1만 재설정. 기존 포팅은 양 슬롯 순회 + 타입 게이트 전무 + 부호비트 1개만 검사 +
+**all-ones 명시적 제외**였다.
+그 all-ones 제외가 **무한 왕복 우회책**이었다: legacy BatchA 분석 풀에 `RuleAddUnsigned`와 `RuleSub2Add`를
+공존시켜 `x - c` -> `x + (c*-1)` -> `x + (-c)` -> `x - c`가 순환. C++은 절대 co-register하지 않고
+(`RuleAddUnsigned`=actcleanup coreaction.cc:5708, `RuleSub2Add`=actprop coreaction.cc:5564)
+**universal action tree는 이미 그 배치였다**(action.go:1427) -- 문제는 legacy 풀뿐이었다.
+**렌더 수정은 불필요했다**: printc는 이미 `PrintC::push_integer`와 일치해서 INT_ADD가 살아남자 TYPE_INT 상수가
+저절로 `-2`로 나왔다. 네이밍(`09e5cbc`)과 합쳐져 **두 함수 동시 MATCH, 26->28**.
+
+---
+
+### 2026-07-24 (세션8-5): 스택을 heritage space로 등록 + refinement 포팅 (master `c54d295`)
+**스택 space가 heritage 파이프라인을 아예 안 타고 있었다.** `bridge.go`가 heritage space 집합을 **번역 직후
+raw p-code varnode가 지목하는 space**로만 만드는데, 스택 varnode는 mainloop 중
+`RuleLoadVarnode`/`RuleStoreVarnode`가 생성하므로 **영원히 그 집합에 못 든다**. C++
+`Heritage::buildInfoList`(heritage.cc:2650-2658)는 모든 space를 등록하고 spacebase 스택은 로드 시점부터 그 안에
+있다. Gosleigh는 슬롯 단위 `HeritageRange` 우회를 썼고 거기엔 refinement도 guard 정규화도 없어 크기 다른 겹침
+접근이 한 offset 키로 rename됐다(add_pt: `ECX(4) = RCX(8) + RDX(8)` = 사이즈 불변식 위반).
+**등록 위치 함정**: `bridge.Build`에 넣으면 `partial.go`의 `BuildJumpTablePartial` 드라이버가 우회해 switch/breadth
+게이트가 깨졌다. `Funcdata.OpHeritage`로 옮겨 모든 드라이버가 균일하게 타게 했고 C++(space 목록을 Architecture에서
+읽음)에 더 가까운 위치가 됐다.
+refinement 계열 전체 포팅(`buildRefinement` 1704 / `splitByRefinement` 1733 / `refineRead` 1772 / `refineWrite`
+1806 / `refineInput` 1836 / `remove13Refinement` 1857 / `refinement` 1890 + `concatPieces` 507 / `splitPieces` 563),
+진입 조건은 `placeMultiequals` 2610-2616의 `size > 4 && max < size`, guardCalls **앞**에 배치. 기존
+`normalizeReadSize`/`normalizeWriteSize`는 재사용.
+**가설 일부 반증**: sign_extend_boundary는 refinement 대상이 아니었다(태스크 `[0x8,2)`라 `size > 4`에 안 걸림) --
+진짜 원인은 스택 태스크가 `normalizeRange`를 전혀 안 탄 것. refinement 실발화는 53함수 중 add_pt `[-0x18,8)`
+**단 1회**. sign_extend_boundary MATCH + `short` param 복구, **28->29**.
+
+---
+
+### 2026-07-24 (세션8-6): 재대입 param이 param_N 유지 + 미선언 변수 버그 (master `2460b6b`)
+재대입된 레지스터 파라미터가 이름을 잃고 **선언 없는 `iVar1`**으로 나왔다(= 컴파일 불가 C). HighVariable 멤버십을
+덤프하니 **병합은 정상**이었다 -- param 입력 varnode가 이미 같은 HV 안에 있었다. 근본은 subvariable/lane flow가
+full-width 입력(RDX:8)을 sub-register(EDX:4)로 교체하는 시점이 param 복구 lock **이후**라, varnode 객체 단위로
+한 번 각인된 이름이 wide 입력과 함께 죽은 것.
+**미선언의 정확한 지점**: 선언 대표가 EDX 입력으로 올라가 `nameOf(EDX)=="param_2"` -> isParamName -> 선언 skip,
+반면 본문은 COPY 출력을 `hv.Name()=="iVar1"`로 렌더. **이름 출처가 둘**이었다.
+C++에서 이름은 storage의 Symbol이 소유하고 `Scope::buildDefaultName`(database.cc:1764)이
+`sym->getCategory()==function_parameter || **high->isInput()**`이면 `param_<index>`를 만든다(database.cc:2480).
+`ActionNameVars`가 그 규칙을 반영 -- live 레지스터 param 입력 인스턴스를 가진 무명 HV는 ABI 슬롯에서 `param_N`을
+가져온다. entry point는 제외(database.cc:2470 irregular input -> `in_<reg>`).
+**남은 발산**: 충실한 근본은 `ActionInputPrototype`이 fixateproto에서 최종 SSA로 input map을 재유도하는 것
+(coreaction.cc:4718) + `ProtoStoreSymbol::setInput`의 Symbol 재생성 -- storage 계층 재바인딩은 후속 항목.
+
+---
+
+### 2026-07-24 (세션8-7): RestructureVarnode가 free varnode 스킵 (master `3afb5cd`)
+add_pt가 변수 2개만 선언하고 **각각에 두 번 대입**했다(`local_res10 = (int)param_2;` 다음 줄에
+`local_res10 = SUBPIECE(param_2,4);` = 의미 파괴). ScopeLocal 심볼은 옳았고 **HighVariable 이름**이 무너진 것.
+죽은 varnode가 원인: SubvariableFlow/SplitVarnode가 8바이트 스필(`mov [rsp+8],rcx`)을 4바이트 SUB84 둘로 대체했지만
+VarnodeBank엔 잔존하고, `RestructureVarnode`가 그 creation-order bank를 돌며 8바이트 SymbolEntry를 만들어
+**disjoint cover 불변식**을 깼다. 이후 `findOverlap(+0xc)`가 stale한 wide Symbol을 먼저 반환.
+C++은 애초에 못 본다: `MapState::gatherVarnodes`(varmap.cc:1130-1134)가 **live location index**(`beginLoc`)를 돌고
+루프 첫 줄이 `if (vn->isFree()) continue;`다. Go `Varnode.IsFree`도 `(flags&(written|input))==0`로 동일 구현이
+이미 있었다 -- **가드 한 줄이 전부**. add_pt가 4개 슬롯으로 분리되고 시그니처도
+`undefined8 add_pt(undefined8,undefined8)`로 골든 일치.
+
+---
+
+### 2026-07-24 (세션8-8): call-site 입력 trial 복구 포팅 (master `2f08090`, 768줄)
+`caller`가 `void caller(void)` + 인자 없는 호출로 붕괴했다(helper_sum 자체는 이미 MATCH). decomp_dbg를
+`break start`로 단계 실행하니 C++ 코어는 **첫 패스부터 RCX/RDX/R8/R9 trial을 CALL에 등록**한다 --
+reloc/로더/flow 갭이 아니라 **call-site 입력 trial 기계가 통째로 없던 것**.
+진입점은 `Heritage::guardCalls`(heritage.cc:1495-1508): `isInputActive() && tryregister`이고
+`characterizeAsInputParam == contains_justified`이며 해당 범위 trial이 없으면 `registerTrial` + `newVarnode` +
+`setActiveHeritage` + `opInsertInput(op,vn,op->numInput())`. Gosleigh는 출력 측만 하고 있었다.
+`ActionActiveParam`(coreaction.cc:1726-1772)도 `numCalls()` 전체를 순회해야 하는데 현 함수 proto만 처리했다.
+동반 포팅: `ParamEntry::containedBy`+포함 enum, `ParamListStandard::characterizeAsParam`/`calcDelay`,
+`FuncProto::characterizeAsInputParam`/`deriveInputMap`/`resolveModel`, `FuncCallSpecs::initActiveInput`/
+`clearActiveInput`/`checkInputTrialUse`/`finalInputCheck`/`buildInputFromTrials`, `TraverseNode`+
+`isAlternatePathValid`, `Funcdata::onlyOpUse`/`checkCallDoubleUse`/`ancestorOpUse`. 기존 `ParamActive`/
+`AncestorRealistic`/`fillinMap`을 재사용했고 완비돼 있던 출력 측(funccallspec_output.go)이 대칭 템플릿이 됐다.
+**실측으로 새로 확정된 2가지**: C++ 코어는 8바이트 RCX trial을 등록하고 ECX로 좁아지는 건 하류 단순화의 결과다.
+그리고 `initActiveInput`(fspec.cc:5336)은 모델에 delayed(스택) entry가 있으면 maxPass를 **0이 아니라 3**으로 잡아
+trim이 4번째 activeparam 패스에서 일어난다.
+caller가 param 5개 + 호출당 인자 4개를 복구했다. **strict MATCH는 현 하네스로 불가** -- C++ 코어조차
+`func_0xffffffffffffffc0`을 출력한다(테스트가 함수 1개 바이트만 base 0에 로드해 callee가 이미지 밖).
+미포팅으로 남긴 것(각각 코드에 근거 주석): 스택(5번째) 인자용 `getSpacebaseOffset`(ActionFuncLink placeholder가
+Gosleigh에선 안 생겨 C++의 `tryregister=false`와 **같은 경로**를 택함), `guardCallOverlappingInput`,
+`AliasChecker`(hasLocalAlias만 관대하게 근사 -- 잘못 reject하면 살아있는 인자가 상수로 날아감), `callee_pop`
+분기(x86/x64는 구체 extrapop 선언이라 C++에서도 죽은 분기), locked-ProtoParameter 분기(도달 불가).
+**후속**: caller에 `uVar2 = (ulonglong)param_N;` 죽은 문장이 누출된다 -- C++이 하류 consume-bit deadcode /
+SubvariableFlow로 얻는 8->4바이트 인자 축소가 없어서이며 trial 포팅과는 별개 근본.
 
 ---
 

@@ -15,16 +15,17 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-24 세션8, master `636f820`, 전 게이트 green 감독관 재검증 -- origin 푸시 대기)
+## 현재 상태 (2026-07-24 세션8, master `2f08090` origin 푸시, 전 게이트 green 감독관 재검증)
 
 **권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`**. 요약:
-- **[세션8] 병렬 2슬롯 Opus 착지 2건**: (1) `markImpliedCheckCover` LOAD-crossing-STORE cover parity(`365aa20`,
-  action_mark.go) -- C++ `checkImpliedCover`(coreaction.cc:3397-3404) 대비 alias 가드 `!` 반전 + containment
-  boundary-inclusive 정정(interior-only `Cover::contain(op,2)`). swap_via_temp uVar1 explicit 마킹의 필수 선행조건
-  (출력 무변화, 렌더 절반은 STOP). (2) INT_SUB 출력토큰 arithmeticOutputStandard(`636f820`, typeop.go+typeop_cast.go)
-  -- `TypeOpIntSub::getOutputToken`(typeop.cc:1328-1332) 포팅, bit_rotate_left의 spurious `U` 제거 -> **MATCH,
-  x64_auto 24->25/32**. 상세 CHANGELOG 세션8. STOP 2건(swap 렌더=printc nd==1 phantom 누수 / popcount=RuleAddUnsigned
-  풀 재배치)은 다음 스코프 세션.
+- **[세션8] 자율주행 감독관 + Opus 병렬 2슬롯으로 착지 8건, x64_auto 25 -> 29/32.** 상세는 CHANGELOG 세션8-1~8.
+  핵심: (a) **detached op**(`f3dc442`) -- `NewOpBefore`가 op를 블록에 안 넣어 Cover/HV가 nil parent 기준으로
+  계산되고 merge가 보상 trim COPY를 만들었다(C++ funcdata_op.cc:670은 `opInsertBefore`로 끝남). 이걸 고치자
+  세션6/7이 반복 STOP했던 "phantom 선언 누수" 경계가 사라졌고 printc nd==1 프록시를 제거했다.
+  (b) **스택을 heritage space로 등록**(`c54d295`) -- 스택이 heritage 파이프라인을 아예 안 타고 있었다
+  (heritageSpaces를 번역 직후 p-code로만 수집). refinement 계열 전체 포팅. (c) **call-site 입력 trial 포팅**
+  (`2f08090`, 768줄) -- caller param 5개 + 인자 4개 복구. (d) 미선언 변수 방출 버그 2건 수정(`2460b6b`/`3afb5cd`,
+  둘 다 컴파일 불가능한 C를 내고 있었다).
 - **[세션6 후속5] char 리터럴 렌더 착지(`53fce49`)**: `renderConstant`(printc.go)에 char-print 분기 추가
   (size-1 signed int -> `'\0'`, C++ type.cc:3642 cacheCoreTypes 재현, val<0x80 좁은 게이트). strlen_style
   strict MATCH -> **x64_auto 23->24/32**. 전 게이트 무회귀.
@@ -47,7 +48,8 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   no_branch/only_branch 미러, printc.cc:2913). **x64_auto 21->22/32**(multi_return_early MATCH). 상세 CHANGELOG
   세션6 후속2. 아래 게이트 수치는 이 값으로 갱신됨.
 - 게이트: tree **10/10**, x64 corpus **8/8**, **op_switch byte-MATCH**, breadth **3/3**,
-  corpus2 **8/13**(+sum_via_pp), x64_auto **25/32**(+bit_rotate_left), production 전부 PASS, `go test ./...` green.
+  corpus2 **8/13**, x64_auto **29/32**(+bit_rotate_left +swap_via_temp +while_countdown +popcount_loop
+  +sign_extend_boundary), production 전부 PASS, `go test ./...` green.
 - 세션5 착지(상세 CHANGELOG 세션5): **GenGoldens bodyHex 손상 버그**(dead-code island 누락으로 분기 변위
   파괴 -- 전 코퍼스 감사로 x64_auto 2건만 손상 확정, 붕괴형 mismatch는 입력 무결성부터) + 엔진 9건
   (cover 인덱스=블록위치, LoopBody 포인터 안정성, InfLoop do/while(true), RuleCollectTerms 포팅,
@@ -64,13 +66,20 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 다음 작업 (우선순위)
 
-> **[최신] 2026-07-24 세션8 (master `636f820`): merge cover parity(`365aa20`) + INT_SUB 출력토큰(`636f820`) 착지.
-> **corpus2 8/13, x64_auto 25/32**(+bit_rotate_left). 다음 후보(전부 대형/딥존) = **swap_via_temp 렌더 절반**
-> (printc.go shouldInline nd==1이 IsExplicit 존중 -- merge 선행조건은 이미 착지, phantom 선언 누수 STOP 경계라
-> explicit LOAD 타겟팅+array 게이트 재검 단독세션) / **popcount RuleAddUnsigned**(cleanup 풀 전용 재배치 +
-> 조건 재작성, cross-file 고위험) / **umulhi**(printc flat-string -> 그룹토큰스트림 재아키텍처, 단독세션) /
-> A2 잔여(IsParamOffset 완전대체). 권위 있는 다음-작업/현재상태는 저장소 루트 `NEXT_SESSION_PROMPT.md` +
-> CHANGELOG 2026-07-24 세션8 참조.
+> **[최신] 2026-07-24 세션8 (master `2f08090` origin 푸시): 착지 8건, **corpus2 8/13, x64_auto 29/32**.
+> 남은 미스매치와 근본(전부 실측 확인됨):
+> - **array_init_then_sum**: 상류 3단이 막혀 있다 -- (1) `Funcdata.Spacebase()`가 `UpdateType(ptr)`만 해서
+>   spacebase 포인터 타입이 InferTypes에 덮임(C++ funcdata.cc:264는 `updateType(ptr,**true,true**)`),
+>   (2) `propagateAddPointer`에 `CPUI_INT_ADD` 케이스 부재(C++ typeop.cc:1291-1313) -> RulePtrArith 미진입 ->
+>   PTRSUB/PTRADD 미생성, (3) ActionSetCasts가 CAST(ptr->int)로 체인 절단. **증명됨**: 골든과 같은 심볼
+>   (`aiStack_48`, `int[18]`)을 손으로 주입해도 출력 바이트 무변화 -> **상류 없이 varmap/ScopeLocal 작업은 무력**.
+>   `local_423` 미선언 방출도 여기에 종속(printc.go:4223 `local_%d(CreateIndex)` 폴백).
+> - **umulhi**: printc 표현식 렌더 flat-string -> 그룹토큰스트림 재아키텍처(단독 대형세션).
+> - **gate**: De Morgan 조건형 + then/else 스왑. **reverse_bytes_inplace**: for 헤더 comma 식 하나만 남음.
+> - **caller/add_pt**: 구조는 복구됐으나 strict MATCH는 별건에 게이팅(caller=하네스 한계로 **불가**,
+>   add_pt=SUBPIECE/CONCAT44 렌더 + uStackX 네이밍). **switch_dense**: imagebase/reloc.
+> - **faverage**: FP 서브시스템 통째 갭.
+> 권위 있는 다음-작업은 저장소 루트 `NEXT_SESSION_PROMPT.md` + CHANGELOG 2026-07-24 세션8-1~8 참조.
 > 갭 지도 = `testdata/x64_auto/GAPMAP.md` + `testdata/x64_corpus2/README.md`.**
 
 ## 잔여 부채 (2026-07-17 세션5 실측 검증 -- 다음 작업의 권위는 루트 NEXT_SESSION_PROMPT.md)
