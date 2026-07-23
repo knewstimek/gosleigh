@@ -20,13 +20,9 @@ import (
 	"gosleigh/pkg/address"
 )
 
-// paramEntry mirrors the small subset of Ghidra ParamEntry state needed for ParamTrial ordering.
-// C++ parity: fspec.hh ParamEntry (partial)
-type paramEntry struct {
-	group        int32
-	exclusion    bool
-	reverseStack bool
-}
+// paramEntry is defined in paramlist.go (full port of Ghidra ParamEntry). The
+// denormalized fields group/exclusion/reverseStack read by ParamTrial.Less are
+// kept in sync there.
 
 // ParamTrial is a placeholder for a potential parameter location.
 // C++ parity: fspec.hh ParamTrial
@@ -122,6 +118,15 @@ func (p *ParamTrial) SetEntry(ent *paramEntry, off int32) {
 	}
 	p.entry = ent
 	p.offset = off
+}
+
+// slotGroup returns the position of this trial within its parameter group.
+// C++ parity: ParamTrial::slotGroup (fspec.hh:265) -> entry->getSlot(addr,size-1).
+func (p *ParamTrial) slotGroup() int32 {
+	if p == nil || p.entry == nil {
+		return 0
+	}
+	return p.entry.getSlot(p.addr, p.size-1)
 }
 
 // SetFixedPosition updates the fixed-position sort key.
