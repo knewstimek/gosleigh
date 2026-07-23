@@ -28,11 +28,11 @@
       "name": "gate",
       "entry": 9744,
       "tags": [
-        "TEMP"
+        "UNKNOWN"
       ],
       "evidence": {
-        "TEMP": [
-          "extra temp/local identifiers in output (1 vs 0): iVar1"
+        "UNKNOWN": [
+          "no heuristic matched -- manual review needed"
         ]
       }
     },
@@ -57,9 +57,8 @@
       ],
       "evidence": {
         "TYPECAST": [
-          "cast (int): want=4 got=0",
+          "cast (int): want=4 got=2",
           "cast (ulonglong): want=2 got=0",
-          "cast (undefined4): want=0 got=1",
           "CONCAT/SUBPIECE: want=1 got=0"
         ],
         "CALL": [
@@ -183,9 +182,10 @@
     "match": 8,
     "tag_counts": {
       "MATCH": 8,
-      "TEMP": 2,
+      "UNKNOWN": 1,
       "TYPECAST": 3,
       "CALL": 2,
+      "TEMP": 1,
       "FP": 1,
       "NAMING": 1
     }

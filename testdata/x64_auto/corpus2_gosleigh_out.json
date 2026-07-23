@@ -10,7 +10,7 @@
     },
     {
       "name": "gate",
-      "output": "\nint gate(int param_1,int param_2,int param_3,int param_4)\n\n{\nif ((0 \u003c param_1) \u0026\u0026 (0 \u003c param_2) || (param_3 \u003c 0) \u0026\u0026 (param_4 != 0)) {\niVar1 = param_1 + param_2;\n}\nelse {\niVar1 = param_3 - param_4;\n}\nreturn iVar1;\n}\n"
+      "output": "\nint gate(int param_1,int param_2,int param_3,int param_4)\n\n{\nif ((0 \u003c param_1) \u0026\u0026 (0 \u003c param_2) || (param_3 \u003c 0) \u0026\u0026 (param_4 != 0)) {\nparam_1 = param_1 + param_2;\n}\nelse {\nparam_1 = param_3 - param_4;\n}\nreturn param_1;\n}\n"
     },
     {
       "name": "clamp3",
@@ -18,7 +18,7 @@
     },
     {
       "name": "add_pt",
-      "output": "\nint add_pt(longlong param_1,longlong param_2)\n\n{\nreturn (undefined4)(param_1 + param_2);\n}\n"
+      "output": "\nundefined8 add_pt(undefined8 param_1,undefined8 param_2)\n\n{\nundefined4 local_res8;\nundefined4 local_resc;\nundefined4 local_res10;\nundefined4 local_res14;\n\nlocal_res10 = (int)param_2;\nlocal_res8 = (int)param_1;\nlocal_res14 = SUBPIECE(param_2, 4);\nlocal_resc = SUBPIECE(param_1, 4);\nreturn CONCAT(local_resc + local_res14, local_res8 + local_res10);\n}\n"
     },
     {
       "name": "bump_scores",

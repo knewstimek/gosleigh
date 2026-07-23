@@ -551,6 +551,23 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 		if vn == nil || vn.Space() == nil {
 			continue
 		}
+		// Free (unattached / dead) Varnodes contribute no RangeHint. C++
+		// MapState::gatherVarnodes (varmap.cc:1134) opens its loop with
+		// `if (vn->isFree()) continue;`, and it walks the live location index
+		// (Funcdata::beginLoc), not a creation-order bank.
+		//
+		// This matters because Gosleigh's bank retains Varnodes that later passes
+		// detached. A wide stack spill that SubvariableFlow/SplitVarnode has since
+		// replaced by its 4-byte halves (add_pt: the 8-byte `mov [rsp+8],rcx` slot,
+		// superseded by SUB84 writes at +8 and +0xc) is dead but still in the bank.
+		// Emitting a SymbolEntry for it leaves an 8-byte Symbol at +8 overlapping the
+		// live 4-byte Symbols at +8 and +0xc, which breaks the disjoint-cover
+		// invariant ScopeLocal::restructure guarantees; findOverlap then answers the
+		// +0xc query with the stale wide Symbol and two distinct slots render under
+		// one name.
+		if vn.IsFree() {
+			continue
+		}
 		if !isStackSpace(vn, sl.model) {
 			continue
 		}
