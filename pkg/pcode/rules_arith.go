@@ -261,12 +261,23 @@ func NewRule2Comp2Sub(group string) *Rule2Comp2Sub {
 }
 
 func (r *Rule2Comp2Sub) apply(op *PcodeOp, data *Funcdata) int {
-	if neg := definedBy(op.Input(0), CPUI_INT_2COMP); neg != nil {
-		rewriteOp(data, op, CPUI_INT_SUB, op.Input(1), neg.Input(0))
-		return 1
-	}
-	if neg := definedBy(op.Input(1), CPUI_INT_2COMP); neg != nil {
-		rewriteOp(data, op, CPUI_INT_SUB, op.Input(0), neg.Input(0))
+	for slot := 0; slot < 2; slot++ {
+		neg := definedBy(op.Input(slot), CPUI_INT_2COMP)
+		if neg == nil {
+			continue
+		}
+		rewriteOp(data, op, CPUI_INT_SUB, op.Input(1-slot), neg.Input(0))
+		// C++ parity: Rule2Comp2Sub::applyOp (ruleaction.cc:7254) destroys the
+		// INT_2COMP after folding it into the ADD-turned-SUB. C++ triggers on the
+		// 2COMP and fires only when it is loneDescend into the ADD; this ADD-triggered
+		// form reaches the same state when this ADD was the 2COMP's sole consumer.
+		// rewriteOp already unset the ADD's old inputs, so an orphaned 2COMP now has
+		// NumDescend()==0. Cleanup runs after the last ActionDeadCode, so no deadcode
+		// pass would remove it -- destroy it here, else the dead op keeps its operand
+		// at two uses and blocks inlining.
+		if out := neg.Output(); out != nil && out.NumDescend() == 0 {
+			data.OpDestroy(neg)
+		}
 		return 1
 	}
 	return 0
