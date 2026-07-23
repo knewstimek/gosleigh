@@ -2,7 +2,7 @@
 
 goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldengap/goldengap.py report`로 재생성).
 
-26/32 MATCH (indent-insensitive).
+28/32 MATCH (indent-insensitive).
 
 ## 함수별 분류
 
@@ -14,7 +14,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `while_pretest_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `loop_forever_break` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `nested_while_matrix` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `while_countdown` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
+| `while_countdown` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `switch_dense` | TYPECAST | TYPECAST: cast (int): want=1 got=0<br>TYPECAST: cast (uint): want=1 got=2<br>TYPECAST: cast (ulonglong): want=0 got=1 |
 | `switch_sparse` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `switch_no_default` | MATCH | MATCH: byte-identical (indent-insensitive) |
@@ -24,7 +24,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `array_reverse_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `reverse_bytes_inplace` | TEMP | TEMP: extra temp/local identifiers in output (4 vs 3): iVar1 |
 | `bit_mask_shift_combo` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `popcount_loop` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
+| `popcount_loop` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `xor_swap_pair` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `bit_rotate_left` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `unsigned_wrap_compare` | MATCH | MATCH: byte-identical (indent-insensitive) |
@@ -43,9 +43,8 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 
 ## 태그 분포
 
-- MATCH: 26
+- MATCH: 28
 - PTR: 1
 - TEMP: 2
 - TYPECAST: 3
-- UNKNOWN: 2
 

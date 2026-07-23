@@ -304,7 +304,14 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRuleBoolZext(group) },
 	func(group string) Rule { return NewRuleLogic2Bool(group) },
 	func(group string) Rule { return NewRuleMultiCollapse(group) },
-	func(group string) Rule { return NewRuleAddUnsigned(group) },
+	// RuleAddUnsigned is deliberately NOT registered here. C++ registers it only in
+	// the cleanup pool (coreaction.cc:5708 actcleanup), never in an analysis pool.
+	// Co-registering it alongside RuleSub2Add (below) forms a rewrite cycle:
+	// RuleSub2Add turns `x - c` into `x + (c * -1)`, RuleCollapseConstants folds
+	// that back to `x + (-c)`, and RuleAddUnsigned turns it into `x - c` again.
+	// Gosleigh used to break the cycle by excluding all-ones constants from
+	// RuleAddUnsigned, which also broke the faithful `x + 0xffffffff => x - 1`
+	// rewrite. Matching the C++ pool placement is the parity fix.
 	func(group string) Rule { return NewRule2Comp2Sub(group) },
 	func(group string) Rule { return NewRuleSubRight(group) },
 	// RulePushMultiME must come BEFORE RulePropagateCopy: PushMultiME fires on
