@@ -27,7 +27,7 @@ Go-only 19, C++-only 21(그중 11은 명시적 stub).
 | # | 룰 | C++이 하는 일 (위치) | Go가 하는 일 | 우선순위 |
 |---|---|---|---|---|
 | 1 | ~~`RuleXorCollapse`~~ | `{INT_EQUAL,NOTEQUAL}` `(V^W)==0 => V==W` (ruleaction.cc:4058) | `{INT_XOR}` 항등원 정리 | **착지 `31539bc`** (기존 본체는 `RuleXorIdentity`로 보존) |
-| 2 | `RuleZextEliminate` | `{EQUAL,NOTEQUAL,LESS,LESSEQUAL}` `zext(V)==c => V==c` (2491) | `{INT_ZEXT}` COPY/fold | **최상** |
+| 2 | ~~`RuleZextEliminate`~~ | `{EQUAL,NOTEQUAL,LESS,LESSEQUAL}` `zext(V)==c => V==c` (2491) | `{INT_ZEXT}` COPY/fold | **착지** (기존 본체는 `RuleZextIdentity`로 보존. **발화 계측 701진입/0발화** -- 비교 피연산자가 이 시점엔 이미 ZEXT가 아님. 왜인지 추적이 후속) |
 | 3 | `RuleShiftPiece` | `{INT_ADD,OR,XOR}` `(zext(V)<<16)+zext(W) => concat` (3773) | `{INT_LEFT,RIGHT}` -- **RuleConcatShift와 본체 완전 동일(중복)** | **최상** |
 | 4 | `RuleDoubleSub` | `{SUBPIECE}` `sub(sub(V,c),d) => sub(V,c+d)` (1798) | `{INT_SUB}` 산술 뺄셈 접기 | 상 |
 | 5 | `RuleRightShiftAnd` | `{INT_RIGHT,SRIGHT}` 시프트 **안쪽** 마스크 제거 (568) | `{INT_AND}` 시프트 **바깥** 마스크 제거(방향 반대) | 상 |
