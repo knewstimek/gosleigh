@@ -220,6 +220,84 @@ func (pe *paramEntry) containsOffset(addr address.Address) bool {
 	return addr.Offset >= pe.addressbase && addr.Offset <= pe.addressbase+uint64(pe.size)-1
 }
 
+// containedBy reports whether this entry's whole range fits inside the given
+// range. C++ parity: ParamEntry::containedBy (fspec.cc:199). Join entries are
+// not modeled (no join pentries in the ABIs exercised here).
+func (pe *paramEntry) containedBy(addr address.Address, sz int32) bool {
+	if addr.Space == nil || addr.Space.Index != pe.spaceIndex {
+		return false
+	}
+	if pe.addressbase < addr.Offset {
+		return false
+	}
+	entryoff := pe.addressbase + uint64(pe.size) - 1
+	rangeoff := addr.Offset + uint64(sz) - 1
+	return entryoff <= rangeoff
+}
+
+// ParamEntry containment codes: how a storage range relates to the parameter
+// entries of a ParamList. C++ parity: fspec.hh ParamEntry enum (fspec.hh:100-105);
+// the ordinal values match so a straight port of the switch logic reads the same.
+const (
+	peNoContainment       = 0 // range neither contains nor is contained by an entry
+	peContainsUnjustified = 1 // an entry contains the range, but not its least significant bytes
+	peContainsJustified   = 2 // an entry contains the range as its least significant bytes
+	peContainedBy         = 3 // the range contains at least one entry
+)
+
+// characterizeAsParam classifies how the given range relates to this list's
+// parameter entries. C++ parity: ParamListStandard::characterizeAsParam
+// (fspec.cc:682). The C++ version drives the walk from a ParamEntryResolver
+// (an interval map keyed by offset); Gosleigh keeps the entries in document
+// order and reproduces the same two phases explicitly:
+//   - phase 1 walks the entries whose range covers loc (resolver->find(offset)),
+//   - phase 2 walks the entries that merely *start* inside [loc, loc+size)
+//     (resolver->find_end(offset+size-1)), which is how a range wider than an
+//     entry is recognized as contained_by.
+func (pl *ParamListStandard) characterizeAsParam(loc address.Address, size int32) int {
+	if pl == nil || loc.Space == nil || size <= 0 {
+		return peNoContainment
+	}
+	resContains := false
+	resContainedBy := false
+	for _, pe := range pl.entry {
+		if !pe.containsOffset(loc) {
+			continue
+		}
+		off := pe.justifiedContain(loc, size)
+		if off == 0 {
+			return peContainsJustified
+		} else if off > 0 {
+			resContains = true
+		}
+		if pe.isExclusion() && pe.containedBy(loc, size) {
+			resContainedBy = true
+		}
+	}
+	if resContains {
+		return peContainsUnjustified
+	}
+	if resContainedBy {
+		return peContainedBy
+	}
+	last := loc.Offset + uint64(size) - 1
+	for _, pe := range pl.entry {
+		if pe.containsOffset(loc) {
+			continue // already visited in phase 1
+		}
+		if loc.Space.Index != pe.spaceIndex {
+			continue
+		}
+		if pe.addressbase < loc.Offset || pe.addressbase > last {
+			continue
+		}
+		if pe.isExclusion() && pe.containedBy(loc, size) {
+			return peContainedBy
+		}
+	}
+	return peNoContainment
+}
+
 // ParamListStandard is the faithful port of the standard parameter list model:
 // an ordered list of ParamEntry plus the resource-section boundaries. It maps a
 // set of Varnode trials (ParamActive) onto formal parameter storage.
@@ -335,6 +413,27 @@ func (pl *ParamListStandard) findEntry(loc address.Address, size int32, just boo
 		}
 	}
 	return nil
+}
+
+// GetMaxDelay returns the maximum heritage delay across the spaces that hold a
+// parameter entry. A non-zero delay means parameter storage lives in a space
+// that is heritaged late (the stack spacebase), so trial classification must be
+// deferred for several passes -- see FuncCallSpecs.InitActiveInput.
+// C++ parity: ParamListStandard::calcDelay / getMaxDelay (fspec.cc:1153).
+func (pl *ParamListStandard) GetMaxDelay() int32 {
+	if pl == nil {
+		return 0
+	}
+	var maxdelay int32
+	for _, pe := range pl.entry {
+		if pe.space == nil {
+			continue
+		}
+		if pe.space.Delay > maxdelay {
+			maxdelay = pe.space.Delay
+		}
+	}
+	return maxdelay
 }
 
 // possibleParam reports whether the given range could be a parameter under this

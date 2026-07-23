@@ -124,10 +124,10 @@
       ],
       "evidence": {
         "TYPECAST": [
-          "cast (void): want=0 got=1"
+          "cast (ulonglong): want=0 got=16"
         ],
         "TEMP": [
-          "extra temp/local identifiers in output (3 vs 2): local_146, local_92, uVar1"
+          "extra temp/local identifiers in output (4 vs 2): local_146, local_92, uVar1, uVar2"
         ],
         "CALL": [
           "suspicious call target(s) in output: local_146, local_92",

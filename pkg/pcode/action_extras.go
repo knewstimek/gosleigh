@@ -77,7 +77,17 @@ func (fc *FuncCallSpecs) InitActiveInput() {
 		return
 	}
 	if fc.getActiveInputState() == nil {
-		fc.setActiveInputState(NewParamActive(false))
+		active := NewParamActive(false)
+		// Defer the trial decision when any parameter entry lives in a space
+		// heritaged with a delay (the stack spacebase): those trials only become
+		// visible after several heritage passes.
+		// C++ parity: fspec.cc FuncCallSpecs::initActiveInput (5331-5339).
+		if m := fc.FuncProto.model; m != nil && m.InputParams != nil {
+			if m.InputParams.GetMaxDelay() > 0 {
+				active.SetMaxPass(3)
+			}
+		}
+		fc.setActiveInputState(active)
 	}
 }
 

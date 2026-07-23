@@ -38,7 +38,7 @@
     },
     {
       "name": "caller",
-      "output": "\nvoid caller(void)\n\n{\nundefined8 uVar1;\n\nuVar1 = local_92();\nuVar1 = local_146();\nreturn;\n}\n"
+      "output": "\nvoid caller(uint param_1,uint param_2,uint param_3,uint param_4,undefined4 param_5)\n\n{\nundefined8 uVar1;\nulonglong uVar2;\n\nuVar2 = (ulonglong)param_1;\nuVar2 = (ulonglong)param_2;\nuVar2 = (ulonglong)param_3;\nuVar2 = (ulonglong)param_4;\nuVar1 = local_92((ulonglong)param_1, (ulonglong)param_2, (ulonglong)param_3, (ulonglong)param_4);\nuVar2 = (ulonglong)param_4;\nuVar2 = (ulonglong)param_3;\nuVar2 = (ulonglong)param_2;\nuVar2 = (ulonglong)param_1;\nuVar1 = local_146((ulonglong)param_4, (ulonglong)param_3, (ulonglong)param_2, (ulonglong)param_1);\nreturn;\n}\n"
     },
     {
       "name": "parse_steps",

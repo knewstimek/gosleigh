@@ -132,6 +132,34 @@ func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 			}
 		}
 
+		// Register an input (parameter) trial when the call is still recovering
+		// its inputs and this range fits one of the model's parameter entries.
+		// A fresh Varnode at the range is appended as an extra CALL input so the
+		// renaming pass that follows wires it to the reaching definition; the
+		// trial and the input slot stay in lockstep (trial slot N == op input N).
+		// Like the output block above, this runs independently of the INDIRECT
+		// dedup below (whichTrial is the idempotence guard) so a re-heritage pass
+		// still picks up newly heritaged parameter ranges.
+		//
+		// Note the C++ tryregister gate: for a spacebase range whose call-site
+		// stack offset is unknown, C++ registers no trial. Gosleigh reaches this
+		// point only for the register space (the early return above), which is
+		// the same outcome -- see FuncCallSpecs.GetSpacebaseOffset.
+		// C++ parity: heritage.cc Heritage::guardCalls (isInputActive block,
+		// lines 1495-1508); guardCallOverlappingInput (contained_by) unported.
+		if fc := h.fd.callSpecsForOp(op); fc != nil && fc.IsInputActive() {
+			addr := address.Address{Space: sp, Offset: offset}
+			if fc.CharacterizeAsInputParam(addr, size) == peContainsJustified {
+				active := fc.GetActiveInput()
+				if active != nil && active.WhichTrial(addr, size) < 0 {
+					active.RegisterTrial(addr, size)
+					vn := h.fd.NewVarnode(size, addr)
+					vn.SetActiveHeritage()
+					h.fd.OpInsertInput(op, vn, op.NumInput())
+				}
+			}
+		}
+
 		key := callGuardKey{callOp: op, offset: offset, size: size}
 		if h.guarded[key] {
 			continue

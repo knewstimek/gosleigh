@@ -17,7 +17,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `sum_via_pp` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `divmix` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `helper_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `caller` | TYPECAST, TEMP, CALL | TYPECAST: cast (void): want=0 got=1<br>TEMP: extra temp/local identifiers in output (3 vs 2): local_146, local_92, uVar1<br>CALL: suspicious call target(s) in output: local_146, local_92<br>CALL: call(s) present in golden but missing in output: helper_sum |
+| `caller` | TYPECAST, TEMP, CALL | TYPECAST: cast (ulonglong): want=0 got=16<br>TEMP: extra temp/local identifiers in output (4 vs 2): local_146, local_92, uVar1, uVar2<br>CALL: suspicious call target(s) in output: local_146, local_92<br>CALL: call(s) present in golden but missing in output: helper_sum |
 | `parse_steps` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `faverage` | TYPECAST, FP | TYPECAST: cast (void): want=0 got=1<br>FP: golden uses float/double, output has none (FP subsystem gap)<br>FP: output drastically smaller than golden (9 vs 44 tokens) -- stub/empty body |
 | `umulhi` | NAMING | NAMING: identical token structure; only identifier names differ |

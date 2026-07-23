@@ -1161,9 +1161,55 @@ func (a *ActionActiveParam) Clone(groups ActionGroupList) Action {
 	return NewActionActiveParam(a.GetGroup())
 }
 
-// Apply determines active parameters from the current SSA graph.
-// C++ parity: coreaction.cc ActionActiveParam::apply
+// Apply resolves each CALL site's input parameters from its active-input trials,
+// then recovers the current function's own parameters.
+//
+// The call-site loop is the faithful port of C++ ActionActiveParam::apply: for a
+// call still in input recovery, the speculative inputs Heritage::guardCalls
+// appended are classified (checkInputTrialUse), the pass counter advances until
+// the model's maxpass is exhausted, and once fully checked the ParamList picks
+// the formal map (deriveInputMap) and the CALL's input list is rewritten to
+// exactly the surviving parameters (buildInputFromTrials).
+//
+// ApplyActiveParamModel afterwards is a Go-local addition with no C++ counterpart
+// in this action: it recovers the *current* function's parameters, which C++ does
+// later in ActionInputPrototype (fixateproto). It must run after the call loop --
+// an entry parameter is only observably live once the call sites that consume it
+// hold it as an argument.
+// C++ parity: coreaction.cc ActionActiveParam::apply (1726-1772).
 func (a *ActionActiveParam) Apply(data *Funcdata) int {
+	if data == nil {
+		return 0
+	}
+	for i := 0; i < data.NumCalls(); i++ {
+		fc := data.GetCallSpecs(i)
+		if fc == nil || !fc.IsInputActive() {
+			continue
+		}
+		activeinput := fc.GetActiveInput()
+		// An indirect call is not trimmable until at least one simplification
+		// pass has had a chance to deindirect it.
+		trimmable := activeinput.NumPasses() > 0 || (fc.op != nil && fc.op.Code() != CPUI_CALLIND)
+		if !activeinput.IsFullyChecked() {
+			fc.checkInputTrialUse(data)
+		}
+		activeinput.FinishPass()
+		if activeinput.NumPasses() > activeinput.MaxPass() {
+			activeinput.MarkFullyChecked()
+		} else {
+			a.count++ // count a change: there is still work to do
+		}
+		if trimmable && activeinput.IsFullyChecked() {
+			if activeinput.NeedsFinalCheck() {
+				fc.finalInputCheck()
+			}
+			fc.ResolveModel(activeinput)
+			fc.DeriveInputMap(activeinput)
+			fc.buildInputFromTrials(data)
+			fc.ClearActiveInput()
+			a.count++
+		}
+	}
 	if ApplyActiveParamModel(data) {
 		a.count++
 	}
