@@ -5,6 +5,38 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-24 (세션8): 병렬 2슬롯 Opus -- merge cover parity + INT_SUB 출력토큰 (master `636f820`)
+감독관 + Opus 2워커 병렬(worktree 격리, 파일 비중첩: merge vs typeop/render). 실측 우선(decomp_dbg/ssadiff/ssadump)
++ STOP 경계 + 전 게이트 -count=1 2회.
+
+**착지 1 -- markImplied LOAD-crossing-STORE cover parity (`365aa20`, action_mark.go)**: swap_via_temp의 사라진
+uVar1(시맨틱 오류: `*param_1=*param_2` STORE 뒤 `*param_2=*param_1`이 오염값 read) 진단. `markImpliedCheckCover`에
+C++ `ActionMarkImplied::checkImpliedCover`(coreaction.cc:3397-3404) 대비 2결함: (1) STORE containment이
+boundary-inclusive였으나 C++ `Cover::contain(op,2)`는 interior-only(`boundary()==0`), (2) alias 가드 `!` 반전
+(Go `if !possibleAlias return false` -> C++ `if isPossibleAlias(...) return false`). call-cross도 interior-only로
+정정. Go `CoverBlock.Contain/Boundary`(0/2/1 interior/start/stop) 시맨틱까지 C++ 대조 확인. **효과**:
+LOAD-crossing-interior-aliasing-STORE varnode(uVar1)가 올바르게 explicit 마킹. 단 출력 무변화(printc.go
+shouldInline nd==1이 explicit 무시 인라인 -- 렌더 절반은 별도 STOP). merge 선행조건 착지, 회귀 0.
+
+**착지 2 -- INT_SUB 출력토큰 arithmeticOutputStandard (`636f820`, typeop.go+typeop_cast.go)**: bit_rotate_left의
+spurious `U`(`0x1fU`). 근본은 cast.go 게이트 아님(충실) -- `0x20 - param_2`(INT_SUB)가 byte 아닌 TYPE_INT로
+타입돼 markExplicitUnsigned "반대편 unsigned 강제" 게이트(cast.cc:53-58) 미발화. Gosleigh가 CPUI_INT_SUB를
+plain typeOpBase로 등록 -> GetOutputToken이 static TYPE_INT. C++ `TypeOpIntSub::getOutputToken`(typeop.cc:1328-1332)은
+arithmeticOutputStandard 오버라이드. INT_ADD/INT_MULT 선례대로 typeOpIntSub 신설. **bit_rotate_left MATCH,
+x64_auto 24->25/32.** 완전 격리(gosleigh_out.json에서 bit_rotate_left만 변경). 전 게이트 무회귀.
+
+**진단 후 STOP 2건 (다음 스코프 세션)**:
+- swap_via_temp 렌더 절반: `printc.go shouldInline` nd==1 경로가 IsExplicit 무시 무조건 인라인(코드 주석 875-881이
+  명시 -- flag-faithful화 시 loop-carried PTRADD/CAST가 phantom 선언 누수, 세션6/7 반복 STOP 경계). explicit LOAD
+  타겟팅 + array_2d_sum/array_reverse_sum 인덱싱 게이트 재검 필요한 고위험 단독 세션.
+- popcount_loop `+0xffffffff`->`-1`: C++ `RuleAddUnsigned`(ruleaction.cc:7194 INT_ADD(V,0xff..)->INT_SUB)가
+  cleanup 풀 전용(coreaction.cc:5708). Gosleigh는 shared 분석 풀에 RuleAddUnsigned+RuleSub2Add 공존
+  (rules_copy.go:315,332)해 all-ones 제외(무한 cycle 가드). 충실 수정 = RuleAddUnsigned를 cleanup 풀 전용으로 +
+  조건 재작성(slot-1/TYPE_UINT/top-quarter-bits, all-ones 제외 삭제). 게다가 popcount는 네이밍(local_8 vs
+  local_res8)으로 어차피 non-MATCH. cross-file 고위험 별도 세션.
+
+---
+
 ### 2026-07-23 (세션6 후속5): char 리터럴 렌더 -- strlen_style strict MATCH (master `53fce49`)
 Opus 1슬롯 위임(worktree). 후속3에서 strlen_style for 구조는 맞췄으나 잔차 `!= 0` vs golden `!= '\0'`. decomp_dbg
 (C++ 코어 `!= '\0'`) + ssadump 실측: 비교 상수 `#0x0:1`의 read-facing이 TYPE_INT/SUB_INT_PLAIN size-1이고
