@@ -782,20 +782,9 @@ func (r *RulePushMulti) apply(op *PcodeOp, data *Funcdata) int {
 	return 0
 }
 
-type RulePushPtr struct{ batchRule }
-
-func NewRulePushPtr(group string) *RulePushPtr {
-	r := &RulePushPtr{}
-	r.batchRule = newBatchRule(group, "pushptr", []OpCode{CPUI_PTRADD, CPUI_PTRSUB}, r.apply, func(g string) Rule { return NewRulePushPtr(g) })
-	return r
-}
-
-func (r *RulePushPtr) apply(op *PcodeOp, data *Funcdata) int {
-	if op.NumInput() < 2 || !isZeroConst(op.Input(1)) {
-		return 0
-	}
-	return rewriteToCopy(data, op, op.Input(0))
-}
+// RulePushPtr lives in rules_pointer.go (faithful port of C++ ruleaction.cc
+// RulePushPtr). It used to be a PTRADD/PTRSUB zero-offset collapse here, which
+// was unrelated to the C++ rule of the same name and never fired on any golden.
 
 type RuleShiftPiece struct{ batchRule }
 
