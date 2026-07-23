@@ -15,9 +15,16 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-23 세션6, master `53fce49`, origin 푸시, 전 게이트 green 감독관 재검증)
+## 현재 상태 (2026-07-24 세션8, master `636f820`, 전 게이트 green 감독관 재검증 -- origin 푸시 대기)
 
 **권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`**. 요약:
+- **[세션8] 병렬 2슬롯 Opus 착지 2건**: (1) `markImpliedCheckCover` LOAD-crossing-STORE cover parity(`365aa20`,
+  action_mark.go) -- C++ `checkImpliedCover`(coreaction.cc:3397-3404) 대비 alias 가드 `!` 반전 + containment
+  boundary-inclusive 정정(interior-only `Cover::contain(op,2)`). swap_via_temp uVar1 explicit 마킹의 필수 선행조건
+  (출력 무변화, 렌더 절반은 STOP). (2) INT_SUB 출력토큰 arithmeticOutputStandard(`636f820`, typeop.go+typeop_cast.go)
+  -- `TypeOpIntSub::getOutputToken`(typeop.cc:1328-1332) 포팅, bit_rotate_left의 spurious `U` 제거 -> **MATCH,
+  x64_auto 24->25/32**. 상세 CHANGELOG 세션8. STOP 2건(swap 렌더=printc nd==1 phantom 누수 / popcount=RuleAddUnsigned
+  풀 재배치)은 다음 스코프 세션.
 - **[세션6 후속5] char 리터럴 렌더 착지(`53fce49`)**: `renderConstant`(printc.go)에 char-print 분기 추가
   (size-1 signed int -> `'\0'`, C++ type.cc:3642 cacheCoreTypes 재현, val<0x80 좁은 게이트). strlen_style
   strict MATCH -> **x64_auto 23->24/32**. 전 게이트 무회귀.
@@ -40,7 +47,7 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   no_branch/only_branch 미러, printc.cc:2913). **x64_auto 21->22/32**(multi_return_early MATCH). 상세 CHANGELOG
   세션6 후속2. 아래 게이트 수치는 이 값으로 갱신됨.
 - 게이트: tree **10/10**, x64 corpus **8/8**, **op_switch byte-MATCH**, breadth **3/3**,
-  corpus2 **8/13**(+sum_via_pp), x64_auto **24/32**(+sum_pp_walk +strlen_style), production 전부 PASS, `go test ./...` green.
+  corpus2 **8/13**(+sum_via_pp), x64_auto **25/32**(+bit_rotate_left), production 전부 PASS, `go test ./...` green.
 - 세션5 착지(상세 CHANGELOG 세션5): **GenGoldens bodyHex 손상 버그**(dead-code island 누락으로 분기 변위
   파괴 -- 전 코퍼스 감사로 x64_auto 2건만 손상 확정, 붕괴형 mismatch는 입력 무결성부터) + 엔진 9건
   (cover 인덱스=블록위치, LoopBody 포인터 안정성, InfLoop do/while(true), RuleCollectTerms 포팅,
@@ -57,12 +64,13 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 다음 작업 (우선순위)
 
-> **[최신] 2026-07-23 세션7 (master `48a747b` origin 동기화): for-loop 인식(`60e01f0`) + (B) print-inline
-> 일부(`4759d8e`) + char 리터럴(`53fce49`) 착지. **corpus2 8/13, x64_auto 24/32**. 다음 후보(전부 대형/딥존) =
-> **umulhi**(printc 표현식렌더를 flat-string -> 그룹토큰스트림 재아키텍처, Oppen코어 prettyprint.go는 완성이나
-> PrintC가 굵은 불투명 토큰만 넘겨 RHS 내부 연산자에서 못 접음 -- 코어렌더 영향 단독세션) / swap_via_temp
-> (markImpliedCheckCover LOAD/STORE alias cover, merge 딥존) / A2 잔여(IsParamOffset 완전대체). 권위 있는
-> 다음-작업/현재상태는 저장소 루트 `NEXT_SESSION_PROMPT.md` + CHANGELOG 2026-07-23 세션6 후속3~5 참조.
+> **[최신] 2026-07-24 세션8 (master `636f820`): merge cover parity(`365aa20`) + INT_SUB 출력토큰(`636f820`) 착지.
+> **corpus2 8/13, x64_auto 25/32**(+bit_rotate_left). 다음 후보(전부 대형/딥존) = **swap_via_temp 렌더 절반**
+> (printc.go shouldInline nd==1이 IsExplicit 존중 -- merge 선행조건은 이미 착지, phantom 선언 누수 STOP 경계라
+> explicit LOAD 타겟팅+array 게이트 재검 단독세션) / **popcount RuleAddUnsigned**(cleanup 풀 전용 재배치 +
+> 조건 재작성, cross-file 고위험) / **umulhi**(printc flat-string -> 그룹토큰스트림 재아키텍처, 단독세션) /
+> A2 잔여(IsParamOffset 완전대체). 권위 있는 다음-작업/현재상태는 저장소 루트 `NEXT_SESSION_PROMPT.md` +
+> CHANGELOG 2026-07-24 세션8 참조.
 > 갭 지도 = `testdata/x64_auto/GAPMAP.md` + `testdata/x64_corpus2/README.md`.**
 
 ## 잔여 부채 (2026-07-17 세션5 실측 검증 -- 다음 작업의 권위는 루트 NEXT_SESSION_PROMPT.md)
