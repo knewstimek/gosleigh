@@ -2,7 +2,7 @@
 
 goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldengap/goldengap.py report`로 재생성).
 
-30/32 MATCH (indent-insensitive).
+31/32 MATCH (indent-insensitive).
 
 ## 함수별 분류
 
@@ -20,7 +20,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `switch_no_default` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `switch_fallthrough` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `array_2d_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `array_init_then_sum` | TYPECAST, PTR, TEMP | TYPECAST: cast (char): want=0 got=2<br>TYPECAST: cast (longlong): want=0 got=2<br>PTR: raw pointer scale '* 4': want=0 got=2<br>TEMP: extra temp/local identifiers in output (3 vs 2): local_423 |
+| `array_init_then_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `array_reverse_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `reverse_bytes_inplace` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `bit_mask_shift_combo` | MATCH | MATCH: byte-identical (indent-insensitive) |
@@ -43,8 +43,6 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 
 ## 태그 분포
 
-- MATCH: 30
-- PTR: 1
-- TEMP: 1
-- TYPECAST: 2
+- MATCH: 31
+- TYPECAST: 1
 

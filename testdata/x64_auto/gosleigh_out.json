@@ -50,7 +50,7 @@
     },
     {
       "name": "array_init_then_sum",
-      "output": "\nint array_init_then_sum(int param_1)\n\n{\nint local_res8;\nint local_58;\nint local_54;\n\nlocal_res8 = param_1;\nif (0x10 \u003c param_1) {\nlocal_res8 = 0x10;\n}\nfor (local_58 = 0; local_58 \u003c local_res8; local_58 = local_58 + 1) {\n*((char *)local_423 + -0x48 + (longlong)local_58 * 4) = local_58 * local_58;\n}\nlocal_54 = 0;\nfor (local_58 = 0; local_58 \u003c local_res8; local_58 = local_58 + 1) {\nlocal_54 = local_54 + ((char *)local_423 + -0x48)[(longlong)local_58 * 4];\n}\nreturn local_54;\n}\n"
+      "output": "\nint array_init_then_sum(int param_1)\n\n{\nint local_res8;\nint local_58;\nint local_54;\nint aiStack_48 [18];\n\nlocal_res8 = param_1;\nif (0x10 \u003c param_1) {\nlocal_res8 = 0x10;\n}\nfor (local_58 = 0; local_58 \u003c local_res8; local_58 = local_58 + 1) {\naiStack_48[local_58] = local_58 * local_58;\n}\nlocal_54 = 0;\nfor (local_58 = 0; local_58 \u003c local_res8; local_58 = local_58 + 1) {\nlocal_54 = local_54 + aiStack_48[local_58];\n}\nreturn local_54;\n}\n"
     },
     {
       "name": "array_reverse_sum",
