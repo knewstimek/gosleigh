@@ -111,6 +111,22 @@ type ProtoModel struct {
 	// registers.  Populated by WithEffectOffsets.
 	// C++ parity: EffectRecord set for PrototypeModel::unaffected regions.
 	UnaffectedOffsets map[uint64]bool
+
+	// InputParams is the faithful port of PrototypeModel::input
+	// (ParamListStandard): the ordered <pentry> storage model used by
+	// FuncProto::deriveInputMap to recover the current function's formal input
+	// list from Varnode trials. Built from the cspec <input> pentries by the
+	// bridge (which owns the register/stack address spaces). Nil for cspec-less
+	// builds; recovery then falls back to the register/stack heuristics.
+	// C++ parity: PrototypeModel::input (compiler.hh).
+	InputParams *ParamListStandard
+}
+
+// SetInputParams attaches the faithful input parameter-storage model.
+func (pm *ProtoModel) SetInputParams(pl *ParamListStandard) {
+	if pm != nil {
+		pm.InputParams = pl
+	}
 }
 
 // RegLookupFunc is an optional callback for looking up a register's byte offset

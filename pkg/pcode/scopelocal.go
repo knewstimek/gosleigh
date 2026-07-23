@@ -406,6 +406,28 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 	}
 }
 
+// registerStackParam records a late-recovered stack parameter Varnode/HighVariable
+// pairing, applying the same bookkeeping BuildFromVarnodes performs for stack
+// params: map the Varnode to the HighVariable, mark it mapped+addrtied (stack
+// storage is identified by address, not SSA number), and seed a signed integer
+// type when untyped so it renders as int/long rather than undefined.
+// C++ parity: ScopeLocal::restructureHigh stack-slot HighVariable creation +
+// vn->setFlags(addrtied) + default TYPE_INT seed.
+func (sl *ScopeLocal) registerStackParam(vn *Varnode, hv *HighVariable) {
+	if sl == nil || vn == nil || hv == nil {
+		return
+	}
+	sl.paramByVn[vn] = hv
+	vn.SetFlags(VarnodeMapped | VarnodeAddrTied)
+	if vn.Type() == nil {
+		sz := vn.Size()
+		if sz <= 0 {
+			sz = 4
+		}
+		SetVarnodeType(vn, sharedTypeFactory.GetBase(int32(sz), TYPE_INT, ""))
+	}
+}
+
 // FindEntry returns the HighVariable associated with the given varnode, if any.
 // C++ parity: ScopeLocal::findEntry
 func (sl *ScopeLocal) FindEntry(vn *Varnode) *HighVariable {

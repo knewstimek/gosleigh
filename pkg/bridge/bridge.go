@@ -583,6 +583,14 @@ func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Fun
 		if ss := buildFaithfulStackSpace(xr, cspec, fd); ss != nil {
 			model.StackSpace = ss
 		}
+		// Build the faithful input parameter-storage model (ParamListStandard)
+		// from the cspec <input> pentries. This drives FuncProto::deriveInputMap
+		// (ActionInputPrototype) so stack parameters that only materialize after
+		// ActionSpacebase are still recovered. Requires model.StackSpace so the
+		// stack <pentry> resolves; built here after StackSpace is set.
+		if specs := buildInputPentrySpecs(xr, cspec, model, fd); len(specs) > 0 {
+			model.SetInputParams(pcode.NewParamListStandard(specs))
+		}
 	}
 	// Entry-point functions use the stack-based processEntry convention: register
 	// argument slots stay known (RegParamOffsets) but are not recovered as named
@@ -681,6 +689,79 @@ func registerSpaceByIndex(fd *pcode.Funcdata, si int64) (*address.Space, uint16)
 		}
 	}
 	return found, maxIdx
+}
+
+// buildInputPentrySpecs resolves the cspec default-proto <input> pentries into
+// pcode.ParamEntrySpec records for NewParamListStandard. Register pentries are
+// resolved to their register-space offset via xr.RegisterByName; the stack
+// pentry uses model.StackSpace. Group ids are assigned in document order: each
+// <group> shares one id, then top-level pentries (the stack entry) each take a
+// fresh id -- matching the ParamListStandard::decode numgroup sequence for the
+// x86/x64 ABIs.
+// C++ parity: ParamListStandard::decode + parseGroup/parsePentry group ids.
+func buildInputPentrySpecs(xr *sla.XRefs, cspec *pcode.CspecData, model *pcode.ProtoModel, fd *pcode.Funcdata) []pcode.ParamEntrySpec {
+	if cspec == nil || cspec.DefaultProto == nil {
+		return nil
+	}
+	var specs []pcode.ParamEntrySpec
+	var group int32
+	var regSpace *address.Space
+	addPentry := func(pe pcode.CspecPentry, grp int32, grouped bool) bool {
+		spec := pcode.ParamEntrySpec{
+			MinSize: int32(pe.MinSize),
+			MaxSize: int32(pe.MaxSize),
+			Align:   int32(pe.Align),
+			IsFloat: pe.Metatype == "float" || pe.Storage == "float",
+			Grouped: grouped,
+			GroupID: grp,
+		}
+		switch {
+		case pe.Register != nil:
+			si, off, _, ok := xr.RegisterByName(pe.Register.Name)
+			if !ok {
+				return false
+			}
+			if regSpace == nil {
+				regSpace, _ = registerSpaceByIndex(fd, si)
+			}
+			if regSpace == nil {
+				return false
+			}
+			spec.Space = regSpace
+			spec.BigEndian = regSpace.BigEndian
+			spec.AddressBase = off
+		case pe.Addr != nil && pe.Addr.Space == "stack":
+			if model.StackSpace == nil {
+				return false
+			}
+			spec.Space = model.StackSpace
+			spec.BigEndian = model.StackSpace.BigEndian
+			spec.AddressBase = uint64(pe.Addr.Offset)
+		default:
+			return false // unsupported storage (e.g. join/hiddenret) -- skip
+		}
+		specs = append(specs, spec)
+		return true
+	}
+	// Groups first (document order), each a shared group id.
+	for _, g := range cspec.DefaultProto.Input.Groups {
+		added := false
+		for _, pe := range g.Pentries {
+			if addPentry(pe, group, true) {
+				added = true
+			}
+		}
+		if added {
+			group++
+		}
+	}
+	// Then top-level pentries (the stack entry), each its own group.
+	for _, pe := range cspec.DefaultProto.Input.Pentries {
+		if addPentry(pe, group, false) {
+			group++
+		}
+	}
+	return specs
 }
 
 // buildSpaceIndex builds an index -> address.Space map covering the spaces the

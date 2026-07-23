@@ -1001,6 +1001,15 @@ func (a *ActionInputPrototype) Clone(groups ActionGroupList) Action {
 }
 
 // Apply finalizes the recovered input prototype.
+//
+// In C++ ActionInputPrototype (coreaction.cc:4718, fixateproto group) is the
+// authoritative current-function input recovery: it runs once at the very end,
+// after the full loop has converged and ActionSpacebase has materialized every
+// stack input. Gosleigh's earlier ActionActiveParam (main loop) already recovers
+// register parameters and locals, but it locks before ActionSpacebase runs, so a
+// stack parameter that only appears later (e.g. [rsp+0x28]) is missed. Here we
+// recover those missing stack inputs faithfully via the ParamListStandard input
+// map on the fully materialized SSA -- exactly the storage model C++ uses.
 // C++ parity: coreaction.cc ActionInputPrototype::apply
 func (a *ActionInputPrototype) Apply(data *Funcdata) int {
 	fp := data.GetFuncProto()
@@ -1023,7 +1032,9 @@ func (a *ActionInputPrototype) Apply(data *Funcdata) int {
 			scope.BuildFromVarnodes(data.GetVarnodeBank().AllVarnodes(), fp)
 			fp.SetInputLocked(true)
 		}
+		return 0
 	}
+	recoverMissingStackParams(data, fp)
 	return 0
 }
 
