@@ -162,21 +162,21 @@
       "name": "umulhi",
       "entry": 10688,
       "tags": [
-        "NAMING"
+        "MATCH"
       ],
       "evidence": {
-        "NAMING": [
-          "identical token structure; only identifier names differ"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     }
   ],
   "summary": {
     "total": 13,
-    "match": 9,
+    "match": 10,
     "tag_counts": {
-      "MATCH": 9,
-      "NAMING": 2,
+      "MATCH": 10,
+      "NAMING": 1,
       "TYPECAST": 2,
       "TEMP": 1,
       "CALL": 1,

@@ -57,17 +57,18 @@ type ExprFragment struct {
 	Text       string
 	Precedence ExprPrecedence
 	op         string
-	// leftText/rightText are the already-parenthesized operand strings of a
-	// binary fragment (empty for non-binary fragments). They let the emitter
-	// re-split a top-level binary expression into separate content tokens with a
-	// whitespace break around the operator, so the pretty-printer can wrap at the
-	// operator boundary instead of at an implied parenthesis. C++ parity: the
-	// Ghidra emitter never flattens an expression -- PrintLanguage::emitOp emits
-	// spaces(spacing,bump) break tokens around every operator (printlanguage.cc:
-	// 333-338); retaining the operands lets Gosleigh reproduce that break point
-	// for the outermost operator of a coarse (flat-string) fragment.
-	leftText  string
-	rightText string
+	// left/right are the unparenthesized child fragments of a binary fragment,
+	// with leftParen/rightParen recording whether binaryChildString wrapped them.
+	// Retaining the children keeps the whole expression tree available at emit
+	// time, so EmitFragment can reproduce Ghidra's per-operator token stream
+	// (a group per operator node, spaces(spacing,bump) on both sides of the
+	// operator, openParen/closeParen groups for parenthesized operands) instead
+	// of handing the pretty-printer one opaque content token. C++ parity: the
+	// RPN stack in PrintLanguage::pushOp/pushAtom never flattens a subtree.
+	left       *ExprFragment
+	right      *ExprFragment
+	leftParen  bool
+	rightParen bool
 }
 
 // associativeBinaryOps are the binary operators Ghidra marks associative in its
@@ -221,26 +222,97 @@ func (pl *PrintLanguage) EmitExpr(expr ExprFragment) {
 	pl.Token(expr.Text)
 }
 
-// EmitBrokenExpr emits a fragment as a token stream, splitting its outermost
-// binary operator into separate content tokens with a whitespace break on each
-// side. This reproduces Ghidra's emitOp binary emission -- spaces(spacing,bump),
-// operator, spaces(spacing,bump) (printlanguage.cc:333-338) -- so the Oppen
-// pretty-printer can insert a line break at the operator boundary when the line
-// overflows, exactly as the C++ does. The operands are emitted as flat content
-// tokens (their own operators are not further split), so only the outermost
-// break point is reproduced; this matches Ghidra for expressions that wrap at
-// their top-level operator. A fragment with no recorded binary operator is
-// emitted unchanged as a single content token.
-func (pl *PrintLanguage) EmitBrokenExpr(expr ExprFragment) {
-	if expr.op == "" || (expr.leftText == "" && expr.rightText == "") {
+// GroupEmitter is the optional part of the emitter contract that carries
+// expression structure: printing groups, parenthesis groups, and operator break
+// points. Only the pretty-printing emitter implements it; a plain TextEmitter
+// does not, in which case EmitFragment falls back to a single flat token (the
+// rendered characters are identical either way, only break opportunities are
+// lost). C++ parity: the Emit base class declares openGroup/closeGroup/
+// openParen/closeParen/spaces, and EmitNoMarkup ignores the grouping ones.
+type GroupEmitter interface {
+	OpenGroup() int
+	CloseGroup(id int)
+	OpenParen(paren string) int
+	CloseParen(paren string, id int)
+	Spaces(num, bump int)
+}
+
+// binaryOpBump is OpToken::bump for the binary operators PrintC builds through
+// BinaryExpr. Every one of them is spacing=1/bump=0 in printc.cc:36-57; only the
+// assignment family carries bump=5, and assignments are emitted by the statement
+// printer (EmitAssignFragment) rather than through BinaryExpr.
+const binaryOpBump = 0
+
+// binaryOpSpacing is OpToken::spacing for those same operators (printc.cc:36-57).
+const binaryOpSpacing = 1
+
+// assignOpBump is OpToken::bump for PrintC::assignment (printc.cc:56).
+const assignOpBump = 5
+
+// EmitFragment emits an expression as the nested token stream Ghidra produces,
+// so the Oppen pretty-printer can break at any operator boundary rather than
+// only between statement-level tokens. Each binary node becomes
+// openGroup / left / spaces(spacing,bump) / op / spaces(spacing,bump) / right /
+// closeGroup, and a parenthesized operand becomes an openParen/closeParen group,
+// mirroring PrintLanguage::pushOp + emitOp + pushAtom (printlanguage.cc:129-187,
+// 329-338). Nodes Gosleigh still renders as flat strings (unary, cast, call,
+// subscript, ...) are emitted as single content tokens; they contribute no break
+// point, exactly as they would if their internal spaces() calls were absent.
+func (pl *PrintLanguage) EmitFragment(expr ExprFragment) {
+	ge, ok := pl.emitter.(GroupEmitter)
+	if !ok {
 		pl.Token(expr.Text)
 		return
 	}
-	pl.Token(expr.leftText)
-	pl.Space()
+	pl.emitFragmentTree(ge, expr)
+}
+
+// EmitAssignFragment emits "lhs = rhs" with the assignment operator's own break
+// points and bump, then the rhs as a structured sub-expression. C++ parity:
+// PrintC::opCopy etc. push PrintC::assignment (spacing 1, bump 5) and let
+// emitOp place spaces(1,5) on both sides of "=" (printc.cc:56,
+// printlanguage.cc:333-338).
+func (pl *PrintLanguage) EmitAssignFragment(lhs string, rhs ExprFragment) {
+	ge, ok := pl.emitter.(GroupEmitter)
+	if !ok {
+		pl.Token(lhs)
+		pl.Space()
+		pl.Token("=")
+		pl.Space()
+		pl.Token(rhs.Text)
+		return
+	}
+	id := ge.OpenGroup()
+	pl.Token(lhs)
+	ge.Spaces(binaryOpSpacing, assignOpBump)
+	pl.Token("=")
+	ge.Spaces(binaryOpSpacing, assignOpBump)
+	pl.emitFragmentTree(ge, rhs)
+	ge.CloseGroup(id)
+}
+
+func (pl *PrintLanguage) emitFragmentTree(ge GroupEmitter, expr ExprFragment) {
+	if expr.op == "" || expr.left == nil || expr.right == nil {
+		pl.Token(expr.Text)
+		return
+	}
+	id := ge.OpenGroup()
+	pl.emitFragmentOperand(ge, *expr.left, expr.leftParen)
+	ge.Spaces(binaryOpSpacing, binaryOpBump)
 	pl.Token(expr.op)
-	pl.Space()
-	pl.Token(expr.rightText)
+	ge.Spaces(binaryOpSpacing, binaryOpBump)
+	pl.emitFragmentOperand(ge, *expr.right, expr.rightParen)
+	ge.CloseGroup(id)
+}
+
+func (pl *PrintLanguage) emitFragmentOperand(ge GroupEmitter, child ExprFragment, paren bool) {
+	if !paren {
+		pl.emitFragmentTree(ge, child)
+		return
+	}
+	id := ge.OpenParen("(")
+	pl.emitFragmentTree(ge, child)
+	ge.CloseParen(")", id)
 }
 
 func (pl *PrintLanguage) EmitChildExpr(expr ExprFragment, parent ExprPrecedence, pos ExprPosition, assoc ExprAssociativity) {
@@ -255,14 +327,17 @@ func (pl *PrintLanguage) UnaryExpr(op string, precedence ExprPrecedence, expr Ex
 }
 
 func (pl *PrintLanguage) BinaryExpr(left ExprFragment, op string, right ExprFragment, precedence ExprPrecedence, assoc ExprAssociativity) ExprFragment {
-	leftStr := pl.binaryChildString(left, op, precedence)
-	rightStr := pl.binaryChildString(right, op, precedence)
+	leftStr, leftParen := pl.binaryChild(left, op, precedence)
+	rightStr, rightParen := pl.binaryChild(right, op, precedence)
+	leftChild, rightChild := left, right
 	return ExprFragment{
 		Text:       leftStr + " " + op + " " + rightStr,
 		Precedence: precedence,
 		op:         op,
-		leftText:   leftStr,
-		rightText:  rightStr,
+		left:       &leftChild,
+		right:      &rightChild,
+		leftParen:  leftParen,
+		rightParen: rightParen,
 	}
 }
 
@@ -274,8 +349,16 @@ func (pl *PrintLanguage) BinaryExpr(left ExprFragment, op string, right ExprFrag
 // parenthesizes e.g. (a + b) - c and (a - b) - c because '-' is non-associative
 // and '+' != '-'.
 func (pl *PrintLanguage) binaryChildString(child ExprFragment, parentOp string, parentPrec ExprPrecedence) string {
+	s, _ := pl.binaryChild(child, parentOp, parentPrec)
+	return s
+}
+
+// binaryChild is binaryChildString plus the parenthesization decision itself,
+// which EmitFragment needs in order to emit an openParen/closeParen group
+// instead of literal "(" / ")" characters inside a flat token.
+func (pl *PrintLanguage) binaryChild(child ExprFragment, parentOp string, parentPrec ExprPrecedence) (string, bool) {
 	if child.Text == "" {
-		return ""
+		return "", false
 	}
 	paren := false
 	switch {
@@ -289,9 +372,9 @@ func (pl *PrintLanguage) binaryChildString(child ExprFragment, parentOp string, 
 		paren = !(child.op == parentOp && associativeBinaryOps[parentOp])
 	}
 	if paren {
-		return "(" + child.Text + ")"
+		return "(" + child.Text + ")", true
 	}
-	return child.Text
+	return child.Text, false
 }
 
 func (pl *PrintLanguage) PostfixExpr(expr ExprFragment, suffix string) ExprFragment {

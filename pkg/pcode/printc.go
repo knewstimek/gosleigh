@@ -2587,37 +2587,44 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 		if err != nil {
 			return err
 		}
-		rhs, err := s.renderVarnode(storeValue(op), cPrecAssign)
+		rhsFrag, err := s.renderVarnodeExpr(storeValue(op))
 		if err != nil {
 			return err
 		}
+		rhs := s.lang.ExprString(rhsFrag, cPrecAssign, ExprPosNone, ExprAssocNone)
 		s.lang.Statement(func() {
-			s.lang.Token(lhs)
-			s.lang.Space()
-			s.lang.Token("=")
-			s.lang.Space()
-			s.lang.Token(rhs)
+			s.emitAssign(lhs, rhsFrag, rhs)
 		})
 		return nil
 	case CPUI_RETURN:
 		// C++ parity: PrintC::emitStatement CPUI_RETURN (printc.cc ~line 780):
 		//   if (op->numInput()>1) { pushVn(op->getIn(1), op, mods); }
 		// returnValue selects input[1] (the return-value wiring form) or input[0] (raw form).
-		// renderReturnValue handles free (stale) varnodes by recovering the live expression.
+		// renderReturnValueFrag handles free (stale) varnodes by recovering the live expression.
+		var frag ExprFragment
 		expr := ""
 		if vn := returnValue(op); vn != nil {
 			var err error
-			expr, err = s.renderReturnValue(vn)
+			frag, err = s.renderReturnValueFrag(vn)
 			if err != nil {
 				return err
 			}
+			expr = s.lang.ExprString(frag, cPrecAssign, ExprPosNone, ExprAssocNone)
 		}
 		s.lang.Statement(func() {
 			s.lang.Token("return")
-			if expr != "" {
-				s.lang.Space()
-				s.lang.Token(expr)
+			if expr == "" {
+				return
 			}
+			s.lang.Space()
+			// C++ parity: PrintC::opReturn pushes the return value through the
+			// normal expression path, so its operator break points are live; the
+			// flat fallback only applies when the value needed outer parentheses.
+			if expr != frag.Text {
+				s.lang.Token(expr)
+				return
+			}
+			s.lang.EmitFragment(frag)
 		})
 		return nil
 	case CPUI_BRANCH:
@@ -2669,10 +2676,11 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 	default:
 		// Any required cast is already a CPUI_CAST op inserted by ActionSetCasts and
 		// rendered by renderOpExpr; no render-time cast synthesis is needed.
-		expr, err := s.renderOpExpr(op, cPrecAssign)
+		frag, err := s.renderOpExprFrag(op)
 		if err != nil {
 			return err
 		}
+		expr := s.lang.ExprString(frag, cPrecAssign, ExprPosNone, ExprAssocNone)
 		if op.Output() == nil {
 			s.lang.Statement(func() {
 				s.lang.Token(expr)
@@ -2681,19 +2689,36 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 		}
 		lhs := s.nameOf(op.Output())
 		s.lang.Statement(func() {
-			s.lang.Token(lhs)
-			s.lang.Space()
-			s.lang.Token("=")
-			s.lang.Space()
-			s.lang.Token(expr)
+			s.emitAssign(lhs, frag, expr)
 		})
 		return nil
 	}
 }
 
-func (s *printCState) renderReturnValue(vn *Varnode) (string, error) {
+// emitAssign emits "lhs = rhs" as a structured token stream when the rendered
+// fragment is exactly the fragment tree (no outer parenthesization was needed at
+// assignment precedence), so the pretty-printer can break at any operator inside
+// the right-hand side. Otherwise it falls back to the flat rendering, which is
+// character-identical but offers no interior break point. C++ parity:
+// PrintC pushes PrintC::assignment and recurses into the value expression; the
+// break points come from emitOp's spaces() calls (printlanguage.cc:333-338).
+func (s *printCState) emitAssign(lhs string, frag ExprFragment, rendered string) {
+	if rendered != frag.Text {
+		s.lang.Token(lhs)
+		s.lang.Space()
+		s.lang.Token("=")
+		s.lang.Space()
+		s.lang.Token(rendered)
+		return
+	}
+	s.lang.EmitAssignFragment(lhs, frag)
+}
+
+// renderReturnValueFrag is the return-value renderer, keeping the expression
+// tree so the RETURN statement can be emitted as a structured token stream.
+func (s *printCState) renderReturnValueFrag(vn *Varnode) (ExprFragment, error) {
 	if vn == nil {
-		return "", nil
+		return ExprFragment{}, nil
 	}
 	// If vn is free (its defining op was killed by ActionDeadCode after the return-value wiring
 	// wired it into RETURN), try to find a live varnode at the same location that
@@ -2706,11 +2731,7 @@ func (s *printCState) renderReturnValue(vn *Varnode) (string, error) {
 		// First try to directly render the expression from the non-dead defining op
 		// (e.g. INT_MULT whose output was freed but the op itself is still alive).
 		if defOp := s.findDefiningOpForFreeVarnode(vn); defOp != nil {
-			frag, err := s.renderOpExprFrag(defOp)
-			if err != nil {
-				return "", err
-			}
-			return s.lang.ExprString(frag, cPrecAssign, ExprPosNone, ExprAssocNone), nil
+			return s.renderOpExprFrag(defOp)
 		}
 		// Fallback: find a live (written, non-free) varnode at the same register location.
 		if live := s.findLiveReturnVarnode(vn); live != nil {
@@ -2733,18 +2754,14 @@ func (s *printCState) renderReturnValue(vn *Varnode) (string, error) {
 			// (uVar1 = call(...);), so the RETURN names it (return uVar1;) rather
 			// than re-expanding the call expression. C++ parity: baseExplicit.
 		default:
-			frag, err := s.renderOpExprFrag(defOp)
-			if err != nil {
-				return "", err
-			}
-			return s.lang.ExprString(frag, cPrecAssign, ExprPosNone, ExprAssocNone), nil
+			return s.renderOpExprFrag(defOp)
 		}
 	}
 	// Fall back to naming the resolved (or original) varnode.
 	if resolved != nil {
-		return s.renderVarnode(resolved, cPrecAssign)
+		return s.renderVarnodeExpr(resolved)
 	}
-	return s.renderVarnode(vn, cPrecAssign)
+	return s.renderVarnodeExpr(vn)
 }
 
 // findDefiningOpForFreeVarnode finds the non-dead PcodeOp that originally wrote to
@@ -4043,16 +4060,24 @@ func (s *printCState) mustRenderConditionFrag(bl *FlowBlock) ExprFragment {
 	return expr
 }
 
-// emitConditionParen emits a parenthesized condition, "(" cond ")", feeding the
-// condition through EmitBrokenExpr so the pretty-printer can break at the
-// outermost operator instead of at the parenthesis. C++ parity: PrintC emits the
-// condition via emitExpression, whose operator break tokens (spaces(spacing,bump)
-// in emitOp) are what Ghidra wraps at; the surrounding parens are openParen /
-// closeParen groups that never themselves become the chosen break.
+// emitConditionParen emits a parenthesized condition, "(" cond ")", as an
+// openParen/closeParen group around the condition's own token stream, so the
+// pretty-printer can break at any operator inside the condition rather than only
+// at the parenthesis. C++ parity: PrintC::emitBlockIf / emitBlockWhileDo wrap the
+// condition in openParen(OPEN_PAREN) ... closeParen(CLOSE_PAREN,id) and emit the
+// condition through the normal expression path, whose spaces(spacing,bump) calls
+// in PrintLanguage::emitOp supply the break points (printlanguage.cc:333-338).
 func (s *printCState) emitConditionParen(frag ExprFragment) {
-	s.lang.Token("(")
-	s.lang.EmitBrokenExpr(frag)
-	s.lang.Token(")")
+	ge, ok := s.lang.Emitter().(GroupEmitter)
+	if !ok {
+		s.lang.Token("(")
+		s.lang.EmitFragment(frag)
+		s.lang.Token(")")
+		return
+	}
+	id := ge.OpenParen("(")
+	s.lang.EmitFragment(frag)
+	ge.CloseParen(")", id)
 }
 
 // renderCondition renders a structured condition block the way C++ PrintC does

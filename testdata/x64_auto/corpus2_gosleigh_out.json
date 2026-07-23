@@ -50,7 +50,7 @@
     },
     {
       "name": "umulhi",
-      "output": "\nlonglong umulhi(ulonglong param_1,ulonglong param_2)\n\n{\nulonglong uVar1;\n\nuVar1 =\n(param_1 \u003e\u003e 0x20) * (param_2 \u0026 0xffffffff) + ((param_1 \u0026 0xffffffff) * (param_2 \u0026 0xffffffff) \u003e\u003e 0x20)\n;\nreturn\n(param_1 \u003e\u003e 0x20) * (param_2 \u003e\u003e 0x20) + (uVar1 \u003e\u003e 0x20) + ((uVar1 \u0026 0xffffffff) + (param_1 \u0026 0xffffffff) * (param_2 \u003e\u003e 0x20) \u003e\u003e 0x20)\n;\n}\n"
+      "output": "\nlonglong umulhi(ulonglong param_1,ulonglong param_2)\n\n{\nulonglong uVar1;\n\nuVar1 = (param_1 \u003e\u003e 0x20) * (param_2 \u0026 0xffffffff) +\n((param_1 \u0026 0xffffffff) * (param_2 \u0026 0xffffffff) \u003e\u003e 0x20);\nreturn (param_1 \u003e\u003e 0x20) * (param_2 \u003e\u003e 0x20) + (uVar1 \u003e\u003e 0x20) +\n((uVar1 \u0026 0xffffffff) + (param_1 \u0026 0xffffffff) * (param_2 \u003e\u003e 0x20) \u003e\u003e 0x20);\n}\n"
     }
   ]
 }
