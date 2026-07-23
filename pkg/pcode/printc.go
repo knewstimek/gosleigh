@@ -861,27 +861,23 @@ func (s *printCState) shouldInline(op *PcodeOp) bool {
 		return false
 	}
 	out := op.Output()
+	// Only an IMPLIED varnode is folded into its consumer; an EXPLICIT one is
+	// materialized as a named temporary. C++ parity: PrintLanguage::pushVn
+	// dispatches on isImplied() alone, independent of the descendant count
+	// (printlanguage.cc), and ActionMarkImplied::apply (coreaction.cc) is what
+	// sets the flag -- it keeps a cheap expression implied when it is used a small
+	// number of times (maxduplicate=2) and its cover is safe, so e.g. "a >> 0x20"
+	// used twice term-duplicates inline at both sites (umulhi).
+	//
+	// Gosleigh used to default-inline every single-descendant op regardless of the
+	// flag. That proxy papered over a structural divergence -- AddTreeState ops
+	// were created detached from any basic block, so loop-carried PTRADDs ended up
+	// in their own HighVariable behind an extra latch COPY -- which is now fixed at
+	// the source in Funcdata.NewOpBefore / AddTreeState.buildTree.
+	if !out.IsImplied() {
+		return false
+	}
 	if out.NumDescend() != 1 {
-		// A varnode with several consumers is normally materialized as a named
-		// temporary. The one exception is an IMPLIED multi-use varnode: PrintC
-		// re-expands (term-duplicates) it at every use site instead of naming it.
-		// ActionMarkImplied keeps a cheap expression implied when it is used a
-		// small number of times (maxduplicate=2) and its cover is safe, so e.g.
-		// "a >> 0x20" used twice renders inline at both sites (umulhi). An EXPLICIT
-		// multi-use varnode stays materialized. C++ parity: PrintLanguage::
-		// pushVnImplied recurses on isImplied() regardless of descendant count
-		// (printlanguage.cc); ActionMarkImplied::apply (coreaction.cc) marks it.
-		//
-		// The single-descendant path below is a deliberately separate, older proxy
-		// (default-inline for nd==1) retained unchanged: it over-inlines nd==1
-		// explicit ops such as a loop-carried PTRADD/CAST that Ghidra also renders
-		// inline (array indexing) but marks explicit via the phi/marker rule. Making
-		// that path flag-faithful would require Ghidra-matching explicit/implied
-		// marking of PTRADD/CAST in phi chains (heritage/merge territory) and would
-		// leak a phantom declaration for those varnodes, so it is left as-is.
-		if !out.IsImplied() {
-			return false
-		}
 		switch op.Code() {
 		case CPUI_BRANCH, CPUI_CBRANCH, CPUI_BRANCHIND, CPUI_STORE, CPUI_RETURN,
 			CPUI_MULTIEQUAL, CPUI_INDIRECT, CPUI_CALL, CPUI_CALLIND, CPUI_CALLOTHER, CPUI_NEW:
@@ -889,6 +885,7 @@ func (s *printCState) shouldInline(op *PcodeOp) bool {
 		}
 		return true
 	}
+	// Single-descendant path.
 	// C++ parity: ActionMarkExplicit::baseExplicit returns -1 (explicit) when any descendant is a marker op (MULTIEQUAL/INDIRECT). coreaction.cc:3083
 	// A varnode whose sole consumer is a marker op must be emitted as an explicit statement, not inlined.
 	consumer := op.Output().LoneDescend()

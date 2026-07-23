@@ -266,6 +266,16 @@ func (fd *Funcdata) NewVarnodeIop(op *PcodeOp) *Varnode {
 	return vn
 }
 
+// NewOpBefore creates a new op and splices it into before's basic block, right
+// ahead of before.
+//
+// C++ parity: Funcdata::newOpBefore (funcdata_op.cc:656). The C++ original ends
+// with opInsertBefore(newop,follow); Gosleigh used to only opMarkAlive() the new
+// op, which left every AddTreeState/SplitFlow-created op detached (parent ==
+// nil). A detached op still renders (PrintC walks def chains) but it has no
+// block index, so Cover/HighVariable liveness for its output is computed against
+// a nil parent -- the merge phase then cannot reason about it and compensates
+// with extra trim COPYs. Inserting here restores the C++ block structure.
 func (fd *Funcdata) NewOpBefore(before *PcodeOp, opcode OpCode, inputs ...*Varnode) *PcodeOp {
 	addr := fd.BaseAddr()
 	if before != nil {
@@ -276,7 +286,11 @@ func (fd *Funcdata) NewOpBefore(before *PcodeOp, opcode OpCode, inputs ...*Varno
 	for i, vn := range inputs {
 		fd.OpSetInput(op, vn, i)
 	}
-	fd.OpMarkAlive(op)
+	if before != nil && before.Parent() != nil {
+		fd.OpInsertBefore(op, before)
+	} else {
+		fd.OpMarkAlive(op)
+	}
 	return op
 }
 
@@ -742,29 +756,38 @@ func (s *AddTreeState) buildTree() {
 	if oldOut == nil {
 		return
 	}
+	// C++ parity: AddTreeState::buildTree (ruleaction.cc:6510). buildMultiples and
+	// buildExtra both run before any PTRADD/PTRSUB is created, so the term ops are
+	// spliced into the block ahead of the address ops, and the LAST op created --
+	// PTRADD, PTRSUB or the INT_ADD that folds the extra terms back in -- inherits
+	// baseOp's output varnode. Gosleigh used to append a CPUI_COPY whenever there
+	// were no extra terms, which put the pointer expression in a fresh unique and
+	// left the original (usually register) varnode on a COPY; that COPY became an
+	// extra phi input on loop-carried pointers.
+	multNode := s.buildMultiples()
+	extra := s.buildExtra()
 	current := s.ptr
-	if multNode := s.buildMultiples(); multNode != nil {
-		ptrAdd := s.data.NewTypedOpBefore(s.baseOp, CPUI_PTRADD, s.ptrSize, s.ptrType, s.ptr, multNode, s.data.NewConstant(s.ptrSize, s.elemSize))
-		current = ptrAdd.Output()
+	var newop *PcodeOp
+	if multNode != nil {
+		newop = s.data.NewTypedOpBefore(s.baseOp, CPUI_PTRADD, s.ptrSize, s.ptrType, s.ptr, multNode, s.data.NewConstant(s.ptrSize, s.elemSize))
+		current = newop.Output()
 	}
 	if s.isSubtype {
 		subType := pointerSubtypeType(s.ptrType, s.subType)
-		ptrSub := s.data.NewTypedOpBefore(s.baseOp, CPUI_PTRSUB, s.ptrSize, subType, current, s.data.NewConstant(s.ptrSize, s.offset))
-		ptrSub.SetStopTypePropagation()
-		current = ptrSub.Output()
+		newop = s.data.NewTypedOpBefore(s.baseOp, CPUI_PTRSUB, s.ptrSize, subType, current, s.data.NewConstant(s.ptrSize, s.offset))
+		newop.SetStopTypePropagation()
+		current = newop.Output()
 	}
-	extra := s.buildExtra()
-	s.data.OpUnsetOutput(s.baseOp)
-	var finalOp *PcodeOp
 	if extra != nil {
-		finalOp = s.data.NewOpBefore(s.baseOp, CPUI_INT_ADD, current, extra)
-		s.data.OpSetOutput(finalOp, oldOut)
-		SetVarnodeType(oldOut, current.TypeReadFacing(finalOp))
-	} else {
-		finalOp = s.data.NewOpBefore(s.baseOp, CPUI_COPY, current)
-		s.data.OpSetOutput(finalOp, oldOut)
-		SetVarnodeType(oldOut, current.TypeReadFacing(finalOp))
+		newop = s.data.NewOpBefore(s.baseOp, CPUI_INT_ADD, current, extra)
 	}
+	if newop == nil {
+		// C++ emits a "ptrarith problems" warning here and leaves baseOp alone.
+		return
+	}
+	s.data.OpUnsetOutput(s.baseOp)
+	s.data.OpSetOutput(newop, oldOut)
+	SetVarnodeType(oldOut, current.TypeReadFacing(newop))
 	s.data.OpDestroy(s.baseOp)
 }
 

@@ -314,14 +314,13 @@ func (r *RuleSub2Add) apply(op *PcodeOp, data *Funcdata) int {
 		size = outputOrInputSize(op)
 	}
 	allOnes := truncateToSize(^uint64(0), size)
+	// NewOpBefore already splices mulOp into op's block ahead of op (the faithful
+	// Funcdata::newOpBefore -> opInsertBefore behaviour, funcdata_op.cc:656). It
+	// used to only mark the op alive, so this call site re-inserted by hand; doing
+	// both now puts the op in the block list twice and leaves a stale entry behind
+	// when it is later destroyed.
 	mulOp := data.NewOpBefore(op, CPUI_INT_MULT, vn, data.NewConstant(size, allOnes))
 	newvn := data.NewUniqueOut(size, mulOp)
-	// Insert mulOp into the same block as op, immediately before it.
-	// C++ uses opInsertBefore which places the new op in the instruction stream.
-	if blk := op.Parent(); blk != nil {
-		mulOp.SetParent(blk)
-		blk.InsertOpBefore(mulOp, op)
-	}
 	data.OpSetInput(op, newvn, 1)
 	data.OpSetOpcode(op, CPUI_INT_ADD)
 	return 1

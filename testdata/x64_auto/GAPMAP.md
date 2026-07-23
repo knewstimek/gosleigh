@@ -2,7 +2,7 @@
 
 goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldengap/goldengap.py report`로 재생성).
 
-25/32 MATCH (indent-insensitive).
+26/32 MATCH (indent-insensitive).
 
 ## 함수별 분류
 
@@ -22,7 +22,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `array_2d_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `array_init_then_sum` | TYPECAST, PTR, TEMP | TYPECAST: cast (int): want=0 got=2<br>TYPECAST: cast (longlong): want=0 got=2<br>PTR: raw pointer scale '* 4': want=0 got=2<br>TEMP: extra temp/local identifiers in output (4 vs 2): local_423, local_8 |
 | `array_reverse_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `reverse_bytes_inplace` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
+| `reverse_bytes_inplace` | TEMP | TEMP: extra temp/local identifiers in output (4 vs 3): iVar1 |
 | `bit_mask_shift_combo` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `popcount_loop` | TEMP | TEMP: extra temp/local identifiers in output (2 vs 1): local_8 |
 | `xor_swap_pair` | MATCH | MATCH: byte-identical (indent-insensitive) |
@@ -39,13 +39,12 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `multi_return_early` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `nested_if_ladder_grade` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `param_reuse_accum` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `swap_via_temp` | TEMP | TEMP: fewer temp/local identifiers than golden (0 vs 1), missing: uVar1 |
+| `swap_via_temp` | MATCH | MATCH: byte-identical (indent-insensitive) |
 
 ## 태그 분포
 
-- MATCH: 25
+- MATCH: 26
 - PTR: 1
 - TEMP: 4
 - TYPECAST: 3
-- UNKNOWN: 1
 
