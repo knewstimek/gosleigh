@@ -61,6 +61,68 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 
 ## 다음 작업 (우선순위)
 
+### [2026-07-24 세션8 read-only 진단으로 확정된 근본 지도 -- 이게 최신 권위]
+진단 워커가 decomp_dbg(C++ ground truth, 하네스와 **동일 입력**: 단일 함수 바이트/base 0/unlocked proto) +
+계측 사본으로 실측 확정. 착수 순서는 아래 표 순.
+
+**(N1) `local_res` 스택 네이밍 [소, ~30줄, ROI 최고]**
+- 스택 로컬 **이름**은 C++ 코어가 아니라 **Ghidra Java(Program DB) 층**이 붙인다(실측: decomp_dbg는
+  `uStackX_8`/`uStack_18`, 골든은 `local_res8`/`local_18`; ghidra-ref C++에 `_res` 문자열 없음).
+  Gosleigh엔 이미 선례가 있다 -- `scopelocal.go:24-40 localHexName`이 음수 오프셋 `local_%x`를 에뮬레이션 중.
+- 골든 `add_pt`가 규칙을 드러낸다: `0x08->local_res8`, `0x0c->uStackX_c`, `0x10->local_res10`, `0x14->uStackX_14`
+  = **MS x64 shadow space의 레지스터 param home 슬롯 시작(RCX@8/RDX@0x10/R8@0x18/R9@0x20)만 `local_res%x`,
+  그 외 양수는 `uStackX_%x`, 음수는 `local_%x`** (가설 -- 골든 전수 실측으로 확정할 것).
+- 영향: `while_countdown`, `popcount_loop`, `array_init_then_sum`, `sign_extend_boundary`, `add_pt` **5개 전부**가
+  이 이름 때문에 MISMATCH. while_countdown/popcount는 사실상 이름만 남은 상태.
+- 대상: `scopelocal.go localHexName` + 호출부(`funcdata.go:572`, `scopelocal.go:341`, `scopelocal_ext.go:643`).
+- 위험: 전 골든 네이밍 영향 -> **TREE_MAP 10/10(x86-32) 회귀 확인 필수**(호출규약이 달라 arch 분기가 필요할 수 있음).
+
+**(N2) 스택 heritage refinement 부재 [중~대, 단독 세션] -- add_pt + sign_extend_boundary 공통 근본**
+- 근본(확정): `fd.heritageSpaces`를 `bridge.go:1029 collectHeritageSpace`가 **번역 직후 raw p-code varnode space만**
+  수집한다. 스택 varnode는 mainloop 중 `RuleLoadVarnode`/`RuleStoreVarnode`가 만들므로 **영원히 목록에 못 든다**.
+  C++ `Heritage::buildInfoList`(heritage.cc:2648-2658)는 `manage->numSpaces()` 전체를 등록해 스택이 항상 포함된다.
+  대신 Gosleigh는 `funcdata.go:416-445 heritageNewStackSlots`가 (offset,size) 슬롯 단위로 `heritage.go:1003-1024
+  HeritageRange`를 호출하는데, 거기엔 **`refinement` 분할도 `normalizeRange`(SUBPIECE/PIECE 삽입)도 없다**.
+  -> 크기 다른 read/write가 같은 offset 키로 rename되어 **8바이트 def가 4바이트 read 자리에 그대로 치환**
+  (`ECX(4) = RCX(8) + RDX(8)` = 사이즈 불변식 위반).
+- **`normalizeReadSize`/`normalizeWriteSize`는 이미 포팅돼 있다(heritage.go:451-540) -- 도달 경로만 끊긴 것.**
+- C++ 참조: `heritage.cc:2599-2645 placeMultiequals`(2608-2616 refinement 진입 조건 `size>4 && max<size`),
+  `1890-1938 refinement`, `1704 buildRefinement`/`1733 splitByRefinement`/`1772 refineRead(PIECE)`/
+  `1806 refineWrite(SUBPIECE)`/`1836 refineInput`/`1857 remove13Refinement`, `2663-2755 heritage`, `2648-2658 buildInfoList`.
+- 대상: `bridge.go:1029-1043`(스택 space 포함) / `funcdata.go:370-445`(슬롯 우회 제거) / `heritage.go:886-990`
+  (`refinedSubTaskSize` 근사 -> `Heritage::refinement` 충실 포팅) / `heritage.go:1003-1024 HeritageRange`.
+- **실험 실측(~50줄 패치)**: add_pt SSA가 C++ ground truth와 op 단위 일치, 시그니처 `undefined8 add_pt(undefined8,undefined8)`
+  골든 일치; sign_extend_boundary는 `int f(short param_1)`로 **param 타입 short 복구**. **회귀 0**(8/8, 8/13, 25/32 유지).
+  53함수 중 크기불일치 겹침 스택 슬롯 보유는 add_pt/sign_extend_boundary **2개뿐**.
+- **VariablePiece/partial-HighVariable 인프라는 불필요**(C++ 코어가 같은 입력에서 SUBPIECE/PIECE만으로 골든 형태 산출 -- 실측).
+- 잔여(별건): SUBPIECE->`(int)((ulonglong)x>>0x20)` / PIECE->`CONCAT44` 렌더, 스택 심볼(`local_res8`) 실체화(ScopeLocal).
+- 미측정: x86-32 tree 골든 회귀 영향 -> **착수 시 먼저 확인**.
+
+**(N3) call-site 입력 trial 복구 미포팅 [대, 단독 세션] -- caller**
+- **입력 무결성 이상 없음**(capstone: `call 0x2840` 2회, helper_sum entry 정확 착지). reloc/로더/flow 갭 **아님**.
+  결정적 근거: 같은 입력으로 decomp_dbg가 `int caller(undefined4 p1..p5) { iVar1 = func_0xffff...c0(p1..p5); ... }`
+  로 **5인자를 전부 복구**한다(callee가 이미지 밖이어도).
+- 근본: (1) `heritage.go:83-151 guardCalls`가 출력 trial만 등록 -- C++ `heritage.cc:1495-1508`의 `isInputActive()`
+  블록(`registerTrial` + `opInsertInput`)이 통째로 없음. (2) `coreaction.go:1166-1171 ActionActiveParam`이
+  `ApplyActiveParamModel`(현 함수 proto 전용)만 호출 -- C++ `coreaction.cc:1726-1772`는 `numCalls()` 전체를 순회하며
+  `checkInputTrialUse -> finishPass -> resolveModel -> deriveInputMap -> buildInputFromTrials`. (3) 헬퍼 미포팅:
+  `checkInputTrialUse`/`finalInputCheck`/`buildInputFromTrials`/`FuncCallSpecs::resolveModel`/`characterizeAsInputParam`.
+  `FuncCallSpecs`는 48줄 스텁(`GetFuncdata()` 항상 nil). (4) 연쇄: call 인자 미복구 -> 진입부 shadow-space 스토어 dead
+  -> 입력 varnode descendant 0 -> `paramactive.go:786`에서 탈락 -> `void caller(void)`.
+- **이미 있는 인프라**: `ParamActive` 완비(paramactive.go:424-736), `AncestorRealistic` 완비, `deriveInputMap`
+  완비(paramlist.go:665), **출력 측 전체가 완비(funccallspec_output.go 204줄 + coreaction.go:1207-1225) = 입력 측 포팅의 대칭 템플릿**.
+  미포팅: `AliasChecker`(varmap.cc:633-830), 범용 `ancestorOpUse`, `characterizeAsInputParam`.
+- C++ 참조: `heritage.cc:1443-1520`(1495-1508), `coreaction.cc:1726-1772`, `fspec.cc:5585-5670`/`5564-5576`/`5685-5745`,
+  `fspec.cc:3767 resolveModel`, `fspec.cc:4289 characterizeAsInputParam`, `varmap.cc:633-830`, `printc.cc:3493 genericFunctionName`.
+- 대상/규모: `guardCalls`(~50줄) + `ActionActiveParam` call 루프(~40줄) + 신규 `funccallspec_input.go`(~250-350줄,
+  output 대칭) + AliasChecker 축소 포팅(~150줄) + `printc.go:4207-4228 nameOf`에 `func_0x%x` fallback(~10줄).
+- **게이트 사실(반드시 선반영)**: **caller는 현 하네스로 어떤 완벽한 포팅으로도 strict MATCH 불가**.
+  C++ 코어 ground truth조차 `func_0xffffffffffffffc0(...)`를 내고 골든은 `helper_sum(...)`이다(하네스가 함수 1개
+  바이트만 base 0에 로드하므로 callee가 이미지 밖). 성공 기준을 **"5인자 + `iVar1 + iVar2` 구조 복구, 이름은 `func_0x...`"**
+  로 잡을 것. strict MATCH를 원하면 골든 함수들을 entry 기준 단일 이미지로 로드+심볼 주입하는 **하네스 변경**이 필요(별건, 중).
+- 병렬성: (N2)와 독립이나 `heritage.go guardCalls`만 양쪽이 건드리므로 그 함수만 조율.
+
+
 ### (A0) [세션6 후속 착지 완료 `ed0bbea`] dead-negate 제거 -> helper_sum MATCH
 근본은 후보 (1)/(2) 둘 다 아니었다(decomp_dbg 실측): dead INT_2COMP는 Gosleigh cleanup 룰 왕복
 (RuleSub2Add `V-W=>V+(W*-1)` -> RuleMultNegOne `W*-1=>INT_2COMP(W)` -> Rule2Comp2Sub `V+INT_2COMP(W)=>V-W`)이
