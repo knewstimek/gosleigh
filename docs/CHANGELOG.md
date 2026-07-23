@@ -5,6 +5,32 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-23 (세션6 후속3): for-loop 인식 -- findLoopVariable CAST 투과, strlen_style for 구조 (master `60e01f0`)
+Opus 1슬롯 위임(worktree 격리). goal 가설(`testTerminal` 축약 포팅)은 실측으로 **반증**: FORLOOP_DBG 계측 결과
+`tryMarkForLoop`가 `testTerminal`이 아니라 그 앞의 **`findLoopVariable`에서 bail**(iterateOp=nil, tailSlot=-1).
+
+**근본 = 미포팅 절이 아니라 액션 순서 차이**. C++은 `BlockWhileDo::finalTransform`(findLoopVariable,
+block.cc:3164/3356)을 `ActionStructureTransform`에서 **ActionSetCasts 이전**에 실행 -> 조건 체인이
+`NEQ->LOAD->INT_ADD->SEXT48->MULTIEQUAL`로 depth-4에 도달. Gosleigh는 이전 세션이 iterate-op CAST 처리 위해
+ActionForLoops를 ActionSetCasts **뒤**로 배치(action.go) -> 삽입된 CPUI_CAST가 findLoopVariable의 depth-4
+예산을 1단계 잡아먹어 loop-head MULTIEQUAL 은닉(`LOAD->CAST->INT_ADD->SEXT48->MULTIEQUAL`은 depth-5).
+
+**수정 (`pkg/pcode/action_forloops.go` findLoopVariable, +22줄)**: def-chain 하강 시 `CPUI_CAST`를
+투과(getIn(0) 관통)해 C++의 pre-cast 도달거리를 재현. CAST는 순수 값 pass-through이고 후속 가드
+(Parent()==head / tail-input / isMoveable / testTerminal)는 불변이라 false match 없음.
+
+**결과**: strlen_style이 `for (local_18 = 0; *(char *)(param_1 + local_18) != 0; local_18 = local_18 + 1) {}`로
+Ghidra **for 구조 완전 일치**(GAPMAP STRUCT->UNKNOWN 이동). 전 게이트 -count=1 2회 무회귀(tree 10/10, x64 8/8,
+corpus2 7/13, switch, breadth 3/3, MSVC/AARCH64/X8664/RegParam/PELoader/X86PE, go test ./...). **x64_auto
+MATCH는 22 유지** -- strlen_style 유일 잔차 `!= 0` vs golden `!= '\0'`(char 리터럴 렌더, printc 상수 타입 경로 =
+STOP 경계, for-loop scope 밖).
+
+**부수 진단(미수정, STOP 경계)**: while_countdown은 이 변경 전부터 이미 `for` 방출 -- 잔차는 네이밍
+(`local_8` vs `local_res8` = paramactive) + 음수상수 INT_ADD를 subtract로 렌더(printc). reverse_bytes_inplace는
+param_2 재대입/carrier 얽힘으로 이 fix에 미포함(goal 예고대로 diagnose-and-stop).
+
+---
+
 ### 2026-07-23 (세션6 후속2): multi_return_early -- BlockList 조건헤드 if-emitter 수정, MATCH (엔진 tip `32fb2b6`)
 read-only 진단(Opus 1슬롯)이 핸드오프 가설(ActionReturnSplit 미발화/오동작 + 반환-캐리어 클러스터 계열)을
 **반증**: ActionReturnSplit·collapse 그래프는 정확(decomp_dbg + standalone 구조 덤퍼 실측), 진짜 근본은
