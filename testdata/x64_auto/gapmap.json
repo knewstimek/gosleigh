@@ -183,11 +183,11 @@
       "name": "reverse_bytes_inplace",
       "entry": 10976,
       "tags": [
-        "TEMP"
+        "UNKNOWN"
       ],
       "evidence": {
-        "TEMP": [
-          "extra temp/local identifiers in output (4 vs 3): iVar1"
+        "UNKNOWN": [
+          "no heuristic matched -- manual review needed"
         ]
       }
     },
@@ -403,7 +403,8 @@
       "MATCH": 29,
       "TYPECAST": 2,
       "PTR": 1,
-      "TEMP": 2
+      "TEMP": 1,
+      "UNKNOWN": 1
     }
   }
 }
