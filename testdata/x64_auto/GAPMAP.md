@@ -2,7 +2,7 @@
 
 goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldengap/goldengap.py report`로 재생성).
 
-22/32 MATCH (indent-insensitive).
+23/32 MATCH (indent-insensitive).
 
 ## 함수별 분류
 
@@ -10,12 +10,12 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 |---|---|---|
 | `sum_loop` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `dowhile_count` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `sum_pp_walk` | TEMP | TEMP: extra temp/local identifiers in output (3 vs 2): lVar1 |
+| `sum_pp_walk` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `while_pretest_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `loop_forever_break` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `nested_while_matrix` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `while_countdown` | TEMP | TEMP: extra temp/local identifiers in output (2 vs 1): local_8 |
-| `switch_dense` | TYPECAST, TEMP | TYPECAST: cast (int): want=1 got=0<br>TYPECAST: cast (uint): want=1 got=2<br>TYPECAST: cast (ulonglong): want=0 got=1<br>TEMP: extra temp/local identifiers in output (2 vs 1): uVar2 |
+| `switch_dense` | TYPECAST | TYPECAST: cast (int): want=1 got=0<br>TYPECAST: cast (uint): want=1 got=2<br>TYPECAST: cast (ulonglong): want=0 got=1 |
 | `switch_sparse` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `switch_no_default` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `switch_fallthrough` | MATCH | MATCH: byte-identical (indent-insensitive) |
@@ -43,9 +43,9 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 
 ## 태그 분포
 
-- MATCH: 22
+- MATCH: 23
 - PTR: 1
-- TEMP: 6
+- TEMP: 4
 - TYPECAST: 3
 - UNKNOWN: 3
 
