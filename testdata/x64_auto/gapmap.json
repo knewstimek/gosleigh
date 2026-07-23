@@ -356,12 +356,11 @@
       "name": "multi_return_early",
       "entry": 12112,
       "tags": [
-        "TYPECAST"
+        "MATCH"
       ],
       "evidence": {
-        "TYPECAST": [
-          "cast (int): want=3 got=1",
-          "cast (longlong): want=3 got=1"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -404,11 +403,11 @@
   ],
   "summary": {
     "total": 32,
-    "match": 21,
+    "match": 22,
     "tag_counts": {
-      "MATCH": 21,
+      "MATCH": 22,
       "TEMP": 6,
-      "TYPECAST": 4,
+      "TYPECAST": 3,
       "PTR": 1,
       "UNKNOWN": 2,
       "STRUCT": 1

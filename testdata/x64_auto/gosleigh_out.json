@@ -114,7 +114,7 @@
     },
     {
       "name": "multi_return_early",
-      "output": "\nundefined8 multi_return_early(longlong param_1,int param_2)\n\n{\nint local_18;\n\nlocal_18 = 0;\nwhile( true ) {\nif (param_2 \u003c= local_18) {\nreturn 0;\n}\nif (1000 \u003c *(int *)(param_1 + (longlong)local_18 * 4)) break;\nlocal_18 = local_18 + 1;\n}\nreturn 1;\n}\n"
+      "output": "\nundefined8 multi_return_early(longlong param_1,int param_2)\n\n{\nint local_18;\n\nlocal_18 = 0;\nwhile( true ) {\nif (param_2 \u003c= local_18) {\nreturn 2;\n}\nif (*(int *)(param_1 + (longlong)local_18 * 4) \u003c 0) {\nreturn 0xffffffff;\n}\nif (*(int *)(param_1 + (longlong)local_18 * 4) == 0) {\nreturn 0;\n}\nif (1000 \u003c *(int *)(param_1 + (longlong)local_18 * 4)) break;\nlocal_18 = local_18 + 1;\n}\nreturn 1;\n}\n"
     },
     {
       "name": "nested_if_ladder_grade",
