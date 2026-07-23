@@ -5,6 +5,27 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-23 (세션6 후속5): char 리터럴 렌더 -- strlen_style strict MATCH (master `53fce49`)
+Opus 1슬롯 위임(worktree). 후속3에서 strlen_style for 구조는 맞췄으나 잔차 `!= 0` vs golden `!= '\0'`. decomp_dbg
+(C++ 코어 `!= '\0'`) + ssadump 실측: 비교 상수 `#0x0:1`의 read-facing이 TYPE_INT/SUB_INT_PLAIN size-1이고
+Gosleigh 값-타입 그래프에 char(isCharPrint)가 아예 없음(`*(char *)`는 렌더타임 이름뿐).
+
+**근본**: `printc.go renderConstant`(3074)에 char-print 분기 부재(Enum/BOOL/INT/FLOAT만). C++는 TypeFactory가
+size-1 TYPE_INT 코어타입 캐시 슬롯을 ASCII char로 채워(type.cc:3642-3647 "Char is preferred over other int
+types") **모든 read-facing size-1 signed int가 char** -> `PrintC::pushConstant`(printc.cc:1813/1821)가
+`pushCharConstant`(1669) -> `printUnicode`(1489)로 `'\0'` 방출.
+
+**수정 (`printc.go` 단일)**: `renderConstant`에 `renderCharConstant` 분기 추가. would-be-char = `isCharPrintLike(dt)`
+또는 plain size-1 TYPE_INT Base(Gosleigh는 char Datatype 미모델링이라 렌더타임 재현 -- inferSignedConstType 선례).
+**게이트 좁힘**: TYPE_UINT size-1("byte") 제외 + val 0x00-0x7f만(>=0x80은 기존 정수 경로 폴백, printc.cc:1693) ->
+int 상수 렌더 무영향. `printUnicode` 이스케이프 테이블(printlanguage.cc:415 unicodeNeedsEscape + printc.cc:1575
+printCharHexEscape) 포팅. 타입팩토리 char-type 전역 신설(넓은 딥존)은 회피.
+
+**결과**: **strlen_style MATCH(`!= '\0'`), x64_auto 23->24/32.** 전 게이트 -count=1 2회 무회귀
+(char_arith_promote/short_arith_trunc/memcpy_style 등 여전히 MATCH). STOP 경계(heritage/merge/type-model) 미진입.
+
+---
+
 ### 2026-07-23 (세션6 후속4): (B) print-inline -- shouldInline IsImplied 소비 + explicit-only 네이밍 (master `4759d8e`)
 Opus 1슬롯 위임(worktree). ssadump flag 덤프(SSA_FLAGS) 실측으로 umulhi의 cheap 식 4개(`param>>0x20`,
 `param&mask`)가 **nd=2인데 impl=true/expl=false**, cross(INT_ADD)는 nd=2 expl=true임을 확인 -- **IsImplied/
