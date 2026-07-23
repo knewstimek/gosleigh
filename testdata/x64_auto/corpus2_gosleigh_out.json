@@ -10,7 +10,7 @@
     },
     {
       "name": "gate",
-      "output": "\nint gate(int param_1,int param_2,int param_3,int param_4)\n\n{\nif ((0 \u003c param_1) \u0026\u0026 (0 \u003c param_2) || (param_3 \u003c 0) \u0026\u0026 (param_4 != 0)) {\nparam_1 = param_1 + param_2;\n}\nelse {\nparam_1 = param_3 - param_4;\n}\nreturn param_1;\n}\n"
+      "output": "\nint gate(int param_1,int param_2,int param_3,int param_4)\n\n{\nif (((param_1 \u003c 1) || (param_2 \u003c 1)) \u0026\u0026 ((-1 \u003c param_3 || (param_4 == 0)))) {\nparam_1 = param_3 - param_4;\n}\nelse {\nparam_1 = param_1 + param_2;\n}\nreturn param_1;\n}\n"
     },
     {
       "name": "clamp3",

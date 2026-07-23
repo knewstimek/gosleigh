@@ -257,65 +257,147 @@ func opFlipInPlaceExecute(fd *Funcdata, fliplist []*PcodeOp) {
 	}
 }
 
-// getSplitPoint returns the FlowBlock containing the CBRANCH op for b.
-// For a basic block with 2 outgoing edges, the block itself is the split point.
-// For structured blocks (list, copy), delegates to the last structured child.
-// C++ parity: block.cc BlockBasic::getSplitPoint / BlockList::getSplitPoint
+// getSplitPoint returns the deepest component FlowBlock that performs the
+// conditional split -- the component able to run flipInPlaceTest /
+// flipInPlaceExecute -- or nil when b does not end in a conditional branch.
+//
+// C++ parity (the virtual overrides, in dispatch order):
+//   - FlowBlock::getSplitPoint      (block.hh:845) -> nil (BlockGoto, BlockIf,
+//     BlockWhileDo, BlockSwitch, ... all inherit this)
+//   - BlockBasic::getSplitPoint     (block.cc:2361) -> this when sizeOut()==2
+//   - BlockCopy::getSplitPoint      (block.hh:535)  -> copy->getSplitPoint()
+//   - BlockList::getSplitPoint      (block.cc:2976) -> last child's split point
+//   - BlockCondition::getSplitPoint (block.hh:631)  -> this
+//
+// Gosleigh's structure-graph leaf is a *BlockBasic carrying srcDelegate, so the
+// BlockCopy case folds into the *BlockBasic branch. The BlockCondition case is
+// what lets ActionPreferComplement reach a compound &&/|| condition: without
+// it, a condition block fell into the generic "recurse into the last child"
+// path and reported a leaf of its right half as the split point, so the De
+// Morgan flip was tested against half the expression and never applied.
 func (b *FlowBlock) getSplitPoint() *FlowBlock {
 	if b == nil {
 		return nil
 	}
-	if b.SizeOut() == 2 {
-		if _, ok := b.Concrete().(*BlockBasic); ok {
-			return b
+	switch c := b.Concrete().(type) {
+	case *BlockBasic:
+		// A structure-graph leaf is Gosleigh's stand-in for BlockCopy: it carries
+		// srcDelegate to the source basic block. Collapse moves a leaf's external
+		// out-edges up to the enclosing structured block, so a leaf inside a
+		// BlockCondition ends up with SizeOut()==1 and would fail the sizeOut()==2
+		// test -- but C++ tests the WRAPPED block, whose edges collapse never
+		// touches. C++ parity: BlockCopy::getSplitPoint -> copy->getSplitPoint().
+		if c.srcDelegate != nil {
+			return c.srcDelegate.FlowBlock.getSplitPoint()
 		}
+		if b.SizeOut() != 2 {
+			return nil
+		}
+		return b
+	case *BlockCondition:
+		return b
 	}
-	children := b.StructuredChildren()
-	if len(children) == 0 {
-		return nil
+	if b.Type() == BlockListType {
+		children := b.StructuredChildren()
+		if len(children) == 0 {
+			return nil
+		}
+		return children[len(children)-1].getSplitPoint()
 	}
-	return children[len(children)-1].getSplitPoint()
+	return nil
 }
 
-// flipInPlaceTestBlock tests whether the CBRANCH condition in the split point
-// block b can be flipped in-place. Returns result (0/1/2) and the flip list.
-// C++ parity: block.cc BlockBasic::flipInPlaceTest
-func flipInPlaceTestBlock(b *FlowBlock) (int, []*PcodeOp) {
+// flipInPlaceTestBlock tests whether the condition computed by split point b can
+// be negated purely by in-place opcode changes, appending the ops that need
+// changing to fliplist. Returns 0 when the flip normalizes the condition, 1 when
+// it is neutral, 2 when it is impossible.
+//
+// C++ parity: FlowBlock::flipInPlaceTest (block.hh:862, default 2),
+// BlockBasic::flipInPlaceTest (block.cc:2368),
+// BlockCondition::flipInPlaceTest (block.cc:2990).
+func flipInPlaceTestBlock(b *FlowBlock, fliplist *[]*PcodeOp) int {
 	if b == nil {
-		return 2, nil
+		return 2
 	}
-	bb, ok := b.Concrete().(*BlockBasic)
-	if !ok || bb.EmptyOp() {
-		return 2, nil
+	switch c := b.Concrete().(type) {
+	case *BlockBasic:
+		if c.EmptyOp() {
+			return 2
+		}
+		lastOp := c.LastOp()
+		if lastOp == nil || lastOp.Code() != CPUI_CBRANCH {
+			return 2
+		}
+		return opFlipInPlaceTest(lastOp, fliplist)
+	case *BlockCondition:
+		// Both halves must be flippable; the result of the FRONT half decides
+		// whether the whole flip normalizes ("Front of AND/OR must be
+		// normalizing", funcdata_op.cc:1270 makes the same choice for the
+		// BOOL_AND/BOOL_OR p-code form of this shape).
+		children := b.StructuredChildren()
+		if len(children) != 2 {
+			return 2
+		}
+		split1 := children[0].getSplitPoint()
+		if split1 == nil {
+			return 2
+		}
+		split2 := children[1].getSplitPoint()
+		if split2 == nil {
+			return 2
+		}
+		sub1 := flipInPlaceTestBlock(split1, fliplist)
+		if sub1 == 2 {
+			return 2
+		}
+		if sub2 := flipInPlaceTestBlock(split2, fliplist); sub2 == 2 {
+			return 2
+		}
+		return sub1
 	}
-	lastOp := bb.LastOp()
-	if lastOp == nil || lastOp.Code() != CPUI_CBRANCH {
-		return 2, nil
-	}
-	var fliplist []*PcodeOp
-	result := opFlipInPlaceTest(lastOp, &fliplist)
-	return result, fliplist
+	return 2
 }
 
-// flipInPlaceExecuteBlock flips the fall-thru sense of the CBRANCH in split
-// block b and swaps its outgoing edges, without touching the BooleanFlip flag
-// (the opcode change already inverts the logical sense).
-// C++ parity: block.cc BlockBasic::flipInPlaceExecute
+// flipInPlaceExecuteBlock performs the flip that flipInPlaceTestBlock validated.
+// For a basic block it flips the fall-thru sense of the CBRANCH and swaps the
+// outgoing edges, without touching the BooleanFlip flag (the opcode change
+// already inverts the logical sense). For a condition block it applies De
+// Morgan: swap the connective and push the negation into both halves. A
+// condition block does not reorder its own outgoing edges -- only the leaf
+// basic blocks do.
+//
+// C++ parity: BlockBasic::flipInPlaceExecute (block.cc:2378),
+// BlockCondition::flipInPlaceExecute (block.cc:3008).
 func flipInPlaceExecuteBlock(b *FlowBlock) {
 	if b == nil {
 		return
 	}
-	bb, ok := b.Concrete().(*BlockBasic)
-	if !ok || bb.EmptyOp() {
-		return
-	}
-	lastOp := bb.LastOp()
-	if lastOp == nil {
-		return
-	}
-	lastOp.FlipFlag(PcodeOpFallthruTrue)
-	if b.SizeOut() == 2 {
-		b.SwapEdges()
+	switch c := b.Concrete().(type) {
+	case *BlockBasic:
+		if c.EmptyOp() {
+			return
+		}
+		lastOp := c.LastOp()
+		if lastOp == nil {
+			return
+		}
+		lastOp.FlipFlag(PcodeOpFallthruTrue)
+		if b.SizeOut() == 2 {
+			b.SwapEdges()
+		}
+	case *BlockCondition:
+		if c.opc == CPUI_BOOL_AND {
+			c.opc = CPUI_BOOL_OR
+		} else {
+			c.opc = CPUI_BOOL_AND
+		}
+		children := b.StructuredChildren()
+		if len(children) > 0 {
+			flipInPlaceExecuteBlock(children[0].getSplitPoint())
+		}
+		if len(children) > 1 {
+			flipInPlaceExecuteBlock(children[1].getSplitPoint())
+		}
 	}
 }
 
@@ -336,13 +418,14 @@ func preferComplementBlockIf(fd *Funcdata, bl *FlowBlock) bool {
 	if split == nil {
 		return false
 	}
-	result, fliplist := flipInPlaceTestBlock(split)
-	if result != 0 {
+	var fliplist []*PcodeOp
+	if flipInPlaceTestBlock(split, &fliplist) != 0 {
 		// Only apply when flip normalizes (result==0). Ghidra skips ambivalent cases.
 		return false
 	}
-	opFlipInPlaceExecute(fd, fliplist)
+	// C++ order (block.cc:3105): flipInPlaceExecute first, then opFlipInPlaceExecute.
 	flipInPlaceExecuteBlock(split)
+	opFlipInPlaceExecute(fd, fliplist)
 	// Swap then-clause (children[1]) and else-clause (children[2]).
 	bl.setStructuredChildren([]*FlowBlock{children[0], children[2], children[1]})
 	return true
