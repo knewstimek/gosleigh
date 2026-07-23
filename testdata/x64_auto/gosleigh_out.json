@@ -74,7 +74,7 @@
     },
     {
       "name": "bit_rotate_left",
-      "output": "\nuint bit_rotate_left(uint param_1,byte param_2)\n\n{\nreturn param_1 \u003c\u003c (param_2 \u0026 0x1f) | param_1 \u003e\u003e (0x20 - param_2 \u0026 0x1fU);\n}\n"
+      "output": "\nuint bit_rotate_left(uint param_1,byte param_2)\n\n{\nreturn param_1 \u003c\u003c (param_2 \u0026 0x1f) | param_1 \u003e\u003e (0x20 - param_2 \u0026 0x1f);\n}\n"
     },
     {
       "name": "unsigned_wrap_compare",

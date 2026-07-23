@@ -2,7 +2,7 @@
 
 goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldengap/goldengap.py report`로 재생성).
 
-24/32 MATCH (indent-insensitive).
+25/32 MATCH (indent-insensitive).
 
 ## 함수별 분류
 
@@ -26,7 +26,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `bit_mask_shift_combo` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `popcount_loop` | TEMP | TEMP: extra temp/local identifiers in output (2 vs 1): local_8 |
 | `xor_swap_pair` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `bit_rotate_left` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
+| `bit_rotate_left` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `unsigned_wrap_compare` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `longlong_combo` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `sign_extend_boundary` | TYPECAST | TYPECAST: cast (char): want=1 got=0 |
@@ -43,9 +43,9 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 
 ## 태그 분포
 
-- MATCH: 24
+- MATCH: 25
 - PTR: 1
 - TEMP: 4
 - TYPECAST: 3
-- UNKNOWN: 2
+- UNKNOWN: 1
 
