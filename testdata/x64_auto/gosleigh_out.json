@@ -82,7 +82,7 @@
     },
     {
       "name": "longlong_combo",
-      "output": "\nlonglong longlong_combo(longlong param_1,longlong param_2,longlong param_3)\n\n{\nreturn (param_1 * param_2 + param_3 * 8) - lVar2;\n}\n"
+      "output": "\nlonglong longlong_combo(longlong param_1,longlong param_2,longlong param_3)\n\n{\nreturn (param_1 * param_2 + param_3 * 8) - (param_1 \u003e\u003e 2);\n}\n"
     },
     {
       "name": "sign_extend_boundary",

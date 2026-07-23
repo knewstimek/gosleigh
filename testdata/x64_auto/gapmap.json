@@ -259,11 +259,11 @@
       "name": "longlong_combo",
       "entry": 11488,
       "tags": [
-        "TEMP"
+        "MATCH"
       ],
       "evidence": {
-        "TEMP": [
-          "extra temp/local identifiers in output (1 vs 0): lVar2"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -404,10 +404,10 @@
   ],
   "summary": {
     "total": 32,
-    "match": 20,
+    "match": 21,
     "tag_counts": {
-      "MATCH": 20,
-      "TEMP": 7,
+      "MATCH": 21,
+      "TEMP": 6,
       "TYPECAST": 4,
       "PTR": 1,
       "UNKNOWN": 2,
