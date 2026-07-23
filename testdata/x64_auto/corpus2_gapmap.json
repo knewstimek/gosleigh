@@ -52,17 +52,11 @@
       "name": "add_pt",
       "entry": 9920,
       "tags": [
-        "TYPECAST",
-        "CALL"
+        "TYPECAST"
       ],
       "evidence": {
         "TYPECAST": [
-          "cast (int): want=4 got=2",
-          "cast (ulonglong): want=2 got=0",
-          "CONCAT/SUBPIECE: want=1 got=0"
-        ],
-        "CALL": [
-          "call(s) present in golden but missing in output: CONCAT44"
+          "cast (ulonglong): want=2 got=0"
         ]
       }
     },
@@ -183,8 +177,8 @@
     "tag_counts": {
       "MATCH": 9,
       "TYPECAST": 3,
-      "CALL": 2,
       "TEMP": 1,
+      "CALL": 1,
       "FP": 1,
       "NAMING": 1
     }

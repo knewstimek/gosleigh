@@ -12,7 +12,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `find_pair` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `gate` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `clamp3` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `add_pt` | TYPECAST, CALL | TYPECAST: cast (int): want=4 got=2<br>TYPECAST: cast (ulonglong): want=2 got=0<br>TYPECAST: CONCAT/SUBPIECE: want=1 got=0<br>CALL: call(s) present in golden but missing in output: CONCAT44 |
+| `add_pt` | TYPECAST | TYPECAST: cast (ulonglong): want=2 got=0 |
 | `bump_scores` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `sum_via_pp` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `divmix` | MATCH | MATCH: byte-identical (indent-insensitive) |
@@ -24,7 +24,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 
 ## 태그 분포
 
-- CALL: 2
+- CALL: 1
 - FP: 1
 - MATCH: 9
 - NAMING: 1
@@ -42,7 +42,7 @@ testdata/x64_corpus2/README.md의 사람 분류와 이 분류기의 자동 태�
 | `find_pair` | P1 (struct) | MATCH | MISS |
 | `gate` | P3/P4 (temp + De Morgan) | MATCH | MISS |
 | `clamp3` | P1 (struct) | MATCH | MISS |
-| `add_pt` | P5 (struct register packing) | TYPECAST, CALL | MATCH |
+| `add_pt` | P5 (struct register packing) | TYPECAST | MATCH |
 | `bump_scores` | P2 (wrap) | MATCH | MISS |
 | `sum_via_pp` | P3/P5 (temp + ptr scale) | MATCH | MISS |
 | `divmix` | MATCH | MATCH | MATCH |

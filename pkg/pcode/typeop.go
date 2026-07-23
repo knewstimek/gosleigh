@@ -1,5 +1,7 @@
 package pcode
 
+import "strconv"
+
 // TypeOp defines the behavioral properties of a p-code opcode.
 // Each OpCode has exactly one TypeOp that determines flag defaults
 // and display name.
@@ -291,6 +293,27 @@ func (t *typeOpIntCmp) PropagateType(_ *PcodeOp, slot int, _ Datatype, tf *TypeF
 		return tf.GetBase(1, TYPE_BOOL, "bool")
 	}
 	return nil
+}
+
+// pieceOperatorName is the functional-print name of a CPUI_PIECE: the base name
+// with the byte sizes of the two inputs appended (CONCAT44 = 4 bytes || 4 bytes).
+// C++ parity: TypeOpPiece::getOperatorName (typeop.cc:2050-2057).
+func pieceOperatorName(op *PcodeOp) string {
+	if op == nil || op.NumInput() < 2 || op.Input(0) == nil || op.Input(1) == nil {
+		return "CONCAT"
+	}
+	return "CONCAT" + strconv.Itoa(int(op.Input(0).Size())) + strconv.Itoa(int(op.Input(1).Size()))
+}
+
+// subpieceOperatorName is the functional-print name of a CPUI_SUBPIECE: the base
+// name with the input byte size and the output byte size appended (SUB84 =
+// 4 bytes taken out of an 8-byte value).
+// C++ parity: TypeOpSubpiece::getOperatorName (typeop.cc:2129-2136).
+func subpieceOperatorName(op *PcodeOp) string {
+	if op == nil || op.NumInput() < 1 || op.Input(0) == nil || op.Output() == nil {
+		return "SUB"
+	}
+	return "SUB" + strconv.Itoa(int(op.Input(0).Size())) + strconv.Itoa(int(op.Output().Size()))
 }
 
 // typeOpSubpiece: SUBPIECE prints as a cast to whatever its output data-type is.

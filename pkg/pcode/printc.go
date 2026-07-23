@@ -3584,7 +3584,9 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	case CPUI_INDIRECT:
 		return s.renderPseudoCall("INDIRECT", op, 0)
 	case CPUI_PIECE:
-		return s.renderPseudoCall("CONCAT", op, 0)
+		// C++ prints PIECE functionally under its size-suffixed operator name
+		// (CONCAT44 etc). C++ parity: TypeOpPiece::getOperatorName via opFunc.
+		return s.renderPseudoCall(pieceOperatorName(op), op, 0)
 	case CPUI_SUBPIECE:
 		// A truncating SUBPIECE that drops high bytes (offset 0) of an integer/
 		// pointer renders as a plain cast, not SUBPIECE(). C++ parity:
@@ -3594,7 +3596,10 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 		if s.subpieceIsCast(op) {
 			return s.renderCast(op)
 		}
-		return s.renderPseudoCall("SUBPIECE", op, 0)
+		// Functional printing uses the size-suffixed operator name (SUB84 etc),
+		// never the raw opcode name. C++ parity: PrintC::opSubpiece -> opFunc ->
+		// TypeOpSubpiece::getOperatorName.
+		return s.renderPseudoCall(subpieceOperatorName(op), op, 0)
 	case CPUI_CAST:
 		return s.renderCast(op)
 	case CPUI_PTRADD:

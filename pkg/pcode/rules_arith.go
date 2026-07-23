@@ -591,15 +591,34 @@ func evaluateBinaryConst(opc OpCode, a, b uint64, size int32) uint64 {
 	}
 }
 
+// RuleSubRight carries two independent bodies under one registration:
+//
+//   - CPUI_SUBPIECE: the true C++ RuleSubRight (ruleaction.cc:7265-7331), which
+//     rewrites a non-least-significant SUBPIECE into a right shift feeding a
+//     least-significant SUBPIECE.
+//   - CPUI_INT_SUB: a pre-existing local algebraic simplification (x-x -> 0,
+//     x-(-y) -> x+y) that has no C++ rule of this name. It is kept here so the
+//     single actcleanup registration slot (action.go, mirroring
+//     coreaction.cc:5711) does not have to change.
 type RuleSubRight struct{ batchRule }
 
 func NewRuleSubRight(group string) *RuleSubRight {
 	r := &RuleSubRight{}
-	r.batchRule = newBatchRule(group, "subright", []OpCode{CPUI_INT_SUB}, r.apply, func(g string) Rule { return NewRuleSubRight(g) })
+	opcodes := []OpCode{CPUI_SUBPIECE, CPUI_INT_SUB}
+	r.batchRule = newBatchRule(group, "subright", opcodes, r.apply, func(g string) Rule { return NewRuleSubRight(g) })
 	return r
 }
 
 func (r *RuleSubRight) apply(op *PcodeOp, data *Funcdata) int {
+	if op.Code() == CPUI_SUBPIECE {
+		return r.applySubpieceRight(op, data)
+	}
+	return r.applyIntSub(op, data)
+}
+
+// applyIntSub: local INT_SUB simplification, no C++ counterpart. See the type
+// comment above.
+func (r *RuleSubRight) applyIntSub(op *PcodeOp, data *Funcdata) int {
 	if sameValue(op.Input(0), op.Input(1)) {
 		return rewriteToConst(data, op, 0)
 	}
@@ -608,6 +627,83 @@ func (r *RuleSubRight) apply(op *PcodeOp, data *Funcdata) int {
 		return 1
 	}
 	return 0
+}
+
+// applySubpieceRight is the Go port of C++ RuleSubRight::applyOp
+// (ruleaction.cc:7271-7331). A SUBPIECE reading above the least significant
+// byte is split into an explicit right shift plus a least-significant SUBPIECE,
+// which PrintC then renders as a cast of a shift instead of a raw SUB()/
+// SUBPIECE() call.
+//
+// Measured C++ core SSA for corpus2 add_pt (decomp_dbg via tools/ssadiff):
+//
+//	u0x10000020 = (cast) RDX
+//	u0x10000010 = u0x10000020 >> #0x20:4
+//	s0x00000014:4 = SUB84(u0x10000010,#0x0:4)
+func (r *RuleSubRight) applySubpieceRight(op *PcodeOp, data *Funcdata) int {
+	if op.addlFlags&PcodeOpSpecialPrint != 0 {
+		return 0
+	}
+	// C++ additionally marks the op for field-extraction printing when the
+	// slot-0 data-type isPieceStructured(). Gosleigh models no piece-structured
+	// type yet (RulePieceStructure is a known-mismatch stub), so that guard is
+	// unreachable and intentionally omitted.
+	c, ok := constantValue(op.Input(1))
+	if !ok || c == 0 {
+		return 0 // SUBPIECE is already least significant
+	}
+	a := op.Input(0)
+	outvn := op.Output()
+	if a == nil || outvn == nil {
+		return 0
+	}
+	if outvn.IsAddrTied() && a.IsAddrTied() {
+		if ov := outvn.Overlap(a); ov >= 0 && uint64(ov) == c {
+			return 0 // ActionCopyMarker turns this SUBPIECE into a marker instead
+		}
+	}
+	opc := CPUI_INT_RIGHT // default shift type
+	d := c * 8            // convert the byte offset to a bit shift
+	// Lump a lone constant right-shift consumer together with the SUBPIECE.
+	if lone := outvn.LoneDescend(); lone != nil {
+		opc2 := lone.Code()
+		if opc2 == CPUI_INT_RIGHT || opc2 == CPUI_INT_SRIGHT {
+			extra, isConst := constantValue(lone.Input(1))
+			// Only when the SUBPIECE takes the whole high end of a.
+			if isConst && uint64(outvn.Size())+c == uint64(a.Size()) {
+				d += extra
+				if d >= uint64(a.Size())*8 {
+					if opc2 == CPUI_INT_RIGHT {
+						return 0 // result should have been 0
+					}
+					d = uint64(a.Size())*8 - 1 // sign extraction
+				}
+				// C++ opUnlink; OpDestroy additionally drops the op from the
+				// op bank, which is safe because the rule returns immediately.
+				data.OpDestroy(op)
+				op = lone
+				data.OpSetOpcode(op, CPUI_SUBPIECE)
+				opc = opc2
+			}
+		}
+	}
+	// Create the shift BEFORE the SUBPIECE happens.
+	meta := TYPE_UINT
+	if opc != CPUI_INT_RIGHT {
+		meta = TYPE_INT
+	}
+	shiftop := data.NewOp(2, op.Addr())
+	data.OpSetOpcode(shiftop, opc)
+	newout := data.NewUniqueOut(a.Size(), shiftop)
+	newout.UpdateType(sharedTypeFactory.GetExactType(a.Size(), meta))
+	data.OpSetInput(shiftop, a, 0)
+	data.OpSetInput(shiftop, data.NewConstant(4, d), 1)
+	data.OpInsertBefore(shiftop, op)
+
+	// Change the SUBPIECE into a least significant SUBPIECE of the shift.
+	data.OpSetInput(op, newout, 0)
+	data.OpSetInput(op, data.NewConstant(4, 0), 1)
+	return 1
 }
 
 type RuleNegateNegate struct{ batchRule }
