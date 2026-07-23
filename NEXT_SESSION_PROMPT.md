@@ -17,6 +17,32 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
   corpus2 잔여 4건 = **add_pt** / **caller** / **faverage** / **umulhi**.
 - 세션8 상세는 아래 "[2026-07-24 세션8 결과]" 블록 + CHANGELOG 세션8-1~12.
 
+### [착지 대기] `varmap-wip-session8` 브랜치 (origin 푸시됨, commit `767ef6f`)
+`array_init_then_sum`의 **varmap 절반이 완성돼 있으나 master에 안 넣었다.** 이유: 그것만 넣으면 렌더 텍스트에서
+`* 4` 스케일이 사라져 **C로 읽을 때 의미가 틀린 줄**이 된다(SSA는 오히려 정확해짐). 프로젝트 규칙
+"green이어도 의미 손상이면 착지 금지"에 걸려 printc 후속과 **함께** 넣기로 했다.
+
+브랜치 내용: `pkg/pcode/varmap.go` 신규(~470줄, AliasChecker/MapState/RangeHint/adjustFit/createEntry/
+buildVariableName) + `scopelocal_ext.go` 배선. 결과 = `aiStack_48 [18]` 심볼 실체화 + SSA가 C++ 동형
+(`PTRADD(PTRSUB(RSP,-0x48), RAX, #0x4)`). 전 게이트 무회귀(tree 10/10, 30/32, corpus2 9/13), -count=1 2회.
+
+**전제 밖에서 발견된 진짜 병목**(기록 필수): `ResolveSpacebaseSymbol`이 심볼 유무와 무관하게 항상 undefined1을
+돌려주고 있었다. 스택 spacebase input varnode에 `BindSpaceConstant` side-table 항목이 없어서다 --
+`Funcdata.Spacebase()`(funcdata.go:654)는 `BindSpacebase`(다른 테이블)와 포인터 타입만 찍는다. C++엔 이 구멍이
+없다(space가 `TypeSpacebase::spaceid`에 내장). Go는 `TypeFactory.GetTypeSpacebase`가 space 인자를 **버리므로**
+side-table이 유일한 통로다. 이 바인딩이 없으면 AddTreeState가 elemSize=1로 잡아 `PTRADD(sp,i,#1)`을 만든다.
+**cherry-pick 시 `bindSpacebaseSpace` 한 줄은 `Funcdata.Spacebase()`의 `BindSpacebase` 옆으로 옮길 것**
+(브랜치에는 funcdata.go 접근 제한 때문에 varmap.go에 있고 `PLACEMENT NOTE` 주석이 달려 있다).
+
+**남은 printc 절반 2건** (이걸 하면 `array_init_then_sum` MATCH -> 31/32):
+1. **배열 선언이 안 나온다**: `printCState.emitLocalDeclarations`(printc.go:1196)가 `s.locals`(Varnode 목록)만
+   순회한다. C++ `PrintC::emitLocalVarDecls`는 **스코프의 Symbol**을 순회한다. 배열은 대응 Varnode가 없어
+   현 구조로는 구조적으로 선언 불가.
+2. **참조가 첨자로 안 나온다**: `renderPtrSub`(printc.go:3916)의 심볼 분기가 **글로벌 스코프만** 조회한다.
+   C++ `PrintC::opPtrsub`의 TYPE_SPACEBASE 분기(printc.cc:1076-1105)는
+   `op->getIn(1)->getHigh()->getSymbol()`로 ScopeLocal 심볼을 읽고, 배열이면 `&`를 생략하고 subscript를 push한다.
+   -> ScopeLocal 조회 추가, 또는 `Funcdata::linkSymbol`로 PTRSUB 상수에 Symbol 부착.
+
 ### 잔여 6건의 현재 위치 (전부 실측 확인)
 | 함수 | 남은 차이 | 규모 |
 |---|---|---|
