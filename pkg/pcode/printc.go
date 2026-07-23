@@ -1606,7 +1606,9 @@ func (s *printCState) isBlockEmpty(bl *FlowBlock) bool {
 // for a basic block it emits the block's ops with the final branch suppressed.
 // C++ parity: PrintC::emitBlockIf emits condBlock with no_branch (printc.cc:3026)
 // -> emitBlockCondition's no_branch path emits getBlock(0) recursively
-// (printc.cc:2972).
+// (printc.cc:2972); a BlockList head follows emitBlockLs's no_branch path
+// (printc.cc:2925-2965), emitting every leading sub-block in full and only the
+// final sub-block's lead.
 func (s *printCState) emitConditionLead(bl *FlowBlock) error {
 	if bl == nil {
 		return nil
@@ -1617,6 +1619,21 @@ func (s *printCState) emitConditionLead(bl *FlowBlock) error {
 			return s.emitConditionLead(children[0])
 		}
 		return nil
+	}
+	if bl.Type() == BlockListType {
+		// emitBlockLs no_branch (printc.cc:2925-2965): the leading sub-blocks are
+		// full statements (e.g. guarded returns); only the final sub-block's branch
+		// is withheld for the enclosing "if".
+		children := bl.StructuredChildren()
+		if len(children) == 0 {
+			return nil
+		}
+		for i := 0; i+1 < len(children); i++ {
+			if err := s.emitBlock(children[i]); err != nil {
+				return err
+			}
+		}
+		return s.emitConditionLead(children[len(children)-1])
 	}
 	if basic := toBasic(bl); basic != nil {
 		return s.emitOps(basic, true)
@@ -3946,6 +3963,15 @@ func (s *printCState) renderCondition(bl *FlowBlock) (ExprFragment, error) {
 			}
 		}
 		return s.lang.Atom("0"), nil
+	case BlockListType:
+		// C++ parity: emitBlockLs only_branch emits only getBlock(size-1)
+		// (printc.cc:2919-2923) -- the final sub-block carries the branch condition;
+		// earlier sub-blocks are the leading statements rendered by emitConditionLead.
+		children := bl.StructuredChildren()
+		if len(children) == 0 {
+			return s.lang.Atom("0"), nil
+		}
+		return s.renderCondition(children[len(children)-1])
 	default:
 		children := bl.StructuredChildren()
 		if len(children) > 0 {
