@@ -1,6 +1,10 @@
 package pcode
 
-import "testing"
+import (
+	"testing"
+
+	"gosleigh/pkg/address"
+)
 
 // RuleXorCollapse -- ruleaction.cc:4058. Covers both C++ forms plus the guards.
 func TestRuleXorCollapse_ComparisonForms(t *testing.T) {
@@ -118,5 +122,124 @@ func TestRuleNotDistribute_BoolDeMorgan(t *testing.T) {
 	}
 	if bitneg.Code() != CPUI_INT_NEGATE {
 		t.Fatalf("~(x&y) was rewritten to %v", bitneg.Code())
+	}
+}
+
+// RuleZextEliminate -- ruleaction.cc:2507. Drop an INT_ZEXT feeding a comparison
+// against a constant that survives the narrowing. This rule does not fire on the
+// current corpus (measured: 701 entries, every one bailing because neither
+// comparison operand is INT_ZEXT-defined), so the behaviour is pinned here.
+func TestRuleZextEliminate_ComparisonForms(t *testing.T) {
+	// zext(V) == c  =>  V == c
+	data := newRulesFuncdata()
+	v := newRuleInput(data, 1, 0x10)
+	zext := newRuleOp(data, CPUI_INT_ZEXT, 4, v)
+	eq := newRuleOp(data, CPUI_INT_EQUAL, 1, zext.Output(), data.NewConstant(4, 0x41))
+	if got := NewRuleZextEliminate("analysis").ApplyOp(eq, data); got != 1 {
+		t.Fatalf("zext(V)==c ApplyOp=%d, want 1", got)
+	}
+	if eq.Input(0) != v {
+		t.Fatalf("zext(V)==c did not reach through the extension: %v", eq.Input(0))
+	}
+	if !eq.Input(1).IsConstant() || eq.Input(1).Size() != 1 || eq.Input(1).Offset() != 0x41 {
+		t.Fatalf("zext(V)==c constant not narrowed: size=%d off=%#x", eq.Input(1).Size(), eq.Input(1).Offset())
+	}
+
+	// c != zext(V)  =>  c != V   (extension in slot 1; slots must stay put)
+	data = newRulesFuncdata()
+	v = newRuleInput(data, 2, 0x10)
+	zext = newRuleOp(data, CPUI_INT_ZEXT, 8, v)
+	ne := newRuleOp(data, CPUI_INT_NOTEQUAL, 1, data.NewConstant(8, 0xffff), zext.Output())
+	if got := NewRuleZextEliminate("analysis").ApplyOp(ne, data); got != 1 {
+		t.Fatalf("c!=zext(V) ApplyOp=%d, want 1", got)
+	}
+	if ne.Input(1) != v {
+		t.Fatalf("c!=zext(V) kept the extension in slot 1: %v", ne.Input(1))
+	}
+	if !ne.Input(0).IsConstant() || ne.Input(0).Size() != 2 || ne.Input(0).Offset() != 0xffff {
+		t.Fatalf("c!=zext(V) constant not narrowed into slot 0: size=%d off=%#x", ne.Input(0).Size(), ne.Input(0).Offset())
+	}
+
+	// zext(V) <= c  =>  V <= c   (the INT_LESSEQUAL member of the op list)
+	data = newRulesFuncdata()
+	v = newRuleInput(data, 1, 0x10)
+	zext = newRuleOp(data, CPUI_INT_ZEXT, 4, v)
+	le := newRuleOp(data, CPUI_INT_LESSEQUAL, 1, zext.Output(), data.NewConstant(4, 0x7f))
+	if got := NewRuleZextEliminate("analysis").ApplyOp(le, data); got != 1 {
+		t.Fatalf("zext(V)<=c ApplyOp=%d, want 1", got)
+	}
+	if le.Input(0) != v || le.Input(1).Size() != 1 {
+		t.Fatalf("zext(V)<=c not rewritten: in0=%v in1size=%d", le.Input(0), le.Input(1).Size())
+	}
+}
+
+func TestRuleZextEliminate_Guards(t *testing.T) {
+	// A constant with non-zero bits above the unextended width must be kept.
+	data := newRulesFuncdata()
+	v := newRuleInput(data, 1, 0x10)
+	zext := newRuleOp(data, CPUI_INT_ZEXT, 4, v)
+	eq := newRuleOp(data, CPUI_INT_EQUAL, 1, zext.Output(), data.NewConstant(4, 0x1234))
+	if got := NewRuleZextEliminate("analysis").ApplyOp(eq, data); got != 0 {
+		t.Fatalf("zext(V)==0x1234 on a 1-byte source ApplyOp=%d, want 0", got)
+	}
+
+	// The other operand has to be constant.
+	data = newRulesFuncdata()
+	v = newRuleInput(data, 1, 0x10)
+	w := newRuleInput(data, 4, 0x20)
+	zext = newRuleOp(data, CPUI_INT_ZEXT, 4, v)
+	eq = newRuleOp(data, CPUI_INT_EQUAL, 1, zext.Output(), w)
+	if got := NewRuleZextEliminate("analysis").ApplyOp(eq, data); got != 0 {
+		t.Fatalf("zext(V)==W ApplyOp=%d, want 0", got)
+	}
+
+	// The extension must have no other reader.
+	data = newRulesFuncdata()
+	v = newRuleInput(data, 1, 0x10)
+	zext = newRuleOp(data, CPUI_INT_ZEXT, 4, v)
+	newRuleOp(data, CPUI_INT_ADD, 4, zext.Output(), data.NewConstant(4, 1))
+	eq = newRuleOp(data, CPUI_INT_EQUAL, 1, zext.Output(), data.NewConstant(4, 0x41))
+	if got := NewRuleZextEliminate("analysis").ApplyOp(eq, data); got != 0 {
+		t.Fatalf("multi-descend extension ApplyOp=%d, want 0", got)
+	}
+
+	// The extension source must be heritage-resolved (free reads are left alone).
+	data = newRulesFuncdata()
+	free := data.NewVarnode(1, address.Address{Space: data.BaseAddr().Space, Offset: 0x30})
+	zext = newRuleOp(data, CPUI_INT_ZEXT, 4, free)
+	eq = newRuleOp(data, CPUI_INT_EQUAL, 1, zext.Output(), data.NewConstant(4, 0x41))
+	if got := NewRuleZextEliminate("analysis").ApplyOp(eq, data); got != 0 {
+		t.Fatalf("zext of a free varnode ApplyOp=%d, want 0", got)
+	}
+
+	// Neither operand written by INT_ZEXT.
+	data = newRulesFuncdata()
+	a := newRuleInput(data, 4, 0x10)
+	eq = newRuleOp(data, CPUI_INT_EQUAL, 1, a, data.NewConstant(4, 0x41))
+	if got := NewRuleZextEliminate("analysis").ApplyOp(eq, data); got != 0 {
+		t.Fatalf("plain V==c ApplyOp=%d, want 0", got)
+	}
+}
+
+// The INT_ZEXT body preserved from the pre-parity rule that carried the
+// RuleZextEliminate name.
+func TestRuleZextIdentity_Elements(t *testing.T) {
+	data := newRulesFuncdata()
+	v := newRuleInput(data, 4, 0x10)
+
+	same := newRuleOp(data, CPUI_INT_ZEXT, 4, v)
+	if got := NewRuleZextIdentity("analysis").ApplyOp(same, data); got != 1 {
+		t.Fatalf("width-preserving zext ApplyOp=%d, want 1", got)
+	}
+	if same.Code() != CPUI_COPY || same.Input(0) != v {
+		t.Fatalf("width-preserving zext did not become COPY V: %v", same.Code())
+	}
+
+	konst := newRuleOp(data, CPUI_INT_ZEXT, 4, data.NewConstant(1, 0x41))
+	if got := NewRuleZextIdentity("analysis").ApplyOp(konst, data); got != 1 {
+		t.Fatalf("zext of a constant ApplyOp=%d, want 1", got)
+	}
+	if konst.Code() != CPUI_COPY || !konst.Input(0).IsConstant() || konst.Input(0).Size() != 4 {
+		t.Fatalf("zext of a constant did not widen in place: %v", konst.Code())
 	}
 }

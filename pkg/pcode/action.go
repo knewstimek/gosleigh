@@ -1273,6 +1273,7 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	actprop.AddRule(NewRuleCollapseConstants("analysis"))
 	actprop.AddRule(NewRuleTransformCPool("analysis"))
 	actprop.AddRule(NewRulePropagateCopy("analysis"))
+	actprop.AddRule(NewRuleZextIdentity("analysis"))
 	actprop.AddRule(NewRuleZextEliminate("analysis"))
 	actprop.AddRule(NewRuleSlessToLess("analysis"))
 	actprop.AddRule(NewRuleZextSless("analysis"))
