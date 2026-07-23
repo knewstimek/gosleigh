@@ -76,11 +76,11 @@
       "name": "while_countdown",
       "entry": 10112,
       "tags": [
-        "UNKNOWN"
+        "MATCH"
       ],
       "evidence": {
-        "UNKNOWN": [
-          "no heuristic matched -- manual review needed"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -207,11 +207,11 @@
       "name": "popcount_loop",
       "entry": 11216,
       "tags": [
-        "UNKNOWN"
+        "MATCH"
       ],
       "evidence": {
-        "UNKNOWN": [
-          "no heuristic matched -- manual review needed"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -398,10 +398,9 @@
   ],
   "summary": {
     "total": 32,
-    "match": 26,
+    "match": 28,
     "tag_counts": {
-      "MATCH": 26,
-      "UNKNOWN": 2,
+      "MATCH": 28,
       "TYPECAST": 3,
       "PTR": 1,
       "TEMP": 2

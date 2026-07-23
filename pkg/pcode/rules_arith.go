@@ -235,21 +235,54 @@ func NewRuleAddUnsigned(group string) *RuleAddUnsigned {
 	return r
 }
 
+// apply is a faithful port of RuleAddUnsigned::applyOp (ruleaction.cc:7202-7234).
+//
+// Only slot 1 is examined, exactly as C++ does: INT_ADD is commutative and
+// RuleTermOrder has already moved any constant term into slot 1 by the time the
+// cleanup pool runs, so a slot loop would be a Gosleigh-only widening.
+//
+// The TYPE_UINT gate is what makes this rule direction-correct, and it is the
+// whole reason a negative INT_ADD constant may survive to the printer: a
+// constant that ActionInferTypes typed TYPE_INT (TypeOpIntAdd::propagateType,
+// typeop.cc:1183 -- the constant inherits the metatype of the other operand)
+// stays an INT_ADD and prints as a signed decimal literal ("+ -2"), while a
+// TYPE_UINT constant becomes INT_SUB ("- 1"). Measured against the C++ core
+// (decomp_dbg): while_countdown keeps `uStackX_8 + -2` (int param), popcount_loop
+// yields `uStackX_8 - 1` (uint param).
+//
+// Unported vs C++: the EquateSymbol name-lock guard (ruleaction.cc:7216-7222) and
+// Varnode::copySymbol -- Gosleigh has no SymbolEntry on Varnode yet.
 func (r *RuleAddUnsigned) apply(op *PcodeOp, data *Funcdata) int {
-	size := outputOrInputSize(op)
-	for slot := 0; slot < 2; slot++ {
-		val, ok := constantValue(op.Input(slot))
-		if !ok || val == 0 || isAllOnesConst(op.Input(slot)) {
-			continue
-		}
-		if val&signBitForSize(size) == 0 {
-			continue
-		}
-		other := op.Input(1 - slot)
-		rewriteOp(data, op, CPUI_INT_SUB, other, data.NewConstant(size, negateConstForSize(val, size)))
-		return 1
+	constvn := op.Input(1)
+	if constvn == nil || !constvn.IsConstant() {
+		return 0
 	}
-	return 0
+	dt := constvn.TypeReadFacing(op)
+	if dt == nil || dt.Metatype() != TYPE_UINT {
+		return 0
+	}
+	if isCharPrintLike(dt) {
+		return 0 // Only change integer forms
+	}
+	size := constvn.Size()
+	val := constvn.Offset()
+	mask := maskForSize(size)
+	// The first quarter of bits must all be 1's. C++ computes the shift as
+	// size*6, i.e. 3/4 of the bit width (size*8 bits total).
+	sa := uint(size) * 6
+	quarter := (mask >> sa) << sa
+	if val&quarter != quarter {
+		return 0
+	}
+	negatedVal := negateConstForSize(val, size)
+	if enumType, ok := dt.(*Enum); ok {
+		if !enumType.HasNamedValue(negatedVal) && enumType.HasNamedValue((^val)&mask) {
+			return 0
+		}
+	}
+	data.OpSetOpcode(op, CPUI_INT_SUB)
+	data.OpSetInput(op, data.NewConstant(size, negatedVal), 1)
+	return 1
 }
 
 type Rule2Comp2Sub struct{ batchRule }
