@@ -28,6 +28,7 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 | `ee6dde2` | **표현식 구조를 emit 시점까지 보존**(ExprFragment 자식 보존 + group/spaces) | umulhi MATCH (corpus2 9->10) |
 | `b0d1476` | 룰 전수 감사 문서화 | **동명 다른 룰 12건 더 발견** |
 | `4a45f96` | **스택 배열 복구**(varmap 포팅 + printc 배열 선언/첨자) | array_init_then_sum MATCH (30->**31/32**) |
+| `31539bc` | 감사 최우선 2건 포팅(`RuleNotDistribute` BOOL_NEGATE, `RuleXorCollapse` INT_EQUAL/NOTEQUAL) | 편도 발산 위험 제거 + 유닛테스트 신설 |
 
 **최종: x64_auto 25 -> 31/32, corpus2 8 -> 10/13.** 잔여 = switch_dense(imagebase/reloc) / add_pt(네이밍) /
 caller(하네스 한계) / faverage(FP).
