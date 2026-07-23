@@ -296,6 +296,7 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRuleTrivialArith(group) },
 	func(group string) Rule { return NewRuleEquality(group) },
 	func(group string) Rule { return NewRuleTrivialBool(group) },
+	func(group string) Rule { return NewRuleZextIdentity(group) },
 	func(group string) Rule { return NewRuleZextEliminate(group) },
 	func(group string) Rule { return NewRuleSlessToLess(group) },
 	func(group string) Rule { return NewRuleZextSless(group) },

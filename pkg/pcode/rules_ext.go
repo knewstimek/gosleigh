@@ -37,15 +37,25 @@ func (r *RulePiece2Sext) apply(op *PcodeOp, data *Funcdata) int {
 	return 1
 }
 
-type RuleZextEliminate struct{ batchRule }
+// RuleZextIdentity folds an INT_ZEXT that extends nothing: a zext whose input
+// already has the output size becomes a COPY, and a zext of a constant folds to
+// the widened constant.
+//
+// No C++ rule of this shape exists. It used to live under the name
+// "RuleZextEliminate", but that name belongs to a completely different C++ rule
+// (see RuleZextEliminate below). The body is kept under its own name because
+// unregistering it regresses output; the constant case overlaps C++
+// RuleCollapseConstants, the same-size case has no C++ counterpart because C++
+// never builds a width-preserving INT_ZEXT.
+type RuleZextIdentity struct{ batchRule }
 
-func NewRuleZextEliminate(group string) *RuleZextEliminate {
-	r := &RuleZextEliminate{}
-	r.batchRule = newBatchRule(group, "zexteliminate", []OpCode{CPUI_INT_ZEXT}, r.apply, func(g string) Rule { return NewRuleZextEliminate(g) })
+func NewRuleZextIdentity(group string) *RuleZextIdentity {
+	r := &RuleZextIdentity{}
+	r.batchRule = newBatchRule(group, "zextidentity", []OpCode{CPUI_INT_ZEXT}, r.apply, func(g string) Rule { return NewRuleZextIdentity(g) })
 	return r
 }
 
-func (r *RuleZextEliminate) apply(op *PcodeOp, data *Funcdata) int {
+func (r *RuleZextIdentity) apply(op *PcodeOp, data *Funcdata) int {
 	in := op.Input(0)
 	if in.Size() == outputOrInputSize(op) {
 		return rewriteToCopy(data, op, in)
@@ -53,6 +63,61 @@ func (r *RuleZextEliminate) apply(op *PcodeOp, data *Funcdata) int {
 	if val, ok := constantValue(in); ok {
 		return rewriteToCopy(data, op, data.NewConstant(outputOrInputSize(op), val))
 	}
+	return 0
+}
+
+type RuleZextEliminate struct{ batchRule }
+
+func NewRuleZextEliminate(group string) *RuleZextEliminate {
+	r := &RuleZextEliminate{}
+	// RuleZextEliminate::getOpList -- ruleaction.cc:2499. Eliminate INT_ZEXT in a
+	// comparison against a constant that loses no non-zero bits when narrowed:
+	//   zext(V) == c  =>  V == c   (likewise !=, <, <=)
+	opcodes := []OpCode{CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL, CPUI_INT_LESS, CPUI_INT_LESSEQUAL}
+	r.batchRule = newBatchRule(group, "zexteliminate", opcodes, r.apply, func(g string) Rule { return NewRuleZextEliminate(g) })
+	return r
+}
+
+// RuleZextEliminate::applyOp -- ruleaction.cc:2507.
+func (r *RuleZextEliminate) apply(op *PcodeOp, data *Funcdata) int {
+	// vn1 is the ZEXTed input, vn2 the other one.
+	vn1 := op.Input(0)
+	vn2 := op.Input(1)
+	zextslot, otherslot := 0, 1
+	if vn2.IsWritten() && vn2.Def().Code() == CPUI_INT_ZEXT {
+		vn1, vn2 = vn2, op.Input(0)
+		zextslot, otherslot = 1, 0
+	} else if !vn1.IsWritten() || vn1.Def().Code() != CPUI_INT_ZEXT {
+		return 0
+	}
+	if !vn2.IsConstant() {
+		return 0
+	}
+	zext := vn1.Def()
+	if !zext.Input(0).IsHeritageKnown() {
+		return 0
+	}
+	if vn1.LoneDescend() != op {
+		return 0 // Make sure extension is not used for anything else
+	}
+	smallsize := zext.Input(0).Size()
+	val := vn2.Offset()
+	// Is the zero extension unnecessary. C++ writes val>>(8*smallsize) on a
+	// uintb; for smallsize>=8 that shift is undefined there, while Go defines it
+	// as 0. The Go answer is the mathematically intended one (any 64-bit value
+	// fits in 8+ bytes), and smallsize>=8 with a wider zext output is not
+	// reachable on the supported architectures.
+	if val>>(8*uint(smallsize)) == 0 {
+		// C++ also does newvn->copySymbolIfValid(vn2) here; Varnode symbol markup
+		// propagation is unported project-wide, so the equate/enum annotation is
+		// not carried over.
+		newvn := data.NewConstant(smallsize, val)
+		data.OpSetInput(op, zext.Input(0), zextslot)
+		data.OpSetInput(op, newvn, otherslot)
+		return 1
+	}
+	// C++ notes an unimplemented else branch here (constant comparison folded on
+	// the spot); not present in C++ either, so nothing to port.
 	return 0
 }
 
