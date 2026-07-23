@@ -22,7 +22,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `array_2d_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `array_init_then_sum` | TYPECAST, PTR, TEMP | TYPECAST: cast (int): want=0 got=2<br>TYPECAST: cast (longlong): want=0 got=2<br>PTR: raw pointer scale '* 4': want=0 got=2<br>TEMP: extra temp/local identifiers in output (3 vs 2): local_423 |
 | `array_reverse_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `reverse_bytes_inplace` | TEMP | TEMP: extra temp/local identifiers in output (4 vs 3): iVar1 |
+| `reverse_bytes_inplace` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
 | `bit_mask_shift_combo` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `popcount_loop` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `xor_swap_pair` | MATCH | MATCH: byte-identical (indent-insensitive) |
@@ -45,6 +45,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 
 - MATCH: 29
 - PTR: 1
-- TEMP: 2
+- TEMP: 1
 - TYPECAST: 2
+- UNKNOWN: 1
 

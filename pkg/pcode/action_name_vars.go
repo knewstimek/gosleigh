@@ -178,6 +178,46 @@ func hvTypePrefix(hv *HighVariable) string {
 	}
 }
 
+// regParamSlotOfHigh returns the calling-convention argument slot index of the
+// HighVariable when one of its live instances is a function input Varnode stored
+// in an argument register, i.e. when the HighVariable is a formal parameter.
+// The lowest slot index wins so the result is deterministic if the HighVariable
+// ever spans two argument registers.
+//
+// C++ parity: HighVariable::isInput (variable.hh) drives the parameter branch of
+// Scope::buildDefaultName (database.cc:1764); the slot index corresponds to
+// Symbol::getCategoryIndex() for a Symbol::function_parameter, which
+// ProtoStoreSymbol::setInput assigns from the recovered input map position.
+// Unused inputs (no descendants) are skipped: ActionInputPrototype only marks a
+// trial active when the Varnode has descendants (coreaction.cc:4738), so a dead
+// argument register never becomes a parameter Symbol.
+func regParamSlotOfHigh(hv *HighVariable, sl *ScopeLocal) (int, bool) {
+	if hv == nil || sl == nil || sl.model == nil {
+		return 0, false
+	}
+	best := -1
+	for i := 0; i < hv.NumInstances(); i++ {
+		vn := hv.GetInstance(i)
+		if vn == nil || !vn.IsInput() || vn.NumDescend() == 0 {
+			continue
+		}
+		if !isRegisterSpace(vn) {
+			continue
+		}
+		idx, ok := sl.model.IsRegParam(vn.Offset())
+		if !ok {
+			continue
+		}
+		if best < 0 || idx < best {
+			best = idx
+		}
+	}
+	if best < 0 {
+		return 0, false
+	}
+	return best, true
+}
+
 // Apply assigns iVar1/uVar1-style names to unnamed register-space HighVariables.
 // Stack locals already have local_hex names from ScopeLocal and are not touched.
 // Must be called after ActionMergeCopy so all HV merging is complete.
@@ -289,6 +329,40 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		if rep == nil {
 			// No nameable representative -- skip (params, implied unique-only HVs).
 			continue
+		}
+		// A HighVariable that still holds a live input Varnode sitting in a
+		// calling-convention argument register IS the formal parameter, however many
+		// re-definitions were merged into it, and takes the param_N name.
+		//
+		// This is the storage-driven half of the C++ naming rule: ActionInputPrototype
+		// (coreaction.cc:4718) re-derives the input map from the FINAL SSA at the
+		// fixateproto stage, and FuncProto::updateInputTypes -> ProtoStoreSymbol::setInput
+		// (fspec.cc) drops and re-creates the parameter Symbol whenever the recovered
+		// storage no longer matches the old SymbolEntry (addr or size). ActionNameVars
+		// then names it through Scope::buildDefaultName (database.cc:1756), whose first
+		// branch is "sym->getCategory() == function_parameter || high->isInput()"
+		// (database.cc:1764) -> buildVariableName(..., index, flags|input) ->
+		// "param_<index>" (database.cc:2481).
+		//
+		// Gosleigh stamps register parameter names once, early, inside
+		// ScopeLocal.BuildFromVarnodes, onto the Varnode that was the input at that
+		// moment. When a parameter is re-assigned in the body, subvariable/lane flow
+		// later replaces the full-width input (RDX:8) with its sub-register (EDX:4)
+		// AFTER parameter recovery locked, so the named HighVariable dies with the
+		// discarded wide input and the surviving one reaches here unnamed -- which used
+		// to yield iVarN for a variable Ghidra prints as param_N. Recovering the name
+		// from the argument-register storage here is the same "storage, not Varnode
+		// identity, owns the parameter name" invariant the C++ re-derivation provides.
+		//
+		// Entry-point functions are excluded: they run the stack-only processEntry
+		// model, so an argument register carries no parameter index (index<0) and C++
+		// names it in_<reg> (database.cc:2470) -- the renderer handles that case.
+		if sl != nil && sl.model != nil && !sl.model.EntryPoint {
+			if idx, ok := regParamSlotOfHigh(c.hv, sl); ok {
+				c.hv.SetName(GetParamName(idx))
+				a.count++
+				continue
+			}
 		}
 		if sl != nil {
 			if nr := highNameRepresentative(c.hv); nr != nil {
