@@ -4,16 +4,11 @@
       "name": "dowhile_scan",
       "entry": 9472,
       "tags": [
-        "STRUCT",
-        "TYPECAST"
+        "MATCH"
       ],
       "evidence": {
-        "STRUCT": [
-          "dangling goto target(s) in output: label_0",
-          "keyword 'break': want=0 got=1"
-        ],
-        "TYPECAST": [
-          "cast (int): want=1 got=2"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -21,12 +16,11 @@
       "name": "find_pair",
       "entry": 9600,
       "tags": [
-        "STRUCT"
+        "MATCH"
       ],
       "evidence": {
-        "STRUCT": [
-          "dangling goto target(s) in output: label_0, label_1, label_2",
-          "keyword 'while': want=2 got=1"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -46,11 +40,11 @@
       "name": "clamp3",
       "entry": 9824,
       "tags": [
-        "STRUCT"
+        "MATCH"
       ],
       "evidence": {
-        "STRUCT": [
-          "dangling goto target(s) in output: label_0, label_1"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -89,15 +83,11 @@
       "name": "sum_via_pp",
       "entry": 10112,
       "tags": [
-        "PTR",
-        "TEMP"
+        "MATCH"
       ],
       "evidence": {
-        "PTR": [
-          "raw pointer scale '* 8': want=0 got=2"
-        ],
-        "TEMP": [
-          "extra temp/local identifiers in output (3 vs 2): lVar1"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -117,11 +107,11 @@
       "name": "helper_sum",
       "entry": 10304,
       "tags": [
-        "TEMP"
+        "MATCH"
       ],
       "evidence": {
-        "TEMP": [
-          "extra temp/local identifiers in output (1 vs 0): tmp_0"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -150,14 +140,11 @@
       "name": "parse_steps",
       "entry": 10480,
       "tags": [
-        "STRUCT"
+        "MATCH"
       ],
       "evidence": {
-        "STRUCT": [
-          "dangling goto target(s) in output: label_0, label_1",
-          "keyword 'while': want=1 got=0",
-          "keyword 'for': want=0 got=1",
-          "keyword 'break': want=1 got=0"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -182,30 +169,25 @@
       "name": "umulhi",
       "entry": 10688,
       "tags": [
-        "TYPECAST",
-        "TEMP"
+        "NAMING"
       ],
       "evidence": {
-        "TYPECAST": [
-          "cast (ulonglong): want=0 got=1"
-        ],
-        "TEMP": [
-          "extra temp/local identifiers in output (5 vs 1): uVar2, uVar3, uVar5, uVar6"
+        "NAMING": [
+          "identical token structure; only identifier names differ"
         ]
       }
     }
   ],
   "summary": {
     "total": 13,
-    "match": 2,
+    "match": 8,
     "tag_counts": {
-      "STRUCT": 4,
-      "TYPECAST": 5,
-      "TEMP": 5,
+      "MATCH": 8,
+      "TEMP": 2,
+      "TYPECAST": 3,
       "CALL": 2,
-      "MATCH": 2,
-      "PTR": 1,
-      "FP": 1
+      "FP": 1,
+      "NAMING": 1
     }
   }
 }

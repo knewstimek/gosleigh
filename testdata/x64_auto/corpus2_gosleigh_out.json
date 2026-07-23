@@ -6,7 +6,7 @@
     },
     {
       "name": "find_pair",
-      "output": "\nint find_pair(longlong param_1,int param_2,int param_3)\n\n{\nint local_18;\nint local_14;\n\nlocal_18 = 0;\nlocal_14 = local_18;\nif (local_18 \u003c param_2) {\ndo {\nlocal_14 = local_14 + 1;\nif (param_2 \u003c= local_14) goto label_0;\n} while (\n*(int *)(param_1 + (longlong)local_18 * 4) + *(int *)(param_1 + (longlong)local_14 * 4) ==\nparam_3);\nlocal_14 = local_18 * 100 + local_14;\n}\nelse {\nlocal_14 = -1;\n}\nreturn local_14;\nlocal_18 = local_18 + 1;\ngoto label_1;\n}\n"
+      "output": "\nint find_pair(longlong param_1,int param_2,int param_3)\n\n{\nint local_18;\nint local_14;\n\nlocal_18 = 0;\ndo {\nlocal_14 = local_18;\nif (param_2 \u003c= local_18) {\nreturn -1;\n}\nwhile (local_14 = local_14 + 1, local_14 \u003c param_2) {\nif (*(int *)(param_1 + (longlong)local_18 * 4) + *(int *)(param_1 + (longlong)local_14 * 4) ==\nparam_3) {\nreturn local_18 * 100 + local_14;\n}\n}\nlocal_18 = local_18 + 1;\n} while( true );\n}\n"
     },
     {
       "name": "gate",
@@ -14,7 +14,7 @@
     },
     {
       "name": "clamp3",
-      "output": "\nint clamp3(int param_1,int param_2,int param_3)\n\n{\nundefined4 local_14;\n\nlocal_14 = param_2;\nif (param_2 \u003c= param_1) goto label_0;\nif (param_1 \u003c= param_3) goto label_1;\nlocal_14 = local_306;\nreturn local_14;\n}\n"
+      "output": "\nint clamp3(int param_1,int param_2,int param_3)\n\n{\nint local_18;\nint local_14;\n\nlocal_14 = param_2;\nif (param_2 \u003c= param_1) {\nlocal_18 = param_1;\nif (param_3 \u003c param_1) {\nlocal_18 = param_3;\n}\nlocal_14 = local_18;\n}\nreturn local_14;\n}\n"
     },
     {
       "name": "add_pt",
@@ -26,7 +26,7 @@
     },
     {
       "name": "sum_via_pp",
-      "output": "\nint sum_via_pp(undefined8 *param_1,int param_2)\n\n{\nlonglong lVar1;\nint local_28;\nundefined8 *local_20;\n\nlocal_28 = 0;\nlVar1 = param_2;\nfor (local_20 = param_1; local_20 \u003c param_1 + lVar1 * 8; local_20 = local_20 + 1 * 8) {\nlocal_28 = local_28 + *(int *)*local_20;\n}\nreturn local_28;\n}\n"
+      "output": "\nint sum_via_pp(undefined8 *param_1,int param_2)\n\n{\nint local_28;\nundefined8 *local_20;\n\nlocal_28 = 0;\nfor (local_20 = param_1; local_20 \u003c param_1 + param_2; local_20 = local_20 + 1) {\nlocal_28 = local_28 + *(int *)*local_20;\n}\nreturn local_28;\n}\n"
     },
     {
       "name": "divmix",
@@ -34,7 +34,7 @@
     },
     {
       "name": "helper_sum",
-      "output": "\nint helper_sum(int param_1,int param_2,int param_3,int param_4)\n\n{\nreturn (param_1 + param_2 + param_3) - tmp_0;\n}\n"
+      "output": "\nint helper_sum(int param_1,int param_2,int param_3,int param_4,int param_5)\n\n{\nreturn (param_1 + param_2 + param_3) - param_4 * param_5;\n}\n"
     },
     {
       "name": "caller",
@@ -50,7 +50,7 @@
     },
     {
       "name": "umulhi",
-      "output": "\nlonglong umulhi(ulonglong param_1,ulonglong param_2)\n\n{\nulonglong uVar1;\nulonglong uVar2;\nulonglong uVar3;\nulonglong uVar5;\nulonglong uVar6;\n\nuVar5 = param_1 \u0026 0xffffffff;\nuVar1 = param_1 \u003e\u003e 0x20;\nuVar6 = param_2 \u0026 0xffffffff;\nuVar2 = param_2 \u003e\u003e 0x20;\nuVar3 = uVar1 * uVar6 + (uVar5 * uVar6 \u003e\u003e 0x20);\nreturn uVar1 * uVar2 + (uVar3 \u003e\u003e 0x20) + ((uVar3 \u0026 0xffffffff) + uVar5 * uVar2 \u003e\u003e 0x20);\n}\n"
+      "output": "\nlonglong umulhi(ulonglong param_1,ulonglong param_2)\n\n{\nulonglong uVar1;\n\nuVar1 =\n(param_1 \u003e\u003e 0x20) * (param_2 \u0026 0xffffffff) + ((param_1 \u0026 0xffffffff) * (param_2 \u0026 0xffffffff) \u003e\u003e 0x20)\n;\nreturn\n(param_1 \u003e\u003e 0x20) * (param_2 \u003e\u003e 0x20) + (uVar1 \u003e\u003e 0x20) + ((uVar1 \u0026 0xffffffff) + (param_1 \u0026 0xffffffff) * (param_2 \u003e\u003e 0x20) \u003e\u003e 0x20)\n;\n}\n"
     }
   ]
 }
