@@ -10,10 +10,13 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (엔진 tip `60e01f0` origin 푸시, 전 게이트 green -- 감독관 재검증)
-- tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **7/13**
-  (bump_scores/divmix/parse_steps/dowhile_scan/find_pair/clamp3/helper_sum), x64_auto **22/32**, production PASS,
-  `go test ./...` green.
+## 현재 상태 (엔진 tip `4759d8e` origin 푸시, 전 게이트 green -- 감독관 재검증)
+- tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **8/13**
+  (+sum_via_pp), x64_auto **23/32**(+sum_pp_walk), production PASS, `go test ./...` green.
+- **세션6 후속4 착지(`4759d8e`) = (B) print-inline 일부**: `shouldInline`이 nd>1 implied 식을 term-dup
+  인라인(printc.go) + `ActionNameVars` explicit-only 네이밍(action_name_vars.go). flag는 이미 C++ 일치였고(실측)
+  순수 렌더+네이밍 수정. **잔여**: umulhi 줄바꿈(PrettyEmitter fold), swap_via_temp LOAD cover 오분류(merge),
+  nd==1 full-faithful(heritage/merge marker) = 계속 STOP 경계. 상세 CHANGELOG 세션6 후속4.
 - **세션6 후속3 착지(`60e01f0`) = for-loop 인식**: `findLoopVariable`(action_forloops.go)가 CPUI_CAST를
   투과하도록 수정 -- 근본은 액션 순서 차이(C++은 finalTransform을 ActionSetCasts 전에 실행, Gosleigh는 후).
   삽입 CAST가 depth-4 예산 소진해 loop-head MULTIEQUAL 은닉하던 것. strlen_style이 Ghidra와 **for 구조 일치**
@@ -139,7 +142,7 @@ sum_via_pp/umulhi/gate/faverage 다수 동시 해결; 대형·단독세션)** �
 - `X64_CORPUS=1 go test -count=1 ./pkg/loader/ -run TestX64CorpusGoldenMap -v` (8/8)
 - `X64_SWITCH=1 go test -count=1 ./pkg/loader/ -run TestX64Switch -v` (op_switch byte-MATCH 사수)
 - `X64_BREADTH=1 go test -count=1 ./pkg/loader/ -run TestX64BreadthGoldenMap -v` (3/3 사수)
-- `X64_CORPUS2=1 go test -count=1 ./pkg/loader/ -run TestX64Corpus2 -v` (**7/13 사수**)
+- `X64_CORPUS2=1 go test -count=1 ./pkg/loader/ -run TestX64Corpus2 -v` (**8/13 사수**)
 - `py -3 tools/goldengap/goldengap.py run && py -3 tools/goldengap/goldengap.py report` (**MATCH 22 사수**;
   bare `go run ./cmd/goldengap`은 파일 미갱신 주의)
 - `go test ./pkg/loader/ -run 'TestMSVC|TestAARCH64|TestX8664|TestX64RegParam|TestPELoader|TestX86PEDecompile'`

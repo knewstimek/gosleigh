@@ -5,6 +5,36 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-23 (세션6 후속4): (B) print-inline -- shouldInline IsImplied 소비 + explicit-only 네이밍 (master `4759d8e`)
+Opus 1슬롯 위임(worktree). ssadump flag 덤프(SSA_FLAGS) 실측으로 umulhi의 cheap 식 4개(`param>>0x20`,
+`param&mask`)가 **nd=2인데 impl=true/expl=false**, cross(INT_ADD)는 nd=2 expl=true임을 확인 -- **IsImplied/
+IsExplicit flag는 이미 C++ ActionMarkImplied/Explicit 포팅과 완전 일치**(heritage/merge 갭 아님). 순수 렌더+네이밍.
+
+**근본 (두 갈래)**:
+1. `printc.go shouldInline`이 `NumDescend()==1`만 인라인 -> C++ `PrintLanguage::pushVnImplied`(descendant 수
+   무관하게 `isImplied()`면 재귀/term-duplicate)가 인라인하는 nd>1 implied 식을 명명 임시로 남김.
+2. `action_name_vars.go ActionNameVars`가 explicit 여부 미검사로 모든 register/stack HV에 uVarN 배정 ->
+   인라인될 implied varnode가 이름 카운터를 소비해 실제 explicit 로컬 번호 밀림(umulhi cross=uVar3, golden=uVar1).
+
+**수정**:
+- `printc.go shouldInline`: nd!=1 분기에 **implied면 term-dup 인라인**(marker/call/branch/store 제외). **nd==1
+  경로는 원본 보존** -- 전면 flag-faithful화 시 loop-carried PTRADD/CAST가 phi로 흘러 explicit 마킹되며 phantom
+  선언 누출(sum_list 회귀 실측)이라 의도적 유지. C++: printlanguage.cc pushVnImplied, coreaction.cc ActionMarkImplied.
+- `action_name_vars.go`: bestVn 게이트에 `&& vn.IsExplicit()` 추가. C++: assignDefaultNames는 nametree symbol
+  (=explicit)만 순회(database.cc:2850), implied는 Symbol 없음.
+
+**결과**: **sum_via_pp(corpus2) + sum_pp_walk(x64_auto) MATCH 전환. corpus2 7->8, x64_auto 22->23.** 전 게이트
+-count=1 2회 무회귀(tree 10/10, x64 8/8, breadth 3/3, switch, MSVC/AARCH64/X8664/RegParam/PELoader/X86PE,
+go test ./...).
+
+**미착지(진단만, STOP 경계)**: umulhi는 내용 byte-identical 교정됐으나 **줄바꿈만 MISMATCH**(Ghidra는 `+`
+width-optimal에서 접고 Gosleigh PrettyEmitter는 assignment 경계 -- EmitPrettyPrint 그룹 중첩 parity, 대형).
+swap_via_temp는 `*param_1` LOAD가 impl=true 오분류(Ghidra는 STORE-before-use라 explicit) = markImpliedCheckCover
+LOAD/STORE alias cover 갭(merge STOP). popcount_loop는 stack 네이밍 + 상수 렌더 별개. nd==1 full-faithful화는
+heritage/merge marker 정합 필요라 STOP.
+
+---
+
 ### 2026-07-23 (세션6 후속3): for-loop 인식 -- findLoopVariable CAST 투과, strlen_style for 구조 (master `60e01f0`)
 Opus 1슬롯 위임(worktree 격리). goal 가설(`testTerminal` 축약 포팅)은 실측으로 **반증**: FORLOOP_DBG 계측 결과
 `tryMarkForLoop`가 `testTerminal`이 아니라 그 앞의 **`findLoopVariable`에서 bail**(iterateOp=nil, tailSlot=-1).
