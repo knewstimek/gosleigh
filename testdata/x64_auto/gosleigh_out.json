@@ -86,7 +86,7 @@
     },
     {
       "name": "sign_extend_boundary",
-      "output": "\nint sign_extend_boundary(int param_1)\n\n{\nreturn (int)param_1 + (int)param_1;\n}\n"
+      "output": "\nint sign_extend_boundary(short param_1)\n\n{\nundefined1 local_res8;\n\nlocal_res8 = (char)param_1;\nreturn (int)local_res8 + (int)param_1;\n}\n"
     },
     {
       "name": "char_arith_promote",

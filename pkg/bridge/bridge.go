@@ -652,12 +652,17 @@ func buildFaithfulStackSpace(xr *sla.XRefs, cspec *pcode.CspecData, fd *pcode.Fu
 	// real space and reordered grid_score's `int iVar1;` declaration).
 	// C++ parity: AddrSpaceManager::addSpacebase (architecture.cc:563) assigns the
 	// spacebase space numSpaces() -- one past the last real space.
+	// The spacebase space heritages one pass behind the space its base register
+	// lives in, so the stack pointer is resolved before stack slots are heritaged.
+	// C++ parity: architecture.cc Architecture::addSpacebase (line 565) passes
+	// ptrdata.space->getDelay()+1 as the SpacebaseSpace delay.
 	stackSpace := &address.Space{
 		Name:     "stack",
 		Kind:     address.SpaceKindStack,
 		Index:    maxIdx + 1,
 		AddrSize: uint8(sz),
 		WordSize: 1,
+		Delay:    regSpace.Delay + 1,
 	}
 	stackSpace.AddSpacebase(address.SpacebaseData{Space: regSpace, Offset: off, Size: int32(sz)})
 	return stackSpace

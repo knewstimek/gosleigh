@@ -267,11 +267,11 @@
       "name": "sign_extend_boundary",
       "entry": 11584,
       "tags": [
-        "TYPECAST"
+        "MATCH"
       ],
       "evidence": {
-        "TYPECAST": [
-          "cast (char): want=1 got=0"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -398,10 +398,10 @@
   ],
   "summary": {
     "total": 32,
-    "match": 28,
+    "match": 29,
     "tag_counts": {
-      "MATCH": 28,
-      "TYPECAST": 3,
+      "MATCH": 29,
+      "TYPECAST": 2,
       "PTR": 1,
       "TEMP": 2
     }
