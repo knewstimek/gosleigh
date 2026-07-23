@@ -76,11 +76,11 @@
       "name": "while_countdown",
       "entry": 10112,
       "tags": [
-        "TEMP"
+        "UNKNOWN"
       ],
       "evidence": {
-        "TEMP": [
-          "extra temp/local identifiers in output (2 vs 1): local_8"
+        "UNKNOWN": [
+          "no heuristic matched -- manual review needed"
         ]
       }
     },
@@ -163,7 +163,7 @@
           "raw pointer scale '* 4': want=0 got=2"
         ],
         "TEMP": [
-          "extra temp/local identifiers in output (4 vs 2): local_423, local_8"
+          "extra temp/local identifiers in output (3 vs 2): local_423"
         ]
       }
     },
@@ -207,11 +207,11 @@
       "name": "popcount_loop",
       "entry": 11216,
       "tags": [
-        "TEMP"
+        "UNKNOWN"
       ],
       "evidence": {
-        "TEMP": [
-          "extra temp/local identifiers in output (2 vs 1): local_8"
+        "UNKNOWN": [
+          "no heuristic matched -- manual review needed"
         ]
       }
     },
@@ -401,9 +401,10 @@
     "match": 26,
     "tag_counts": {
       "MATCH": 26,
-      "TEMP": 4,
+      "UNKNOWN": 2,
       "TYPECAST": 3,
-      "PTR": 1
+      "PTR": 1,
+      "TEMP": 2
     }
   }
 }

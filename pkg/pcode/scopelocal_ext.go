@@ -640,7 +640,7 @@ func (sl *ScopeLocal) buildVariableName(addr address.Address, pc address.Address
 	if sl == nil {
 		return ""
 	}
-	return localHexName(addr.Offset)
+	return sl.stackLocalName(addr.Offset)
 }
 
 // containsRange reports whether the [e.first, e.last] range wholly contains

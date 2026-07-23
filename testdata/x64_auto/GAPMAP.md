@@ -14,17 +14,17 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `while_pretest_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `loop_forever_break` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `nested_while_matrix` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `while_countdown` | TEMP | TEMP: extra temp/local identifiers in output (2 vs 1): local_8 |
+| `while_countdown` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
 | `switch_dense` | TYPECAST | TYPECAST: cast (int): want=1 got=0<br>TYPECAST: cast (uint): want=1 got=2<br>TYPECAST: cast (ulonglong): want=0 got=1 |
 | `switch_sparse` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `switch_no_default` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `switch_fallthrough` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `array_2d_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `array_init_then_sum` | TYPECAST, PTR, TEMP | TYPECAST: cast (int): want=0 got=2<br>TYPECAST: cast (longlong): want=0 got=2<br>PTR: raw pointer scale '* 4': want=0 got=2<br>TEMP: extra temp/local identifiers in output (4 vs 2): local_423, local_8 |
+| `array_init_then_sum` | TYPECAST, PTR, TEMP | TYPECAST: cast (int): want=0 got=2<br>TYPECAST: cast (longlong): want=0 got=2<br>PTR: raw pointer scale '* 4': want=0 got=2<br>TEMP: extra temp/local identifiers in output (3 vs 2): local_423 |
 | `array_reverse_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `reverse_bytes_inplace` | TEMP | TEMP: extra temp/local identifiers in output (4 vs 3): iVar1 |
 | `bit_mask_shift_combo` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `popcount_loop` | TEMP | TEMP: extra temp/local identifiers in output (2 vs 1): local_8 |
+| `popcount_loop` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
 | `xor_swap_pair` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `bit_rotate_left` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `unsigned_wrap_compare` | MATCH | MATCH: byte-identical (indent-insensitive) |
@@ -45,6 +45,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 
 - MATCH: 26
 - PTR: 1
-- TEMP: 4
+- TEMP: 2
 - TYPECAST: 3
+- UNKNOWN: 2
 
