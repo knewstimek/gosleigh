@@ -1,4 +1,4 @@
-# 다음 세션 프롬프트 (2026-07-17 세션5 오후 작성, 엔진 tip `06489d0`, docs 포함 `ee9d0c1`)
+# 다음 세션 프롬프트 (2026-07-23 세션6 작성, 엔진 tip `991be09`)
 
 ## THE mission (절대 잊지 말 것)
 Ghidra C++ 디컴파일러 엔진을 Go로 **byte-identical** 포팅. 실제 .sla(x86/x64/ARM) 로드해 임의 실제 함수를
@@ -10,10 +10,14 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (엔진 tip `06489d0`, docs 포함 `ee9d0c1` origin 푸시, 전 게이트 green -- docsync 시점 실측 재검증)
+## 현재 상태 (엔진 tip `991be09` origin 푸시, 전 게이트 green -- 감독관 재검증)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **6/13**
   (bump_scores/divmix/parse_steps/dowhile_scan/find_pair/clamp3), x64_auto **20/32**, production PASS,
   `go test ./...` green.
+- **세션6 착지(`991be09`) = A2 param-recovery undercount**: 충실 `ParamListStandard`/`ParamEntry`/`fillinMap`
+  포팅(신규 paramlist.go 709줄) + fixateproto `recoverMissingStackParams`(진짜 fillinMap 소비, IsParamOffset
+  휴리스틱 교체). helper_sum 스택 param_5 복구(ssadump 실측, golden 시그니처 일치), caller 5-인자 일치.
+  corpus2 6/13 유지 -- body tmp_0는 param 무관 별개 갭(다음 작업 (A0)). 상세 CHANGELOG 세션6.
 - 세션5 착지 = 골든 손상 수정(GenGoldens bodyHex 연속 span) + 전 코퍼스 무결성 감사(손상은 x64_auto 2건뿐,
   corpus1/2 무결) + 엔진 9건: cover 인덱스=블록위치(97084fa), LoopBody 포인터 안정성(e19d788), InfLoop
   do/while(true)(0af54ad), RuleCollectTerms 포팅(e908beb), RuleShift2Mult 컨텍스트 게이트(75c6db5),
@@ -42,7 +46,21 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 
 ## 다음 작업 (우선순위)
 
-### (A) [대형, 고위험, 최우선] param-recovery 발산 -- 세션5 read-only 진단으로 3갈래 분해됨
+### (A0) [소~중, 최우선 -- 세션6 사용자 지정] dead-negate 제거 -> helper_sum MATCH
+세션6에서 A2 param 복구가 착지해 helper_sum이 `int helper_sum(param_1..param_5)`로 정확해졌으나 body는
+여전히 `return (param_1+param_2+param_3) - tmp_0;`(golden `- param_4 * param_5`). 근본 = param 무관 별개 갭:
+- 현상: ssadump helper_sum SSA에 `u0x96400 = R9D * s0x28`(=param_4*param_5) + **dead `u0x9670c = -u0x96400`**
+  (INT_2COMP, use 없음) + `EAX = EAX - u0x96400`. dead negate가 곱셈을 2-use로 만들어 인라인 실패 -> explicit
+  tmp_0. 제거 시 곱셈 1-use -> `param_4 * param_5` 인라인 -> helper_sum golden MATCH(corpus2 6->7).
+- C++ 참조: decomp_dbg 실측상 C++ 코어는 이 INT_2COMP를 아예 생성 안 함. 원인 후보 2갈래: (1) packed
+  .sla IMUL 번역이 플래그용 negate 방출하는데 Ghidra는 그 플래그를 소비 없는 dead로 정리, (2) consume-based
+  DeadCode(action_deadcode.go, `GOSL_DESCENDANT_DC` fallback + descendant-count 루프 잔재)가 use 없는
+  INT_2COMP를 못 걷어냄. **착수 전 decomp_dbg로 C++ IMUL 번역 raw p-code vs Gosleigh 대조 필수.**
+- 수정 대상 Go: consume/deadcode 경로(action_deadcode.go) 또는 IMUL SLEIGH 번역. **다수 함수 회귀 위험 ->
+  read-only 진단 먼저 신중 격리(세션5 clamp3 패턴).**
+- 성공 기준: ssadump helper_sum body `- param_4 * param_5`, `X64_CORPUS2` corpus2 6->7, 전 게이트 무회귀.
+
+### (A) [대형, 고위험] param-recovery 발산 -- 세션5 read-only 진단으로 3갈래 분해 (A1/A2 스택 착지됨)
 공통 상위 원인: `pkg/pcode/paramactive.go` `ApplyActiveParamModel`이 C++ `ActionInputPrototype`
 (coreaction.cc:4718, fixateproto 그룹, deadcode 다수 통과 이후)의 **조기·축약 대체품**이다. 세션4의
 "spurious RDX(sz8)"는 이미 해소됨(param_2는 int 정확). 세 갈래는 별개 근본:
@@ -55,8 +73,11 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **뒤로** 재배치(구조적으로 "deadcode 실행됨" 보장). 무회귀 수렴 확인. **잔여**: body `iVar1 = local_10`
 (골든 `param_2 = local_10`) carrier는 A2 undercount 계열 -- MATCH는 아직 20(body gap).
 
-**(A2) undercount -- 스택/struct param [중위험, 큰 작업]**: helper_sum param_5(스택 param) 누락 +
-미선언 tmp_0, add_pt struct-by-value hi/lo 분할 + CONCAT44 반환 미복구. 근본 = `FuncProto.resolveModel`
+**(A2) undercount [세션6 스택 param 착지 `991be09`; 잔여 = 완전대체/struct]**: helper_sum param_5(스택 param)는
+세션6에 복구 완료(충실 ParamListStandard.fillinMap 포팅 + additive recoverMissingStackParams; body tmp_0는
+(A0) dead-negate로 이관). **잔여**: 옛 ApplyActiveParamModel(IsParamOffset) 완전 대체 = updateInputTypes store
+재빌드 + unref varnode 실체화; add_pt struct hi/lo + CONCAT44는 별개(param 무관, 스택 overlap load/store). 원래
+근본 지도 = `FuncProto.resolveModel`
 + `deriveInputMap`(fspec.cc) 미포팅 -- 트라이얼을 모델 slot에 채워 레지스터 세트 밖 스택 param 복구 +
 미참조 input 생성(coreaction.cc:4745-4759). caller의 전 param 소실 + `local_92()` call-target 실패는
 helper_sum 프로토가 고쳐지면 연쇄 재확인.
@@ -64,8 +85,9 @@ helper_sum 프로토가 고쳐지면 연쇄 재확인.
 **(A3) 무관 트랙 [별개, param 아님]**: sum_via_pp 잉여 `lVar1 = param_2` copy(copy-coalesce),
 multi_return_early return 분기 2개 드롭(ActionReturnSplit -- control-flow 구조화). param 라인과 분리 처리.
 
-권장 순서: A1(검증완료, 저위험) -> 전 게이트 -> A2(resolveModel/deriveInputMap) -> A3.
-- 성공 기준: reverse_bytes_inplace param 2개로(ssadump 실측), helper_sum param_5 복구, 전 게이트 무회귀.
+권장 순서(세션6 갱신): **A0(dead-negate, 최우선)** -> A2 잔여(완전대체/struct) -> A3.
+- 성공 기준(세션6 완료분): reverse_bytes_inplace 2 param(A1 세션5), helper_sum param_5 복구(A2 스택 세션6).
+  잔여 성공 기준은 (A0)/(A2 잔여) 각 항목 참조.
 
 ### (B) [대형, 시스템, 단독 세션 권장] pre-structure SSA 정합 -- deadcode/MarkImplied 타이밍
 - 세션4 지도 유지: Ghidra는 구조화 전에 ActionDeadCode/ActionMarkImplied 완료, Gosleigh는 print 시점으로

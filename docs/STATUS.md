@@ -15,9 +15,14 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-17 세션5 오후, master `ee9d0c1`, origin 푸시, 전 게이트 green 실측 재검증)
+## 현재 상태 (2026-07-23 세션6, master `991be09`, origin 푸시, 전 게이트 green 감독관 재검증)
 
-**권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`** (세션5 성과/다음작업 전부). 요약:
+**권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`**. 요약:
+- **[세션6] A2 param-recovery undercount 착지(`991be09`)**: 충실 `ParamListStandard`/`ParamEntry`/`fillinMap`
+  포팅(신규 paramlist.go) + fixateproto `recoverMissingStackParams`로 helper_sum 스택 param_5 복구(ssadump
+  실측, golden 시그니처 일치). 전 게이트 무회귀. corpus2는 6/13 유지 -- body `tmp_0`는 param 무관 별개 갭
+  (dead INT_2COMP = IMUL 플래그 잔재가 consume-deadcode 통과). **다음 최우선 = dead-negate 제거(제거 시
+  helper_sum MATCH, 6->7)**. 상세 CHANGELOG 세션6. 아래 세션5 게이트 수치는 유효(A2는 시그니처만 개선).
 - 게이트: tree **10/10**, x64 corpus **8/8**, **op_switch byte-MATCH**, breadth **3/3**,
   corpus2 **6/13**(+find_pair/clamp3), x64_auto **20/32**(15->20: dowhile_count/nested_if_ladder_grade/
   param_reuse_accum/char_arith_promote/bit_mask_shift_combo), production 전부 PASS, `go test ./...` green.
@@ -37,10 +42,12 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 다음 작업 (우선순위)
 
-> **[최신] 2026-07-17 세션5 오후 (엔진 tip `06489d0`, docs 포함 `ee9d0c1` origin 동기화): 골든 무결성 감사 + 엔진 9건, corpus2 6/13 +
-> x64_auto 20/32. 다음 최우선 = param-recovery undercount(helper_sum 스택 param/add_pt struct =
-> resolveModel/deriveInputMap 포팅). 권위 있는 다음-작업/현재상태는 저장소 루트 `NEXT_SESSION_PROMPT.md`
-> + CHANGELOG 2026-07-17 세션5 참조. 갭 지도 = `testdata/x64_auto/GAPMAP.md` + `testdata/x64_corpus2/README.md`.**
+> **[최신] 2026-07-23 세션6 (엔진 tip `991be09` origin 동기화): A2 param-recovery undercount 착지 -- 충실
+> ParamListStandard 포팅으로 helper_sum 스택 param_5 복구. corpus2 6/13 유지, x64_auto 20/32. 다음 최우선
+> = dead-negate 제거(helper_sum body tmp_0의 근본 = dead INT_2COMP/IMUL 플래그가 consume-deadcode 통과;
+> 제거 시 helper_sum MATCH 6->7, 단 다수 함수 회귀 위험이라 read-only 진단 먼저). 권위 있는 다음-작업/
+> 현재상태는 저장소 루트 `NEXT_SESSION_PROMPT.md` + CHANGELOG 2026-07-23 세션6 참조. 갭 지도 =
+> `testdata/x64_auto/GAPMAP.md` + `testdata/x64_corpus2/README.md`.**
 
 ## 잔여 부채 (2026-07-17 세션5 실측 검증 -- 다음 작업의 권위는 루트 NEXT_SESSION_PROMPT.md)
 
@@ -48,6 +55,14 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 stale였던 이유 = 마일스톤 완료 후 해당 미시작 섹션을 지우지 않음: (a) dispatch는 세션4 breadth 3/3으로,
 (a-2) 단축타입명/uVar1은 세션2/3으로, (b) process 3갭은 세션2 x64 corpus 8/8로 이미 완료였다.
 아래는 코드/게이트로 재확인한 장기 부채만:
+
+- **[세션6] dead INT_2COMP (IMUL 플래그 잔재) consume-deadcode 통과**: helper_sum body `tmp_0`의 근본.
+  `u = -(R9D*s0x28)`가 use 없이 살아남아 곱셈을 2-use로 만들어 인라인 차단. decomp_dbg상 C++ 코어는 미생성.
+  제거 시 helper_sum golden MATCH(corpus2 6->7). **다음 세션 최우선.** IMUL SLEIGH 번역/consume-deadcode
+  영역이라 다수 함수 회귀 위험 -> read-only 진단 먼저.
+- **[세션6] A2 param-recovery 하이브리드 잔존**: 새 `ParamListStandard.fillinMap`은 스택 갭에만 additive
+  소비, 레지스터/로컬은 여전히 옛 `ApplyActiveParamModel`(IsParamOffset 휴리스틱). 완전 대체(updateInputTypes
+  store 재빌드 + unref varnode 실체화)는 A2 잔여 슬라이스.
 
 - **isLoopCondMultiequal band-aid**(merge.go, H8-debt-1 잔여): 세션5 cover fix 이후 dowhile_count는 트림
   자체가 불필요해졌으나 gcd는 여전히 forceOutputTrim 경로로 통과(무회귀 확인). 원리화는 broad/위험, 별도 세션.

@@ -5,6 +5,54 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-23 (세션6): A2 param-recovery undercount -- x64 스택 param_5 복구, 충실 ParamListStandard 포팅 (엔진 tip `991be09`)
+감독관 세션(진단 Opus 2슬롯 병렬 read-only, 구현 Opus 1슬롯 worktree 격리, 감독관 전 게이트 -count=1 직접
+재검증 + ff-only 착지 + push). 핸드오프 (A2) undercount 슬라이스 = helper_sum의 5번째 스택 인자
+(`[rsp+0x28]`) 미복구.
+
+**진단 (2슬롯 병렬 read-only, 상호검증)**:
+- C++ ground truth: Gosleigh가 C++ `ParamList`/`ParamEntry`/`fillinMap` 기계를 아예 미포팅하고
+  `IsParamOffset` 오프셋 임계값 휴리스틱으로 대체 -- `buildTrialMap`의 미참조(unref) trial 생성
+  (fspec.cc:886-935) 부재가 undercount 핵심.
+- Gosleigh 실측: 결정적 추가 원인 = 타이밍/lock. `ApplyActiveParamModel`이 mainloop `activeparam`에서
+  스택 varnode를 만드는 `ActionSpacebase`(바로 뒤)보다 먼저 돌아 첫 pass에 레지스터 4개로 one-shot
+  `SetInputLocked` -> 늦게 materialize되는 s0x28은 재복구 경로 없이 `tmp_0` fallback. C++
+  `ActionInputPrototype`(coreaction.cc:4718)는 fixateproto에서 deadcode/heritage 안정화 이후 실행돼 스택
+  입력이 이미 존재.
+
+**착지 (`991be09`, faithful, 전 게이트 -count=1 무회귀)**:
+- **신규 `pkg/pcode/paramlist.go`** (709줄): Ghidra `ParamEntry`(getSlot/getAddrBySlot/justifiedContain/
+  findEntry, fspec.cc:60-577) + `ParamListStandard`(buildTrialMap+unref 생성, fillinMap + forceExclusionGroup/
+  separateSections/forceNoUse/forceInactiveChain/markBestInactive/markGroupNoUse/selectUnreferenceEntry,
+  fspec.cc:597-1313) 충실 포팅. 옛 stub `paramEntry`를 전체 포팅으로 대체(denormalized group/exclusion/
+  reverseStack 유지 -> ParamTrial.Less 무변경). 문서화된 범위 한정: resolver interval-tree 대신 순서 walk
+  (비중첩 register/stack ABI에서 동일결과), join record 미모델, typeAlign=1.
+- **배선**: `bridge.buildInputPentrySpecs`가 cspec `<input>` pentry(레지스터 그룹4 + 스택 offset40)를
+  실제 space로 해석해 `ProtoModel.InputParams` 빌드(ParamListStandard::decode numgroup 순서 재현).
+  `protomodel.SetInputParams`, `scopelocal.registerStackParam`(addrtied + 기본 TYPE_INT seed) 추가.
+- **신규 `pkg/pcode/action_inputproto.go` `recoverMissingStackParams`**: fixateproto ActionInputPrototype에서
+  최종 input-def varnode를 `possibleParam`->RegisterTrial->`FillinMap`(deriveInputMap)로 분류, used/non-unref/
+  stack trial 중 미명명 param을 레지스터 param 뒤 offset 오름차순으로 추가. 진짜 fillinMap 출력을 소비
+  (IsParamOffset 임계값을 findEntry로 교체).
+
+**결과**: ssadump `int helper_sum(param_1..param_5)` -- **param_5 복구**(golden 시그니처 일치), caller 5-인자
+호출부 일치. 전 게이트 green(tree 10/10, x64 8/8, switch byte-MATCH, breadth 3/3, corpus2 6/13, MSVC/AARCH64/
+X8664/RegParam/PELoader/X86PE, go test ./...). 신규 단위테스트 `TestFillinMapHelperSum`/
+`TestFindEntryStackAndRegister`/`TestFillinMapLeadingHoleUnref`.
+
+**미달/부채 (투명)**:
+- helper_sum body는 여전히 `- tmp_0`(golden `- param_4 * param_5`)라 corpus2는 6/13 유지. 원인 = **param과
+  무관한 별개 갭**: dead `INT_2COMP`(`u = -(R9D*s0x28)`, IMUL 오버플로 플래그 잔재)가 consume-deadcode를
+  통과 -> 곱셈이 2-use가 되어 인라인 실패 -> explicit tmp_0. decomp_dbg 실측: C++ 코어는 이 op을 아예
+  생성하지 않음(IMUL 번역 차이). param_5가 복구된 지금 이 dead-negate 하나만 제거하면 helper_sum MATCH
+  (6->7). **다음 세션 최우선(세션6 사용자 지정)**. consume-deadcode/IMUL SLEIGH 영역이라 다수 함수 회귀
+  위험 -> read-only 진단 먼저 신중 격리.
+- 옛 `ApplyActiveParamModel`(IsParamOffset 휴리스틱) 잔존 하이브리드: 레지스터/로컬은 옛 경로, 스택 갭만
+  새 fillinMap이 additive 소비. 완전 대체(updateInputTypes로 store 전체 재빌드 + 레지스터/스택 unref varnode
+  실체화)는 후속 슬라이스(A2 잔여).
+
+---
+
 ### 2026-07-17 (세션5, 오후): 골든 무결성 감사 + 엔진 9건 -- x64_auto 20/32, corpus2 6/13 (엔진 tip `06489d0`, 25 커밋 + docs 후속)
 감독관 세션(전 워커 Opus, worktree 격리, 병렬 2슬롯, 매 landing 스팟체크 + 전매트릭스 -count=1 2회 +
 cherry-pick + push). 세션4 핸드오프 (A)와 (D) 지목 항목에서 출발, 골든 파이프라인 자체의 손상 버그를 발견해
