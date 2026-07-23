@@ -850,6 +850,380 @@ func (h *Heritage) renameRecurse(bl *BlockBasic, graph *BlockGraph,
 }
 
 // ---------------------------------------------------------------------------
+// Refinement -- split an address range along the boundaries shared by every
+// Varnode overlapping it, so SSA renaming only ever sees participants of one
+// uniform size.  Without this, a range holding e.g. two 4-byte writes and one
+// 8-byte read renames the 8-byte read to the 4-byte definition sitting at the
+// same start offset (the rename varStack is keyed by address, not size).
+// C++ parity: heritage.cc Heritage::refinement (1890-1940) and its helpers
+// buildRefinement (1704), splitByRefinement (1733), refineRead (1772),
+// refineWrite (1806), refineInput (1836), remove13Refinement (1857), plus
+// concatPieces (507) and splitPieces (563).
+// ---------------------------------------------------------------------------
+
+// maxWriteSize returns the largest written-Varnode size in the list. This is the
+// value C++ Heritage::collect returns; placeMultiequals compares it against the
+// task size to decide whether the range needs refining.
+// C++ parity: heritage.cc Heritage::collect (lines 336-337).
+func maxWriteSize(writes []*Varnode) int32 {
+	m := int32(0)
+	for _, vn := range writes {
+		if vn.Size() > m {
+			m = vn.Size()
+		}
+	}
+	return m
+}
+
+// startBasicBlock returns the entry BlockBasic of the graph, or nil.
+// C++ parity: fd->getBasicBlocks().getStartBlock().
+func startBasicBlock(graph *BlockGraph) *BlockBasic {
+	if graph == nil || graph.GetSize() == 0 {
+		return nil
+	}
+	return toBasic(graph.GetBlock(0))
+}
+
+// concatPieces builds a chain of PIECE ops reconstructing one value out of
+// vnlist (given in increasing address order) and makes finalvn the result.
+// insertop is the op the expression is inserted before; nil inserts at the
+// beginning of the entry block. Returns the unified Varnode.
+// C++ parity: heritage.cc Heritage::concatPieces (507-550).
+func (h *Heritage) concatPieces(graph *BlockGraph, vnlist []*Varnode, insertop *PcodeOp, finalvn *Varnode) *Varnode {
+	if len(vnlist) < 2 {
+		return finalvn
+	}
+	preexist := vnlist[0]
+	bigEndian := preexist.Addr().Space.BigEndian
+	opaddr := h.fd.BaseAddr()
+	if insertop != nil {
+		opaddr = insertop.Addr()
+	}
+	var prev *PcodeOp
+	for i := 1; i < len(vnlist); i++ {
+		vn := vnlist[i]
+		newop := h.fd.NewOp(2, opaddr)
+		h.fd.OpSetOpcode(newop, CPUI_PIECE)
+		var newvn *Varnode
+		if i == len(vnlist)-1 {
+			newvn = finalvn
+			h.fd.OpSetOutput(newop, newvn)
+		} else {
+			newvn = h.fd.NewUniqueOut(preexist.Size()+vn.Size(), newop)
+		}
+		if bigEndian {
+			h.fd.OpSetInput(newop, preexist, 0) // most significant part
+			h.fd.OpSetInput(newop, vn, 1)       // least significant part
+		} else {
+			h.fd.OpSetInput(newop, vn, 0)
+			h.fd.OpSetInput(newop, preexist, 1)
+		}
+		// C++ holds one insert iterator and never advances it, so the ops land in
+		// creation order at that point. OpInsertBefore reproduces that directly;
+		// the entry-block case has to chain after the first op to keep the order.
+		switch {
+		case insertop != nil:
+			h.fd.OpInsertBefore(newop, insertop)
+		case prev != nil:
+			h.fd.OpInsertAfter(newop, prev)
+		default:
+			bb := startBasicBlock(graph)
+			if bb == nil {
+				return finalvn
+			}
+			h.fd.OpInsertBegin(newop, bb)
+		}
+		prev = newop
+		preexist = newvn
+	}
+	return preexist
+}
+
+// splitPieces defines each Varnode in vnlist as a SUBPIECE of startvn, where
+// [addr,addr+size) is the whole range startvn covers. insertop is the defining op
+// the SUBPIECEs are inserted after; nil inserts at the beginning of the entry
+// block. C++ parity: heritage.cc Heritage::splitPieces (563-604).
+func (h *Heritage) splitPieces(graph *BlockGraph, vnlist []*Varnode, insertop *PcodeOp,
+	addr address.Address, size int32, startvn *Varnode) {
+
+	bigEndian := addr.Space.BigEndian
+	baseoff := addr.Offset
+	if bigEndian {
+		baseoff = addr.Offset + uint64(size)
+	}
+	opaddr := h.fd.BaseAddr()
+	if insertop != nil {
+		opaddr = insertop.Addr()
+	}
+	prev := insertop
+	for _, vn := range vnlist {
+		newop := h.fd.NewOp(2, opaddr)
+		h.fd.OpSetOpcode(newop, CPUI_SUBPIECE)
+		var diff uint64
+		if bigEndian {
+			diff = baseoff - (vn.Offset() + uint64(vn.Size()))
+		} else {
+			diff = vn.Offset() - baseoff
+		}
+		h.fd.OpSetInput(newop, startvn, 0)
+		h.fd.OpSetInput(newop, h.fd.NewConstant(4, diff), 1)
+		h.fd.OpSetOutput(newop, vn)
+		if prev != nil {
+			// C++ advances the iterator past the write once, then inserts each op
+			// at that fixed point; chaining after the previous op is equivalent.
+			h.fd.OpInsertAfter(newop, prev)
+		} else {
+			bb := startBasicBlock(graph)
+			if bb == nil {
+				return
+			}
+			h.fd.OpInsertBegin(newop, bb)
+		}
+		prev = newop
+	}
+}
+
+// buildRefinement marks the start and end byte of every Varnode in vnlist inside
+// the refinement array for [addr,addr+size). refine has size+1 entries (the extra
+// slot is the fencepost for the range end).
+// C++ parity: heritage.cc Heritage::buildRefinement (1704-1714). C++ collect only
+// ever yields Varnodes fully inside the range, so the bounds tests below are
+// guards for Gosleigh's overlap-based Collect, not extra behavior.
+func buildRefinement(refine []int32, addr address.Address, size int32, vnlist []*Varnode) {
+	for _, vn := range vnlist {
+		if vn.Offset() < addr.Offset {
+			continue
+		}
+		diff := int64(vn.Offset() - addr.Offset)
+		if diff+int64(vn.Size()) > int64(size) {
+			continue
+		}
+		refine[diff] = 1
+		refine[diff+int64(vn.Size())] = 1
+	}
+}
+
+// splitByRefinement returns a disjoint cover of vn built from fresh Varnodes whose
+// boundaries follow the refinement partition. Returns nil when vn already fits one
+// partition element (nothing to do).
+// C++ parity: heritage.cc Heritage::splitByRefinement (1733-1753). The wrapOffset
+// call is dropped: heritage ranges never wrap the space here.
+func (h *Heritage) splitByRefinement(vn *Varnode, addr address.Address, refine []int32) []*Varnode {
+	curaddr := vn.Addr()
+	if curaddr.Offset < addr.Offset {
+		return nil
+	}
+	diff := int64(curaddr.Offset - addr.Offset)
+	if diff >= int64(len(refine)) {
+		return nil
+	}
+	sz := vn.Size()
+	cutsz := refine[diff]
+	if cutsz <= 0 || sz <= cutsz {
+		return nil // already refined
+	}
+	split := []*Varnode{h.fd.NewVarnode(cutsz, curaddr)}
+	sz -= cutsz
+	for sz > 0 {
+		curaddr.Offset += uint64(cutsz)
+		diff = int64(curaddr.Offset - addr.Offset)
+		if diff >= int64(len(refine)) || refine[diff] <= 0 {
+			break // partition does not cover the rest; leave the tail alone
+		}
+		cutsz = refine[diff]
+		if cutsz > sz {
+			cutsz = sz // final piece
+		}
+		split = append(split, h.fd.NewVarnode(cutsz, curaddr))
+		sz -= cutsz
+	}
+	return split
+}
+
+// refineRead replaces a free read straddling the refinement with a concatenation
+// of partition-sized reads. C++ parity: heritage.cc Heritage::refineRead (1772-1787).
+func (h *Heritage) refineRead(graph *BlockGraph, vn *Varnode, addr address.Address, refine []int32) {
+	newvn := h.splitByRefinement(vn, addr, refine)
+	if len(newvn) == 0 {
+		return
+	}
+	// C++ takes loneDescend unconditionally (a free read has exactly one). Gosleigh's
+	// Collect also classifies descendant-less Varnodes as reads, so bail out instead
+	// of rewriting an op that does not exist.
+	op := vn.LoneDescend()
+	if op == nil {
+		for _, piece := range newvn {
+			h.fd.DeleteVarnode(piece)
+		}
+		return
+	}
+	slot := op.GetSlot(vn)
+	if slot < 0 {
+		for _, piece := range newvn {
+			h.fd.DeleteVarnode(piece)
+		}
+		return
+	}
+	replacevn := h.fd.NewUnique(vn.Size())
+	h.concatPieces(graph, newvn, op, replacevn)
+	h.fd.OpSetInput(op, replacevn, slot)
+	if vn.HasNoDescend() {
+		h.fd.DeleteVarnode(vn)
+	}
+}
+
+// refineWrite replaces a written Varnode straddling the refinement with
+// partition-sized pieces, each defined by a SUBPIECE of the original definition.
+// C++ parity: heritage.cc Heritage::refineWrite (1806-1818).
+func (h *Heritage) refineWrite(graph *BlockGraph, vn *Varnode, addr address.Address, refine []int32) {
+	def := vn.Def()
+	if def == nil {
+		return
+	}
+	newvn := h.splitByRefinement(vn, addr, refine)
+	if len(newvn) == 0 {
+		return
+	}
+	replacevn := h.fd.NewUnique(vn.Size())
+	h.fd.OpSetOutput(def, replacevn)
+	h.splitPieces(graph, newvn, def, vn.Addr(), vn.Size(), replacevn)
+	h.fd.TotalReplace(vn, replacevn)
+	h.fd.DeleteVarnode(vn)
+}
+
+// refineInput splits a known input Varnode into partition-sized pieces defined by
+// SUBPIECEs of the input, and write-masks the original.
+// C++ parity: heritage.cc Heritage::refineInput (1836-1844).
+func (h *Heritage) refineInput(graph *BlockGraph, vn *Varnode, addr address.Address, refine []int32) {
+	newvn := h.splitByRefinement(vn, addr, refine)
+	if len(newvn) == 0 {
+		return
+	}
+	h.splitPieces(graph, newvn, nil, vn.Addr(), vn.Size(), vn)
+	vn.SetAddlFlags(VarnodeWriteMask)
+}
+
+// remove13Refinement rewrites a 1-3 or 3-1 partition pair as a single 4, since
+// such a cover of a 4-byte range is almost certainly artificial.
+// C++ parity: heritage.cc Heritage::remove13Refinement (1857-1880).
+func remove13Refinement(refine []int32) {
+	if len(refine) == 0 {
+		return
+	}
+	pos := int32(0)
+	lastsize := refine[pos]
+	if lastsize <= 0 {
+		return
+	}
+	pos += lastsize
+	for pos < int32(len(refine)) {
+		cursize := refine[pos]
+		if cursize == 0 {
+			break
+		}
+		if (lastsize == 1 && cursize == 3) || (lastsize == 3 && cursize == 1) {
+			refine[pos-lastsize] = 4
+			lastsize = 4
+			pos += cursize
+		} else {
+			lastsize = cursize
+			pos += lastsize
+		}
+	}
+}
+
+// refinement finds the common refinement of every read/write/input overlapping the
+// disjoint task at index idx, splits those Varnodes to match it, and replaces the
+// task (and its globalDisjoint entry) with one entry per partition element.
+// Returns true when a non-trivial refinement was applied; the first partition
+// element then occupies index idx, so the caller re-collects at idx and the
+// remaining elements are picked up by later iterations of the task loop -- exactly
+// how C++ resumes from the iterator refinement() hands back.
+// C++ parity: heritage.cc Heritage::refinement (1890-1940).
+func (h *Heritage) refinement(graph *BlockGraph, idx int, readvars, writevars, inputvars []*Varnode) bool {
+	task := h.disjoint.Get(idx)
+	size := task.Size
+	if size > 1024 {
+		return false
+	}
+	addr := task.Addr
+	refine := make([]int32, size+1) // extra "fencepost" slot for the size position
+	buildRefinement(refine, addr, size, readvars)
+	buildRefinement(refine, addr, size, writevars)
+	buildRefinement(refine, addr, size, inputvars)
+	refine = refine[:size] // remove the fencepost
+	lastpos := int32(0)
+	for curpos := int32(1); curpos < size; curpos++ { // boundary points -> partition sizes
+		if refine[curpos] != 0 {
+			refine[lastpos] = curpos - lastpos
+			lastpos = curpos
+		}
+	}
+	if lastpos == 0 {
+		return false // no non-trivial refinement
+	}
+	refine[lastpos] = size - lastpos
+	remove13Refinement(refine)
+	for _, vn := range readvars {
+		h.refineRead(graph, vn, addr, refine)
+	}
+	for _, vn := range writevars {
+		h.refineWrite(graph, vn, addr, refine)
+	}
+	for _, vn := range inputvars {
+		h.refineInput(graph, vn, addr, refine)
+	}
+
+	// Alter the disjoint cover (both locally and globally) to reflect the refinement.
+	flags := task.Flags
+	curPass := h.globalDisjoint.FindPass(addr)
+	if curPass < 0 {
+		curPass = h.pass
+	}
+	if gi := h.globalDisjoint.Find(addr); gi >= 0 {
+		h.globalDisjoint.RemoveAt(gi)
+	}
+	parts := make([]MemRange, 0, 2)
+	partAddr := addr
+	for cut := int32(0); cut < size; {
+		sz := refine[cut]
+		if sz <= 0 {
+			break
+		}
+		parts = append(parts, MemRange{Addr: partAddr, Size: sz, Flags: flags})
+		h.globalDisjoint.Add(partAddr, sz, curPass)
+		cut += sz
+		partAddr.Offset += uint64(sz)
+	}
+	if len(parts) == 0 {
+		return false
+	}
+	h.disjoint.ReplaceAt(idx, parts)
+	return true
+}
+
+// RemoveAt drops the entry at index idx.
+// C++ parity: heritage.cc Heritage::refinement -> globaldisjoint.erase(iter).
+func (lm *LocationMap) RemoveAt(idx int) {
+	if idx < 0 || idx >= len(lm.entries) {
+		return
+	}
+	lm.entries = append(lm.entries[:idx], lm.entries[idx+1:]...)
+}
+
+// ReplaceAt substitutes the task at index idx with the given ranges, preserving
+// list order. C++ parity: heritage.cc Heritage::refinement -> disjoint.erase +
+// repeated disjoint.insert at the erased position.
+func (tl *TaskList) ReplaceAt(idx int, ranges []MemRange) {
+	if idx < 0 || idx >= len(tl.tasks) {
+		return
+	}
+	tail := append([]MemRange(nil), tl.tasks[idx+1:]...)
+	tl.tasks = append(tl.tasks[:idx], ranges...)
+	tl.tasks = append(tl.tasks, tail...)
+}
+
+// ---------------------------------------------------------------------------
 // refinedSubTaskSize computes the sub-task granularity for a merged address range.
 // Returns the max varnode size that starts exactly at addr.Offset; if that max is
 // smaller than size, the caller should split the task into sub-tasks of that size.
@@ -956,11 +1330,22 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 		// physical splits; x86 register varnodes don't straddle sub-task boundaries).
 		for i := 0; i < h.disjoint.Len(); i++ {
 			task := h.disjoint.Get(i)
+			// A range wider than 4 bytes whose largest write does not fill it is
+			// split along the common refinement of everything overlapping it. This
+			// runs before guardCalls so the guard (like C++ Heritage::guard, which
+			// placeMultiequals calls after refinement) sees the refined range.
+			// C++ parity: heritage.cc Heritage::placeMultiequals (2609-2616).
+			reads, writes, inputs := h.Collect(task.Addr, task.Size)
+			if task.Size > 4 && maxWriteSize(writes) < task.Size {
+				if h.refinement(graph, i, reads, writes, inputs) {
+					task = h.disjoint.Get(i)
+				}
+			}
 			// Insert INDIRECT guards for call-site side-effects on this range BEFORE
 			// Collect so the INDIRECT output varnodes appear as written SSA definitions.
 			// C++ parity: heritage.cc Heritage::heritage -> guard -> guardCalls
 			h.guardCalls(info.Space, task.Addr.Offset, task.Size)
-			reads, writes, inputs := h.Collect(task.Addr, task.Size)
+			reads, writes, inputs = h.Collect(task.Addr, task.Size)
 			if len(reads) == 0 && len(writes) == 0 && len(inputs) == 0 {
 				continue
 			}
@@ -1005,9 +1390,13 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 //   - Processes exactly one range, bypassing the TaskList merging logic.
 //   - Does NOT increment the pass counter or run AnnotateFloatTypes.
 //
-// The caller is responsible for calling this once per distinct stack slot.
-// C++ parity: approximates Heritage::heritage() restricted to one slot; Ghidra
-// avoids this problem by running ActionStackPtrFlow before the first Heritage pass.
+// Dormant: no live caller. Stack slots used to be driven through here one at a
+// time; they now go through Heritage() like every other space (see
+// Funcdata.registerStackHeritageSpace), which is what gives them refinement and
+// guard normalization. Kept for harnesses that need to heritage one explicit range.
+// C++ parity: approximates Heritage::heritage() restricted to one range; it skips
+// both refinement and normalizeRange, so callers must supply a range whose
+// reads/writes are already uniform in size.
 func (h *Heritage) HeritageRange(graph *BlockGraph, addr address.Address, size int32) {
 	if h.maxDepth == -1 {
 		h.BuildADT(graph)

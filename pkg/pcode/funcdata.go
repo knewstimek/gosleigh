@@ -97,9 +97,6 @@ type Funcdata struct {
 	// retained). The hand-ordered decompile driver builds its own Heritage and does
 	// not use this field. C++ parity: Funcdata::heritage member.
 	heritage *Heritage
-	// heritagedStackSlots records stack slots already processed by per-slot
-	// HeritageRange so each is heritaged once across mainloop passes (tree path).
-	heritagedStackSlots map[heritageSlotKey]bool
 
 	// Architecture-adjacent services used by the op factories.
 	// C++ parity: these live on Architecture (glb) in the C++ code; the Go
@@ -363,9 +360,9 @@ func (fd *Funcdata) HeritageSpaces() []*address.Space { return fd.heritageSpaces
 // directly with an explicit graph. The ProtoModel (when a FuncProto is attached)
 // enables call-site INDIRECT guards; nil is leaf-safe.
 //
-// Stack-slot heritage is driven separately by ActionStackPtrFlow once the stack
-// space is resolved; in the iterative mainloop a later ActionHeritage pass picks
-// up newly stack-heritaged varnodes.
+// Stack slots are heritaged by the same Heritage() pass as everything else: the
+// stack (spacebase) space is registered as a heritage space here, so its ranges go
+// through the whole task pipeline -- refinement and guard normalization included.
 // C++ parity: funcdata.hh Funcdata::opHeritage -> Heritage::heritage.
 func (fd *Funcdata) OpHeritage() {
 	if fd.graph == nil || len(fd.heritageSpaces) == 0 {
@@ -375,6 +372,7 @@ func (fd *Funcdata) OpHeritage() {
 	if fd.funcProto != nil {
 		model = fd.funcProto.Model()
 	}
+	fd.registerStackHeritageSpace()
 	// Reuse a persistent Heritage engine so the pass counter and globalDisjoint
 	// cover survive across mainloop iterations -- this makes heritage incremental
 	// (only newly freed varnodes are reprocessed) instead of re-placing every phi
@@ -384,63 +382,70 @@ func (fd *Funcdata) OpHeritage() {
 	if fd.heritage == nil {
 		fd.heritage = NewHeritage(fd, fd.heritageSpaces).WithProtoModel(model)
 	}
-	// Incremental register/default-space heritage: pass and globalDisjoint persist,
-	// so already-resolved varnodes are skipped and only new free reads are placed.
+	// Incremental heritage over every registered space (registers, defaults and the
+	// stack): pass and globalDisjoint persist, so already-resolved varnodes are
+	// skipped and only new free reads are placed. The stack is recovered faithfully
+	// as a spacebase fixture -- ActionSpacebase (Funcdata.Spacebase) marks the
+	// stack-pointer varnodes each mainloop pass and RuleLoadVarnode/RuleStoreVarnode
+	// convert the accesses, so new stack slots keep showing up here pass after pass.
 	fd.heritage.Heritage(fd.graph)
-	// The stack is recovered faithfully as a spacebase fixture: ActionSpacebase
-	// (Funcdata.Spacebase) marks the stack-pointer varnodes each mainloop pass and
-	// RuleLoadVarnode/RuleStoreVarnode convert the accesses. This mirrors Ghidra,
-	// where the stack space exists from pass 0 (glb->getStackSpace()); no bespoke
-	// synthetic-stack pass runs in the universal tree.
-	// Stack slots synthesized mid-run are heritaged one slot
-	// at a time (HeritageRange), never via the full Heritage() task list, because
-	// the latter merges adjacent stack offsets into a single oversized range and
-	// produces wrong-size phis. Each distinct slot is heritaged exactly once (the
-	// heritagedStackSlots guard) so re-running OpHeritage on later iterations does
-	// not re-place stack phis. This mirrors the hand-ordered decompile driver,
-	// which runs HeritageRange per StackPtrFlow slot after the register pass.
-	fd.heritageNewStackSlots(model)
+	fd.resolveStackSpace(model)
 }
 
-// heritageSlotKey identifies a heritaged stack slot by space, offset, and size so
-// each slot is processed by HeritageRange exactly once across mainloop passes.
-type heritageSlotKey struct {
-	space  *address.Space
-	offset uint64
-	size   int32
-}
-
-// heritageNewStackSlots runs per-slot SSA construction for any stack varnode not
-// yet heritaged, and records the resolved stack space on the proto model so
-// ScopeLocal restructure can classify stack parameters and locals.
-func (fd *Funcdata) heritageNewStackSlots(model *ProtoModel) {
-	if fd.heritage == nil {
+// registerStackHeritageSpace adds the stack (spacebase) space to the heritage
+// space set. The bridge builds that set from the spaces raw p-code varnodes name,
+// and stack varnodes only appear later in the mainloop (RuleLoadVarnode /
+// RuleStoreVarnode), so the stack would otherwise never be heritaged at all.
+// Ghidra has no such gap: Heritage::buildInfoList (heritage.cc:2650-2658) walks
+// every space the AddrSpaceManager holds, and the stack spacebase space is one of
+// them from load time. Runs before the Heritage engine is constructed, because
+// NewHeritage snapshots the space list.
+func (fd *Funcdata) registerStackHeritageSpace() {
+	sp := fd.stackSpace()
+	if sp == nil {
 		return
 	}
-	if fd.heritagedStackSlots == nil {
-		fd.heritagedStackSlots = make(map[heritageSlotKey]bool)
+	for _, existing := range fd.heritageSpaces {
+		if existing == sp {
+			return
+		}
 	}
-	// Snapshot first: HeritageRange creates new varnodes (phis) as it runs.
-	snapshot := append([]*Varnode(nil), fd.vbank.AllVarnodes()...)
-	var stackSpace *address.Space
-	for _, vn := range snapshot {
+	fd.heritageSpaces = append(fd.heritageSpaces, sp)
+}
+
+// stackSpace returns the stack (spacebase) space this function was configured
+// with, preferring the attached prototype's model over the architecture default.
+func (fd *Funcdata) stackSpace() *address.Space {
+	if fd.funcProto != nil {
+		if m := fd.funcProto.Model(); m != nil && m.StackSpace != nil {
+			return m.StackSpace
+		}
+	}
+	if fd.defaultModel != nil {
+		return fd.defaultModel.StackSpace
+	}
+	return nil
+}
+
+// resolveStackSpace records the resolved stack space on the proto model so
+// ScopeLocal restructure can classify stack parameters and locals. It is a
+// fallback for builds that never set model.StackSpace up front (bridge.go sets it
+// from the cspec); stack SSA itself is done by Heritage() now that the stack space
+// is a registered heritage space, exactly as in C++ where Heritage::buildInfoList
+// covers every space including the spacebase.
+func (fd *Funcdata) resolveStackSpace(model *ProtoModel) {
+	if model == nil || model.StackSpace != nil {
+		return
+	}
+	for _, vn := range fd.vbank.AllVarnodes() {
 		if vn == nil || vn.Space() == nil {
 			continue
 		}
 		sp := vn.Space()
-		if sp.Kind != address.SpaceKindStack && sp.Name != "stack" {
-			continue
+		if sp.Kind == address.SpaceKindStack || sp.Name == "stack" {
+			model.StackSpace = sp
+			return
 		}
-		stackSpace = sp
-		key := heritageSlotKey{sp, vn.Offset(), vn.Size()}
-		if fd.heritagedStackSlots[key] {
-			continue
-		}
-		fd.heritagedStackSlots[key] = true
-		fd.heritage.HeritageRange(fd.graph, vn.Addr(), vn.Size())
-	}
-	if stackSpace != nil && model != nil && model.StackSpace == nil {
-		model.StackSpace = stackSpace
 	}
 }
 
