@@ -58,7 +58,7 @@
     },
     {
       "name": "reverse_bytes_inplace",
-      "output": "\nvoid reverse_bytes_inplace(longlong param_1,int param_2)\n\n{\nundefined4 local_14;\nundefined4 local_10;\n\nfor (local_14 = 0; local_14 \u003c local_10; local_14 = local_14 + 1) {\n*(undefined1 *)(param_1 + local_14) = *(undefined1 *)(param_1 + local_10);\n*(undefined1 *)(param_1 + local_10) = *(undefined1 *)(param_1 + local_14);\niVar1 = local_10;\n}\nreturn;\n}\n"
+      "output": "\nvoid reverse_bytes_inplace(longlong param_1,int param_2)\n\n{\nundefined1 uVar1;\nundefined4 local_14;\nundefined4 local_10;\n\nfor (local_14 = 0; local_14 \u003c local_10; local_14 = local_14 + 1) {\nuVar1 = *(undefined1 *)(param_1 + local_14);\n*(undefined1 *)(param_1 + local_14) = *(undefined1 *)(param_1 + local_10);\n*(undefined1 *)(param_1 + local_10) = uVar1;\niVar1 = local_10;\n}\nreturn;\n}\n"
     },
     {
       "name": "bit_mask_shift_combo",
@@ -126,7 +126,7 @@
     },
     {
       "name": "swap_via_temp",
-      "output": "\nvoid swap_via_temp(undefined4 *param_1,undefined4 *param_2)\n\n{\n*param_1 = *param_2;\n*param_2 = *param_1;\nreturn;\n}\n"
+      "output": "\nvoid swap_via_temp(undefined4 *param_1,undefined4 *param_2)\n\n{\nundefined4 uVar1;\n\nuVar1 = *param_1;\n*param_1 = *param_2;\n*param_2 = uVar1;\nreturn;\n}\n"
     }
   ]
 }

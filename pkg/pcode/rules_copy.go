@@ -42,21 +42,13 @@ func (r *RulePropagateCopy) apply(op *PcodeOp, data *Funcdata) int {
 		data.OpUnsetInput(op, i)
 		data.OpSetInput(op, copyop.Input(0), i)
 		changed = 1
-		// C++ leaves the now-possibly-dead COPY for the dead-code pass to reap.
-		// AddTreeState.buildTree (NewOpBefore) creates address-expression PTRADD/COPY
-		// ops detached-but-alive -- never inserted into a block -- so they render
-		// inline. In the universal-action tree, no ActionDeadCode pass runs again
-		// after this oppool propagation, so a detached COPY orphaned here survives.
-		// That keeps its source (e.g. a PTRADD) at 2 descendants, forcing it explicit:
-		// a phantom uVar declaration that also blocks for-loop folding
-		// (testIterateForm truncates at the explicit multi-use node). Eagerly reap the
-		// COPY when this propagation left it dead, matching the in-block dead-code
-		// cleanup C++ gets for free. Restricted to detached COPYs so in-block
-		// snapshots (e.g. gcd's loop-head trimOpOutput COPY) defer to dead-code.
-		if cout := copyop.Output(); cout != nil && cout.HasNoDescend() &&
-			copyop.Parent() == nil && !cout.IsAddrTied() && !cout.IsPersist() {
-			data.OpDestroy(copyop)
-		}
+		// C++ leaves the now-dead COPY for the dead-code pass to reap
+		// (RulePropagateCopy::applyOp, ruleaction.cc:3960). Gosleigh used to reap
+		// detached COPYs here because AddTreeState created its ops without splicing
+		// them into a basic block, so ActionDeadCode never saw them; both the
+		// detached-op bug (Funcdata.NewOpBefore) and the spurious address-expression
+		// COPY (AddTreeState.buildTree) are fixed at the source, so the eager reap
+		// is gone.
 	}
 	return changed
 }

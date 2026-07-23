@@ -96,8 +96,11 @@ func TestRulePtrArith_RewriteAndNonRewrite(t *testing.T) {
 	if got := NewRulePtrArith("ptr").ApplyOp(root, data); got != 1 {
 		t.Fatalf("ptrarith ApplyOp = %d, want 1", got)
 	}
-	if out.Def() == nil || out.Def().Code() != CPUI_COPY {
-		t.Fatalf("expected rewritten root to feed COPY, got %v", out.Def())
+	// AddTreeState::buildTree hands baseOp's output to the last op it created --
+	// here the PTRADD, since there are no subtype or leftover terms. C++ never
+	// appends a COPY (ruleaction.cc:6545-6551).
+	if out.Def() == nil || out.Def().Code() != CPUI_PTRADD {
+		t.Fatalf("expected rewritten root to be defined by PTRADD, got %v", out.Def())
 	}
 
 	noUse := newRuleOp(data, CPUI_INT_ADD, 4, ptr, data.NewConstant(4, 4))

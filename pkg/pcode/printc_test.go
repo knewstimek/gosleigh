@@ -116,6 +116,11 @@ func TestPrintCExpressionPrecedence(t *testing.T) {
 		fd.OpSetInput(add, right, 0)
 		fd.OpSetInput(add, fd.NewConstant(4, 3), 1)
 		fd.NewVarnodeOut(4, address.Address{Space: env.uniq, Offset: 0x100}, add)
+		// The production pipeline runs ActionMarkImplied before printing; these
+		// hand-built fixtures do not, so the intermediate uniques are flagged here.
+		// PrintC inlines a defining op only when its output is implied
+		// (PrintLanguage::pushVn -> pushVnImplied, printlanguage.cc).
+		add.Output().SetImplied()
 		fd.OpMarkAlive(add)
 
 		mul := fd.NewOp(2, env.fnAddr)
@@ -130,6 +135,7 @@ func TestPrintCExpressionPrecedence(t *testing.T) {
 		fd.OpSetInput(eq, left, 0)
 		fd.OpSetInput(eq, fd.NewConstant(4, 0), 1)
 		fd.NewVarnodeOut(1, address.Address{Space: env.uniq, Offset: 0x108}, eq)
+		eq.Output().SetImplied()
 		fd.OpMarkAlive(eq)
 
 		ne := fd.NewOp(2, env.fnAddr)
@@ -137,6 +143,7 @@ func TestPrintCExpressionPrecedence(t *testing.T) {
 		fd.OpSetInput(ne, right, 0)
 		fd.OpSetInput(ne, fd.NewConstant(4, 1), 1)
 		fd.NewVarnodeOut(1, address.Address{Space: env.uniq, Offset: 0x109}, ne)
+		ne.Output().SetImplied()
 		fd.OpMarkAlive(ne)
 
 		orOp := fd.NewOp(2, env.fnAddr)
@@ -144,6 +151,7 @@ func TestPrintCExpressionPrecedence(t *testing.T) {
 		fd.OpSetInput(orOp, eq.Output(), 0)
 		fd.OpSetInput(orOp, ne.Output(), 1)
 		fd.NewVarnodeOut(1, address.Address{Space: env.uniq, Offset: 0x10a}, orOp)
+		orOp.Output().SetImplied()
 		fd.OpMarkAlive(orOp)
 
 		notOp := fd.NewOp(1, env.fnAddr)
@@ -188,6 +196,7 @@ func TestPrintCExpressionPrecedence(t *testing.T) {
 		fd.OpSetInput(add, right, 1)
 		fd.NewVarnodeOut(4, address.Address{Space: env.uniq, Offset: 0x100}, add)
 		SetVarnodeType(add.Output(), intType)
+		add.Output().SetImplied()
 		fd.OpMarkAlive(add)
 
 		cast := fd.NewOp(1, env.fnAddr)
@@ -226,6 +235,7 @@ func TestPrintCExpressionPrecedence(t *testing.T) {
 		fd.OpSetInput(add, fd.NewConstant(4, 3), 1)
 		fd.NewVarnodeOut(4, address.Address{Space: env.uniq, Offset: 0x100}, add)
 		SetVarnodeType(add.Output(), intType)
+		add.Output().SetImplied()
 		fd.OpMarkAlive(add)
 
 		call := fd.NewOp(2, env.fnAddr)
