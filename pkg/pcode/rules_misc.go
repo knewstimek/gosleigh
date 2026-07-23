@@ -104,29 +104,48 @@ type RuleNotDistribute struct{ batchRule }
 
 func NewRuleNotDistribute(group string) *RuleNotDistribute {
 	r := &RuleNotDistribute{}
-	r.batchRule = newBatchRule(group, "notdistribute", []OpCode{CPUI_INT_NEGATE}, r.apply, func(g string) Rule { return NewRuleNotDistribute(g) })
+	// RuleNotDistribute::applyOp -- ruleaction.cc:1139. Boolean De Morgan:
+	//   !(V && W)  =>  !V || !W
+	// This is a BOOL_NEGATE rule. An earlier Gosleigh rule carrying the same name
+	// distributed INT_NEGATE over INT_AND/INT_OR instead. That bitwise form has no
+	// C++ counterpart and no inverse here (RuleBitUndistribute is still a stub), so
+	// it was a one-way expansion that could leak `~a | ~b` into output; it is gone.
+	r.batchRule = newBatchRule(group, "notdistribute", []OpCode{CPUI_BOOL_NEGATE}, r.apply, func(g string) Rule { return NewRuleNotDistribute(g) })
 	return r
 }
 
 func (r *RuleNotDistribute) apply(op *PcodeOp, data *Funcdata) int {
-	root := op.Input(0).Def()
-	if root == nil || root.NumInput() != 2 {
+	compop := op.Input(0).Def()
+	if compop == nil {
 		return 0
 	}
-	outSize := outputOrInputSize(op)
-	switch root.Code() {
-	case CPUI_INT_AND:
-		neg0 := newAuxUnaryOp(data, op.Addr(), CPUI_INT_NEGATE, outSize, root.Input(0))
-		neg1 := newAuxUnaryOp(data, op.Addr(), CPUI_INT_NEGATE, outSize, root.Input(1))
-		rewriteOp(data, op, CPUI_INT_OR, neg0.Output(), neg1.Output())
-		return 1
-	case CPUI_INT_OR:
-		neg0 := newAuxUnaryOp(data, op.Addr(), CPUI_INT_NEGATE, outSize, root.Input(0))
-		neg1 := newAuxUnaryOp(data, op.Addr(), CPUI_INT_NEGATE, outSize, root.Input(1))
-		rewriteOp(data, op, CPUI_INT_AND, neg0.Output(), neg1.Output())
-		return 1
+	var opc OpCode
+	switch compop.Code() {
+	case CPUI_BOOL_AND:
+		opc = CPUI_BOOL_OR
+	case CPUI_BOOL_OR:
+		opc = CPUI_BOOL_AND
+	default:
+		return 0
 	}
-	return 0
+
+	newneg1 := data.NewOp(1, op.Addr())
+	newout1 := data.NewUniqueOut(1, newneg1)
+	data.OpSetOpcode(newneg1, CPUI_BOOL_NEGATE)
+	data.OpSetInput(newneg1, compop.Input(0), 0)
+	data.OpInsertBefore(newneg1, op)
+
+	newneg2 := data.NewOp(1, op.Addr())
+	newout2 := data.NewUniqueOut(1, newneg2)
+	data.OpSetOpcode(newneg2, CPUI_BOOL_NEGATE)
+	data.OpSetInput(newneg2, compop.Input(1), 0)
+	data.OpInsertBefore(newneg2, op)
+
+	// op is unary BOOL_NEGATE; it grows to the binary opc, so slot 1 is inserted.
+	data.OpSetOpcode(op, opc)
+	data.OpSetInput(op, newout1, 0)
+	data.OpInsertInput(op, newout2, 1)
+	return 1
 }
 
 type RuleHighOrderAnd struct{ batchRule }
