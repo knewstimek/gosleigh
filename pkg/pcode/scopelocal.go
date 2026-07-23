@@ -21,22 +21,77 @@ import (
 	"gosleigh/pkg/address"
 )
 
-// localHexName returns the Ghidra-style local variable name for a stack slot.
-// Ghidra names stack locals using the absolute value of the signed frame offset
-// in hex: offset 0xfffffff4 (-12) -> "local_c", 0xfffffff8 (-8) -> "local_8".
-// Positive offsets (parameters) use this function only when the caller knows
-// they are locals; callers must guard against parameter offsets beforehand.
-// C++ parity: ScopeLocal uses frame-offset-based naming via Symbol::buildName.
+// localHexName returns a hex-offset default name for a non-stack storage
+// address. Only Funcdata::mapGlobals uses it, to manufacture a placeholder
+// symbol for a persistent (global) Varnode that no Scope claims; the real
+// Ghidra name for that case comes from the global symbol table, which Gosleigh
+// has not ported yet. Stack slots must NOT use this -- see stackLocalName.
 func localHexName(offset uint64) string {
-	// Interpret the offset as a signed 32-bit value to get the frame offset.
-	// Stack addresses in x86-32 are 4 bytes; use int32 sign extension.
 	signed := int32(uint32(offset))
 	if signed < 0 {
 		return fmt.Sprintf("local_%x", uint32(-signed))
 	}
-	// Positive offset: use as-is with "local_" prefix.
-	// This should not normally occur since positive stack offsets are params.
 	return fmt.Sprintf("local_%x", offset)
+}
+
+// stackLocalName returns the default display name for a stack slot at the given
+// raw frame offset.
+//
+// This emulates the Ghidra *Java* naming layer, not the C++ decompiler core.
+// The core (varmap.cc ScopeLocal::buildVariableName) names an unmapped stack
+// slot "<typeprefix>Stack[X]_<hex>" -- "uStack_18" for offset -0x18, "uStackX_8"
+// for offset +8, the 'X' flagging caller-allocated space. Those core names only
+// survive into the final listing for slots that have no Program-DB stack
+// variable; a slot that does have one reaches the decompiler already named by
+// Java, and that Java name is what the goldens show (golden add_pt carries both
+// kinds side by side: "local_res8"/"local_res10" for the DB-backed home-slot
+// starts, "uStackX_c"/"uStackX_14" for the un-DB'd 4-byte upper halves).
+//
+// Ghidra 12.0.4 ghidra/program/model/symbol/SymbolUtilities.java
+// getDefaultLocalName(Program, int stackOffset, int firstUseOffset):
+//
+//	boolean reservedArea = stackGrowsNegative ? (stackOffset >= 0) : (stackOffset < 0);
+//	stackOffset = Math.abs(stackOffset);
+//	String name = (reservedArea ? "local_res" : "local_") + Integer.toHexString(stackOffset);
+//	if (firstUseOffset != 0) name += "_" + Integer.toString(firstUseOffset);
+//
+// The "reserved area" is the region the caller owns: on a negative-growth stack
+// that is every non-negative offset -- the MS x64 home/shadow slots at +8, +0x10,
+// +0x18, +0x20 and the stack-argument area beyond. Ghidra tags those "local_res"
+// to distinguish them from true frame locals at negative offsets ("local_").
+// Note the boundary is inclusive of 0, and that the prefix depends only on the
+// sign, not on slot alignment.
+//
+// The firstUseOffset suffix is deliberately not emitted: Gosleigh never builds
+// use-point-limited stack symbols, so the offset is always 0 here.
+func stackLocalName(offset uint64, growsNegative bool) string {
+	// Stack offsets arrive as the raw space offset with the frame displacement
+	// encoded in two's complement. Frame displacements are far inside int32 for
+	// both the 4-byte (x86-32) and 8-byte (x86-64, AARCH64) stack spaces, so a
+	// single int32 sign-extension recovers the signed offset for either width.
+	signed := int32(uint32(offset))
+	reserved := signed >= 0
+	if !growsNegative {
+		reserved = signed < 0
+	}
+	mag := uint32(signed)
+	if signed < 0 {
+		mag = uint32(-signed)
+	}
+	if reserved {
+		return fmt.Sprintf("local_res%x", mag)
+	}
+	return fmt.Sprintf("local_%x", mag)
+}
+
+// stackLocalName names a slot in this scope's stack space, honoring the
+// architecture's stack growth direction.
+func (sl *ScopeLocal) stackLocalName(offset uint64) string {
+	growsNegative := true
+	if e := sl.ext(); e != nil {
+		growsNegative = e.stackGrows
+	}
+	return stackLocalName(offset, growsNegative)
 }
 
 // stackSpaceKind returns the SpaceKind used for stack address spaces.
@@ -338,7 +393,7 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 	// collapse into one variable if a prior merge over-merged them.
 	claimedHigh := make(map[*HighVariable]bool)
 	for _, g := range localList {
-		name := localHexName(g.offset)
+		name := sl.stackLocalName(g.offset)
 		// Reuse the existing HighVariable the stack varnodes already belong to,
 		// rather than creating a fresh one and re-adding only the stack varnodes.
 		// By this point Heritage/merge (mergeAddrTied + mergeMarker) has coalesced
