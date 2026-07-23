@@ -2057,7 +2057,15 @@ func (s *printCState) emitForBlock(wdo *BlockWhileDo, children []*FlowBlock) err
 	if err != nil {
 		return err
 	}
-	condStr := s.mustRenderCondition(children[0])
+	// The condition clause is emitted under comma_separate, exactly like the
+	// plain while-do header: C++ emitForLoop sets setMod(comma_separate) at
+	// printc.cc:3106 and that mod is still active when condBlock->emit(this)
+	// runs at printc.cc:3115. Any printable non-implied op that lives in the
+	// condition block is therefore emitted ahead of the branch test, separated
+	// by ", " (emitBlockBasic, printc.cc:2839). Rendering only the branch test
+	// here silently dropped those ops (reverse_bytes_inplace lost
+	// "local_10 = param_2 + -1").
+	condStr := s.renderCondBlockComma(children[0])
 
 	s.lang.OpenBlockAfter(func() {
 		s.lang.Token("for")
@@ -4042,7 +4050,23 @@ func (s *printCState) emitConditionParen(frag ExprFragment) {
 	s.lang.Token(")")
 }
 
+// renderCondition renders a structured condition block the way C++ PrintC does
+// under the only_branch modifier, MINUS the outermost parenthesis: every caller
+// supplies that one itself (emitConditionParen, or an explicit "(" / ")" pair).
+// That convention is faithful because in C++ the outermost paren of a condition
+// always comes from the block being emitted -- opCbranch's openParen for a leaf
+// (printc.cc:573), emitBlockCondition's openParen for a compound
+// (printc.cc:2979) -- never from the enclosing "if"/"while" keyword.
 func (s *printCState) renderCondition(bl *FlowBlock) (ExprFragment, error) {
+	return s.renderConditionInner(bl, false)
+}
+
+// renderConditionInner is renderCondition with the comma_separate modifier
+// tracked explicitly. PrintC::emitBlockCondition sets comma_separate on
+// getBlock(1) only (printc.cc:2984) and it is inherited by everything emitted
+// underneath, which is what suppresses the leaf parenthesis deeper in the right
+// half: opCbranch computes "yesparen = !isSet(comma_separate)" (printc.cc:560).
+func (s *printCState) renderConditionInner(bl *FlowBlock, commaSep bool) (ExprFragment, error) {
 	if bl == nil {
 		return s.lang.Atom("0"), nil
 	}
@@ -4053,22 +4077,23 @@ func (s *printCState) renderCondition(bl *FlowBlock) (ExprFragment, error) {
 			return s.lang.Atom("0"), nil
 		}
 		if len(children) == 1 {
-			return s.renderCondition(children[0])
+			return s.renderConditionInner(children[0], commaSep)
 		}
-		// C++ parity: PrintC::emitBlockCondition (printc.cc:2968). block(0) is
-		// emitted with only_branch (its condition only); block(1) with
-		// comma_separate (its leading stores joined by ',' then its condition).
-		// The joiner is "&&" when the opcode is CPUI_BOOL_AND, else "||", matching
-		// the getOpcode()==CPUI_BOOL_AND test. Both operands render at the lowest
-		// precedence so BinaryExpr parenthesizes them, as Ghidra does.
-		left, err := s.renderCondition(children[0])
+		// C++ parity: PrintC::emitBlockCondition (printc.cc:2968) emits
+		//   openParen ; block(0)->emit ; op ; openParen ; block(1)->emit ; ) ; )
+		// so block(1) always carries an extra structural paren of its own, and
+		// block(0) carries none beyond whatever it emits for itself. The joiner
+		// is "&&" when the opcode is CPUI_BOOL_AND, else "||", matching the
+		// getOpcode()==CPUI_BOOL_AND test.
+		left, err := s.renderCondBlockFrag(children[0], commaSep)
 		if err != nil {
 			return ExprFragment{}, err
 		}
-		right, err := s.renderConditionComma(children[1])
+		rightInner, err := s.renderCondBlockFrag(children[1], true)
 		if err != nil {
 			return ExprFragment{}, err
 		}
+		right := s.lang.GroupExpr(rightInner)
 		op := "||"
 		prec := cPrecLogicalOr
 		if bc, ok := bl.Concrete().(*BlockCondition); ok && bc.opc == CPUI_BOOL_AND {
@@ -4077,6 +4102,12 @@ func (s *printCState) renderCondition(bl *FlowBlock) (ExprFragment, error) {
 		}
 		return s.lang.BinaryExpr(left, op, right, prec, ExprAssocLeft), nil
 	case BlockBasicType, BlockPlain:
+		if commaSep {
+			// emitBlockBasic under comma_separate joins the block's printable
+			// statements with ", " and ends with the branch condition
+			// (printc.cc:2839).
+			return s.lang.Expr(s.renderCondBlockComma(bl), cPrecLowest), nil
+		}
 		basic := toBasic(bl)
 		if basic == nil {
 			return s.lang.Atom("0"), nil
@@ -4107,28 +4138,30 @@ func (s *printCState) renderCondition(bl *FlowBlock) (ExprFragment, error) {
 		if len(children) == 0 {
 			return s.lang.Atom("0"), nil
 		}
-		return s.renderCondition(children[len(children)-1])
+		return s.renderConditionInner(children[len(children)-1], commaSep)
 	default:
 		children := bl.StructuredChildren()
 		if len(children) > 0 {
-			return s.renderCondition(children[0])
+			return s.renderConditionInner(children[0], commaSep)
 		}
 		return s.lang.Atom("0"), nil
 	}
 }
 
-// renderConditionComma renders a condition sub-block as the second operand of a
-// compound condition, in comma_separate mode: a basic block emits its leading
-// non-branch stores joined by ',' followed by its CBRANCH condition; a nested
-// condition renders recursively as a compound condition. Rendered at the lowest
-// precedence so the enclosing BinaryExpr wraps it in parentheses.
-// C++ parity: PrintC::emitBlockCondition sets comma_separate on getBlock(1)
-// (printc.cc:2984), which for a basic block emits statements comma-separated.
-func (s *printCState) renderConditionComma(bl *FlowBlock) (ExprFragment, error) {
-	if bl != nil && bl.Type() == BlockBasicType {
-		return s.lang.Expr(s.renderCondBlockComma(bl), cPrecLowest), nil
+// renderCondBlockFrag renders one half of a BlockCondition as C++
+// "bl->emit(this)" would, INCLUDING the parenthesis that block emits for itself:
+// a nested BlockCondition always opens one (printc.cc:2979); a leaf opens one
+// through opCbranch unless comma_separate is set (printc.cc:560). The result is
+// marked primary so the enclosing BinaryExpr adds nothing on top of it.
+func (s *printCState) renderCondBlockFrag(bl *FlowBlock, commaSep bool) (ExprFragment, error) {
+	inner, err := s.renderConditionInner(bl, commaSep)
+	if err != nil {
+		return ExprFragment{}, err
 	}
-	return s.renderCondition(bl)
+	if commaSep && (bl == nil || bl.Type() != BlockConditionType) {
+		return s.lang.Expr(inner.Text, ExprPrecPrimary), nil
+	}
+	return s.lang.GroupExpr(inner), nil
 }
 
 func (s *printCState) mustRenderSwitchSelector(bl *FlowBlock) string {
