@@ -77,8 +77,14 @@ func (f *TypeFactory) GetVoid() *Void {
 // dropped; once a TypeSpacebase class lands the (space, scope_addr) tuple
 // will key the intern map.
 func (f *TypeFactory) GetTypeSpacebase(_ *address.Space) Datatype {
-	// Size 1 is a placeholder; the wrapping Pointer carries the real width.
-	return f.GetBase(1, TYPE_SPACEBASE, "spacebase")
+	// Size 0 matches the C++ TypeSpacebase, which is Datatype(0,1,TYPE_SPACEBASE)
+	// -- size and therefore alignSize are 0. The wrapping Pointer carries the
+	// real width. The size matters: TypeOpIntAdd::propagateAddPointer and
+	// AddTreeState both branch on getPtrTo()->getAlignSize(), and a size-1
+	// stand-in makes the frame look like a byte array (AddTreeState's
+	// isDegenerate path, which emits PTRADD(sp,x,1) instead of the
+	// PTRSUB(sp,off)+PTRADD(.,i,elem) pair C++ builds).
+	return f.GetBase(0, TYPE_SPACEBASE, "spacebase")
 }
 
 func (f *TypeFactory) GetPointer(size int32, to Datatype, wordSize uint32) *Pointer {

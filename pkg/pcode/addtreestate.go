@@ -659,6 +659,36 @@ func (s *AddTreeState) calcSubtype() {
 		s.subType = subType
 		s.isSubtype = true
 	case TYPE_SPACEBASE:
+		// C++ ruleaction.cc:6306-6317. hasMatchingSubType resolves the mapped
+		// variable containing `offset` (TypeSpacebase::getSubType -- Gosleigh's
+		// Funcdata.ResolveSpacebaseSymbol) and passes back the offset within it.
+		// C++ leaves the PTRSUB output untyped and lets TypeOpPtrsub::propagateType
+		// re-derive it from the same resolution; Gosleigh's buildTree wants the
+		// pointed-to type up front, so it is recorded here. Without it the PTRSUB
+		// output would stay a pointer-to-spacebase and RulePtrArith would rebuild
+		// the same PTRSUB forever.
+		// Known mismatch: the arrayHint (biggestNonMultCoeff) branch of
+		// hasMatchingSubType, which searches nearby arrayed components, is not
+		// ported -- only the plain getSubType lookup is.
+		signedOffset := signExtendToInt64(s.offset, s.ptrSize)
+		ws := int64(s.wordSize)
+		if ws <= 0 {
+			ws = 1
+		}
+		symType, extraBytes := s.data.ResolveSpacebaseSymbol(s.ptr.GetSpaceFromConst(), signedOffset*ws)
+		if symType == nil {
+			s.valid = false
+			return
+		}
+		extra := bytesToAddressUnits(int32(extraBytes), s.wordSize)
+		s.offset = truncateToSize(s.offset-extra, s.ptrSize)
+		s.correct = truncateToSize(s.correct-extra, s.ptrSize)
+		// getTypePointerStripArray: a PTRSUB onto an array symbol points at the
+		// element, matching TypeFactory::getTypePointerStripArray (type.cc:4270).
+		if arr, ok := symType.(*Array); ok && arr.Element() != nil {
+			symType = arr.Element()
+		}
+		s.subType = symType
 		s.isSubtype = true
 	default:
 		s.valid = false
@@ -775,7 +805,13 @@ func (s *AddTreeState) buildTree() {
 	if s.isSubtype {
 		subType := pointerSubtypeType(s.ptrType, s.subType)
 		newop = s.data.NewTypedOpBefore(s.baseOp, CPUI_PTRSUB, s.ptrSize, subType, current, s.data.NewConstant(s.ptrSize, s.offset))
-		newop.SetStopTypePropagation()
+		// C++ ruleaction.cc:6531 only stops propagation when the pointed-to
+		// data-type has a size (size != 0). For a spacebase base (size 0) the
+		// PTRSUB output must stay open to TypeOpPtrsub::propagateType so it can
+		// be refined to the mapped symbol's type.
+		if s.elemSize != 0 {
+			newop.SetStopTypePropagation()
+		}
 		current = newop.Output()
 	}
 	if extra != nil {

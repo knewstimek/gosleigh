@@ -156,7 +156,7 @@
       ],
       "evidence": {
         "TYPECAST": [
-          "cast (int): want=0 got=2",
+          "cast (char): want=0 got=2",
           "cast (longlong): want=0 got=2"
         ],
         "PTR": [

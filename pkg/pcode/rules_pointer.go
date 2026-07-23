@@ -174,9 +174,19 @@ func evaluatePointerExpression(op *PcodeOp, slot int) int {
 				res = 2
 			}
 		case CPUI_LOAD, CPUI_STORE:
-			if desc.Input(1) == out {
-				res = 2
+			if desc.Input(1) != out {
+				res = 2 // C++ falls into the catch-all else branch here
+				break
 			}
+			// A spacebase register plus a constant feeding a LOAD/STORE address
+			// is the stack-variable form handled by RuleLoadVarnode /
+			// RuleStoreVarnode: neither push nor ptrarith it.
+			// C++ parity: ruleaction.cc:6612-6614.
+			if ptrBase.IsSpaceBase() && (ptrBase.IsInput() || ptrBase.IsConstant()) &&
+				op.Input(1-slot).IsConstant() {
+				return 0
+			}
+			res = 2
 		default:
 			res = 2
 		}
@@ -414,6 +424,167 @@ func markPointerFlow(op *PcodeOp) bool {
 		changed = true
 	}
 	return changed
+}
+
+// RulePushPtr pushes a Varnode with known pointer data-type to the bottom of
+// its additive expression: the pointer must be added last, onto the expression
+// computing the offset into its data-type. Without it a two-level address
+// computation like (spacebase + const) + (index * scale) never presents the
+// pointer to RulePtrArith on the outer INT_ADD -- verifyPreferredPointer sees
+// the inner add as the preferred pointer expression and declines -- so no
+// PTRSUB/PTRADD is ever built for stack array accesses.
+//
+// C++ parity: ruleaction.cc RulePushPtr::applyOp (L6865-6915),
+// ::buildVarnodeOut (L6785), ::collectDuplicateNeeds (L6800), ::duplicateNeed
+// (L6829).
+type RulePushPtr struct{ batchRule }
+
+func NewRulePushPtr(group string) *RulePushPtr {
+	r := &RulePushPtr{}
+	r.batchRule = newBatchRule(group, "pushptr", []OpCode{CPUI_INT_ADD}, r.apply, func(g string) Rule { return NewRulePushPtr(g) })
+	return r
+}
+
+// pushPtrBuildVarnodeOut keeps the duplicated result in the original storage
+// when that storage can hold a second definition; address-tied and unique
+// Varnodes get a fresh unique instead.
+// C++ parity: RulePushPtr::buildVarnodeOut (ruleaction.cc:6785).
+func pushPtrBuildVarnodeOut(vn *Varnode, op *PcodeOp, data *Funcdata) *Varnode {
+	if vn.IsAddrTied() || (vn.Space() != nil && vn.Space().IsUnique()) {
+		return data.NewUniqueOut(vn.Size(), op)
+	}
+	return data.NewVarnodeOut(vn.Size(), vn.Addr(), op)
+}
+
+// pushPtrCollectDuplicateNeeds walks the offset expression feeding the pointer
+// add and lists the single-descendant extension/scale ops that must be
+// duplicated once the add itself is duplicated across several descendants.
+// C++ parity: RulePushPtr::collectDuplicateNeeds (ruleaction.cc:6800).
+func pushPtrCollectDuplicateNeeds(reslist []*PcodeOp, vn *Varnode) []*PcodeOp {
+	for {
+		if vn == nil || !vn.IsWritten() {
+			return reslist
+		}
+		if vn.IsAutoLive() {
+			return reslist
+		}
+		if vn.LoneDescend() == nil {
+			return reslist // Already has multiple descendants
+		}
+		op := vn.Def()
+		if op == nil {
+			return reslist
+		}
+		switch op.Code() {
+		case CPUI_INT_ZEXT, CPUI_INT_SEXT, CPUI_INT_2COMP:
+			reslist = append(reslist, op)
+		case CPUI_INT_MULT:
+			// C++ only records the op when the scale is constant, but keeps
+			// walking either way (ruleaction.cc:6811-6814).
+			if op.NumInput() > 1 && op.Input(1) != nil && op.Input(1).IsConstant() {
+				reslist = append(reslist, op)
+			}
+		default:
+			return reslist
+		}
+		vn = op.Input(0)
+	}
+}
+
+// pushPtrDuplicateNeed replaces op with one copy per descendant so each
+// duplicated pointer add gets its own offset computation. The original op is
+// destroyed.
+// C++ parity: RulePushPtr::duplicateNeed (ruleaction.cc:6829).
+func pushPtrDuplicateNeed(op *PcodeOp, data *Funcdata) {
+	outVn := op.Output()
+	if outVn == nil {
+		return
+	}
+	inVn := op.Input(0)
+	num := op.NumInput()
+	opc := op.Code()
+	for {
+		descend := outVn.DescendIter()
+		if len(descend) == 0 {
+			break
+		}
+		decOp := descend[0]
+		slot := decOp.GetSlot(outVn)
+		if slot < 0 {
+			break
+		}
+		newOp := data.NewOp(num, op.Addr())
+		newOut := pushPtrBuildVarnodeOut(outVn, newOp, data)
+		newOut.UpdateType(outVn.Type())
+		data.OpSetOpcode(newOp, opc)
+		data.OpSetInput(newOp, inVn, 0)
+		if num > 1 {
+			data.OpSetInput(newOp, op.Input(1), 1)
+		}
+		data.OpSetInput(decOp, newOut, slot)
+		data.OpInsertBefore(newOp, decOp)
+	}
+	data.OpDestroy(op)
+}
+
+func (r *RulePushPtr) apply(op *PcodeOp, data *Funcdata) int {
+	if !data.HasTypeRecoveryStarted() {
+		return 0
+	}
+	slot := ptrInputSlot(op)
+	if slot < 0 {
+		return 0
+	}
+	if evaluatePointerExpression(op, slot) != 1 {
+		return 0
+	}
+	vni := op.Input(slot)
+	vn := op.Output()
+	if vn == nil {
+		return 0
+	}
+	vnadd2 := op.Input(1 - slot)
+	var duplicateList []*PcodeOp
+	if vn.LoneDescend() == nil {
+		duplicateList = pushPtrCollectDuplicateNeeds(duplicateList, vnadd2)
+	}
+
+	for {
+		descend := vn.DescendIter()
+		if len(descend) == 0 {
+			break
+		}
+		decop := descend[0]
+		j := decop.GetSlot(vn)
+		if j < 0 {
+			break
+		}
+		vnadd1 := decop.Input(1 - j)
+		if vnadd1 == nil {
+			break
+		}
+		// Create a new INT_ADD for the intermediate result that did not exist in
+		// the original code. It is not associated with the original INT_ADD's
+		// address, and it does not preserve the original output storage.
+		newop := data.NewOp(2, decop.Addr()) // Use the later address
+		data.OpSetOpcode(newop, CPUI_INT_ADD)
+		newout := data.NewUniqueOut(vnadd1.Size(), newop) // Temporary storage
+
+		data.OpSetInput(decop, vni, 0)
+		data.OpSetInput(decop, newout, 1)
+
+		data.OpSetInput(newop, vnadd1, 0)
+		data.OpSetInput(newop, vnadd2, 1)
+
+		data.OpInsertBefore(newop, decop)
+	}
+	if !vn.IsAutoLive() {
+		data.OpDestroy(op)
+	}
+	for _, dup := range duplicateList {
+		pushPtrDuplicateNeed(dup, data)
+	}
+	return 1
 }
 
 func (r *RulePtrArith) apply(op *PcodeOp, data *Funcdata) int {

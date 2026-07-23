@@ -656,7 +656,12 @@ func (fd *Funcdata) Spacebase() {
 				// Only set the pointer type on the input spacebase register.
 				ct := tf.GetTypeSpacebase(stackSpace)
 				ptr := tf.GetPointer(point.Size, ct, uint32(stackSpace.WordSize))
-				vn.UpdateType(ptr)
+				// C++ funcdata.cc:264 uses updateType(ptr,true,true): the
+				// pointer-to-spacebase type is LOCKED and overrides any earlier
+				// lock. Without the lock ActionInferTypes::writeBack immediately
+				// demotes the base register back to int, so no pointer ever
+				// reaches RulePtrArith and PTRSUB/PTRADD are never formed.
+				vn.UpdateTypeLock(ptr, true, true)
 			}
 		}
 	}
