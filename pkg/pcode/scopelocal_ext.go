@@ -586,6 +586,10 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 	})
 
 	types := sharedTypeFactory
+	// Signed start offset of every fixed slot, ascending -- the bounds the open
+	// RangeHints from gatherOpen are stretched against below.
+	// C++ parity: the sorted RangeHint maplist ScopeLocal::restructure walks.
+	fixedStarts := make([]int64, 0, len(ordered))
 	// Gather the reconciled (RangeHint::preferred) committed data-type for each
 	// stack offset from the live Varnodes, once. C++ parity: MapState::gatherVarnodes
 	// + ScopeLocal::restructure merge loop (varmap.cc:1124/1294). The type is read
@@ -620,7 +624,15 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 		entry := NewSymbolEntry(sym, 0, s.addr, sz, 0)
 		sym.attachEntry(entry)
 		ext.entries = append(ext.entries, entry)
+		fixedStarts = append(fixedStarts, signExtendSpaceOffset(s.addr.Offset, s.addr.Space))
 	}
+
+	// Recover stack objects that no Varnode covers: an array reached only
+	// through PTRSUB(sp,off)+PTRADD(.,index,step) shows up as an open
+	// RangeHint, never as a stack Varnode, so the loop above cannot see it.
+	// C++ parity: MapState::gatherOpen feeding ScopeLocal::restructure
+	// (varmap.cc:1268 / 1313).
+	sl.createOpenEntries(fd, fixedStarts)
 
 	if aliasyes {
 		// TODO: real alias marking requires the ported AliasChecker. Without
@@ -652,10 +664,26 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 }
 
 // buildVariableName picks a default display name for a stack slot.
-// C++ parity: ScopeLocal::buildVariableName (stack default subset)
+//
+// Scalar slots keep the Java-layer spelling (see stackLocalName): every scalar
+// frame slot in the goldens reaches the decompiler already named by the Ghidra
+// Program DB. A decompiler-recovered aggregate has no Program-DB variable --
+// the Java stack-frame analysis never allocated one for that byte range -- so
+// the C++ core name is the one that survives into the listing. The x64_auto
+// array_init_then_sum golden shows both spellings in one function:
+// local_58 / local_54 (Java) next to aiStack_48 (core).
+//
+// C++ parity: ScopeLocal::buildVariableName (varmap.cc:548).
 func (sl *ScopeLocal) buildVariableName(addr address.Address, pc address.Address, ct Datatype) string {
 	if sl == nil {
 		return ""
+	}
+	if ct != nil && ct.Metatype() == TYPE_ARRAY {
+		growsNegative := true
+		if e := sl.ext(); e != nil {
+			growsNegative = e.stackGrows
+		}
+		return coreStackName(addr.Space, addr.Offset, growsNegative, ct)
 	}
 	return sl.stackLocalName(addr.Offset)
 }

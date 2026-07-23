@@ -662,6 +662,18 @@ func (fd *Funcdata) Spacebase() {
 				// demotes the base register back to int, so no pointer ever
 				// reaches RulePtrArith and PTRSUB/PTRADD are never formed.
 				vn.UpdateTypeLock(ptr, true, true)
+				// Record which space the spacebase points into. In C++ the space
+				// is intrinsic to the data-type: getTypeSpacebase(id) builds a
+				// TypeSpacebase whose `spaceid` member TypeSpacebase::getSubType
+				// hands to getMap(). Gosleigh's TypeFactory.GetTypeSpacebase has
+				// no such member, so the space travels through the
+				// BindSpaceConstant side table instead -- the same channel
+				// ActionConstantPtr already uses for the global spacebase. Without
+				// it every stack Funcdata.ResolveSpacebaseSymbol query hit the
+				// `spc == nil` guard and answered undefined1, which made
+				// AddTreeState size a frame element at 1 byte and emit
+				// PTRADD(sp,index,#1) instead of PTRADD(sp,index,#4).
+				BindSpaceConstant(vn, stackSpace)
 			}
 		}
 	}

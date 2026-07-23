@@ -236,29 +236,11 @@ func (s *printCState) emit() (string, error) {
 	// renderFunctionSignature has now updated param names (param_1 -> param_3 etc.),
 	// so we can resolve the correct final name for the return carrier.
 	s.finalizeReturnCarrierRenames()
-	s.emitLocalDeclarations()
 	// Emit blank line between declarations and body only when at least one
-	// non-suppressed local was actually declared. Unique-space temps and
-	// prologue varnodes are skipped in emitLocalDeclarations; count only
-	// the varnodes that will produce a "type name;" declaration.
-	hasVisibleLocal := false
-	for _, vn := range s.locals {
-		if s.prologueVarnodes[vn] {
-			continue
-		}
-		// Mirror emitLocalDeclarations: implied unique temps are not declared, but
-		// an explicit unique (the loop-head snapshot iVar1) is, so it counts as a
-		// visible local and earns the blank line before the body.
-		if vn.Space() != nil && vn.Space().IsUnique() && !vn.IsExplicit() {
-			continue
-		}
-		// Skip locals that were remapped to a param name (G5: no separate declaration).
-		if s.isParamName(s.nameOf(vn)) {
-			continue
-		}
-		hasVisibleLocal = true
-		break
-	}
+	// declaration was actually emitted. C++ parity: PrintC::emitLocalVarDecls
+	// (printc.cc:2343) emits its separating tagLine on the same `notempty` flag
+	// emitScopeVarDecls returns.
+	hasVisibleLocal := s.emitLocalDeclarations()
 	if hasVisibleLocal && s.graph != nil && s.graph.GetSize() != 0 {
 		s.lang.Newline()
 	}
@@ -1193,11 +1175,19 @@ func (s *printCState) renderFunctionSignature(retType Datatype) string {
 	return s.decls.FunctionSignature(displayName, codeType, allNames)
 }
 
-func (s *printCState) emitLocalDeclarations() {
+// emitLocalDeclarations emits one "type name;" statement per declared local and
+// reports whether anything was emitted.
+// C++ parity: PrintC::emitLocalVarDecls / emitScopeVarDecls `notempty`.
+func (s *printCState) emitLocalDeclarations() bool {
 	// Skip varnodes that share a name with an already-declared local.
 	// This arises when multiple SSA versions of the same storage location
 	// are merged to one local_ name by collectVarnodeNames.
 	declared := make(map[string]struct{})
+	var sl *ScopeLocal
+	if s.fd != nil {
+		sl = s.fd.GetScopeLocal()
+	}
+	decls := make([]localDecl, 0, len(s.locals))
 	for _, vn := range s.locals {
 		// Skip varnodes that were identified as prologue/return-chain only
 		// after collectSymbols ran (markReturnOnlyCopies runs post-collect).
@@ -1245,11 +1235,166 @@ func (s *printCState) emitLocalDeclarations() {
 		} else {
 			dt = s.normalizeTypeForDecl(vn.TypeDefFacing())
 		}
-		decl := CDeclString(dt, name)
+		decl := localDeclString(dt, name)
+		rec := localDecl{text: decl}
+		if sp := vn.Space(); sp != nil && sl != nil && sp == sl.SpaceID() {
+			rec.hasOffset = true
+			rec.offset = vn.Addr().Offset
+		}
+		decls = append(decls, rec)
+	}
+	decls = s.mergeScopeOnlyDecls(decls, declared)
+	for _, d := range decls {
+		text := d.text
 		s.lang.Statement(func() {
-			s.lang.Token(decl)
+			s.lang.Token(text)
 		})
 	}
+	return len(decls) != 0
+}
+
+// localDeclString renders a local variable declaration. It differs from
+// CDeclString only in array spacing: PrintC::pushTypeStart pushes array_expr,
+// a postsurround OpToken carrying spacing 1 (printc.cc:76), so Ghidra emits
+// "int aiStack_48 [18]" with one space before the subscript. CDeclRenderer
+// (printc_decl.go) writes "[18]" flush against the declarator and also backs
+// struct/global/typedef rendering, so the spacing is applied here on the
+// declaration path rather than changed underneath those other users.
+// C++ parity: printc.cc PrintC::emitVarDecl -> pushTypeStart/pushTypeEnd.
+func localDeclString(dt Datatype, name string) string {
+	if arr, ok := dt.(*Array); ok {
+		return localDeclString(arr.Element(), fmt.Sprintf("%s [%d]", name, arr.Count()))
+	}
+	return CDeclString(dt, name)
+}
+
+// localDecl is one emitted local declaration, tagged with its stack offset when
+// the declaration comes from a Symbol/Varnode living in the scope's own space.
+// The offset is what orders scope-only declarations against Varnode-backed ones.
+type localDecl struct {
+	text      string
+	hasOffset bool
+	offset    uint64
+}
+
+// mergeScopeOnlyDecls adds a declaration for every ScopeLocal Symbol that no
+// Varnode declared. Gosleigh drives emitLocalDeclarations off the Varnode list,
+// but C++ PrintC::emitLocalVarDecls (printc.cc:2326) drives it off the scope's
+// Symbol map via emitScopeVarDecls (printc.cc:2650), so a Symbol with no Varnode
+// of its own -- exactly the recovered stack arrays ScopeLocal::restructure
+// synthesizes from open RangeHints -- was structurally impossible to declare.
+//
+// The scope-only Symbols are spliced into the Varnode-driven sequence by
+// unsigned address, which is the order the C++ MapIterator walks the scope's
+// rangemap in (and why "local_res8" at frame offset +8 precedes the negative
+// frame slots in Ghidra output). Symbols that a Varnode already declared are
+// skipped here rather than in the main loop, so the existing sequence -- and
+// therefore every function with no scope-only Symbol -- is byte-identical.
+//
+// C++ filters reproduced from emitScopeVarDecls: piece entries, unnamed symbols
+// and non-first entries of a multi-entry Symbol are not declared. FunctionSymbol
+// / LabSymbol have no Gosleigh equivalent in ScopeLocal.
+func (s *printCState) mergeScopeOnlyDecls(decls []localDecl, declared map[string]struct{}) []localDecl {
+	if s.fd == nil {
+		return decls
+	}
+	sl := s.fd.GetScopeLocal()
+	if sl == nil {
+		return decls
+	}
+	space := sl.SpaceID()
+	covered := s.stackOffsetsWithVarnodes(space)
+	for _, e := range sl.Entries() {
+		if e == nil || e.IsDynamic() || e.Offset() != 0 {
+			continue // Don't do a partial entry
+		}
+		sym := e.Symbol()
+		if sym == nil || sym.Name() == "" {
+			continue
+		}
+		// Only Symbols that own no Varnode are supplied here. Every Symbol that
+		// does have one is already reached through the Varnode-driven loop above,
+		// which carries the naming/suppression rules (prologue slots, merged SSA
+		// versions, return carriers) that decide whether it is declared at all.
+		// Re-declaring those from the scope would resurrect slots the Varnode loop
+		// deliberately dropped -- e.g. a stack spill whose value was later merged
+		// into a register HighVariable, where Ghidra's own restructure pass drops
+		// the Symbol along with the Varnode but Gosleigh's ScopeLocal keeps it.
+		if s.entryCoversVarnode(e, covered) {
+			continue
+		}
+		name := sym.Name()
+		if _, seen := declared[name]; seen {
+			continue
+		}
+		if s.isParamName(name) {
+			continue
+		}
+		dt := sym.Type()
+		if dt == nil {
+			continue
+		}
+		declared[name] = struct{}{}
+		rec := localDecl{
+			text:      localDeclString(s.normalizeTypeForDecl(dt), name),
+			hasOffset: e.Addr().Space == space,
+			offset:    e.Addr().Offset,
+		}
+		pos := len(decls)
+		if rec.hasOffset {
+			for i, d := range decls {
+				if d.hasOffset && d.offset > rec.offset {
+					pos = i
+					break
+				}
+			}
+		}
+		decls = append(decls, localDecl{})
+		copy(decls[pos+1:], decls[pos:])
+		decls[pos] = rec
+	}
+	return decls
+}
+
+// stackOffsetsWithVarnodes collects the start offsets of every live Varnode in
+// the scope's stack space. Used to tell a Symbol that owns storage of its own
+// from one that ScopeLocal::restructure synthesized out of an open RangeHint.
+func (s *printCState) stackOffsetsWithVarnodes(space *address.Space) map[uint64]struct{} {
+	covered := map[uint64]struct{}{}
+	if s.fd == nil || space == nil {
+		return covered
+	}
+	bank := s.fd.GetVarnodeBank()
+	if bank == nil {
+		return covered
+	}
+	for _, vn := range bank.AllVarnodes() {
+		if vn == nil || vn.IsFree() || vn.Space() != space {
+			continue
+		}
+		covered[vn.Addr().Offset] = struct{}{}
+	}
+	return covered
+}
+
+// entryCoversVarnode reports whether any live stack Varnode starts inside the
+// SymbolEntry's address range.
+func (s *printCState) entryCoversVarnode(e *SymbolEntry, covered map[uint64]struct{}) bool {
+	if len(covered) == 0 {
+		return false
+	}
+	size := int64(e.Size())
+	if size < 1 {
+		size = 1
+	}
+	start := e.Addr().Offset
+	end := start + uint64(size)
+	for off := range covered {
+		if off >= start && off < end {
+			return true
+		}
+	}
+	return false
 }
 
 // stackSymbolType returns the declaration data-type for a stack Varnode taken
@@ -2930,12 +3075,42 @@ func storeValue(op *PcodeOp) *Varnode {
 }
 
 func (s *printCState) renderStoreLHS(ptr *Varnode, parentPrec ExprPrecedence) (string, error) {
+	// C++ parity: PrintC::opStore (printc.cc:519-537) is the mirror of opLoad --
+	// when checkArrayDeref accepts the pointer expression the dereference op is
+	// NOT pushed and print_store_value is set instead, which makes opPtradd emit
+	// a subscript rather than a '+' (printc.cc:900-908). Without this the store
+	// side of an array write printed as *(base + index), dropping the element
+	// scaling and reading as a byte-sized access in C.
+	if checkArrayDeref(ptr) {
+		if frag, ok, err := s.tryRenderSubscript(ptr); err != nil {
+			return "", err
+		} else if ok {
+			return s.lang.ExprString(frag, parentPrec, ExprPosNone, ExprAssocNone), nil
+		}
+	}
 	frag, err := s.renderVarnodeExpr(ptr)
 	if err != nil {
 		return "", err
 	}
 	lhs := s.lang.UnaryExpr("*", cPrecUnary, frag)
 	return s.lang.ExprString(lhs, parentPrec, ExprPosNone, ExprAssocNone), nil
+}
+
+// checkArrayDeref reports whether a LOAD/STORE pointer expression can be printed
+// with array (or member) syntax instead of a '*' dereference: the pointer must be
+// an implied, written Varnode whose defining op is a PTRSUB or PTRADD. The
+// SEGMENTOP hop of the C++ original is omitted because Gosleigh does not emit
+// SEGMENTOP.
+// C++ parity: printc.cc PrintC::checkArrayDeref (L353-368).
+func checkArrayDeref(vn *Varnode) bool {
+	if vn == nil || !vn.IsImplied() || !vn.IsWritten() {
+		return false
+	}
+	def := vn.Def()
+	if def == nil {
+		return false
+	}
+	return def.Code() == CPUI_PTRSUB || def.Code() == CPUI_PTRADD
 }
 
 // booleanFlipToken returns the negated binary operator token, precedence, and
@@ -3933,7 +4108,7 @@ func (s *printCState) renderPtrAdd(op *PcodeOp) (ExprFragment, error) {
 func (s *printCState) renderPtrSub(op *PcodeOp) (ExprFragment, error) {
 	base := op.Input(0)
 	off := op.Input(1)
-	if symExpr, ok := s.renderPtrSubGlobalSymbol(base, off); ok {
+	if symExpr, ok := s.renderPtrSubSpacebaseSymbol(base, off); ok {
 		return symExpr, nil
 	}
 	if fieldExpr, ok := s.renderPtrSubField(base, off); ok {
@@ -3951,33 +4126,48 @@ func (s *printCState) renderPtrSub(op *PcodeOp) (ExprFragment, error) {
 	return s.lang.BinaryExpr(castBase, "+", offExpr, cPrecAdd, ExprAssocLeft), nil
 }
 
-// renderPtrSubGlobalSymbol renders a PTRSUB off a global spacebase constant as a
-// reference to the global symbol it resolves to (e.g. "&__ImageBase"). Ghidra's
+// renderPtrSubSpacebaseSymbol renders a PTRSUB off a spacebase register as a
+// reference to the Symbol covering that frame/image offset -- "&__ImageBase" for
+// the global spacebase, "aiStack_48" for a recovered stack array. Ghidra's
 // opPtrsub reads the symbol from op->getIn(1)->getHigh()->getSymbol() in the
-// TYPE_SPACEBASE branch; Gosleigh has no global-symbol HighVariable linking yet,
-// so the offset constant is resolved against the injected global scope directly
-// at print time. The '&' is dropped for code/array symbol types, matching the
-// C++ valueon handling. Returns false (falling through to the generic PTRSUB
-// rendering) when the base is not a global spacebase, the offset is not
-// constant, or no global symbol covers the address -- so the default
-// (uninjected) path is unchanged.
-// C++ parity: printc.cc PrintC::opPtrsub, TYPE_SPACEBASE branch (&name / name).
-func (s *printCState) renderPtrSubGlobalSymbol(base, off *Varnode) (ExprFragment, bool) {
+// TYPE_SPACEBASE branch; Gosleigh does not link Symbols onto the HighVariable of
+// the PTRSUB offset constant, so the offset is resolved against the scopes
+// directly at print time. Global scope first, ScopeLocal second: the same
+// two-scope order Funcdata.ResolveSpacebaseSymbol uses for the C++
+// TypeSpacebase::getSubType/getMap pair (action_extras.go:1061). The '&' is
+// dropped for code/array symbol types, matching the C++ valueon handling.
+// Returns false (falling through to the generic PTRSUB rendering) when the base
+// is not a spacebase, the offset is not constant, or no symbol covers the
+// address -- so every non-symbol path is unchanged.
+// C++ parity: printc.cc PrintC::opPtrsub, TYPE_SPACEBASE branch (printc.cc:1076-1116).
+func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode) (ExprFragment, bool) {
 	if base == nil || off == nil || !base.IsSpaceBase() || !off.IsConstant() {
 		return ExprFragment{}, false
 	}
 	if s.fd == nil {
 		return ExprFragment{}, false
 	}
-	gs := s.fd.GetGlobalScope()
-	if gs == nil {
-		return ExprFragment{}, false
-	}
+	// The space the spacebase points into. GetSpaceFromConst carries the binding
+	// stamped by ActionConstantPtr (global) and Funcdata.Spacebase (stack);
+	// AssociatedSpacebase is the direct binding Funcdata.Spacebase made when it
+	// marked the base register.
 	spc := base.GetSpaceFromConst()
+	if spc == nil {
+		spc = base.AssociatedSpacebase()
+	}
 	if spc == nil {
 		return ExprFragment{}, false
 	}
-	entry := gs.QueryContainer(address.Address{Space: spc, Offset: off.Offset()}, 1, address.Address{})
+	probe := address.Address{Space: spc, Offset: off.Offset()}
+	var entry *SymbolEntry
+	if gs := s.fd.GetGlobalScope(); gs != nil {
+		entry = gs.QueryContainer(probe, 1, address.Address{})
+	}
+	if entry == nil {
+		if sl := s.fd.GetScopeLocal(); sl != nil && sl.SpaceID() == spc {
+			entry = sl.QueryContainer(probe, 1, address.Address{})
+		}
+	}
 	if entry == nil || entry.Symbol() == nil {
 		return ExprFragment{}, false
 	}
