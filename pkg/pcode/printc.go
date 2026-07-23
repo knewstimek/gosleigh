@@ -3078,6 +3078,12 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 			return name
 		}
 	}
+	// Character constant: a read-facing char type prints as a single-quoted
+	// character ('\0', 'A', '\n', ...). C++ parity: PrintC::pushConstant routes an
+	// isCharPrint type to pushCharConstant (printc.cc:1813/1821 -> 1669).
+	if lit, ok := renderCharConstant(vn, dt); ok {
+		return lit
+	}
 	// When the constant carries only a generic TYPE_UINT (the default for untyped
 	// constants), check if any consumer's storage location is signed. If so, the
 	// constant lives in a signed context and should be rendered as a signed literal.
@@ -3152,6 +3158,113 @@ func formatIntegerLiteral(val uint64, sz int32, sign bool) string {
 		return "-" + body
 	}
 	return body
+}
+
+// renderCharConstant renders a size-1 character constant as a single-quoted C
+// character, mirroring PrintC::pushCharConstant (printc.cc:1669-1718) for the
+// common displayFormat==0 path. It returns ok=false when the constant is not a
+// (would-be) char, or when the byte value is >= 0x80 -- in which case C++ falls
+// back to integer/escape rendering (printc.cc:1693-1703), so the caller lets the
+// normal integer path run and the output is unchanged from before this branch.
+//
+// Ghidra models char as a distinct TypeChar (isCharPrint, isASCII). Gosleigh has
+// no char Datatype, but Ghidra's TypeFactory fills the size-1 TYPE_INT core-type
+// cache slot with the ASCII "char" type ("Char is preferred over other int
+// types", type.cc:3642-3647), so every read-facing size-1 signed integer is
+// char. The would-be-char set is therefore isCharPrintLike(dt) (a real char
+// subtype, should one ever be modelled) or a plain size-1 TYPE_INT Base. TYPE_UINT
+// size-1 ("byte") is not char and is intentionally excluded so byte constants
+// keep printing as integers.
+func renderCharConstant(vn *Varnode, dt Datatype) (string, bool) {
+	if dt == nil || dt.Size() != 1 {
+		return "", false
+	}
+	charLike := isCharPrintLike(dt)
+	if !charLike {
+		if base, ok := dt.(*Base); ok && base.Metatype() == TYPE_INT {
+			charLike = true
+		}
+	}
+	if !charLike {
+		return "", false
+	}
+	val := vn.Offset() & 0xff
+	// C++: a size-1 value >= 0x80 is not a valid unicode code-point and (with no
+	// forced display format) prints via the integer path (printc.cc:1693-1701).
+	if val >= 0x80 {
+		return "", false
+	}
+	return "'" + escapeCharForC(int(val)) + "'", true
+}
+
+// escapeCharForC renders one code-point as it appears inside C single quotes,
+// following PrintC::printUnicode (printc.cc:1489-1533) and its escape table.
+// Only 0x00-0x7f is exercised by renderCharConstant (size-1 char, val < 0x80).
+func escapeCharForC(c int) string {
+	if unicodeNeedsEscape(c) {
+		switch c {
+		case 0:
+			return "\\0"
+		case 7:
+			return "\\a"
+		case 8:
+			return "\\b"
+		case 9:
+			return "\\t"
+		case 10:
+			return "\\n"
+		case 11:
+			return "\\v"
+		case 12:
+			return "\\f"
+		case 13:
+			return "\\r"
+		case 92:
+			return "\\\\"
+		case '"':
+			return "\\\""
+		case '\'':
+			return "\\'"
+		}
+		return printCharHexEscapeC(c)
+	}
+	return string(rune(c))
+}
+
+// unicodeNeedsEscape mirrors PrintLanguage::unicodeNeedsEscape
+// (printlanguage.cc:415-491) over the byte range a size-1 char can hold. The
+// higher-plane branches (>= 0x100) are not reachable for a size-1 char constant
+// and are collapsed to "escape"; wide-character rendering is out of scope here.
+func unicodeNeedsEscape(c int) bool {
+	if c < 0x20 { // C0 control characters
+		return true
+	}
+	if c < 0x7f { // printable ASCII
+		switch c {
+		case 92, '"', '\'':
+			return true
+		}
+		return false
+	}
+	if c < 0x100 {
+		if c > 0xa0 { // printable code-points A1-FF
+			return false
+		}
+		return true // DEL + C1 control characters
+	}
+	return true
+}
+
+// printCharHexEscapeC mirrors PrintC::printCharHexEscape (printc.cc:1575-1586).
+func printCharHexEscapeC(c int) string {
+	switch {
+	case c < 256:
+		return fmt.Sprintf("\\x%02x", c)
+	case c < 65536:
+		return fmt.Sprintf("\\x%04x", c)
+	default:
+		return fmt.Sprintf("\\x%08x", c)
+	}
 }
 
 // inferSignedConstType returns a TYPE_INT base type for a constant varnode whose
