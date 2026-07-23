@@ -34,7 +34,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `short_arith_trunc` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `cond_assign_abs` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `minmax_chain4` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `strlen_style` | STRUCT | STRUCT: keyword 'while': want=0 got=1<br>STRUCT: keyword 'for': want=1 got=0 |
+| `strlen_style` | UNKNOWN | UNKNOWN: no heuristic matched -- manual review needed |
 | `memcpy_style` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `multi_return_early` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `nested_if_ladder_grade` | MATCH | MATCH: byte-identical (indent-insensitive) |
@@ -45,8 +45,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 
 - MATCH: 22
 - PTR: 1
-- STRUCT: 1
 - TEMP: 6
 - TYPECAST: 3
-- UNKNOWN: 2
+- UNKNOWN: 3
 
