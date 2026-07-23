@@ -37,8 +37,8 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 - **goldengap**: `py -3 tools/goldengap/goldengap.py all|add|gen|run|report|validate-corpus2` --
   C함수 추가 -> MSVC -> Ghidra headless 골든 -> Gosleigh 대조 -> 갭 자동분류 -> testdata/x64_auto/GAPMAP.md.
   **주의 1**: Gosleigh 단독 재실행은 `goldengap.py run`을 써라 -- bare `go run ./cmd/goldengap`은 -out 없이
-  stdout에만 출력해 gosleigh_out.json이 갱신 안 됨(세션5에서 stale 검증 함정 실증). **주의 2**: report가
-  GAPMAP.md 수동 섹션을 덮어씀(툴 개선 후보).
+  stdout에만 출력해 gosleigh_out.json이 갱신 안 됨(세션5에서 stale 검증 함정 실증). **주의 2**: GAPMAP.md는 전체 자동생성(수동 섹션 없음)이라
+  옛 '수동 섹션 덮어씀' 주의는 stale. 실제 한계는 TYPECAST/TEMP 토큰수 휴리스틱이 렌더 근본을 못 짚는 것.
 - **ssadiff**: `SLEIGHHOME='D:\News\Utility\리버싱\ghidra_12.0.4_PUBLIC' py -3 tools/ssadiff/ssadiff.py
   --golden <골든.json> --func <이름> --decomp-dbg D:/News/Business/Gosleigh/tools/decomp_dbg.exe --fuzzy`
   -- C++ 코어 vs Gosleigh 최종 SSA op 단위 비교. Gosleigh 쪽만: `go run ./cmd/ssadump`. 사용법
@@ -72,7 +72,7 @@ rewrite 후 orphan 2COMP(`NumDescend()==0`)를 `OpDestroy`(C++ ruleaction.cc:725
 `vn.IsInput() ||` 잉여 절 + (3) deadcode 前 발화. 수정 = 후보를 `isParamLocation && vn.IsInput()`으로 제한
 + 활성 조건 `NumDescend()>0`만(coreaction.cc:4737 `!hasNoDescend()`) + ActionActiveParam을 ActionDeadCode
 **뒤로** 재배치(구조적으로 "deadcode 실행됨" 보장). 무회귀 수렴 확인. **잔여**: body `iVar1 = local_10`
-(골든 `param_2 = local_10`) carrier는 A2 undercount 계열 -- MATCH는 아직 20(body gap).
+(골든 `param_2 = local_10`) carrier는 (B) print-inline/param 계열 잔여(reverse_bytes_inplace는 여전히 UNKNOWN/MISMATCH, x64_auto 22/32에 미포함).
 
 **(A2) undercount [세션6 스택 param 착지 `991be09`; 잔여 = 완전대체/struct]**: helper_sum param_5(스택 param)는
 세션6에 복구 완료(충실 ParamListStandard.fillinMap 포팅 + additive recoverMissingStackParams; body tmp_0는
@@ -83,11 +83,11 @@ rewrite 후 orphan 2COMP(`NumDescend()==0`)를 `OpDestroy`(C++ ruleaction.cc:725
 미참조 input 생성(coreaction.cc:4745-4759). caller의 전 param 소실 + `local_92()` call-target 실패는
 helper_sum 프로토가 고쳐지면 연쇄 재확인.
 
-**(A3) 무관 트랙 [별개, param 아님]**: sum_via_pp 잉여 `lVar1 = param_2` copy(copy-coalesce),
-multi_return_early return 분기 2개 드롭(ActionReturnSplit -- control-flow 구조화). param 라인과 분리 처리.
+**(A3) 무관 트랙 [세션6에 해소/재분류]**: multi_return_early는 세션6 후속2 착지(PrintC BlockList emitter 버그, ActionReturnSplit 아님, `f569034`).
+sum_via_pp 잉여 `lVar1`은 copy-coalesce가 아니라 (B) print-inline(shouldInline이 IsImplied 미소비)으로 재분류(decomp_dbg 실측). => (A3)는 소진, 남은 건 (B).
 
-권장 순서(세션6 후속 갱신): A0 착지 완료 -> **A2 잔여(옛 IsParamOffset 완전대체 = updateInputTypes store
-재빌드 + unref varnode 실체화; struct hi/lo+CONCAT44)** 또는 A3(ActionReturnSplit/copy) -> (C) 잔여.
+권장 순서(세션6 후속2 갱신): A0/multi_return_early 착지 완료 -> **(B) print-inline flag 소비 재작성(고레버리지
+sum_via_pp/umulhi/gate/faverage 다수 동시 해결; 대형·단독세션)** 또는 A2 잔여(IsParamOffset 완전대체) -> (C)/struct 잔여.
 - 성공 기준(세션6 완료분): reverse_bytes_inplace 2 param(A1 세션5), helper_sum param_5 복구+body MATCH
   (A2 스택 세션6 + A0 dead-negate). 잔여 성공 기준은 (A2 잔여)/(A3)/(C) 각 항목 참조.
 
@@ -112,7 +112,7 @@ multi_return_early return 분기 2개 드롭(ActionReturnSplit -- control-flow �
   -> 단독 세션. C++ 참조: printc.cc emitExpression/ActionMarkExplicit(coreaction.cc).
 - 착수 전 ssadiff로 현 SSA 갭 지도를 함수별로 뽑아 범위 확정.
 
-### (C) [소~중] x64_auto/corpus2 잔여 (21/32 이후)
+### (C) [소~중] x64_auto/corpus2 잔여 (22/32 이후)
 - switch_dense: 세션5 바이트 정정으로 실바이트 디코드 정상화 -- 잔여는 TYPECAST(cast int/uint/ulonglong
   want/got 불일치) + TEMP uVar2. 기존 "range-check idiom" 설명은 손상 바이트 시절 것이라 stale -- 재실측부터.
 - strlen_style STRUCT(for/while, loop-variable phi depth-3, (B)와 얽힘).
@@ -123,8 +123,8 @@ multi_return_early return 분기 2개 드롭(ActionReturnSplit -- control-flow �
 - sum_pp_walk TEMP(lVar1 -- SEXT48 implied 실패, (B) 클러스터). array_init_then_sum PTR `* 4`+local_428
   (스택 배열 미복구 근본 -- PTRADD를 안 거침). sign_extend_boundary
   TYPECAST(longlong_combo는 세션6 dead-negate로 MATCH). bit_rotate_left 리터럴 U 접미사. while_countdown/popcount_loop/swap_via_temp TEMP((B) 계열).
-- corpus2 잔여 7건: gate(&&/|| 그룹핑 + param-as-return, De Morgan P4), add_pt/
-  sum_via_pp/helper_sum/caller(반환 캐리어/call-site), faverage(FP), umulhi(spurious CAST). P5-P8은
+- corpus2 잔여 6건(helper_sum은 세션6 MATCH): gate(&&/|| 그룹핑 + param-as-return, De Morgan P4), add_pt/
+  caller(반환 캐리어/call-site = A2 계열), sum_via_pp/umulhi((B) print-inline 재분류, 옛 spurious CAST는 오진), faverage(FP). P5-P8은
   corpus2 README 지도 유지.
 
 ## 회귀 가드 (매 수정마다 필수, -count=1 2회 결정성)

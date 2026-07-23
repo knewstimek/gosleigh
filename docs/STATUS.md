@@ -21,11 +21,11 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 - **[세션6] A2 param-recovery undercount 착지(`991be09`)**: 충실 `ParamListStandard`/`ParamEntry`/`fillinMap`
   포팅(신규 paramlist.go) + fixateproto `recoverMissingStackParams`로 helper_sum 스택 param_5 복구(ssadump
   실측, golden 시그니처 일치). 전 게이트 무회귀.
-- **[세션6 후속] dead-negate 제거(`ed0bbea`)**: helper_sum body `tmp_0` 근본 = cleanup 룰 왜복이 만든 orphan
+- **[세션6 후속] dead-negate 제거(`ed0bbea`)**: helper_sum body `tmp_0` 근본 = cleanup 룰 왕복이 만든 orphan
   INT_2COMP(C++ 미생성). `Rule2Comp2Sub`가 rewrite 후 orphan 2COMP 파괴(ruleaction.cc:7254). corpus2 6->7,
   x64_auto 20->21(longlong_combo 동반).
 - **[세션6 후속2] multi_return_early 착지(`f569034`)**: `BlockIf` 조건헤드가 `BlockList`일 때 PrintC
-  이미터가 선행 guarded-return 누락 + 최내곱 오렌더. ActionReturnSplit·collapse는 정확했고(decomp_dbg
+  이미터가 선행 guarded-return 누락 + 최내곽 오렌더. ActionReturnSplit·collapse는 정확했고(decomp_dbg
   실측) 순수 emitter 버그. `emitConditionLead`/`renderCondition`에 BlockList 케이스 추가(emitBlockLs
   no_branch/only_branch 미러, printc.cc:2913). **x64_auto 21->22/32**(multi_return_early MATCH). 상세 CHANGELOG
   세션6 후속2. 아래 게이트 수치는 이 값으로 갱신됨.
@@ -36,8 +36,8 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   (cover 인덱스=블록위치, LoopBody 포인터 안정성, InfLoop do/while(true), RuleCollectTerms 포팅,
   RuleShift2Mult 컨텍스트 게이트, RuleDoubleShift 완전 포팅, PTRADD 렌더 스케일 제거, heritage BuildADT
   faithful 포팅(clamp3 완결), **param-recovery overcount 수정(phantom R8 param 제거 -- ActionInputPrototype
-  input-only trial + deadcode 후 발화)**). 다음 최우선 = param-recovery undercount(helper_sum 스택 param/
-  add_pt struct = resolveModel/deriveInputMap 포팅) -- NEXT_SESSION_PROMPT (A2).
+  input-only trial + deadcode 후 발화)**). (세션5가 지목했던 param-recovery undercount는 세션6에 A2 스택
+  param + dead-negate로 착지 완료 -- 현재 다음 작업은 위 [최신] 블록/NEXT_SESSION 참조.)
 - **툴 2종 착지(핸드오프 우선 제작 툴 완성)**: `tools/goldengap/`(원커맨드 골든 생성+갭 자동분류,
   `testdata/x64_auto/` 32함수 discovery 코퍼스) + `tools/ssadiff/`(C++ 코어 decomp_dbg <-> Gosleigh
   최종 SSA를 op 단위 나란히 비교, savefile 템플릿 생성 포함).
@@ -83,8 +83,9 @@ stale였던 이유 = 마일스톤 완료 후 해당 미시작 섹션을 지우�
   다중 guard switch 코퍼스 추가 시 필요.
 - **consume-DeadCode 정리**: `GOSL_DESCENDANT_DC` fallback(action_deadcode.go:70) + 레거시
   descendant-count 루프 잔존 -- broader corpus 검증 후 제거.
-- **goldengap 툴 개선 후보**: report가 GAPMAP.md 수동 섹션을 덮어씀 + TYPECAST 휴리스틱이 블록 소실을
-  오분류(multi_return_early 사례, 세션5 확인).
+- **goldengap 툴 개선 후보**: GAPMAP.md는 전체 자동생성(수동 섹션 없음)이라 '덮어씀' 우려는 stale(옛 주의
+  삭제). 실제 한계 = TYPECAST/TEMP 토큰수 휴리스틱이 블록소실/미인라인 근본을 못 짚음(multi_return_early는
+  세션6에 emitter 버그로 판명돼 이미 MATCH -- 예시도 stale).
 - struct/union 타입 복구, 스택 파라미터/CONCAT44/reloc/FP(corpus2 P5-P8), PARITY_AUDIT 미포팅 opcode 잔여.
 
 
