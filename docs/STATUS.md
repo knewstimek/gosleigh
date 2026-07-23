@@ -15,9 +15,12 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-23 세션6, master `32fb2b6`, origin 푸시, 전 게이트 green 감독관 재검증)
+## 현재 상태 (2026-07-23 세션6, master `60e01f0`, origin 푸시, 전 게이트 green 감독관 재검증)
 
 **권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`**. 요약:
+- **[세션6 후속3] for-loop 인식 착지(`60e01f0`)**: `findLoopVariable`(action_forloops.go)가 CPUI_CAST 투과.
+  근본 = 액션 순서 차이(C++은 finalTransform을 ActionSetCasts 전 실행, Gosleigh는 후 -> 삽입 CAST가 depth-4 예산
+  소진). strlen_style Ghidra for 구조 일치(잔차 char 리터럴 `!= '\0'` = STOP 경계). x64_auto MATCH 22 유지. 전 게이트 무회귀.
 - **[세션6] A2 param-recovery undercount 착지(`991be09`)**: 충실 `ParamListStandard`/`ParamEntry`/`fillinMap`
   포팅(신규 paramlist.go) + fixateproto `recoverMissingStackParams`로 helper_sum 스택 param_5 복구(ssadump
   실측, golden 시그니처 일치). 전 게이트 무회귀.
