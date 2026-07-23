@@ -5,6 +5,29 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-23 (세션6 후속): dead-negate 제거 -- Rule2Comp2Sub orphan INT_2COMP 파괴, helper_sum MATCH (엔진 tip `d707fdd`)
+A2 착지 직후 남은 helper_sum body `tmp_0`(golden `- param_4 * param_5`)를 제거. read-only 진단(Opus 1슬롯,
+decomp_dbg 실측)으로 두 후보(IMUL SLEIGH 번역 / consume-deadcode)를 **둘 다 기각**하고 룰 패리티 버그로 확정.
+
+**근본**: dead `INT_2COMP`(`u = -(R9D*s0x28)`, use 0)는 Gosleigh 자체 cleanup 룰 왕복이 만든 orphan --
+`RuleSub2Add`(analysis, `V-W => V+(W*-1)`) -> `RuleMultNegOne`(cleanup, `W*-1 => INT_2COMP(W)`) ->
+`Rule2Comp2Sub`(cleanup, `V+INT_2COMP(W) => V-W`). SUB는 복원되나 INT_2COMP가 use 0으로 잔존. actcleanup은
+마지막 ActionDeadCode 뒤라(universalAction 패리티) 쓸어줄 deadcode 패스가 없음 -> orphan이 곱셈을 2-use로
+유지 -> 인라인 차단 -> explicit tmp_0. decomp_dbg 실측: C++ 코어는 이 INT_2COMP를 애초에 미생성.
+
+**수정 (`ed0bbea`, `pkg/pcode/rules_arith.go` Rule2Comp2Sub.apply)**: C++ `Rule2Comp2Sub::applyOp`
+(ruleaction.cc:7254)는 2COMP에 트리거해 loneDescend ADD로 접힌 뒤 `opDestroy`로 파괴. Gosleigh는 ADD에
+트리거하는 구조라, ADD를 SUB로 rewrite(옛 입력 unset) 후 2COMP output이 orphan(`NumDescend()==0`)이면
+`OpDestroy`. 가드가 살아있는 2COMP는 미파괴. C++ 결과와 동일(단일 소비 케이스).
+
+**결과**: helper_sum `return (param_1+param_2+param_3) - param_4 * param_5;` golden MATCH. **corpus2 6/13 ->
+7/13**, **x64_auto 20/32 -> 21/32**(longlong_combo도 동일 orphan temp lVar2 제거로 TEMP->MATCH). caller
+호출부는 A2 복구 덕에 `helper_sum(param_1..param_5)` 5-인자 정확(caller 자체는 별개 이유로 MISMATCH). 전
+게이트 -count=1 2회 무회귀(tree 10/10, x64 8/8, switch, breadth 3/3, MSVC/AARCH64/X8664/RegParam/PELoader/
+X86PE, go test ./...). 스냅샷 재생성 `d707fdd`.
+
+---
+
 ### 2026-07-23 (세션6): A2 param-recovery undercount -- x64 스택 param_5 복구, 충실 ParamListStandard 포팅 (엔진 tip `991be09`)
 감독관 세션(진단 Opus 2슬롯 병렬 read-only, 구현 Opus 1슬롯 worktree 격리, 감독관 전 게이트 -count=1 직접
 재검증 + ff-only 착지 + push). 핸드오프 (A2) undercount 슬라이스 = helper_sum의 5번째 스택 인자
