@@ -21,6 +21,14 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 | `2460b6b` | 재대입 param이 `param_N` 유지(미선언 변수 버그 소멸) | reverse_bytes/gate 정정 |
 | `3afb5cd` | RestructureVarnode가 free varnode 스킵 | add_pt 구조 복구(의미 파괴 소멸) |
 | `2f08090` | **call-site 입력 trial 복구 포팅**(768줄) | caller 5-param + 인자 4개 복구 |
+| `a93c92e` | for 헤더 comma-separate + faithful preferComplement split | reverse_bytes_inplace MATCH (29->30), gate MATCH (corpus2 8->9) |
+| `6521fd2` | **진짜 `RuleSubRight` 포팅**(동명 다른 룰) + PIECE/SUBPIECE 이름에 피연산자 크기 | add_pt에서 raw opcode 이름(SUBPIECE/CONCAT) 소멸 |
+| `a08ee35` | spacebase 포인터 타입 lock + **진짜 `RulePushPtr` 포팅**(동명 dead code) + TypeSpacebase 크기 0 | array_init SSA에 PTRSUB/PTRADD 생성(상류 개통) |
+| `690fdf5` | `castStandardRead` TYPE_UNKNOWN 억제 삭제(C++에 없는 발명) | add_pt `(ulonglong)` 캐스트 golden 일치 |
+
+**동명 다른 룰 2건 발견**: `RuleSubRight`(C++은 SUBPIECE, Go는 INT_SUB 대수단순화)와 `RulePushPtr`(C++은 INT_ADD
+포인터 밀기, Go는 발화조차 안 하는 PTRADD collapse). **이름 충돌이 미포팅 룰을 가리고 있었다** -- 룰 포팅 감사 시
+이름이 아니라 `getOpList`와 본체로 대조해야 한다.
 
 **방법론에서 얻은 것**: 감독관이 goal에 적은 근본 후보가 **워커 실측으로 반증된 사례가 5건**이다 --
 (a) bit_rotate의 U 접미사는 cast.go 게이트가 아니라 INT_SUB 출력토큰, (b) swap의 latch COPY는 merge 게이트가
@@ -199,6 +207,75 @@ Gosleigh에선 안 생겨 C++의 `tryregister=false`와 **같은 경로**를 택
 분기(x86/x64는 구체 extrapop 선언이라 C++에서도 죽은 분기), locked-ProtoParameter 분기(도달 불가).
 **후속**: caller에 `uVar2 = (ulonglong)param_N;` 죽은 문장이 누출된다 -- C++이 하류 consume-bit deadcode /
 SubvariableFlow로 얻는 8->4바이트 인자 축소가 없어서이며 trial 포팅과는 별개 근본.
+
+---
+
+### 2026-07-24 (세션8-9): for 헤더 comma + faithful preferComplement (master `a93c92e`)
+**reverse_bytes_inplace**: for 헤더의 `local_10 = param_2 + -1,` 누락은 포맷이 아니라 **statement 유실**이었다
+(조건이 미정의 `local_10`을 참조). `emitForBlock`이 `mustRenderCondition`(CBRANCH 조건만)을 썼고
+`emitWhileBlock`은 이미 `renderCondBlockComma`를 쓰고 있었다 -- **기계는 있었고 for 경로만 호출을 안 했다**
+(C++ `emitForLoop` printc.cc:3106-3115가 `setMod(comma_separate)` 후 조건 블록을 emit).
+**gate**: De Morgan은 구조화 규칙이 아니라 구조화 후처리 `ActionPreferComplement`다. `ruleBlockOr`은 항상 OR을
+만들고 AND는 duality로만 나오므로 gate는 `OR(AND,AND)`로 구조화된 뒤 `BlockIf::preferComplement`가 조건 전체를
+뒤집고 clause를 swap한다. 발화가 안 된 이유는 `getSplitPoint` 2중 버그: (1) C++은 BlockCondition에서
+`return this`(block.hh:631)인데 Go는 마지막 child로 재귀, (2) 고쳐도 collapse가 리프의 out-edge를 상위 구조
+블록으로 올려 `SizeOut()==1`이 되는데 C++은 `BlockCopy::getSplitPoint`(block.hh:535)로 **collapse가 안 건드린
+원본 BlockBasic**을 테스트한다(Go 대응물 = `BlockBasic.srcDelegate`). `flipInPlaceTest`/`flipInPlaceExecute`
+(block.cc:2990/3008) 포팅 + `preferComplement` 실행 순서 정정(block.cc:3105-3107).
+**괄호 모델을 precedence 유도 -> 구조 유도로 교체**: C++ `emitBlockCondition`(printc.cc:2979/2996)이 전체에
+openParen 1개 + block(1)에 openParen 1개를 넣고 `comma_separate`를 **block(1)에만** 걸어, `opCbranch`의
+`yesparen = !isSet(comma_separate)`(printc.cc:560)로 그 안의 리프 괄호를 억제한다. golden
+`((-1 < param_3 || (param_4 == 0)))`가 정확히 이 조합이다. **29->30, corpus2 8->9.**
+
+---
+
+### 2026-07-24 (세션8-10): 진짜 RuleSubRight + PIECE/SUBPIECE 연산자 이름 (master `6521fd2`)
+add_pt가 **p-code opcode 이름을 C 출력에 그대로 흘리고 있었다**(`SUBPIECE(param_2, 4)`, `CONCAT(...)`).
+ssadiff 실측: C++ 코어는 offset!=0 SUBPIECE를 시프트+offset0 SUBPIECE로 쪼갠다.
+**미포팅이 드러나지 않은 이유 = 이름 충돌**: C++ `RuleSubRight::getOpList`는 `CPUI_SUBPIECE`(ruleaction.cc:7268,
+"sub(V,c) => sub(V>>c*8,0)")인데 Go의 동명 룰은 `CPUI_INT_SUB` 대수 단순화(`x-x->0` 등)였다.
+`applyOp` 전문 포팅(special-print 체크, c==0 조기반환, ActionCopyMarker에 양보하는 addrtied/overlap 가드,
+lone INT_RIGHT/INT_SRIGHT 흡수). 이름은 `TypeOpPiece::getOperatorName`(typeop.cc:2055) /
+`TypeOpSubpiece::getOperatorName`(typeop.cc:2135)이 피연산자 바이트 크기를 붙여 `CONCAT44`/`SUB84`를 만든다.
+**부채**: 기존 INT_SUB 본체를 `applyIntSub`로 같은 룰에 남겨뒀다(action.go 무수정 목적) -- C++에 대응이 없는
+발명이므로 별도 룰로 분리하거나 제거해야 한다.
+
+---
+
+### 2026-07-24 (세션8-11): spacebase 포인터 타입 lock + 진짜 RulePushPtr (master `a08ee35`)
+`array_init_then_sum`이 PTRSUB/PTRADD를 아예 못 만들어 스택 배열 복구가 불가능했다. 4중 블로커:
+1. `Funcdata.Spacebase()`가 lock 없이 `UpdateType` -> `inferWriteBack`이 즉시 int로 되돌림
+   (C++ funcdata.cc:264는 `updateType(ptr,true,true)`). `inferWriteBack`은 `IsTypeLock`을 이미 올바르게 존중하므로
+   lock 누락 하나가 전부였다.
+2. `inferPropagateIntAdd`가 `return nil`이고 `propagateAddPointer`에 INT_ADD 케이스 부재(typeop.cc:1290-1315).
+   추가 발견: `inferPropagateAddIn2Out`이 `command==3`(untransformed) 반환을 spacebase 가드 **뒤**에 둬서 base가
+   unique인 바깥 ADD에서 전파가 죽었다(C++ typeop.cc:1226은 command 3이면 spacebase와 무관하게 downChain 생략).
+3. **`ActionSetCasts`는 범인이 아니었다**(가설 반증) -- `(cast)` op는 포인터 체인이 끊긴 **증상**이었다.
+   진짜 3단 블로커는 **두 번째 동명 다른 룰**: Go `RulePushPtr`은 PTRADD/PTRSUB zero-offset collapse로
+   **전 게이트에서 한 번도 발화하지 않는 dead code**였고, C++ `RulePushPtr`(ruleaction.cc:6865)은 INT_ADD에서
+   `(sp+c)+(i*s) -> sp+((i*s)+c)`로 민다. `RulePtrArith::verifyPreferredPointer`(ruleaction.cc:6560)가 안쪽 add를
+   선호해 바깥 add를 거절하므로, 이게 없으면 AddTreeState는 영원히 진입 못 한다.
+4. `TypeSpacebase` 크기가 1이었다(C++ `Datatype(0,1,TYPE_SPACEBASE)` = 0). 1이면 AddTreeState가 `isDegenerate`로
+   빠져 `PTRADD(sp,x,1)`만 나온다.
+안정화 2건: `calcSubtype`의 TYPE_SPACEBASE 분기가 mapped-variable 해석(ruleaction.cc:6306-6317)을 빼먹어
+PTRSUB 출력이 ptr-to-spacebase로 남고 RulePtrArith가 무한 재생성하던 **무한 루프** 차단,
+`buildTree`의 `SetStopTypePropagation()`을 `size != 0` 조건부로(ruleaction.cc:6531).
+**결과**: SSA에 C++과 같은 PTRSUB+PTRADD 생성, 주소식 주변 `(cast)` 소멸, 로컬 타입이 `undefined4`->`int`로
+golden 근접. 잔여 = PTRADD 스케일 1 vs C++ 4, `((char *)local_423 + -0x48)[...]` 렌더 -- **둘 다 ScopeLocal에
+`-0x48`의 `int[18]` 심볼이 없어서**이며, 그 심볼만 생기면 자동으로 따라온다(= varmap 차례. 과거 세션이
+"상류 없이 varmap은 출력에 0의 영향"을 심볼 주입으로 증명했었고, 이제 그 상류가 뚫렸다).
+
+---
+
+### 2026-07-24 (세션8-12): castStandardRead TYPE_UNKNOWN 억제 삭제 (master `690fdf5`)
+add_pt가 golden의 `(ulonglong)` 캐스트 없이 시프트했다. `castStandardRead`는 curtype이 TYPE_UNKNOWN이면
+무조건 캐스트를 억제하는 **Gosleigh 발명 래퍼**였다. C++ `CastStrategyC::castStandard`(cast.cc:344-361)는
+TYPE_UNKNOWN을 **`isptr`일 때만** 면제하고(cast.cc:356 "Don't cast pointers to unknown") 스칼라는 절대 면제하지
+않는다. 래퍼 주석이 근거로 든 "inherits_sign이 read-facing을 int로 만든다"는 `getHighTypeReadFacing`에 없는 동작.
+**"광범위 보정이라 좁혀야 한다"는 우려는 계측으로 반증**: x64_auto 32함수에서 **0회**, corpus2에서 **2회**
+(둘 다 add_pt의 시프트)만 발화하는 dead code였다. 좁히기가 아니라 **삭제**가 정답이었고, 5개 호출부가 이제
+`CastStandard`를 직접 불러 C++과 1:1이다. 억제를 assert하던 테스트는 C++ 기준으로 정정(undefined4 INT_SLESS
+피연산자는 `(int)` 캐스트가 정답) + add_pt 케이스 고정 테스트 추가. 45개 함수 전수 diff에서 **add_pt 2줄만 변경**.
 
 ---
 

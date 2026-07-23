@@ -10,12 +10,22 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (master `2f08090` origin 푸시, 전 게이트 green -- 감독관 재검증)
-- tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **8/13**,
-  x64_auto **29/32**, production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
-- x64_auto 잔여 3건 = array_init_then_sum / reverse_bytes_inplace / switch_dense.
-  corpus2 잔여 5건 = gate / add_pt / caller / faverage / umulhi.
-- 세션8 상세는 아래 "[2026-07-24 세션8 결과]" 블록 + CHANGELOG 세션8-1~8.
+## 현재 상태 (master `690fdf5` origin 푸시, 전 게이트 green -- 감독관 재검증)
+- tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **9/13**,
+  x64_auto **30/32**, production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
+- x64_auto 잔여 2건 = **array_init_then_sum** / **switch_dense**.
+  corpus2 잔여 4건 = **add_pt** / **caller** / **faverage** / **umulhi**.
+- 세션8 상세는 아래 "[2026-07-24 세션8 결과]" 블록 + CHANGELOG 세션8-1~12.
+
+### 잔여 6건의 현재 위치 (전부 실측 확인)
+| 함수 | 남은 차이 | 규모 |
+|---|---|---|
+| `array_init_then_sum` | 상류(`a08ee35`)로 PTRSUB/PTRADD는 생성됨. ScopeLocal에 `-0x48`의 `int[18]` 심볼이 없어 스케일 1 + `((char *)local_423 + -0x48)[...]`. **varmap(MapState/RangeHint/AliasChecker) 포팅만 남음** | 중 |
+| `add_pt` | **이름만 다름** -- golden `uStackX_c`/`uStackX_14`(C++ 코어 네이밍, Java DB 변수 없는 슬롯). 어느 슬롯을 Java가 잡았을지 모델링은 순수 휴리스틱이라 **parity 규칙상 금지** | (보류) |
+| `caller` | **현 하네스로 strict MATCH 불가**(C++ 코어조차 `func_0x...`). 잔여 실무 = `uVar2 = (ulonglong)param_N;` 죽은 문장(8->4바이트 축소 = consume-bit deadcode/SubvariableFlow) | 중 |
+| `umulhi` | 내용 byte-identical, **줄바꿈만** 다름. printc 표현식 렌더 flat-string -> 그룹토큰스트림 재아키텍처 | 대(단독) |
+| `faverage` | FP 서브시스템 통째 갭 | 대 |
+| `switch_dense` | imagebase/reloc(주소 상수·`&__ImageBase`). caller처럼 하네스 한계 가능성 -- **착수 전 확인 필요** | 대 |
 - **세션6 후속5 착지(`53fce49`) = char 리터럴 렌더**: `renderConstant`(printc.go)에 char-print 분기 추가
   (size-1 signed int -> `'\0'`, C++ type.cc:3642 cacheCoreTypes 재현). strlen_style strict MATCH. 상세 CHANGELOG 세션6 후속5.
 - **세션6 후속4 착지(`4759d8e`) = (B) print-inline 일부**: `shouldInline`이 nd>1 implied 식을 term-dup
