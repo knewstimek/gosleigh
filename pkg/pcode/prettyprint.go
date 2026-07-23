@@ -8,19 +8,18 @@ package pcode
 // size of each printing group, and inserts line breaks so that no line exceeds
 // maxlinesize characters (default 100).
 //
-// Integration note (why this diverges structurally from the C++):
-//   Gosleigh's PrintC builds whole sub-expressions as flat Go strings and feeds
-//   them to the emitter as opaque content tokens, with the statement-level
-//   structure (lhs, "=", rhs, ";", spaces, newlines, indent) arriving through
-//   the TokenEmitter interface. So the token stream this port receives is
-//   coarser than Ghidra's fully nested RPN stream: a sub-expression is one
-//   tokenstring rather than a tree of grouped tokens. The Oppen core is ported
-//   verbatim; only the token *granularity* differs. For the current golden set
-//   the coarser stream reproduces Ghidra's break decisions exactly because the
-//   only break that fires (the assignment "=" of an overlong store/assign
-//   statement) sits between two whitespace break tokens with a content token
-//   ("=") in between, which is enough for the Oppen size accounting to place the
-//   break after "=" just as Ghidra does.
+// Integration note (token granularity):
+//   Ghidra never flattens an expression: PrintLanguage::pushOp opens a group (or
+//   a parenthesis group) per operator node and emitOp puts spaces(spacing,bump)
+//   break tokens on both sides of every operator, so the Oppen core sees the
+//   whole expression tree and can break at any operator boundary. Gosleigh's
+//   PrintC renders sub-expressions into strings, but ExprFragment retains the
+//   binary tree and PrintLanguage.EmitFragment replays it as the same
+//   group/spaces/openParen stream (see printlanguage.go). Nodes Gosleigh still
+//   renders monolithically (unary, cast, call, subscript, member access) arrive
+//   as single content tokens and therefore offer no interior break point; that
+//   is the remaining granularity gap, and it only costs break *opportunities*,
+//   never changes the characters emitted.
 //
 // Output/indentation note:
 //   The project's Ghidra goldens are stored with leading indentation stripped
@@ -29,11 +28,10 @@ package pcode
 //   To stay byte-identical with that convention, the low-level sink here reuses
 //   TextEmitter's exact indent/space/newline semantics and ignores the Oppen
 //   continuation-indent value; the Oppen core only DECIDES where newlines go.
-//   Consequently the break threshold is measured against the emitted (un-indented)
-//   line width, i.e. indentincrement is 0. Ghidra measures against the indented
-//   width; the two agree on every current golden (only bump_scores wraps, and it
-//   wraps under both). This is the deliberate, documented parity compromise
-//   forced by the un-indented golden convention.
+//   The width accounting itself is unaffected: startIndent still bumps the
+//   indent stack by indentincrement (2), so line lengths are measured against
+//   the indented width exactly as Ghidra measures them -- only the continuation
+//   spaces are not written out.
 
 const ppMaxLineSizeDefault = 100
 const ppLineForce = 999999 // TokenSplit numspaces for a forced line break
@@ -578,6 +576,70 @@ func (e *PrettyEmitter) Space()   { e.spacesToken(1, 0) }
 func (e *PrettyEmitter) Newline() { e.tagLine() }
 func (e *PrettyEmitter) Indent()  { e.startIndent() }
 func (e *PrettyEmitter) Dedent()  { e.stopIndent() }
+
+// --- GroupEmitter interface (nested expression structure) ---
+//
+// These are the Emit-level operations PrintLanguage::pushOp / emitOp use to
+// delimit a sub-expression and to mark the break points around an operator.
+// Without them every sub-expression reaches the Oppen core as a single opaque
+// content token, so the only break points are the ones between statement-level
+// tokens. C++ parity: EmitPrettyPrint::openGroup / closeGroup / openParen /
+// closeParen / spaces (prettyprint.cc:1128-1209).
+
+// OpenGroup starts a printing group. The group's begin token records the
+// remaining line space, which becomes the continuation indent for any break
+// taken inside it. C++ parity: EmitPrettyPrint::openGroup (prettyprint.cc:1149).
+func (e *PrettyEmitter) OpenGroup() int {
+	e.checkstart()
+	tok := e.tokqueue.push()
+	tok.tagtype = ppTagBegin
+	tok.delimtype = ppBegin
+	e.countbase++
+	tok.count = e.countbase
+	id := tok.count
+	e.scan()
+	return id
+}
+
+// CloseGroup ends the group opened by OpenGroup.
+// C++ parity: EmitPrettyPrint::closeGroup (prettyprint.cc:1159).
+func (e *PrettyEmitter) CloseGroup(id int) {
+	e.checkend()
+	tok := e.tokqueue.push()
+	tok.tagtype = ppTagEnd
+	tok.delimtype = ppEnd
+	tok.count = id
+	e.scan()
+}
+
+// OpenParen emits an open parenthesis that also opens a printing group, so the
+// parenthesized sub-expression gets its own continuation indent.
+// C++ parity: EmitPrettyPrint::openParen (prettyprint.cc:1128).
+func (e *PrettyEmitter) OpenParen(paren string) int {
+	id := e.OpenGroup()
+	tok := e.tokqueue.push()
+	e.setContent(tok, paren)
+	tok.count = id
+	e.scan()
+	e.needbreak = true
+	return id
+}
+
+// CloseParen emits the matching close parenthesis and closes its group.
+// C++ parity: EmitPrettyPrint::closeParen (prettyprint.cc:1139).
+func (e *PrettyEmitter) CloseParen(paren string, id int) {
+	e.checkstring()
+	tok := e.tokqueue.push()
+	e.setContent(tok, paren)
+	tok.count = id
+	e.scan()
+	e.CloseGroup(id)
+}
+
+// Spaces emits num spaces as a break opportunity; bump is OpToken::bump, the
+// extra indentation applied if this break is the one that fires.
+// C++ parity: EmitPrettyPrint::spaces (prettyprint.cc:1202).
+func (e *PrettyEmitter) Spaces(num, bump int) { e.spacesToken(num, bump) }
 
 func (e *PrettyEmitter) Reset() {
 	e.sink.Reset()
