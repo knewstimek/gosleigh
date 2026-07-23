@@ -25,6 +25,12 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 | `6521fd2` | **진짜 `RuleSubRight` 포팅**(동명 다른 룰) + PIECE/SUBPIECE 이름에 피연산자 크기 | add_pt에서 raw opcode 이름(SUBPIECE/CONCAT) 소멸 |
 | `a08ee35` | spacebase 포인터 타입 lock + **진짜 `RulePushPtr` 포팅**(동명 dead code) + TypeSpacebase 크기 0 | array_init SSA에 PTRSUB/PTRADD 생성(상류 개통) |
 | `690fdf5` | `castStandardRead` TYPE_UNKNOWN 억제 삭제(C++에 없는 발명) | add_pt `(ulonglong)` 캐스트 golden 일치 |
+| `ee6dde2` | **표현식 구조를 emit 시점까지 보존**(ExprFragment 자식 보존 + group/spaces) | umulhi MATCH (corpus2 9->10) |
+| `b0d1476` | 룰 전수 감사 문서화 | **동명 다른 룰 12건 더 발견** |
+| `4a45f96` | **스택 배열 복구**(varmap 포팅 + printc 배열 선언/첨자) | array_init_then_sum MATCH (30->**31/32**) |
+
+**최종: x64_auto 25 -> 31/32, corpus2 8 -> 10/13.** 잔여 = switch_dense(imagebase/reloc) / add_pt(네이밍) /
+caller(하네스 한계) / faverage(FP).
 
 **동명 다른 룰 2건 발견**: `RuleSubRight`(C++은 SUBPIECE, Go는 INT_SUB 대수단순화)와 `RulePushPtr`(C++은 INT_ADD
 포인터 밀기, Go는 발화조차 안 하는 PTRADD collapse). **이름 충돌이 미포팅 룰을 가리고 있었다** -- 룰 포팅 감사 시

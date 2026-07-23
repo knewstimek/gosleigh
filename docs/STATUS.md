@@ -15,10 +15,10 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-24 세션8, master `690fdf5` origin 푸시, 전 게이트 green 감독관 재검증)
+## 현재 상태 (2026-07-24 세션8, master `4a45f96` origin 푸시, 전 게이트 green 감독관 재검증)
 
 **권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`**. 요약:
-- **[세션8] 자율주행 감독관 + Opus 병렬 2슬롯으로 착지 12건, x64_auto 25 -> 30/32, corpus2 8 -> 9/13.** 상세는 CHANGELOG 세션8-1~12.
+- **[세션8] 자율주행 감독관 + Opus 병렬 2슬롯으로 착지 15건, x64_auto 25 -> 31/32, corpus2 8 -> 10/13.** 상세는 CHANGELOG 세션8-1~15.
   **동명 다른 룰 2건 발견**(`RuleSubRight`, `RulePushPtr`) -- 이름 충돌이 미포팅 룰을 가리고 있었다.
   룰 감사는 이름이 아니라 `getOpList`+본체로 대조할 것.
   핵심: (a) **detached op**(`f3dc442`) -- `NewOpBefore`가 op를 블록에 안 넣어 Cover/HV가 nil parent 기준으로
@@ -50,8 +50,9 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   no_branch/only_branch 미러, printc.cc:2913). **x64_auto 21->22/32**(multi_return_early MATCH). 상세 CHANGELOG
   세션6 후속2. 아래 게이트 수치는 이 값으로 갱신됨.
 - 게이트: tree **10/10**, x64 corpus **8/8**, **op_switch byte-MATCH**, breadth **3/3**,
-  corpus2 **9/13**(+gate), x64_auto **30/32**(+bit_rotate_left +swap_via_temp +while_countdown +popcount_loop
-  +sign_extend_boundary +reverse_bytes_inplace), production 전부 PASS, `go test ./...` green, `go vet` clean.
+  corpus2 **10/13**(+gate +umulhi), x64_auto **31/32**(+bit_rotate_left +swap_via_temp +while_countdown
+  +popcount_loop +sign_extend_boundary +reverse_bytes_inplace +array_init_then_sum), production 전부 PASS,
+  `go test ./...` green, `go vet` clean. **잔여: x64_auto switch_dense 1건 / corpus2 add_pt·caller·faverage 3건.**
 - 세션5 착지(상세 CHANGELOG 세션5): **GenGoldens bodyHex 손상 버그**(dead-code island 누락으로 분기 변위
   파괴 -- 전 코퍼스 감사로 x64_auto 2건만 손상 확정, 붕괴형 mismatch는 입력 무결성부터) + 엔진 9건
   (cover 인덱스=블록위치, LoopBody 포인터 안정성, InfLoop do/while(true), RuleCollectTerms 포팅,
