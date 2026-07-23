@@ -526,14 +526,14 @@ func (t *typeOpIntCmp) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Da
 			return reqtype
 		}
 		curtype := op.Input(slot).TypeReadFacing(op)
-		return cs.castStandardRead(reqtype, curtype, true, true)
+		return cs.CastStandard(reqtype, curtype, true, true)
 	case CPUI_INT_LESS, CPUI_INT_LESSEQUAL:
 		reqtype := t.InputTypeLocal(op, slot, cs.tlst)
 		if cs.checkIntPromotionForCompare(op, slot) {
 			return reqtype
 		}
 		curtype := op.Input(slot).TypeReadFacing(op)
-		return cs.castStandardRead(reqtype, curtype, true, false)
+		return cs.CastStandard(reqtype, curtype, true, false)
 	default:
 		// Float comparisons and others fall back to the base behavior.
 		return baseGetInputCast(t, op, slot, cs)
@@ -551,7 +551,7 @@ func (t *typeOpZext) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Data
 		return reqtype
 	}
 	curtype := op.Input(slot).TypeReadFacing(op)
-	return cs.castStandardRead(reqtype, curtype, true, false)
+	return cs.CastStandard(reqtype, curtype, true, false)
 }
 
 // INT_SEXT getInputCast: cast the input unless the natural integer promotion
@@ -565,7 +565,7 @@ func (t *typeOpSext) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Data
 		return reqtype
 	}
 	curtype := op.Input(slot).TypeReadFacing(op)
-	return cs.castStandardRead(reqtype, curtype, true, false)
+	return cs.CastStandard(reqtype, curtype, true, false)
 }
 
 // INT_RIGHT / INT_SRIGHT getInputCast: the shifted value (slot 0) must carry the
@@ -598,7 +598,7 @@ func shiftValueInputCast(t TypeOp, op *PcodeOp, slot int, cs *CastStrategyC, wan
 		return reqtype
 	}
 	curtype := vn.TypeReadFacing(op)
-	return cs.castStandardRead(reqtype, curtype, true, true)
+	return cs.CastStandard(reqtype, curtype, true, true)
 }
 
 // PTRADD/PTRSUB slot-0 getInputCast in C++ compares the varnode's own type

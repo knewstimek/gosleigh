@@ -159,10 +159,14 @@ func TestActionSetCastsInsertsCopyCast(t *testing.T) {
 	}
 }
 
-// TestGetInputCastSignedCompare verifies the signed-comparison getInputCast: a
-// uint operand of INT_SLESS is cast to int (the complex_max `(int)param` pattern),
-// while an undefined (TYPE_UNKNOWN) operand is left uncast (castStandardRead models
-// Ghidra's inherits_sign read-facing type). C++ parity: TypeOpIntSless::getInputCast.
+// TestGetInputCastSignedCompare verifies the signed-comparison getInputCast: an
+// operand of INT_SLESS whose read-facing type is not already TYPE_INT/TYPE_BOOL is
+// cast to int -- both the uint case (the complex_max `(int)param` pattern) and the
+// undefined (TYPE_UNKNOWN) case. castStandard only waives the cast for a
+// TYPE_UNKNOWN curbase when isptr is set (pointer-to-unknown), which never holds
+// for a scalar compare operand.
+// C++ parity: TypeOpIntSless::getInputCast (typeop.cc 1025-1033) ->
+// CastStrategyC::castStandard (cast.cc 344-361, the care_uint_int TYPE_INT arm).
 func TestGetInputCastSignedCompare(t *testing.T) {
 	fd := makeInferTestFuncdata(t)
 	insts := RegisterTypeOps()
@@ -194,10 +198,41 @@ func TestGetInputCastSignedCompare(t *testing.T) {
 	}
 	_ = i4
 
-	// undefined operand -> no cast (read-facing gap compensation).
+	// undefined operand -> cast to int. castStandard reaches the TYPE_INT arm with
+	// care_uint_int=true; TYPE_UNKNOWN is not TYPE_INT/TYPE_BOOL and isptr is false,
+	// so it falls through to "return reqtype".
 	op2 := build(und4, und4)
-	if got := insts[CPUI_INT_SLESS].GetInputCast(op2, 0, sharedCastStrategyC); got != nil {
-		t.Errorf("SLESS undefined operand: expected no cast, got %v", got)
+	if got := insts[CPUI_INT_SLESS].GetInputCast(op2, 0, sharedCastStrategyC); got == nil || got.Metatype() != TYPE_INT {
+		t.Errorf("SLESS undefined operand: expected cast to int, got %v", got)
+	}
+}
+
+// TestGetInputCastShiftUndefined pins the INT_RIGHT slot-0 cast over an undefined
+// operand: the required type is unsigned, the read-facing type is undefined8, so
+// castStandard returns the requirement and the shift renders as
+// `(ulonglong)param >> n` (corpus2 add_pt). This is the case a former Gosleigh-only
+// "suppress the cast when curtype is TYPE_UNKNOWN" guard silently swallowed.
+// C++ parity: TypeOpIntRight::getInputCast (typeop.cc 1545-1558).
+func TestGetInputCastShiftUndefined(t *testing.T) {
+	fd := makeInferTestFuncdata(t)
+	insts := RegisterTypeOps()
+	tf := sharedTypeFactory
+
+	und8 := tf.GetBase(8, TYPE_UNKNOWN, "undefined8")
+
+	op := fd.NewOp(2, fd.BaseAddr())
+	fd.OpSetOpcode(op, CPUI_INT_RIGHT)
+	val := fd.NewVarnode(8, makeInferRamAddr(fd, 0x6200))
+	amt := fd.NewVarnode(8, makeInferRamAddr(fd, 0x6208))
+	val.SetFlags(VarnodeExplicit)
+	amt.SetFlags(VarnodeExplicit)
+	fd.OpSetInput(op, val, 0)
+	fd.OpSetInput(op, amt, 1)
+	val.UpdateType(und8)
+
+	got := insts[CPUI_INT_RIGHT].GetInputCast(op, 0, sharedCastStrategyC)
+	if got == nil || got.Metatype() != TYPE_UINT || got.Size() != 8 {
+		t.Errorf("INT_RIGHT undefined8 operand: expected cast to 8-byte uint, got %v", got)
 	}
 }
 
