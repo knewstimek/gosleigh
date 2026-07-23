@@ -106,7 +106,7 @@
     },
     {
       "name": "strlen_style",
-      "output": "\nint strlen_style(longlong param_1)\n\n{\nundefined4 local_18;\n\nlocal_18 = 0;\nwhile (*(char *)(param_1 + local_18) != 0) {\nlocal_18 = local_18 + 1;\n}\nreturn local_18;\n}\n"
+      "output": "\nint strlen_style(longlong param_1)\n\n{\nundefined4 local_18;\n\nfor (local_18 = 0; *(char *)(param_1 + local_18) != 0; local_18 = local_18 + 1) {\n}\nreturn local_18;\n}\n"
     },
     {
       "name": "memcpy_style",

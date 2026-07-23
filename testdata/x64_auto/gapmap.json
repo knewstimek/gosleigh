@@ -331,12 +331,11 @@
       "name": "strlen_style",
       "entry": 11952,
       "tags": [
-        "STRUCT"
+        "UNKNOWN"
       ],
       "evidence": {
-        "STRUCT": [
-          "keyword 'while': want=0 got=1",
-          "keyword 'for': want=1 got=0"
+        "UNKNOWN": [
+          "no heuristic matched -- manual review needed"
         ]
       }
     },
@@ -409,8 +408,7 @@
       "TEMP": 6,
       "TYPECAST": 3,
       "PTR": 1,
-      "UNKNOWN": 2,
-      "STRUCT": 1
+      "UNKNOWN": 3
     }
   }
 }

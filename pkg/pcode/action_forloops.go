@@ -320,6 +320,28 @@ func findLoopVariable(cbranch *PcodeOp, head, tail *BlockBasic, lastOp *PcodeOp)
 		}
 		defOp := inputVn.Def()
 
+		// C++ parity: BlockWhileDo::finalTransform (block.cc:3356) runs inside
+		// ActionStructureTransform, which precedes ActionSetCasts in the C++
+		// action pipeline, so the def-chain findLoopVariable walks contains no
+		// CPUI_CAST ops. Gosleigh runs ActionForLoops after ActionSetCasts (see
+		// action.go), so an inserted CAST would otherwise consume one level of
+		// this depth-4 breadth search that C++ never spent, hiding the loop-head
+		// MULTIEQUAL (e.g. strlen_style's condition chain
+		// LOAD -> CAST -> INT_ADD -> SEXT48 -> MULTIEQUAL is depth 5 with the
+		// cast but depth 4 in C++'s pre-cast graph). A CPUI_CAST is a pure value
+		// pass-through, so see through it to reproduce C++'s pre-cast reach.
+		for defOp != nil && defOp.Code() == CPUI_CAST {
+			castIn := defOp.Input(0)
+			if castIn == nil || !castIn.IsWritten() {
+				defOp = nil
+				break
+			}
+			defOp = castIn.Def()
+		}
+		if defOp == nil {
+			continue
+		}
+
 		if defOp.Code() == CPUI_MULTIEQUAL && defOp.Parent() == head {
 			// Found a MULTIEQUAL at the head. Scan all its inputs for one
 			// that is defined in the tail block.
