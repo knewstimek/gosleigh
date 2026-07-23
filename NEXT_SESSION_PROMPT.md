@@ -13,7 +13,7 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 ## 현재 상태 (master `4a45f96` origin 푸시, 전 게이트 green -- 감독관 재검증)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **10/13**,
   x64_auto **31/32**, production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
-- x64_auto 잔여 **1건** = **switch_dense**.
+- x64_auto 잔여 **1건** = **switch_dense**. (룰 감사 잔여 10건은 아래 표 -- 다음 세션 최대 광맥)
   corpus2 잔여 **3건** = **add_pt** / **caller** / **faverage**.
 - 세션8 상세는 아래 "[2026-07-24 세션8 결과]" 블록 + CHANGELOG 세션8-1~12.
 
@@ -26,12 +26,12 @@ Go-only 19, C++-only 21(그중 11은 명시적 stub).
 
 | # | 룰 | C++이 하는 일 (위치) | Go가 하는 일 | 우선순위 |
 |---|---|---|---|---|
-| 1 | `RuleXorCollapse` | `{INT_EQUAL,NOTEQUAL}` `(V^W)==0 => V==W` (ruleaction.cc:4058) | `{INT_XOR}` 항등원 정리 | **최상** |
+| 1 | ~~`RuleXorCollapse`~~ | `{INT_EQUAL,NOTEQUAL}` `(V^W)==0 => V==W` (ruleaction.cc:4058) | `{INT_XOR}` 항등원 정리 | **착지 `31539bc`** (기존 본체는 `RuleXorIdentity`로 보존) |
 | 2 | `RuleZextEliminate` | `{EQUAL,NOTEQUAL,LESS,LESSEQUAL}` `zext(V)==c => V==c` (2491) | `{INT_ZEXT}` COPY/fold | **최상** |
 | 3 | `RuleShiftPiece` | `{INT_ADD,OR,XOR}` `(zext(V)<<16)+zext(W) => concat` (3773) | `{INT_LEFT,RIGHT}` -- **RuleConcatShift와 본체 완전 동일(중복)** | **최상** |
 | 4 | `RuleDoubleSub` | `{SUBPIECE}` `sub(sub(V,c),d) => sub(V,c+d)` (1798) | `{INT_SUB}` 산술 뺄셈 접기 | 상 |
 | 5 | `RuleRightShiftAnd` | `{INT_RIGHT,SRIGHT}` 시프트 **안쪽** 마스크 제거 (568) | `{INT_AND}` 시프트 **바깥** 마스크 제거(방향 반대) | 상 |
-| 6 | `RuleNotDistribute` | `{BOOL_NEGATE}` 불리언 드모르간 (1139) | `{INT_NEGATE}` **비트** 드모르간 | 상 |
+| 6 | ~~`RuleNotDistribute`~~ | `{BOOL_NEGATE}` 불리언 드모르간 (1139) | `{INT_NEGATE}` **비트** 드모르간 | **착지 `31539bc`** (발명 룰은 코퍼스에서 발화 0이라 제거해도 출력 바이트 동일) |
 | 7 | `RuleHumptyOr` | `{INT_OR}` `(V&W)|(V&X) => V&(W|X)` (5339) | `{PIECE}` 조각 재결합 | 중 |
 | 8 | `RuleOrCompare` | `{INT_OR}` `(V|W)==0 => (V==0)&&(W==0)` (10805) | `{BOOL_OR}` `<`+`==` => `<=` | 중 |
 | 9 | `Rule2Comp2Mult` | `{INT_2COMP}` `-V => V*-1` (3979) | `{INT_MULT}` 상수 접기 | 중 |
@@ -39,9 +39,9 @@ Go-only 19, C++-only 21(그중 11은 명시적 stub).
 | 11 | `RuleBoolZext` | `{INT_ZEXT}` `zext(V)*-1` 계열 5형 (3001) | `{EQUAL,NOTEQUAL}` bool 비교만 | 중 |
 | 12 | `RulePushMulti` | `{MULTIEQUAL}` 2-branch phi CSE (1062) | phi 입력 동일 치환 -- **Go판은 미등록 死코드**(진짜는 `RulePushMultiME`로 포팅됨) | 하(정리) |
 
-**위험 1건 (되돌리기 권장)**: Go의 `RuleNotDistribute`는 비트 드모르간으로 식을 **전개**한다(1 op -> 3 op).
+**~~위험 1건~~ (세션8에 해소, `31539bc`)**: Go의 `RuleNotDistribute`는 비트 드모르간으로 식을 **전개**한다(1 op -> 3 op).
 그런데 Ghidra에서 되접는 `RuleBitUndistribute`는 Gosleigh에서 **stub**이다. 되돌릴 경로가 없는 **편도 발산**이라
-`~(a&b)`가 `~a|~b`로 출력될 위험이 있다. **제거 단독 실험을 먼저 돌려볼 것**(제거만으로 개선일 가능성 높음).
+`~(a&b)`가 `~a|~b`로 출력될 위험이 있다. -> **제거 실험 결과 코퍼스 발화 0**이라 출력 바이트 동일했고, C++ BOOL_NEGATE판을 포팅해 넣었다.
 
 **인접 결함(트리거만 역방향, 변환은 동일 -- 기록만)**: `Rule2Comp2Sub`가 C++의 `loneDescend` 요구를 빠뜨려
 2COMP 다중 사용 시 부정 연산이 복제될 수 있음(코퍼스 발화 미확인). `RuleNegateIdentity`에 `INT_XOR` 누락.
