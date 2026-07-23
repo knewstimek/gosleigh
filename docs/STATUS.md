@@ -15,9 +15,12 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-23 세션6, master `4759d8e`, origin 푸시, 전 게이트 green 감독관 재검증)
+## 현재 상태 (2026-07-23 세션6, master `53fce49`, origin 푸시, 전 게이트 green 감독관 재검증)
 
 **권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`**. 요약:
+- **[세션6 후속5] char 리터럴 렌더 착지(`53fce49`)**: `renderConstant`(printc.go)에 char-print 분기 추가
+  (size-1 signed int -> `'\0'`, C++ type.cc:3642 cacheCoreTypes 재현, val<0x80 좁은 게이트). strlen_style
+  strict MATCH -> **x64_auto 23->24/32**. 전 게이트 무회귀.
 - **[세션6 후속4] (B) print-inline 일부 착지(`4759d8e`)**: `shouldInline`이 nd>1 implied 식 term-dup 인라인
   (printc.go) + `ActionNameVars` explicit-only 네이밍(action_name_vars.go). flag는 이미 C++ 일치(실측), 순수
   렌더+네이밍. **sum_via_pp(corpus2) + sum_pp_walk(x64_auto) MATCH -> corpus2 8/13, x64_auto 23/32**. 전 게이트
@@ -37,7 +40,7 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   no_branch/only_branch 미러, printc.cc:2913). **x64_auto 21->22/32**(multi_return_early MATCH). 상세 CHANGELOG
   세션6 후속2. 아래 게이트 수치는 이 값으로 갱신됨.
 - 게이트: tree **10/10**, x64 corpus **8/8**, **op_switch byte-MATCH**, breadth **3/3**,
-  corpus2 **8/13**(+sum_via_pp), x64_auto **23/32**(+sum_pp_walk), production 전부 PASS, `go test ./...` green.
+  corpus2 **8/13**(+sum_via_pp), x64_auto **24/32**(+sum_pp_walk +strlen_style), production 전부 PASS, `go test ./...` green.
 - 세션5 착지(상세 CHANGELOG 세션5): **GenGoldens bodyHex 손상 버그**(dead-code island 누락으로 분기 변위
   파괴 -- 전 코퍼스 감사로 x64_auto 2건만 손상 확정, 붕괴형 mismatch는 입력 무결성부터) + 엔진 9건
   (cover 인덱스=블록위치, LoopBody 포인터 안정성, InfLoop do/while(true), RuleCollectTerms 포팅,

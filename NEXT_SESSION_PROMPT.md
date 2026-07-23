@@ -10,9 +10,11 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (엔진 tip `4759d8e` origin 푸시, 전 게이트 green -- 감독관 재검증)
+## 현재 상태 (엔진 tip `53fce49` origin 푸시, 전 게이트 green -- 감독관 재검증)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **8/13**
-  (+sum_via_pp), x64_auto **23/32**(+sum_pp_walk), production PASS, `go test ./...` green.
+  (+sum_via_pp), x64_auto **24/32**(+sum_pp_walk +strlen_style), production PASS, `go test ./...` green.
+- **세션6 후속5 착지(`53fce49`) = char 리터럴 렌더**: `renderConstant`(printc.go)에 char-print 분기 추가
+  (size-1 signed int -> `'\0'`, C++ type.cc:3642 cacheCoreTypes 재현). strlen_style strict MATCH. 상세 CHANGELOG 세션6 후속5.
 - **세션6 후속4 착지(`4759d8e`) = (B) print-inline 일부**: `shouldInline`이 nd>1 implied 식을 term-dup
   인라인(printc.go) + `ActionNameVars` explicit-only 네이밍(action_name_vars.go). flag는 이미 C++ 일치였고(실측)
   순수 렌더+네이밍 수정. **잔여**: umulhi 줄바꿈(PrettyEmitter fold), swap_via_temp LOAD cover 오분류(merge),
@@ -122,10 +124,8 @@ sum_via_pp/umulhi/gate/faverage 다수 동시 해결; 대형·단독세션)** �
 ### (C) [소~중] x64_auto/corpus2 잔여 (22/32 이후)
 - switch_dense: 세션5 바이트 정정으로 실바이트 디코드 정상화 -- 잔여는 TYPECAST(cast int/uint/ulonglong
   want/got 불일치) + TEMP uVar2. 기존 "range-check idiom" 설명은 손상 바이트 시절 것이라 stale -- 재실측부터.
-- **strlen_style [세션6 후속3 착지 `60e01f0`]**: for 구조는 findLoopVariable CAST 투과로 MATCH 전환.
-  유일 잔차 = `*(char *)(...) != 0` vs golden `!= '\0'`. 근본 = char-typed LOAD와 비교되는 size-1 상수를
-  Ghidra는 char 리터럴(`'\0'`)로 렌더(TypeOpNotEqual 상수 char 타이핑 + printc size-1 char 상수 문자표기).
-  Gosleigh엔 이 경로 부재. 수정 대상 = printc 상수 렌더/typeop. (소, 격리 -- 신규 착지 후보.)
+- **strlen_style [세션6 후속3+후속5 완료 -- strict MATCH]**: for 구조(후속3 `60e01f0` findLoopVariable CAST
+  투과) + char 리터럴(후속5 `53fce49` renderConstant char-print 분기, `!= '\0'`) 둘 다 착지 -> strict MATCH.
 - **multi_return_early [세션6 후속2 착지 `f569034`]**: 근본은 ActionReturnSplit 아님(그건 정확, decomp_dbg
   실측). PrintC 이미터가 `BlockIf` 조건헤드=BlockList일 때 선행 guarded-return 누락+최내곽 오렌더 ->
   `emitConditionLead`/`renderCondition`에 BlockList 케이스 추가(emitBlockLs no_branch/only_branch 미러). MATCH.
