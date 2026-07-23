@@ -47,8 +47,12 @@ corpus #1이 안 다루는 구조 위주:
 
 ## 갭 맵 (X64_CORPUS2 측정, indent-insensitive)
 
-**1/13 MATCH.** 유일 MATCH = `divmix`(signed/unsigned magic-number division 완전 복구).
-나머지는 아래 클래스로 분류. 우선순위는 (넓이 x 심각도 x 신규성) 기준.
+**8/13 MATCH (2026-07-23 세션7 실측).** 최초 디스커버리 시점 1/13(divmix만)에서 세션4~7에 걸쳐 상향:
+divmix / dowhile_scan / find_pair / parse_steps / clamp3 / bump_scores / helper_sum / sum_via_pp.
+아래 P1~P8 클래스 분석은 **원본 디스커버리 스냅샷(대부분 해소됨)** -- 잔여 = gate(P4 De Morgan),
+add_pt(P5 CONCAT44), caller(P7 reloc), umulhi(P3 -> 세션7 재분류: 내용 byte-identical, PrettyEmitter
+줄바꿈만), faverage(P8 FP). 권위 있는 현재 갭은 `../x64_auto/CORPUS2_GAPMAP.md`(자동생성).
+아래는 최초 분류(넓이 x 심각도 x 신규성 우선순위)를 이력으로 보존.
 
 ### P1 -- 제어흐름 구조화 실패 (신규, 최대 클러스터: 4함수)
 `dowhile_scan`, `find_pair`, `parse_steps`, `clamp3`. Gosleigh가 do-while / 2중 루프 +

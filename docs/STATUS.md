@@ -57,12 +57,13 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 다음 작업 (우선순위)
 
-> **[최신] 2026-07-23 세션6 (엔진 tip `32fb2b6` origin 동기화): A2 스택 param_5 + dead-negate(Rule2Comp2Sub
-> orphan 파괴) + multi_return_early(BlockList if-emitter) 착지. corpus2 7/13, x64_auto 22/32. 다음 후보 =
-> **(B) print-inline 시스템**(printc가 IsImplied flag 미소비 -- sum_via_pp/umulhi/gate/faverage 다수 동시
-> 해결 가능, 고레버리지·대형) / A2 잔여(IsParamOffset 완전대체) / A3. 권위 있는 다음-작업/현재상태는
-> 저장소 루트 `NEXT_SESSION_PROMPT.md` + CHANGELOG 2026-07-23 세션6 참조. 갭 지도 =
-> `testdata/x64_auto/GAPMAP.md` + `testdata/x64_corpus2/README.md`.**
+> **[최신] 2026-07-23 세션7 (master `48a747b` origin 동기화): for-loop 인식(`60e01f0`) + (B) print-inline
+> 일부(`4759d8e`) + char 리터럴(`53fce49`) 착지. **corpus2 8/13, x64_auto 24/32**. 다음 후보(전부 대형/딥존) =
+> **umulhi**(printc 표현식렌더를 flat-string -> 그룹토큰스트림 재아키텍처, Oppen코어 prettyprint.go는 완성이나
+> PrintC가 굵은 불투명 토큰만 넘겨 RHS 내부 연산자에서 못 접음 -- 코어렌더 영향 단독세션) / swap_via_temp
+> (markImpliedCheckCover LOAD/STORE alias cover, merge 딥존) / A2 잔여(IsParamOffset 완전대체). 권위 있는
+> 다음-작업/현재상태는 저장소 루트 `NEXT_SESSION_PROMPT.md` + CHANGELOG 2026-07-23 세션6 후속3~5 참조.
+> 갭 지도 = `testdata/x64_auto/GAPMAP.md` + `testdata/x64_corpus2/README.md`.**
 
 ## 잔여 부채 (2026-07-17 세션5 실측 검증 -- 다음 작업의 권위는 루트 NEXT_SESSION_PROMPT.md)
 
@@ -71,11 +72,13 @@ stale였던 이유 = 마일스톤 완료 후 해당 미시작 섹션을 지우�
 (a-2) 단축타입명/uVar1은 세션2/3으로, (b) process 3갭은 세션2 x64 corpus 8/8로 이미 완료였다.
 아래는 코드/게이트로 재확인한 장기 부채만:
 
-- **[세션6] (B) print-inline: printc가 explicit/implied flag 미소비**: `printc.go shouldInline`이 `NumDescend()==1`
-  + 보수적 cross-block/register 가드로 인라인을 재유도 -- 이미 포팅된 `ActionMarkExplicit/ActionMarkImplied`의
-  IsImplied/term-duplication 모델을 안 읽음. sum_via_pp/umulhi는 SSA가 C++ byte-identical인데 이 렌더 판정만
-  달라 MISMATCH(decomp_dbg 실측). 고레버리지(gate/faverage 등 다수 동시 해결 가능)·대형(printc
-  renderVarnodeExpr/shouldInline를 flag 기반 term-duplication으로 재작성, 단독 세션). (B) pre-structure SSA와 같은 축.
+- **[세션6->세션7 부분 착지 `4759d8e`] (B) print-inline**: `shouldInline`이 nd>1 implied 식을 term-dup 인라인하도록
+  수정 + `ActionNameVars` explicit-only 네이밍 -> sum_via_pp/sum_pp_walk MATCH. flag는 이미 C++ 일치였고(실측)
+  순수 렌더+네이밍 갭이었다. **잔여**: (1) nd==1 경로는 원본 보존(전면 flag-faithful화 시 loop-carried
+  PTRADD/CAST가 phi로 explicit 마킹돼 phantom 선언 누출 = heritage/merge marker 영역), (2) umulhi는 내용
+  byte-identical이나 **줄바꿈만 MISMATCH** = printc 표현식렌더 flat-string -> 그룹토큰스트림 재아키텍처(별도
+  대형세션, 아래 [최신] 참조), (3) swap_via_temp는 `*param_1` LOAD가 impl 오분류 = markImpliedCheckCover
+  LOAD/STORE alias cover 갭(merge 딥존).
 - **[세션6] A2 param-recovery 하이브리드 잔존**: 새 `ParamListStandard.fillinMap`은 스택 갭에만 additive
   소비, 레지스터/로컬은 여전히 옛 `ApplyActiveParamModel`(IsParamOffset 휴리스틱). 완전 대체(updateInputTypes
   store 재빌드 + unref varnode 실체화)는 A2 잔여 슬라이스.

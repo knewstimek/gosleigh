@@ -81,7 +81,7 @@ rewrite 후 orphan 2COMP(`NumDescend()==0`)를 `OpDestroy`(C++ ruleaction.cc:725
 `vn.IsInput() ||` 잉여 절 + (3) deadcode 前 발화. 수정 = 후보를 `isParamLocation && vn.IsInput()`으로 제한
 + 활성 조건 `NumDescend()>0`만(coreaction.cc:4737 `!hasNoDescend()`) + ActionActiveParam을 ActionDeadCode
 **뒤로** 재배치(구조적으로 "deadcode 실행됨" 보장). 무회귀 수렴 확인. **잔여**: body `iVar1 = local_10`
-(골든 `param_2 = local_10`) carrier는 (B) print-inline/param 계열 잔여(reverse_bytes_inplace는 여전히 UNKNOWN/MISMATCH, x64_auto 22/32에 미포함).
+(골든 `param_2 = local_10`) carrier는 (B) print-inline/param 계열 잔여(reverse_bytes_inplace는 여전히 UNKNOWN/MISMATCH, x64_auto 24/32에 미포함).
 
 **(A2) undercount [세션6 스택 param 착지 `991be09`; 잔여 = 완전대체/struct]**: helper_sum param_5(스택 param)는
 세션6에 복구 완료(충실 ParamListStandard.fillinMap 포팅 + additive recoverMissingStackParams; body tmp_0는
@@ -95,33 +95,34 @@ helper_sum 프로토가 고쳐지면 연쇄 재확인.
 **(A3) 무관 트랙 [세션6에 해소/재분류]**: multi_return_early는 세션6 후속2 착지(PrintC BlockList emitter 버그, ActionReturnSplit 아님, `f569034`).
 sum_via_pp 잉여 `lVar1`은 copy-coalesce가 아니라 (B) print-inline(shouldInline이 IsImplied 미소비)으로 재분류(decomp_dbg 실측). => (A3)는 소진, 남은 건 (B).
 
-권장 순서(세션6 후속2 갱신): A0/multi_return_early 착지 완료 -> **(B) print-inline flag 소비 재작성(고레버리지
-sum_via_pp/umulhi/gate/faverage 다수 동시 해결; 대형·단독세션)** 또는 A2 잔여(IsParamOffset 완전대체) -> (C)/struct 잔여.
+권장 순서(세션7 갱신): (B) print-inline 부분 착지(후속4 `4759d8e` -- sum_via_pp/sum_pp_walk MATCH) -> **잔여
+umulhi 그룹토큰 재아키텍처(아래 (B) 상세)** 또는 A2 잔여(IsParamOffset 완전대체) / swap_via_temp cover(merge) -> (C)/struct 잔여.
 - 성공 기준(세션6 완료분): reverse_bytes_inplace 2 param(A1 세션5), helper_sum param_5 복구+body MATCH
   (A2 스택 세션6 + A0 dead-negate). 잔여 성공 기준은 (A2 잔여)/(A3)/(C) 각 항목 참조.
 
 ### (B) [대형, 시스템, 단독 세션 권장] pre-structure SSA 정합 -- deadcode/MarkImplied 타이밍
 - 세션4 지도 유지: Ghidra는 구조화 전에 ActionDeadCode/ActionMarkImplied 완료, Gosleigh는 print 시점으로
   미룸 -> (1) BlockBasic::isComplex leaf faithful 포팅 6게이트 회귀(40d00a3 known gap 스텁), (2) TEMP
-  클러스터(umulhi/sum_via_pp/swap_via_temp/popcount_loop 등 임시 인라인 실패), (3) SSA parity 부채(phi
-  SeqNum 주소, 블록 병합, return 캐리어 COPY).
+  클러스터(세션7 후속4로 sum_via_pp/sum_pp_walk 해소; 잔여 swap_via_temp[merge cover]/popcount_loop[네이밍]/
+  umulhi[줄바꿈=그룹토큰]), (3) SSA parity 부채(phi SeqNum 주소, 블록 병합, return 캐리어 COPY).
 - **세션5 추가 부채(같은 축)**: SeqNum.Order가 전역적으로 블록 위치로 유지 안 됨 -- cover는 97084fa로
   국소 해결했지만 다른 Order 소비자(double.go, funcdata.go:1483, rules_misc.go:2745, merge.go:1304 정렬)는
   여전히 stale decode order. 완전 포팅(BlockBasic::insert order 유지)은 Order를 opTree 맵 키에서 분리 필요.
 - C++ 참조: coreaction.cc universalAction 순서, block.cc:2388 BlockBasic::isComplex, block.cc:2255/2638
   insert/setOrder.
-- **[세션6 추가, 고레버리지] print-inline: printc가 explicit/implied flag 미소비**: `printc.go shouldInline`
-  (~863)이 `NumDescend()==1` + 보수적 cross-block/register 가드로 인라인을 재유도 -- 이미 포팅된
-  `ActionMarkExplicit/ActionMarkImplied`(action_mark.go, term-duplication `defaultMaxTermDuplication=2`,
-  markImpliedCheckCover)의 IsImplied flag를 안 읽는다. **sum_via_pp/umulhi는 SSA가 C++ byte-identical인데
-  이 렌더 판정만 달라 MISMATCH**(decomp_dbg 실측 확정 -- 핸드오프의 "umulhi spurious CAST"/"sum_via_pp
-  copy-coalesce"는 둘 다 오진). 수정 = printc `renderVarnodeExpr`/`shouldInline`를 flag 기반(다중소비 cheap
-  식은 use site마다 term-duplication 재전개 + cover 기반 cross-block 인라인)으로 재작성. **고레버리지**
-  (하나 고치면 sum_via_pp/umulhi/gate/faverage 등 다수 동시 해결 가능) but **대형·고위험**(전 함수 렌더 영향)
-  -> 단독 세션. C++ 참조: printc.cc emitExpression/ActionMarkExplicit(coreaction.cc).
-- 착수 전 ssadiff로 현 SSA 갭 지도를 함수별로 뽑아 범위 확정.
+- **[세션6->세션7 부분 착지 `4759d8e`] print-inline**: 후속4가 `shouldInline`을 nd>1 implied 식 term-dup
+  인라인으로 수정(marker/call/branch/store 제외) + `ActionNameVars` explicit-only 네이밍(implied는 Symbol 없어
+  이름카운터 미소비) -> **sum_via_pp/sum_pp_walk MATCH**. flag(IsImplied)는 이미 C++ 일치였음(ssadump 실측) =
+  순수 렌더+네이밍이었다. **잔여 (전부 STOP 경계)**: (1) nd==1 경로 원본 보존(전면 flag-faithful화 시
+  loop-carried PTRADD/CAST가 phi로 explicit 마킹돼 phantom 선언 누출, sum_list 회귀 실측 -- heritage/merge marker),
+  (2) **umulhi**: 내용 byte-identical이나 **줄바꿈만 MISMATCH** -- Ghidra는 `+` width-optimal에서 접고 Gosleigh는
+  `=` 경계에서 접음. 근본 = **PrintC 표현식 렌더가 하위식을 flat Go 문자열(불투명 content 토큰 1개)로 넘김**
+  -> Oppen 코어(prettyprint.go, 이미 충실 포팅)는 굵은 토큰 사이(=/;)에서만 break 가능. 수정 = printc가 이항
+  연산자마다 openGroup/closeGroup+break 토큰을 emit(Ghidra pushOp/emitOp 구조, printc.cc) -- 문자열빌드 -> 토큰스트림
+  재아키텍처. **대형·고위험(전 함수 포맷 영향), 단독 세션.** (3) gate/faverage 등은 메 별건(De Morgan/FP).
+- 착수 전 ssadiff/decomp_dbg로 현 SSA 갭 지도를 함수별로 뽑아 범위 확정.
 
-### (C) [소~중] x64_auto/corpus2 잔여 (22/32 이후)
+### (C) [소~중] x64_auto/corpus2 잔여 (24/32 이후)
 - switch_dense: 세션5 바이트 정정으로 실바이트 디코드 정상화 -- 잔여는 TYPECAST(cast int/uint/ulonglong
   want/got 불일치) + TEMP uVar2. 기존 "range-check idiom" 설명은 손상 바이트 시절 것이라 stale -- 재실측부터.
 - **strlen_style [세션6 후속3+후속5 완료 -- strict MATCH]**: for 구조(후속3 `60e01f0` findLoopVariable CAST
