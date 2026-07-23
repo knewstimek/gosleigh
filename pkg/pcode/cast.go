@@ -325,23 +325,6 @@ func (cs *CastStrategyC) checkIntPromotionForExtension(op *PcodeOp) bool {
 	return true
 }
 
-// castStandardRead is CastStandard for the care_uint_int=true contexts (signed
-// and ordered comparisons, integer extensions). Gosleigh has no read-facing
-// HighVariable types, so an operand whose stored type is TYPE_UNKNOWN (e.g. an
-// undefined4 local) would be spuriously cast to int here. In Ghidra the
-// read-facing type of such an operand of a signed/ordered op is already int
-// (the op carries inherits_sign), so no cast is emitted. We model that gap by
-// suppressing the cast when curtype is undefined.
-//
-// C++ parity note: this compensates for the missing read-facing/def-facing type
-// distinction; the underlying castStandard call is otherwise faithful.
-func (cs *CastStrategyC) castStandardRead(reqtype, curtype Datatype, careUintInt, carePtrUint bool) Datatype {
-	if curtype != nil && curtype.Metatype() == TYPE_UNKNOWN {
-		return nil
-	}
-	return cs.CastStandard(reqtype, curtype, careUintInt, carePtrUint)
-}
-
 // arithmeticOutputStandard returns the data-type an arithmetic op (INT_ADD etc.)
 // produces, following the C arithmetic typing rules: the most specific of the
 // input read-facing types, treating bool as int.

@@ -52,11 +52,11 @@
       "name": "add_pt",
       "entry": 9920,
       "tags": [
-        "TYPECAST"
+        "NAMING"
       ],
       "evidence": {
-        "TYPECAST": [
-          "cast (ulonglong): want=2 got=0"
+        "NAMING": [
+          "identical token structure; only identifier names differ"
         ]
       }
     },
@@ -176,11 +176,11 @@
     "match": 9,
     "tag_counts": {
       "MATCH": 9,
-      "TYPECAST": 3,
+      "NAMING": 2,
+      "TYPECAST": 2,
       "TEMP": 1,
       "CALL": 1,
-      "FP": 1,
-      "NAMING": 1
+      "FP": 1
     }
   }
 }

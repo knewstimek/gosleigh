@@ -12,7 +12,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `find_pair` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `gate` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `clamp3` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `add_pt` | TYPECAST | TYPECAST: cast (ulonglong): want=2 got=0 |
+| `add_pt` | NAMING | NAMING: identical token structure; only identifier names differ |
 | `bump_scores` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `sum_via_pp` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `divmix` | MATCH | MATCH: byte-identical (indent-insensitive) |
@@ -27,9 +27,9 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 - CALL: 1
 - FP: 1
 - MATCH: 9
-- NAMING: 1
+- NAMING: 2
 - TEMP: 1
-- TYPECAST: 3
+- TYPECAST: 2
 
 
 ## corpus2 사람 분류(P1~P8) 대조
@@ -42,7 +42,7 @@ testdata/x64_corpus2/README.md의 사람 분류와 이 분류기의 자동 태�
 | `find_pair` | P1 (struct) | MATCH | MISS |
 | `gate` | P3/P4 (temp + De Morgan) | MATCH | MISS |
 | `clamp3` | P1 (struct) | MATCH | MISS |
-| `add_pt` | P5 (struct register packing) | TYPECAST | MATCH |
+| `add_pt` | P5 (struct register packing) | NAMING | MISS |
 | `bump_scores` | P2 (wrap) | MATCH | MISS |
 | `sum_via_pp` | P3/P5 (temp + ptr scale) | MATCH | MISS |
 | `divmix` | MATCH | MATCH | MATCH |
@@ -52,5 +52,5 @@ testdata/x64_corpus2/README.md의 사람 분류와 이 분류기의 자동 태�
 | `faverage` | P8 (FP unported) | TYPECAST, FP | MATCH |
 | `umulhi` | P3 (temp propagation) | NAMING | MISS |
 
-대조 가능 12건 중 4건 일치 (N/A 항목은 이름 기준 분류 체계가 달라 대조 제외).
+대조 가능 12건 중 3건 일치 (N/A 항목은 이름 기준 분류 체계가 달라 대조 제외).
 
