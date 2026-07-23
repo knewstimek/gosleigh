@@ -230,7 +230,18 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		// Prefer non-unique, non-input varnodes as the representative.
 		// Unique-space and input varnodes are secondary: they do not produce
 		// the user-visible name in C output.
-		if vn.Space() != nil && !vn.Space().IsUnique() && !vn.IsInput() {
+		//
+		// Only EXPLICIT varnodes are named. An implied varnode is inlined into its
+		// consumer expression by PrintC (never printed as a standalone variable), so
+		// Ghidra creates no Symbol for it and it never advances the default-name
+		// counter. C++ parity: ActionNameVars::apply names only the Varnodes in
+		// namerec (linkSymbols, coreaction.cc:2985) plus the mapped symbols in
+		// nametree (ScopeInternal::assignDefaultNames, database.cc:2850); implied
+		// varnodes have no Symbol and are absent from both. Without this gate a
+		// cheap multi-use expression that ActionMarkImplied term-duplicated (e.g.
+		// a>>0x20 used twice) would still consume a uVarN slot, shifting the numbers
+		// of the real explicit locals (umulhi: cross should be uVar1, not uVar3).
+		if vn.Space() != nil && !vn.Space().IsUnique() && !vn.IsInput() && vn.IsExplicit() {
 			if c.bestVn == nil {
 				c.bestVn = vn
 			} else if vn.CreateIndex() < c.bestVn.CreateIndex() {

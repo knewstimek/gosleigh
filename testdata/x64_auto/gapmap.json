@@ -28,11 +28,11 @@
       "name": "sum_pp_walk",
       "entry": 9664,
       "tags": [
-        "TEMP"
+        "MATCH"
       ],
       "evidence": {
-        "TEMP": [
-          "extra temp/local identifiers in output (3 vs 2): lVar1"
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
         ]
       }
     },
@@ -88,17 +88,13 @@
       "name": "switch_dense",
       "entry": 10176,
       "tags": [
-        "TYPECAST",
-        "TEMP"
+        "TYPECAST"
       ],
       "evidence": {
         "TYPECAST": [
           "cast (int): want=1 got=0",
           "cast (uint): want=1 got=2",
           "cast (ulonglong): want=0 got=1"
-        ],
-        "TEMP": [
-          "extra temp/local identifiers in output (2 vs 1): uVar2"
         ]
       }
     },
@@ -402,10 +398,10 @@
   ],
   "summary": {
     "total": 32,
-    "match": 22,
+    "match": 23,
     "tag_counts": {
-      "MATCH": 22,
-      "TEMP": 6,
+      "MATCH": 23,
+      "TEMP": 4,
       "TYPECAST": 3,
       "PTR": 1,
       "UNKNOWN": 3
