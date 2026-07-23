@@ -355,7 +355,17 @@ func markImpliedCheckCover(data *Funcdata, vn *Varnode) bool {
 				continue
 			}
 			storeBlock := storeOp.Parent()
-			if storeBlock == nil || !cov.GetCoverBlock(storeBlock.Index()).Contain(storeOp) {
+			if storeBlock == nil {
+				continue
+			}
+			// C++ parity: coreaction.cc checkImpliedCover uses
+			// vn->getCover()->contain(storeop,2). Cover::contain with max==2
+			// requires INTERIOR containment (boundary()==0): a STORE sitting
+			// exactly on the LOAD's def or last-use boundary does not count as
+			// "crossing". Boundary-inclusive containment would wrongly force
+			// e.g. the *param_2 LOAD in "*param_1 = *param_2" to stay explicit.
+			cb := cov.GetCoverBlock(storeBlock.Index())
+			if !cb.Contain(storeOp) || cb.Boundary(storeOp) != 0 {
 				continue
 			}
 			if storeOp.NumInput() < 3 || op.NumInput() < 2 {
@@ -365,7 +375,10 @@ func markImpliedCheckCover(data *Funcdata, vn *Varnode) bool {
 				continue
 			}
 			if storeOp.Input(0).Offset() == op.Input(0).Offset() {
-				if !markImpliedPossibleAlias(storeOp.Input(1), op.Input(1), 2) {
+				// C++ parity: isPossibleAlias(...) -> return false. If the LOAD
+				// and STORE pointers may hold the same value, the loaded value
+				// can change across the STORE, so the LOAD must stay explicit.
+				if markImpliedPossibleAlias(storeOp.Input(1), op.Input(1), 2) {
 					return false
 				}
 			}
@@ -387,7 +400,12 @@ func markImpliedCheckCover(data *Funcdata, vn *Varnode) bool {
 				continue
 			}
 			callBlock := callOp.Parent()
-			if callBlock != nil && cov.GetCoverBlock(callBlock.Index()).Contain(callOp) {
+			if callBlock == nil {
+				continue
+			}
+			// C++ parity: vn->getCover()->contain(callop,2) -- interior only.
+			cb := cov.GetCoverBlock(callBlock.Index())
+			if cb.Contain(callOp) && cb.Boundary(callOp) == 0 {
 				return false
 			}
 		}
