@@ -257,15 +257,23 @@ func (r *RuleAndZext) apply(op *PcodeOp, data *Funcdata) int {
 	return 0
 }
 
-type RuleXorCollapse struct{ batchRule }
+// RuleXorIdentity folds the INT_XOR identity/complement elements,
+// "V ^ 0 => V" and "V ^ -1 => ~V".
+//
+// No C++ rule of this shape exists. It used to live under the name
+// "RuleXorCollapse", but that name belongs to a completely different C++ rule
+// (see RuleXorCollapse below). The body is kept under its own name because
+// unregistering it regresses output; the zero case overlaps C++ RuleIdentityEl
+// (ruleaction.cc) except that this one also normalizes the commuted slot 0.
+type RuleXorIdentity struct{ batchRule }
 
-func NewRuleXorCollapse(group string) *RuleXorCollapse {
-	r := &RuleXorCollapse{}
-	r.batchRule = newBatchRule(group, "xorcollapse", []OpCode{CPUI_INT_XOR}, r.apply, func(g string) Rule { return NewRuleXorCollapse(g) })
+func NewRuleXorIdentity(group string) *RuleXorIdentity {
+	r := &RuleXorIdentity{}
+	r.batchRule = newBatchRule(group, "xoridentity", []OpCode{CPUI_INT_XOR}, r.apply, func(g string) Rule { return NewRuleXorIdentity(g) })
 	return r
 }
 
-func (r *RuleXorCollapse) apply(op *PcodeOp, data *Funcdata) int {
+func (r *RuleXorIdentity) apply(op *PcodeOp, data *Funcdata) int {
 	if isZeroConst(op.Input(0)) {
 		return rewriteToCopy(data, op, op.Input(1))
 	}
@@ -281,4 +289,57 @@ func (r *RuleXorCollapse) apply(op *PcodeOp, data *Funcdata) int {
 		return 1
 	}
 	return 0
+}
+
+type RuleXorCollapse struct{ batchRule }
+
+func NewRuleXorCollapse(group string) *RuleXorCollapse {
+	r := &RuleXorCollapse{}
+	// RuleXorCollapse::applyOp -- ruleaction.cc:4058. Eliminate INT_XOR feeding a
+	// comparison:
+	//   (V ^ W) == 0  =>  V == W
+	//   (V ^ c) == d  =>  V == (c^d)
+	r.batchRule = newBatchRule(group, "xorcollapse", []OpCode{CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL}, r.apply, func(g string) Rule { return NewRuleXorCollapse(g) })
+	return r
+}
+
+func (r *RuleXorCollapse) apply(op *PcodeOp, data *Funcdata) int {
+	if !op.Input(1).IsConstant() {
+		return 0
+	}
+	xorop := op.Input(0).Def()
+	if xorop == nil || xorop.Code() != CPUI_INT_XOR {
+		return 0
+	}
+	// Only rewrite when the XOR result has no other reader; otherwise the XOR
+	// stays alive and the rewrite only adds an operation.
+	if op.Input(0).LoneDescend() == nil {
+		return 0
+	}
+	coeff1 := op.Input(1).Offset()
+	xorvn := xorop.Input(1)
+	if xorop.Input(0).IsFree() {
+		return 0 // This will be propagated
+	}
+	if !xorvn.IsConstant() {
+		if coeff1 != 0 {
+			return 0
+		}
+		if xorvn.IsFree() {
+			return 0
+		}
+		data.OpSetInput(op, xorvn, 1) // Move term to other side
+		data.OpSetInput(op, xorop.Input(0), 0)
+		return 1
+	}
+	coeff2 := xorvn.Offset()
+	if coeff2 == 0 {
+		return 0
+	}
+	// C++ also does constvn->copySymbolIfValid(xorvn) here; Varnode symbol markup
+	// propagation is unported, so the equate/enum annotation is not carried over.
+	constvn := data.NewConstant(op.Input(1).Size(), coeff1^coeff2)
+	data.OpSetInput(op, constvn, 1)
+	data.OpSetInput(op, xorop.Input(0), 0)
+	return 1
 }

@@ -1267,6 +1267,7 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	actprop.AddRule(NewRuleEqual2Zero("analysis"))
 	actprop.AddRule(NewRuleEqual2Constant("analysis"))
 	actprop.AddRule(NewRuleThreeWayCompare("analysis"))
+	actprop.AddRule(NewRuleXorIdentity("analysis"))
 	actprop.AddRule(NewRuleXorCollapse("analysis"))
 	actprop.AddRule(NewRuleAddMultCollapse("analysis"))
 	actprop.AddRule(NewRuleCollapseConstants("analysis"))
