@@ -5,6 +5,35 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-23 (세션6 후속2): multi_return_early -- BlockList 조건헤드 if-emitter 수정, MATCH (엔진 tip `32fb2b6`)
+read-only 진단(Opus 1슬롯)이 핸드오프 가설(ActionReturnSplit 미발화/오동작 + 반환-캐리어 클러스터 계열)을
+**반증**: ActionReturnSplit·collapse 그래프는 정확(decomp_dbg + standalone 구조 덤퍼 실측), 진짜 근본은
+**PrintC 이미터 1건**.
+
+**근본**: `BlockIf`의 조건 헤드(children[0])가 `BlockList`(선행 guarded-return sub-block들 + 최종 분기
+조건)일 때 이미터가 (1) 선행 sub-block들을 누락, (2) 최내곽을 조건으로 오렌더. 결과: multi_return_early가
+`if(v<0)return -1`/`if(v==0)return 0` 두 분기 통째 소실 + 첫 `return 2`를 `return 0`으로 오출력.
+
+**수정 (`f569034`, `pkg/pcode/printc.go`)**: C++ `emitBlockIf`(printc.cc:3010)는 condBlock을 no_branch
+(emitBlockLs printc.cc:2925-2965 = 전 sub-block emit, 마지막만 분기 억제) + only_branch(printc.cc:2919-2923
+= getBlock(size-1)만) 두 번 emit. Go `emitConditionLead`/`renderCondition`이 BlockCondition/basic 헤드만
+처리했음 -> BlockList 케이스 추가(이미 BlockList 루프-exit 헤드를 처리하던 `emitWhileBlockOverflow` 미러:
+lead는 선행 sub-block 전부 emit + 마지막 lead, condition은 마지막 sub-block). default(children[0])는 불변 =
+blast radius 최소.
+
+**결과**: multi_return_early golden MATCH, **x64_auto 21/32 -> 22/32**. 전 게이트 -count=1 2회 무회귀
+(tree 10/10, x64 8/8, corpus2 7/13, switch, breadth 3/3, MSVC/AARCH64/X8664/RegParam/PELoader/X86PE,
+go test ./...). 스냅샷 재생성 `32fb2b6`.
+
+**부수 진단(별개 read-only, sum_via_pp/umulhi)**: 둘 다 SSA가 C++ 코어와 byte-identical(decomp_dbg 실측)이고
+갭은 **오직 최종 C 렌더링의 inline 판정**임을 확정 -- `printc.go shouldInline`이 `NumDescend()==1`로 재유도하며
+이미 포팅된 `ActionMarkExplicit/ActionMarkImplied`의 IsImplied flag를 미소비. 핸드오프 신호("umulhi spurious
+CAST", "sum_via_pp copy-coalesce")는 둘 다 오진. 이건 (B) print-inline 시스템 갭(대형, 단독 세션)이며 고레버리지
+(하나 고치면 sum_via_pp/umulhi/gate/faverage 등 다수 동시 해결 가능성). 지금 착수할 저위험 조각 없음 -> STATUS
+잔여 부채 + NEXT_SESSION에 기록.
+
+---
+
 ### 2026-07-23 (세션6 후속): dead-negate 제거 -- Rule2Comp2Sub orphan INT_2COMP 파괴, helper_sum MATCH (엔진 tip `d707fdd`)
 A2 착지 직후 남은 helper_sum body `tmp_0`(golden `- param_4 * param_5`)를 제거. read-only 진단(Opus 1슬롯,
 decomp_dbg 실측)으로 두 후보(IMUL SLEIGH 번역 / consume-deadcode)를 **둘 다 기각**하고 룰 패리티 버그로 확정.

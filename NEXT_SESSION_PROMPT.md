@@ -1,4 +1,4 @@
-# 다음 세션 프롬프트 (2026-07-23 세션6 작성, 엔진 tip `d707fdd`)
+# 다음 세션 프롬프트 (2026-07-23 세션6 작성, 엔진 tip `32fb2b6`)
 
 ## THE mission (절대 잊지 말 것)
 Ghidra C++ 디컴파일러 엔진을 Go로 **byte-identical** 포팅. 실제 .sla(x86/x64/ARM) 로드해 임의 실제 함수를
@@ -10,9 +10,9 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (엔진 tip `d707fdd` origin 푸시, 전 게이트 green -- 감독관 재검증)
+## 현재 상태 (엔진 tip `32fb2b6` origin 푸시, 전 게이트 green -- 감독관 재검증)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **7/13**
-  (bump_scores/divmix/parse_steps/dowhile_scan/find_pair/clamp3/helper_sum), x64_auto **21/32**, production PASS,
+  (bump_scores/divmix/parse_steps/dowhile_scan/find_pair/clamp3/helper_sum), x64_auto **22/32**, production PASS,
   `go test ./...` green.
 - **세션6 착지(`991be09`) = A2 param-recovery undercount**: 충실 `ParamListStandard`/`ParamEntry`/`fillinMap`
   포팅(신규 paramlist.go 709줄) + fixateproto `recoverMissingStackParams`(진짜 fillinMap 소비, IsParamOffset
@@ -21,6 +21,9 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 - **세션6 후속 착지(`ed0bbea`) = dead-negate 제거**: helper_sum body `tmp_0`의 근본 = Gosleigh cleanup 룰
   왕복(RuleSub2Add->RuleMultNegOne->Rule2Comp2Sub)이 만든 orphan INT_2COMP. `Rule2Comp2Sub`가 rewrite 후
   orphan 2COMP 파괴(ruleaction.cc:7254 패리티). helper_sum MATCH, **corpus2 7/13, x64_auto 21/32**. 상세 (A0).
+- **세션6 후속2 착지(`f569034`) = multi_return_early**: 근본은 ActionReturnSplit 아님(정확) -- PrintC 이미터가
+  `BlockIf` 조건헤드=BlockList일 때 선행 guarded-return 누락+최내곽 오렌더. `emitConditionLead`/`renderCondition`에
+  BlockList 케이스 추가(emitBlockLs no_branch/only_branch 미러, printc.cc:2913). **x64_auto 21->22**. 상세 (C).
 - 세션5 착지 = 골든 손상 수정(GenGoldens bodyHex 연속 span) + 전 코퍼스 무결성 감사(손상은 x64_auto 2건뿐,
   corpus1/2 무결) + 엔진 9건: cover 인덱스=블록위치(97084fa), LoopBody 포인터 안정성(e19d788), InfLoop
   do/while(true)(0af54ad), RuleCollectTerms 포팅(e908beb), RuleShift2Mult 컨텍스트 게이트(75c6db5),
@@ -98,18 +101,25 @@ multi_return_early return 분기 2개 드롭(ActionReturnSplit -- control-flow �
   여전히 stale decode order. 완전 포팅(BlockBasic::insert order 유지)은 Order를 opTree 맵 키에서 분리 필요.
 - C++ 참조: coreaction.cc universalAction 순서, block.cc:2388 BlockBasic::isComplex, block.cc:2255/2638
   insert/setOrder.
+- **[세션6 추가, 고레버리지] print-inline: printc가 explicit/implied flag 미소비**: `printc.go shouldInline`
+  (~863)이 `NumDescend()==1` + 보수적 cross-block/register 가드로 인라인을 재유도 -- 이미 포팅된
+  `ActionMarkExplicit/ActionMarkImplied`(action_mark.go, term-duplication `defaultMaxTermDuplication=2`,
+  markImpliedCheckCover)의 IsImplied flag를 안 읽는다. **sum_via_pp/umulhi는 SSA가 C++ byte-identical인데
+  이 렌더 판정만 달라 MISMATCH**(decomp_dbg 실측 확정 -- 핸드오프의 "umulhi spurious CAST"/"sum_via_pp
+  copy-coalesce"는 둘 다 오진). 수정 = printc `renderVarnodeExpr`/`shouldInline`를 flag 기반(다중소비 cheap
+  식은 use site마다 term-duplication 재전개 + cover 기반 cross-block 인라인)으로 재작성. **고레버리지**
+  (하나 고치면 sum_via_pp/umulhi/gate/faverage 등 다수 동시 해결 가능) but **대형·고위험**(전 함수 렌더 영향)
+  -> 단독 세션. C++ 참조: printc.cc emitExpression/ActionMarkExplicit(coreaction.cc).
 - 착수 전 ssadiff로 현 SSA 갭 지도를 함수별로 뽑아 범위 확정.
 
 ### (C) [소~중] x64_auto/corpus2 잔여 (21/32 이후)
 - switch_dense: 세션5 바이트 정정으로 실바이트 디코드 정상화 -- 잔여는 TYPECAST(cast int/uint/ulonglong
   want/got 불일치) + TEMP uVar2. 기존 "range-check idiom" 설명은 손상 바이트 시절 것이라 stale -- 재실측부터.
 - strlen_style STRUCT(for/while, loop-variable phi depth-3, (B)와 얽힘).
-- **multi_return_early: TYPECAST 태그는 오분류(세션5 진단)** -- 캐스트는 골든과 동일하고 진짜 갭은
-  ActionReturnSplit: 4개 return이 한 블록(0x74)에 몰려 조건 분기 2개(`return -1`/`return 0`)가 통째로
-  소실 + 루프-exit `return 2`가 `return 0`으로 오출력. C++은 return별 값-블록 분리(RAX = const) 후 0x70
-  MULTIEQUAL -> 단일 return RAX. corpus2의 add_pt/sum_via_pp/helper_sum/caller 반환-캐리어 클러스터와
-  같은 계열 -- (A) 착수 시 함께 지도에 넣어라. GAPMAP 휴리스틱이 캐스트 토큰 수만 세는 한계도 확인
-  (블록 소실을 TYPECAST로 오분류 -- 툴 개선 후보).
+- **multi_return_early [세션6 후속2 착지 `f569034`]**: 근본은 ActionReturnSplit 아님(그건 정확, decomp_dbg
+  실측). PrintC 이미터가 `BlockIf` 조건헤드=BlockList일 때 선행 guarded-return 누락+최내곽 오렌더 ->
+  `emitConditionLead`/`renderCondition`에 BlockList 케이스 추가(emitBlockLs no_branch/only_branch 미러). MATCH.
+  교훈: GAPMAP TYPECAST 태그는 오분류였고 반환-캐리어 클러스터(add_pt/caller)와도 무관(그쪽은 A2 계열).
 - sum_pp_walk TEMP(lVar1 -- SEXT48 implied 실패, (B) 클러스터). array_init_then_sum PTR `* 4`+local_428
   (스택 배열 미복구 근본 -- PTRADD를 안 거침). sign_extend_boundary
   TYPECAST(longlong_combo는 세션6 dead-negate로 MATCH). bit_rotate_left 리터럴 U 접미사. while_countdown/popcount_loop/swap_via_temp TEMP((B) 계열).
@@ -123,7 +133,7 @@ multi_return_early return 분기 2개 드롭(ActionReturnSplit -- control-flow �
 - `X64_SWITCH=1 go test -count=1 ./pkg/loader/ -run TestX64Switch -v` (op_switch byte-MATCH 사수)
 - `X64_BREADTH=1 go test -count=1 ./pkg/loader/ -run TestX64BreadthGoldenMap -v` (3/3 사수)
 - `X64_CORPUS2=1 go test -count=1 ./pkg/loader/ -run TestX64Corpus2 -v` (**7/13 사수**)
-- `py -3 tools/goldengap/goldengap.py run && py -3 tools/goldengap/goldengap.py report` (**MATCH 21 사수**;
+- `py -3 tools/goldengap/goldengap.py run && py -3 tools/goldengap/goldengap.py report` (**MATCH 22 사수**;
   bare `go run ./cmd/goldengap`은 파일 미갱신 주의)
 - `go test ./pkg/loader/ -run 'TestMSVC|TestAARCH64|TestX8664|TestX64RegParam|TestPELoader|TestX86PEDecompile'`
 - `go test ./...`
