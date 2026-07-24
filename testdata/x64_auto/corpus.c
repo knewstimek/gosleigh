@@ -523,3 +523,10 @@ int probe_negconst(int x) { return x + -5; }
 unsigned probe_hexbig(unsigned x) { return x | 0xdeadbeef; }
 long long probe_const64(long long x) { return x + 0x100000000LL; }
 unsigned probe_shiftmask(unsigned x) { return (x << 8) | (x >> 24); }
+
+/* --- session11 batch 6: return-of-memory shapes (validates LOAD-boundary fix) --- */
+
+int probe_ret_deref(int *p) { return *p; }
+int probe_ret_subscript(int *p) { return p[3]; }
+int probe_ret_derefadd(int *p) { return *p + 1; }
+long long probe_ret_load8(long long *p) { return *p; }
