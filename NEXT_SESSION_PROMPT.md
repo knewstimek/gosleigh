@@ -58,12 +58,17 @@ Go-only 19, C++-only 21(그중 11은 명시적 stub).
   담당)/`othermask==fullmask`(무의미)는 skip. **이 NZMask 가드들 + RuleAndMask 선행 정규화(a가 b를 덮으면
   `a&b`가 이미 b로 접혀 HumptyOr 입력이 안 됨)가 C++의 오실레이션 안전 장치다.** 그런데 **Go `RuleAndDistribute`
   (rules_misc.go:188)는 other가 상수면 무조건 분배하는 과공격적 부분포팅** -- 가드 전무. 그 자체로 parity 버그 +
-  HumptyOr와 발진원. -> **(1) RuleAndDistribute 충실 포팅은 세션9에 착지(`e336502`) = 발진원 제거, RuleHumptyOr
-  언블록.** RuleAndMask도 세션9 NZMask/consume 충실화(`a67beda`)로 선행 정규화 전제 충족. **남은 것: (2) 진짜
-  RuleHumptyOr 포팅**(ruleaction.cc:5350, swap 매칭 a==c/a==d/b==c/b==d + 상수/비상수 2브랜치 + NZMask 가드
-  5407-5408 + else 분기의 opInsertBefore) **+ (3) 기존 Go `{PIECE}` 본체**(concat(sub(V,hi),sub(V,0))=>V,
-  rules_copy.go:262)가 다른 룰 중복/死인지 판정(중복이면 드롭, 아니면 rename 보존). 이제 단일-룰 작업. 게이트:
-  `go test ./pkg/pcode/`(발진) -> 5 loader 골든 -> goldengap. 현 코퍼스 무발화 예상이라 golden 무변화면 정상.
+  HumptyOr와 발진원. RuleAndDistribute 충실 포팅은 세션9 착지(`e336502`), RuleAndMask도 NZMask/consume 충실화
+  (`a67beda`). **기존 Go `{PIECE}` 본체(concat(sub(V,hi),sub(V,0))=>V)는 `RuleHumptyDumpty`(actprop 등록,
+  rules_ghidra_port.go:953)의 subset 중복 = 드롭 가능**(세션9 확인). **세션9가 진짜 RuleHumptyOr(INT_OR) 포팅을
+  실제 시도했으나 `pkg/bridge` 테스트에서 무한 발진해 revert.** 정밀 근본(세션9 진단): 발진은 **공통 피연산자 `a`가
+  상수이고 b(또는 c)를 완전히 덮을 때만** 발생 -- 그 경우 `a&b`는 b로 **선-환원**됐어야 하나(RuleAndMask+commute가
+  const를 slot1로 보내 처리) Gosleigh는 그 순서/정규화가 달라 `(a&b)|(a&c)`가 살아남고, RuleHumptyOr가 `const&(b|c)`
+  생성 -> RuleAndDistribute의 trivial-cover 가지(`(ormask&othermask)==ormask`)가 되돌림 -> 발진. (부분 마스크 const는
+  RuleAndDistribute 가드가 정상 차단해 발진 없음 -- 실측). **착지 조건: (i) AND 상수를 slot1로 정규화(RuleAndCommute
+  순서) 또는 RuleAndMask를 slot-symmetric하게 만들어 `const&X` 선-환원 보장, 또는 (ii) RuleHumptyOr에 "a가 상수로
+  b/c 완전덮음이면 return 0"(선-환원됐어야 할 형태 회피) 가드 추가 -- (ii)는 C++에 없는 우회라 (i)이 정석.** 착지 시
+  반드시 `go test ./pkg/bridge/`(-timeout 90s)까지 확인(loader/pcode 게이트만으론 이 발진 못 잡음 -- 세션9 실증).
 - **#11 `RuleBoolZext`** (ruleaction.cc:3015, `{INT_ZEXT}` `zext(bool)*-1` 5형): `op.Output().loneDescend()`로
   **전진 탐색**(ZEXT출력의 유일소비 MULT -> 그 출력의 유일소비 ADD/EQUAL/NOTEQUAL/AND/OR)해 BOOL_NEGATE/
   BOOL_AND/BOOL_OR 생성. `isBooleanValue` 판정 필요. ~80줄, subtle. 역방향 파트너는 없어 발진 위험은 낮으나
@@ -72,8 +77,10 @@ Go-only 19, C++-only 21(그중 11은 명시적 stub).
   (BOOL_AND 생성). 제어/조건식 구조를 바꾸므로 렌더 영향 큼 -- 착수 전 대상 골든에서 실제 발화하는지부터 실측.
 - **#12 `RulePushMulti`** (ruleaction.cc:1062, `{MULTIEQUAL}` 2-branch phi CSE): 진짜는 이미 `RulePushMultiME`로
   포팅됨. Go의 동명 `RulePushMulti`(rules_misc.go:782)는 **어디에도 미등록된 死코드** -- 정리(삭제)만 하면 됨. 최저위험.
-- **공통 게이트(세션9 확립)**: 착지 전 반드시 `go test ./pkg/pcode/`(배치 발진) -> 5개 loader 골든 -> goldengap.
-  방향 반대 룰 쌍은 프로덕션 풀 분리를 봐도 **테스트 배치 co-pooling 발진**을 별도로 확인(Rule2Comp2Mult 교훈).
+- **공통 게이트(세션9 확립)**: 착지 전 반드시 `go test ./pkg/pcode/`(배치 발진) **+ `go test ./pkg/bridge/`
+  (-timeout 90s, 실제 디컴파일 발진) + `go test -timeout 60s ./...`(전 패키지 발진 스택)** -> 5개 loader 골든 ->
+  goldengap. **교훈: pcode 배치 통과 != 발진 없음** -- RuleHumptyOr 발진은 pcode 통과했으나 bridge에서 행(세션9 실증).
+  방향 반대 룰 쌍은 프로덕션 풀 분리를 봐도 발진 가능(Rule2Comp2Mult=테스트배치 co-pooling / RuleHumptyOr=정규화 순서).
 
 **~~위험 1건~~ (세션8에 해소, `31539bc`)**: Go의 `RuleNotDistribute`는 비트 드모르간으로 식을 **전개**한다(1 op -> 3 op).
 그런데 Ghidra에서 되접는 `RuleBitUndistribute`는 Gosleigh에서 **stub**이다. 되돌릴 경로가 없는 **편도 발산**이라
