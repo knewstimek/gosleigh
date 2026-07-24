@@ -5,6 +5,40 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-24 (세션10): 동명 다른 룰 감사 완결 -- 잔여 5건 전부 착지, 회귀 0 (master `d9d52f0`)
+자율주행 세션(감독관 Opus + Sonnet 워커 2슬롯 병렬). 세션8 룰 감사가 남긴 12건 중 잔여 5건(#7/#8/#9/#11/#12)을
+전부 착지 -- **name-collision 감사 12건 완결**(세션8: 3, 세션9: 4, 세션10: 5). 방법론은 세션9와 동일(진짜 C++
+룰 `getOpList`+본체 대조 + 기존 동명 본체 중복/死 확인 + 배치·bridge 발진 게이트 + 전 골든 `-count=1`).
+**병렬 구조(단일 커미터)**: rules_ext.go(#11)/rules_misc.go(#8) = Sonnet 워커가 격리 worktree에서 초안+자체
+발진게이트(pkg/pcode+pkg/bridge) -> 최종코드 보고 -> Opus가 C++ 원문 대조 후 main repo 적용+골든 전 게이트+커밋.
+rules_copy.go/rules_arith.go 클러스터(#9/#7/#12, 파일 공유+parity 최난도) = Opus 직접.
+
+**착지 5건**:
+| 커밋 | 룰 | C++ 원본 | 기존 Go 동명 본체 처리 |
+|---|---|---|---|
+| `60b66a9` | `Rule2Comp2Mult` | ruleaction.cc:3987 `{INT_2COMP}` `-V=>V*-1` | INT_MULT `2COMP*c=>x*-c`는 real-port+RuleAddMultCollapse 중복 -- 교체. **세션9 차단 해소**: batchARuleFactories에서 RuleMultNegOne 제거(C++ actcleanup 전용, 역쌍 co-pool 발진 제거) |
+| `7c0e31c` | `RuleBoolZext` | ruleaction.cc:3015 `{INT_ZEXT}` `zext(V)*-1` 5형(ADD+1/EQ/NE/AND/OR/XOR) | `{EQ,NE}` `zext(bool)==0/1`은 RuleZextEliminate+RuleBooleanNegate 체인 중복 -- 드롭 |
+| `992ed24` | `RuleOrCompare` | ruleaction.cc:10816 `{INT_OR}` `(V|W)==0=>(V==0)&&(W==0)` | `{BOOL_OR}` `V<W||V==W=>V<=W`는 RuleLessEqual 미완성 중복(RuleLessEqual이 별도 완전 포팅) -- 드롭 |
+| `6a8d953` | `RulePushMulti`(정리) | 진짜는 coreaction.cc:1062 `{MULTIEQUAL}`로 RulePushMultiME 포팅됨 | Go 발명 `{ADD..XOR}` phi-CSE(프로덕션 미등록, RuleConditionalMove+PropagateCopy 커버) -- 삭제(batchCMisc factory+test 정리) |
+| `d9d52f0` | `RuleHumptyOr` | ruleaction.cc:5350 `{INT_OR}` `(V&W)|(V&X)=>V&(W|X)` | `{PIECE}` concat(sub,sub)=>V는 RuleHumptyDumpty subset -- 드롭. **세션9 발진 해소**(아래) |
+
+**#7 RuleHumptyOr 발진 근본 규명 + 해소**(세션9가 revert했던 그것): 임시 계측으로 정확한 사이클 확정 --
+공유 `a`=상수 0xffbf, b=0x7f, c=0x80. HumptyOr가 `(a&b)|(a&c)`->`a&(b|c)` 생성 -> `a&(b|c)`는 a가 (b|c)=0xff를
+부분(0xbf)만 덮어 RuleAndMask 환원 실패 -> AndDistribute의 trivial-cover(a가 c=0x80 완전덮음, ruleaction.cc:1289)
+가 되돌림 -> **같은 op 무한 플립(55858회/타임아웃)**. C++은 상수 slot1 정규화+RuleAndMask 선-환원으로 `a&c=>c`가
+먼저 일어나 HumptyOr가 애초에 발화 안 함. Gosleigh는 traversal 순서상 HumptyOr가 먼저 발화. **해법**: HumptyOr에
+C++엔 없는 가드 1개 -- "상수 a가 b/c 완전덮음이면 return 0"(AndDistribute 발화조건 1289-1290의 완전 여집합).
+C++의 효과적 등가(선-환원이 어차피 HumptyOr를 안 걸리게 함, 골든 바이트 무변화로 검증). slot-symmetric
+RuleAndMask도 실험했으나 blast radius 대비 traversal-order를 못 잡아 revert. **교훈: pcode 배치 통과 != 발진
+없음 -- 발진은 pkg/bridge 실디컴파일(6502)에서만 났고, 계측 없이는 "이론상 선-환원이 막아야"에 갇힌다. 계측이 정답.**
+
+**게이트(5건 전부)**: build/vet clean, pkg/pcode+pkg/bridge 발진 없음, `go test ./...` green, TREE 10/10,
+X64_CORPUS 8/8, X64_SWITCH byte-MATCH, X64_BREADTH 3/3, X64_CORPUS2 유지, goldengap 31/32(switch_dense
+baseline). **코퍼스 출력 바이트 무변경**(gosleigh_out.json content diff 0 = EOL 노이즈뿐) -- 5개 룰 모두
+정규화 국면 정합만 개선, 렌더 무영향. 잔여 골든 = switch_dense/caller/faverage(전부 하네스·FP 근본).
+
+---
+
 ### 2026-07-24 (세션9): 동명 다른 룰 4건 + RuleAndMask/RuleAndDistribute 충실화, 회귀 0 (master `e336502`)
 자율주행 세션(Opus 직접). 세션8 룰 감사가 남긴 "동명 다른 룰" 12건 중 잔여 9건에서 4건 착지. 방법론:
 (1) 진짜 C++ 룰(`getOpList`+본체) 대조, (2) 기존 동명 Go 본체가 다른 등록룰의 중복/死코드인지 확인,
