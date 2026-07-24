@@ -548,3 +548,10 @@ int probe_count_bits(unsigned x) {
 	while (x) { c += x & 1; x >>= 1; }
 	return c;
 }
+
+/* --- session11 batch 8: return-width / narrow-type render stress --- */
+
+short probe_ret_short(int x) { return (short)(x + 1); }
+char probe_ret_char(int x) { return (char)(x + 1); }
+long long probe_ret_ll(int x) { return (long long)x * 1000; }
+unsigned short probe_ret_ushort(unsigned x) { return (unsigned short)(x >> 3); }
