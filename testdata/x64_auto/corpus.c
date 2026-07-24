@@ -668,3 +668,10 @@ int probe_count_eq(int *a, int n, int v) {
 
 /* --- session11 batch 16: floating point (characterize FP subsystem gap) --- */
 
+
+/* --- session11 batch 17: compound assignment / bit edge cases --- */
+
+int probe_compound(int *p, int v) { *p += v; return *p; }
+unsigned probe_clearbit(unsigned x, int n) { return x & ~(1u << n); }
+unsigned probe_setbit(unsigned x, int n) { return x | (1u << n); }
+unsigned probe_rotr(unsigned x, int n) { return (x >> n) | (x << (32 - n)); }
