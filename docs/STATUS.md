@@ -15,7 +15,7 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-24 세션8, master `4a45f96` origin 푸시, 전 게이트 green 감독관 재검증)
+## 현재 상태 (2026-07-24 세션8, master `e3a573f` origin 푸시, 전 게이트 green 감독관 재검증)
 
 **권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`**. 요약:
 - **[세션8] 자율주행 감독관 + Opus 병렬 2슬롯으로 착지 15건, x64_auto 25 -> 31/32, corpus2 8 -> 10/13.** 상세는 CHANGELOG 세션8-1~15.
@@ -69,7 +69,7 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 
 ## 다음 작업 (우선순위)
 
-> **[최신] 2026-07-24 세션8 (master `2f08090` origin 푸시): 착지 8건, **corpus2 8/13, x64_auto 29/32**.
+> **[최신] 2026-07-24 세션8 (master `e3a573f` origin 푸시): 착지 8건, **corpus2 8/13, x64_auto 29/32**.
 > 남은 미스매치와 근본(전부 실측 확인됨):
 > - **array_init_then_sum**: 상류 3단이 막혀 있다 -- (1) `Funcdata.Spacebase()`가 `UpdateType(ptr)`만 해서
 >   spacebase 포인터 타입이 InferTypes에 덮임(C++ funcdata.cc:264는 `updateType(ptr,**true,true**)`),
@@ -82,7 +82,7 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 > - **caller/add_pt**: 구조는 복구됐으나 strict MATCH는 별건에 게이팅(caller=하네스 한계로 **불가**,
 >   add_pt=SUBPIECE/CONCAT44 렌더 + uStackX 네이밍). **switch_dense**: imagebase/reloc.
 > - **faverage**: FP 서브시스템 통째 갭.
-> 권위 있는 다음-작업은 저장소 루트 `NEXT_SESSION_PROMPT.md` + CHANGELOG 2026-07-24 세션8-1~8 참조.
+> 권위 있는 다음-작업은 저장소 루트 `NEXT_SESSION_PROMPT.md` + CHANGELOG 2026-07-24 세션8-1~17 참조.
 > 갭 지도 = `testdata/x64_auto/GAPMAP.md` + `testdata/x64_corpus2/README.md`.**
 
 ## 잔여 부채 (2026-07-17 세션5 실측 검증 -- 다음 작업의 권위는 루트 NEXT_SESSION_PROMPT.md)
@@ -92,13 +92,12 @@ stale였던 이유 = 마일스톤 완료 후 해당 미시작 섹션을 지우�
 (a-2) 단축타입명/uVar1은 세션2/3으로, (b) process 3갭은 세션2 x64 corpus 8/8로 이미 완료였다.
 아래는 코드/게이트로 재확인한 장기 부채만:
 
-- **[세션6->세션7 부분 착지 `4759d8e`] (B) print-inline**: `shouldInline`이 nd>1 implied 식을 term-dup 인라인하도록
-  수정 + `ActionNameVars` explicit-only 네이밍 -> sum_via_pp/sum_pp_walk MATCH. flag는 이미 C++ 일치였고(실측)
-  순수 렌더+네이밍 갭이었다. **잔여**: (1) nd==1 경로는 원본 보존(전면 flag-faithful화 시 loop-carried
-  PTRADD/CAST가 phi로 explicit 마킹돼 phantom 선언 누출 = heritage/merge marker 영역), (2) umulhi는 내용
-  byte-identical이나 **줄바꿈만 MISMATCH** = printc 표현식렌더 flat-string -> 그룹토큰스트림 재아키텍처(별도
-  대형세션, 아래 [최신] 참조), (3) swap_via_temp는 `*param_1` LOAD가 impl 오분류 = markImpliedCheckCover
-  LOAD/STORE alias cover 갭(merge 딥존).
+- **[세션8에 (B) print-inline 클러스터 전부 해소]** (이 불릿은 세션6/7 서술이 대거 stale이라 정정):
+  (1) "nd==1 flag-faithful화 시 phantom 누출 = heritage/merge marker 영역"이라던 진단은 **반증됐다** -- 진짜 근본은
+  detached op(`NewOpBefore`가 블록 삽입 누락)였고, 고치자 `shouldInline` nd==1이 `isImplied()`를 존중해도 누출이
+  없어졌다(`f3dc442`, CHANGELOG 세션8-2). (2) umulhi 줄바꿈은 "그룹토큰스트림 재아키텍처 별도 대형세션"이 아니라,
+  ExprFragment가 자식만 버리고 있어 **점진 해결**됐다(`ee6dde2`, MATCH). (3) swap_via_temp의 "markImpliedCheckCover
+  merge 딥존" 진단은 맞았고 `365aa20`으로 착지(+ detached op로 렌더 완결) -> **MATCH**.
 - **[세션6] A2 param-recovery 하이브리드 잔존**: 새 `ParamListStandard.fillinMap`은 스택 갭에만 additive
   소비, 레지스터/로컬은 여전히 옛 `ApplyActiveParamModel`(IsParamOffset 휴리스틱). 완전 대체(updateInputTypes
   store 재빌드 + unref varnode 실체화)는 A2 잔여 슬라이스.
@@ -110,8 +109,9 @@ stale였던 이유 = 마일스톤 완료 후 해당 미시작 섹션을 지우�
 - **SeqNum.Order != 블록 실행 위치(전역)**: cover 소비자만 세션5에 국소 해결(`97084fa`). 다른 Order 소비자
   (double.go, funcdata.go, rules_misc.go, merge.go 정렬)는 여전히 stale decode order -- 측정된 실패는 없음.
   완전 포팅은 Order를 opTree 맵 키에서 분리해야 함(별도 세션).
-- **pre-structure SSA 정합**(deadcode/MarkImplied 타이밍): TEMP 클러스터 + BlockBasic::isComplex leaf
-  known-gap의 공통 선행 -- NEXT_SESSION_PROMPT (B).
+- **pre-structure SSA 정합**(deadcode/MarkImplied 타이밍): TEMP 클러스터는 세션8에 대부분 해소됨(detached op
+  `f3dc442` + printc group-token `ee6dde2` + free-varnode 스킵 `3afb5cd`). 잔여 known-gap = BlockBasic::isComplex
+  leaf faithful 포팅(40d00a3 스텁, 6게이트 회귀 이력).
 - **PathMeld.meld/internalIntersect/checkUnrolledGuard 스텁**: 현 코퍼스는 단일 path/guard라 미도달.
   다중 guard switch 코퍼스 추가 시 필요.
 - **consume-DeadCode 정리**: `GOSL_DESCENDANT_DC` fallback(action_deadcode.go:70) + 레거시
@@ -119,7 +119,11 @@ stale였던 이유 = 마일스톤 완료 후 해당 미시작 섹션을 지우�
 - **goldengap 툴 개선 후보**: GAPMAP.md는 전체 자동생성(수동 섹션 없음)이라 '덮어씀' 우려는 stale(옛 주의
   삭제). 실제 한계 = TYPECAST/TEMP 토큰수 휴리스틱이 블록소실/미인라인 근본을 못 짚음(multi_return_early는
   세션6에 emitter 버그로 판명돼 이미 MATCH -- 예시도 stale).
-- struct/union 타입 복구, 스택 파라미터/CONCAT44/reloc/FP(corpus2 P5-P8), PARITY_AUDIT 미포팅 opcode 잔여.
+- struct/union 타입 복구, reloc/FP(corpus2 P5-P8 / faverage), PARITY_AUDIT 미포팅 opcode 잔여. (스택 파라미터는
+  세션8 A2 스택 param `991be09`+heritage refinement `c54d295`로, CONCAT44 렌더는 `6521fd2`로 해소.)
+- **[세션8 신규 최대 부채] 동명 다른 룰 잔여 9건**: 룰 감사(`b0d1476`)가 Go 룰 이름은 같은데 C++과 다른 룰
+  12건을 확인, 3건 포팅(`31539bc`/`0fa8787`). 잔여 9건(RuleShiftPiece/RuleZextCommute/RuleDoubleSub 등)은
+  전부 actprop에 등록돼 실행 중 -- NEXT_SESSION_PROMPT 표. **룰 감사는 이름이 아니라 getOpList+본체로 대조.**
 
 
 ## 완료 마일스톤 (상세는 CHANGELOG)
