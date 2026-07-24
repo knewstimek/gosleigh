@@ -639,3 +639,10 @@ int probe_classify(int x) {
 	if (x < 100) return 1;
 	return 2;
 }
+
+/* --- session11 batch 14: 8-byte / unsigned return handling --- */
+
+long long probe_ret_ll_add(long long a, long long b) { return a + b; }
+unsigned probe_ret_usub(unsigned a, unsigned b) { return a - b; }
+long long probe_ret_ll_shift2(long long x, int n) { return x << n; }
+unsigned long long probe_ret_ull(unsigned long long x) { return x >> 1; }

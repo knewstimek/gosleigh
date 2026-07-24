@@ -363,6 +363,22 @@
     {
       "name": "probe_classify",
       "output": "\nundefined8 probe_classify(int param_1)\n\n{\nundefined8 uVar1;\n\nif (param_1 \u003c 10) {\nuVar1 = 0;\n}\nelse if (param_1 \u003c 100) {\nuVar1 = 1;\n}\nelse {\nuVar1 = 2;\n}\nreturn uVar1;\n}\n"
+    },
+    {
+      "name": "probe_ret_ll_add",
+      "output": "\nlonglong probe_ret_ll_add(longlong param_1,longlong param_2)\n\n{\nreturn param_1 + param_2;\n}\n"
+    },
+    {
+      "name": "probe_ret_usub",
+      "output": "\nint probe_ret_usub(int param_1,int param_2)\n\n{\nreturn param_1 - param_2;\n}\n"
+    },
+    {
+      "name": "probe_ret_ll_shift2",
+      "output": "\nlonglong probe_ret_ll_shift2(longlong param_1,byte param_2)\n\n{\nreturn param_1 \u003c\u003c (param_2 \u0026 0x3f);\n}\n"
+    },
+    {
+      "name": "probe_ret_ull",
+      "output": "\nulonglong probe_ret_ull(ulonglong param_1)\n\n{\nreturn param_1 \u003e\u003e 1;\n}\n"
     }
   ]
 }

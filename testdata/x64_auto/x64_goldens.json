@@ -545,6 +545,30 @@
       "entry": 15920,
       "bytes": "894c2408837c24080a7d0433c0eb13837c2408647d07b801000000eb05b802000000c3",
       "c": "\r\nundefined8 probe_classify(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 < 10) {\r\n    uVar1 = 0;\r\n  }\r\n  else if (param_1 < 100) {\r\n    uVar1 = 1;\r\n  }\r\n  else {\r\n    uVar1 = 2;\r\n  }\r\n  return uVar1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_ret_ll_add",
+      "entry": 15968,
+      "bytes": "488954241048894c2408488b442410488b4c24084803c8488bc1c3",
+      "c": "\r\nlonglong probe_ret_ll_add(longlong param_1,longlong param_2)\r\n\r\n{\r\n  return param_1 + param_2;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_ret_usub",
+      "entry": 16016,
+      "bytes": "89542410894c24088b4424108b4c24082bc88bc1c3",
+      "c": "\r\nint probe_ret_usub(int param_1,int param_2)\r\n\r\n{\r\n  return param_1 - param_2;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_ret_ll_shift2",
+      "entry": 16048,
+      "bytes": "8954241048894c24088b4424100fb6c8488b44240848d3e0c3",
+      "c": "\r\nlonglong probe_ret_ll_shift2(longlong param_1,byte param_2)\r\n\r\n{\r\n  return param_1 << (param_2 & 0x3f);\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_ret_ull",
+      "entry": 16080,
+      "bytes": "48894c2408488b44240848d1e8c3",
+      "c": "\r\nulonglong probe_ret_ull(ulonglong param_1)\r\n\r\n{\r\n  return param_1 >> 1;\r\n}\r\n\r\n"
     }
   ]
 }
