@@ -363,25 +363,23 @@ type Rule2Comp2Mult struct{ batchRule }
 
 func NewRule2Comp2Mult(group string) *Rule2Comp2Mult {
 	r := &Rule2Comp2Mult{}
-	r.batchRule = newBatchRule(group, "2comp2mult", []OpCode{CPUI_INT_MULT}, r.apply, func(g string) Rule { return NewRule2Comp2Mult(g) })
+	r.batchRule = newBatchRule(group, "2comp2mult", []OpCode{CPUI_INT_2COMP}, r.apply, func(g string) Rule { return NewRule2Comp2Mult(g) })
 	return r
 }
 
+// apply is a faithful port of Rule2Comp2Mult::applyOp (ruleaction.cc:3987):
+// eliminate INT_2COMP by rewriting `-V` as `V * -1`. C++ registers this rule in
+// the analysis pool (actprop), while its exact inverse RuleMultNegOne
+// (`V * -1 => -V`) lives only in the cleanup pool (actcleanup, action.go:1428).
+// The separate pools are what stop the pair from oscillating; the
+// batchARuleFactories test set mirrors the analysis pool and therefore must NOT
+// include RuleMultNegOne.
 func (r *Rule2Comp2Mult) apply(op *PcodeOp, data *Funcdata) int {
-	size := outputOrInputSize(op)
-	if neg := definedBy(op.Input(0), CPUI_INT_2COMP); neg != nil {
-		if val, ok := constantValue(op.Input(1)); ok {
-			rewriteOp(data, op, CPUI_INT_MULT, neg.Input(0), data.NewConstant(size, negateConstForSize(val, size)))
-			return 1
-		}
-	}
-	if neg := definedBy(op.Input(1), CPUI_INT_2COMP); neg != nil {
-		if val, ok := constantValue(op.Input(0)); ok {
-			rewriteOp(data, op, CPUI_INT_MULT, neg.Input(0), data.NewConstant(size, negateConstForSize(val, size)))
-			return 1
-		}
-	}
-	return 0
+	data.OpSetOpcode(op, CPUI_INT_MULT)
+	size := op.Input(0).Size()
+	negone := data.NewConstant(size, truncateToSize(^uint64(0), size))
+	data.OpInsertInput(op, negone, 1)
+	return 1
 }
 
 type RuleMultNegOne struct{ batchRule }
