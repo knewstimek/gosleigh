@@ -45,8 +45,8 @@
     {
       "name": "switch_dense",
       "entry": 10176,
-      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0d0f1d00008b8481382800004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
-      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000027e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x6d30)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
+      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0d0f1e00008b8481382800004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
+      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000027e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x6e30)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
     },
     {
       "name": "switch_sparse",
@@ -299,6 +299,24 @@
       "entry": 13216,
       "bytes": "44894c242044894424188954241048894c24086b442410646b4c24180a8b54242003d08bc203c88bc14898488b4c24088b0481c3",
       "c": "\r\nundefined4 probe_3d(longlong param_1,int param_2,int param_3,int param_4)\r\n\r\n{\r\n  return *(undefined4 *)(param_1 + (longlong)(param_3 * 10 + param_4 + param_2 * 100) * 4);\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_ret_and",
+      "entry": 13280,
+      "bytes": "89542410894c24088b4424108b4c240823c88bc1c3",
+      "c": "\r\nuint probe_ret_and(uint param_1,uint param_2)\r\n\r\n{\r\n  return param_1 & param_2;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_ret_not",
+      "entry": 13312,
+      "bytes": "894c24088b442408f7d0c3",
+      "c": "\r\nuint probe_ret_not(uint param_1)\r\n\r\n{\r\n  return ~param_1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_ret_wide",
+      "entry": 13344,
+      "bytes": "89542410894c2408486344240848634c24104803c1c3",
+      "c": "\r\nlonglong probe_ret_wide(int param_1,int param_2)\r\n\r\n{\r\n  return (longlong)param_1 + (longlong)param_2;\r\n}\r\n\r\n"
     }
   ]
 }
