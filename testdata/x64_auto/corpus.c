@@ -622,3 +622,20 @@ void probe_byte_store2(char *p, char c) { p[0] = c; p[1] = c; }
 short probe_short_ident(short x) { return x; }
 
 
+
+/* --- session11 batch 13: multi-return (ReturnSplit / structuring) --- */
+
+int probe_sign(int x) {
+	if (x > 0) return 1;
+	if (x < 0) return -1;
+	return 0;
+}
+int probe_first_neg(int *a, int n) {
+	for (int i = 0; i < n; i++) if (a[i] < 0) return i;
+	return -1;
+}
+int probe_classify(int x) {
+	if (x < 10) return 0;
+	if (x < 100) return 1;
+	return 2;
+}

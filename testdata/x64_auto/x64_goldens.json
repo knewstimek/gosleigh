@@ -45,8 +45,8 @@
     {
       "name": "switch_dense",
       "entry": 10432,
-      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0d872600008b8481382900004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
-      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000028e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x78a8)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
+      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0d8f2700008b8481382900004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
+      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000028e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x79b0)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
     },
     {
       "name": "switch_sparse",
@@ -527,6 +527,24 @@
       "entry": 15760,
       "bytes": "66894c24080fb7442408c3",
       "c": "\r\nundefined2 probe_short_ident(undefined2 param_1)\r\n\r\n{\r\n  return param_1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_sign",
+      "entry": 15792,
+      "bytes": "894c2408837c2408007e07b801000000eb10837c2408007d07b8ffffffffeb0233c0c3",
+      "c": "\r\nundefined8 probe_sign(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 < 1) {\r\n    if (param_1 < 0) {\r\n      uVar1 = 0xffffffff;\r\n    }\r\n    else {\r\n      uVar1 = 0;\r\n    }\r\n  }\r\n  else {\r\n    uVar1 = 1;\r\n  }\r\n  return uVar1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_first_neg",
+      "entry": 15840,
+      "bytes": "8954241048894c24084883ec18c7042400000000eb088b0424ffc08904248b4424283904247d1648630424488b4c2420833c81007d058b0424eb07ebd9b8ffffffff4883c418c3",
+      "c": "\r\nint probe_first_neg(longlong param_1,int param_2)\r\n\r\n{\r\n  int local_18;\r\n  \r\n  local_18 = 0;\r\n  while( true ) {\r\n    if (param_2 <= local_18) {\r\n      return -1;\r\n    }\r\n    if (*(int *)(param_1 + (longlong)local_18 * 4) < 0) break;\r\n    local_18 = local_18 + 1;\r\n  }\r\n  return local_18;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_classify",
+      "entry": 15920,
+      "bytes": "894c2408837c24080a7d0433c0eb13837c2408647d07b801000000eb05b802000000c3",
+      "c": "\r\nundefined8 probe_classify(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 < 10) {\r\n    uVar1 = 0;\r\n  }\r\n  else if (param_1 < 100) {\r\n    uVar1 = 1;\r\n  }\r\n  else {\r\n    uVar1 = 2;\r\n  }\r\n  return uVar1;\r\n}\r\n\r\n"
     }
   ]
 }
