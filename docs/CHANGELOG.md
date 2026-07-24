@@ -5,6 +5,49 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-25 (세션12): #9 conditional-move collapse + #7 누산기 루프 렌더 fix (master `1f6a4cb`)
+
+자율주행, Opus 직접. **엔진 fix 2건 착지(전 골든 무회귀), x64_auto 102/103 -> 106/107**(switch_dense만 non-match).
+
+**착지1(`94af189`) -- #9 both-constant conditional-move collapse**: `return a==b`가 `undefined4 f(){if(c)local=1;
+else local=0; return local;}`로 방출되던 것(최다빈도 C 패턴). 3-부품 fix:
+- **RuleConditionalMove 스텁 -> C++ both-constant 분기 충실 포팅**(ruleaction.cc:9498-9524): 2-입력 MULTIEQUAL의
+  두 입력이 boolean 상수(1/0)면 CBRANCH 조건의 COPY/INT_ZEXT/BOOL_NEGATE로 collapse. checkBoolean + 블록-다이아몬드
+  발견(inblock/rootblock/path0istrue) + op-surgery. 비상수/단일상수 분기(CloneBlockOps 필요)는 bail. 옛 스텁의
+  "all-identical->COPY"는 RuleMultiCollapse(ruleaction.cc:3246, 이미 등록됨)와 중복이라 안전 교체. 신규 헬퍼
+  Funcdata.OpBoolNegate(funcdata_op.cc:560).
+- **ActionRedundBranch 활성화**(coreaction.cc:3499): collapse가 남긴 "true/false 양쪽 같은 블록" CBRANCH를 제거해야
+  하는데 이 액션이 **스텁**이었음(그래서 `if(c) goto L; return x;` 잔재). RemoveBranch/branchRemoveInternal
+  (funcdata_block.cc, edge 제거+MULTIEQUAL input prune+structureReset) 포팅 + Apply의 removeBranch 케이스 구현.
+  splice 케이스(spliceBlockBasic)는 Go BlockGraph.SpliceBlock이 C++과 의미 반대(name-collision)라 미포팅, 렌더
+  무영향으로 문서화 skip.
+- **bool 타입명 `_Bool` -> `bool`**(printc.go normalizedBaseType): Ghidra는 TYPE_BOOL 코어타입을 "bool"로 명명
+  (type.cc:291-292). 코퍼스 최초 bool 반환 함수라 미검증이던 divergence.
+- probe_ret_eq/lt/uge MATCH (uge는 Ghidra flipped form `param_2 <= param_1`까지 정확 일치). 전 골든 무회귀
+  (both-constant MULTIEQUAL은 기존 골든에 부재 = 회귀 0 증명).
+
+**착지2(`1f6a4cb`) -- #7 누산기 루프 렌더 fix + 오진 정정(핵심 교훈)**: `int s=0; do{s+=i; i++;} while(i<n);
+return s;`가 루프-body `s+=i` 소실 + `return local_14+local_18`(should `return local_14`)로 방출.
+- **오진 정정**: NEXT_SESSION 옛 #7 가설("Merge가 register ECX(=s+i)를 stack local_14 phi 출력과 coalesce 못함,
+  Merge 코어 deep")은 **실측 반증**. MERGE_SKIP_DEBUG(임시 계측)로 확인: MergeMarker/MergeOp가 register 입력을
+  stack local High로 **정상 coalesce**하고(DOMERGE 발화), ActionMarkExplicit도 multi-instance High를 explicit
+  마킹함. 즉 SSA·Merge·explicit 전부 정상. 세션10/11의 "과잉 root-cause 단정" 교훈 재현.
+- **진짜 근본 = 렌더 억제 휴리스틱 2곳**: (1) `markReturnOnlyCopies`(printc.go)가 MULTIEQUAL 소비자를 무조건
+  transparent로 봐서 `local_14=local_14+i`를 "return-only 중간값"으로 오억제 -> **op이 그 phi의 출력을 입력으로
+  읽으면(loop back-edge) opaque 가드** 추가. (2) `renderReturnValueFrag`가 resolveForReturn으로 EAX->ECX(COPY)->
+  INT_ADD를 찾아 무조건 인라인 -> **resolved varnode가 explicit면 이름 사용(인라인 금지)** 가드 추가. 둘 다 렌더 사이드.
+- probe_dowhile MATCH. **잔여 #7 = probe_binsearch**: loop-head snapshot(iVar1) + swapped 변수(gcd-family) -- `return
+  iVar1`은 복구됐으나 루프 변수 업데이트(`local_14=iVar1+1` 등)가 여전히 소실(업데이트 op이 자기 phi가 아닌 iVar1을
+  읽어 back-edge 가드 미발화). 다른 억제 경로. repro: `int f(int*a,int n,int key){int lo=0,hi=n-1; while(lo<=hi){int
+  mid=(lo+hi)/2; if(a[mid]==key)return mid; if(a[mid]<key)lo=mid+1; else hi=mid-1;} return -1;}`.
+
+**방법론 교훈(영구)**: "빈 함수/void 붕괴/드롭된 문장" 증상은 엔진(Merge/SSA) 갭으로 보이지만 **렌더 억제 휴리스틱
+(markPrologueOps/markReturnOnlyCopies/renderReturnValueFrag -- 전부 C++ 비충실 Gosleigh 근사)이 HOT 근본**일 수
+있다. 착수: MERGE_SKIP_DEBUG류로 병합/explicit 상태부터 실측 -> 정상이면 렌더 억제 경로 추적(EMIT 루프의 inline/
+prologue/identity 플래그 계측). 선행 가설(NEXT_SESSION 기록)도 실측 반증 대상.
+
+---
+
 ### 2026-07-24 (세션11): 반환타입 LOAD-경계 fix + goldengap 프로브로 감사맵 실측 재검증 (master `0013c8e`)
 
 자율주행. **엔진 fix 3건 착지 + 진단툴 1건 신설 + 감사맵 latent 항목 실측 재검증 + 신규 divergence 특성화(4 family)

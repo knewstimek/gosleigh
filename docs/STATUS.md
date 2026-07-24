@@ -15,9 +15,23 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-24 세션11, master `c9bb66d` origin 푸시, 전 게이트 green)
+## 현재 상태 (2026-07-25 세션12, master `1f6a4cb` origin 푸시, 전 게이트 green)
 
-**권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md` (line ~42 세션11 우선순위 맵)**. 요약:
+**권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md` (== 세션12 다음 우선순위 == 블록)**. 요약:
+- **[세션12] 엔진 fix 2건 착지(전 골든 무회귀), x64_auto 102->106/107**:
+  - `94af189` **#9 both-constant conditional-move collapse**: RuleConditionalMove 스텁을 C++ both-constant 분기
+    (ruleaction.cc:9498-9524) 충실 포팅 + **ActionRedundBranch 활성화**(스텁 -> RemoveBranch/branchRemoveInternal
+    포팅으로 redundant CBRANCH 제거) + bool 타입명 `_Bool`->`bool`(type.cc:291). `return a==b` -> `bool f(){return
+    a==b;}`. probe_ret_eq/lt/uge MATCH. splice 케이스(spliceBlockBasic)는 렌더 무영향으로 문서화 skip.
+  - `1f6a4cb` **#7 누산기 루프 렌더 fix**: `s+=i` do-while의 루프-body 업데이트 소실 + 반환 인라인 수정.
+    **오진 정정(핵심 교훈)**: 옛 #7 가설("Merge가 register↔stack coalesce 못함")은 실측 반증 -- Merge는 정상
+    coalesce, ActionMarkExplicit도 explicit 마킹함. 근본은 렌더 휴리스틱 2곳(markReturnOnlyCopies가 loop back-edge
+    업데이트를 return-only로 오억제 / renderReturnValueFrag가 explicit varnode def를 인라인). probe_dowhile MATCH.
+  - 잔여: switch_dense(imagebase 하네스) + corpus2 add_pt/caller/faverage + #7 binsearch(loop-head snapshot)/#13/#6/FP.
+  - **교훈: 렌더 억제 휴리스틱(markPrologueOps/markReturnOnlyCopies/renderReturnValueFrag)이 "엔진 갭"으로 오인되는
+    HOT 근본. 계측(MERGE_SKIP_DEBUG류)으로 병합/explicit 상태부터 확인 -> 억제 경로 추적. 선행 가설 실측 반증 재현.**
+
+**[세션11 이하는 역사 -- 세션12 블록이 최신]**:
 - **[세션11] 엔진 fix 3건 착지(전 골든 무회귀) + 진단툴 신설 + gap 지형 완전 매핑**:
   `0720f83` 반환타입 LOAD-경계(inferReturnType hasArithmeticAncestor가 LOAD 주소산술 추적) / `4f8d0e0` byte-fill
   store 드롭(markPrologueOps가 1바이트 param 슬라이스를 spill 오분류 -> paramVns를 hv.Instances로) / `5d3727d`
