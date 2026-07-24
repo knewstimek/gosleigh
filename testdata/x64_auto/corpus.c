@@ -687,3 +687,12 @@ int probe_ret_uge(unsigned a, unsigned b) { return a >= b; }
 /* added via goldengap add: probe_dowhile -- accumulator loop (s += i), the
    common #7 case fixed by the loop-back-edge / explicit-return render guards */
 int probe_dowhile(int n) { int i=0,s=0; do { s+=i; i++; } while (i<n); return s; }
+
+/* probe_binsearch -- #7 loop-head-snapshot case: conditional loop-var updates
+   (lo=mid+1 / hi=mid-1) driven by a snapshot iVar1=(lo+hi)/2. Fixed by the
+   isSelfReferentialMultiequal stack-slot guard (markPrologueOps). */
+int probe_binsearch(int *a, int n, int key) {
+	int lo=0, hi=n-1;
+	while (lo<=hi) { int mid=(lo+hi)/2; if (a[mid]==key) return mid; if (a[mid]<key) lo=mid+1; else hi=mid-1; }
+	return -1;
+}
