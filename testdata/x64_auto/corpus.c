@@ -445,3 +445,15 @@ void swap_via_temp(long *a, long *b) {
 
 /* added via goldengap add: probe_distribute */
 long probe_distribute(long *arr, long i, long j) { return arr[(i + j) * 3]; }
+
+/* probe: distribute -- pre-factored i*3 + j*3 (exercises AddTreeState reassoc /
+ * distributeIntMultAdd; audit-map #1). Does the engine keep the factored form
+ * or recombine to (i+j)*3? Compare to Ghidra ground truth. */
+long probe_dist_factor(long *arr, long i, long j) {
+	return arr[i * 3 + j * 3];
+}
+
+/* probe: distribute -- scaled sum plus an extra non-scaled term. */
+long probe_dist_mixed(long *arr, long i, long j) {
+	return arr[(i + j) * 3 + j];
+}

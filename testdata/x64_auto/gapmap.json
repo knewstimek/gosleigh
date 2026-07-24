@@ -397,13 +397,37 @@
           "byte-identical (indent-insensitive)"
         ]
       }
+    },
+    {
+      "name": "probe_dist_factor",
+      "entry": 12496,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_dist_mixed",
+      "entry": 12544,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 33,
-    "match": 32,
+    "total": 35,
+    "match": 34,
     "tag_counts": {
-      "MATCH": 32,
+      "MATCH": 34,
       "TYPECAST": 1
     }
   }

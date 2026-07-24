@@ -45,8 +45,8 @@
     {
       "name": "switch_dense",
       "entry": 10176,
-      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0df71900008b8481382800004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
-      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000027e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x6a18)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
+      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0df71a00008b8481382800004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
+      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000027e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x6b18)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
     },
     {
       "name": "switch_sparse",
@@ -197,6 +197,18 @@
       "entry": 12448,
       "bytes": "44894424188954241048894c24088b4424188b4c241003c88bc16bc0034898488b4c24088b0481c3",
       "c": "\r\nundefined4 probe_distribute(longlong param_1,int param_2,int param_3)\r\n\r\n{\r\n  return *(undefined4 *)(param_1 + (longlong)((param_2 + param_3) * 3) * 4);\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_dist_factor",
+      "entry": 12496,
+      "bytes": "44894424188954241048894c24086b442410036b4c24180303c14898488b4c24088b0481c3",
+      "c": "\r\nundefined4 probe_dist_factor(longlong param_1,int param_2,int param_3)\r\n\r\n{\r\n  return *(undefined4 *)(param_1 + (longlong)(param_2 * 3 + param_3 * 3) * 4);\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_dist_mixed",
+      "entry": 12544,
+      "bytes": "44894424188954241048894c24088b4424188b4c241003c88bc16bc003034424184898488b4c24088b0481c3",
+      "c": "\r\nundefined4 probe_dist_mixed(longlong param_1,int param_2,int param_3)\r\n\r\n{\r\n  return *(undefined4 *)(param_1 + (longlong)(param_2 * 3 + param_3 * 4) * 4);\r\n}\r\n\r\n"
     }
   ]
 }
