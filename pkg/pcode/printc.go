@@ -3469,18 +3469,23 @@ func printCharHexEscapeC(c int) string {
 // at least one consumer op writes to a storage location that is signed anywhere in
 // the function. This resolves the signed rendering gap:
 //
-// Problem: Go's metatype ordering (TYPE_UINT=13 < TYPE_INT=14) prevents TYPE_INT
-// from propagating into constants whose tempType was initialized as TYPE_UINT.
-// Meanwhile, TYPE_UINT from the constant propagates forward (COPY/MULTIEQUAL),
-// giving the output varnode (e.g. EAX_1) TYPE_UINT -- even though another SSA
-// version of the same register (e.g. EAX_0, input to INT_SLESS) has TYPE_INT.
+// The metatype ordering TYPE_UINT(13) < TYPE_INT(14) is NOT a bug: it is a faithful
+// copy of C++ type.hh:84-85 ("signed is considered less specific than unsigned in
+// C"), verified against datatype.go:14-15, and other code (action_seed_signed.go,
+// action_infertypes_legacy.go) correctly relies on it. Do not "fix" the ordering.
+//
+// The real gap is that Gosleigh does not reproduce C++ TypeOpCopy::propagateType,
+// which pushes TYPE_INT into the constant. Instead the constant's TYPE_UINT
+// propagates forward (COPY/MULTIEQUAL) and, being the more specific metatype, wins --
+// so the output varnode (e.g. EAX_1) stays TYPE_UINT even though another SSA version
+// of the same register (e.g. EAX_0, input to INT_SLESS) carries TYPE_INT.
 //
 // Solution: check if ANY varnode at the same storage location (same space/offset/
 // size) as the consumer's output has TYPE_INT committed. If yes, the storage
 // location is signed in this function context and the constant should render signed.
 //
-// C++ parity: Ghidra propagates TYPE_INT into constants via TypeOpCopy; this is
-// the rendering-time fallback for that behaviour.
+// C++ parity: a rendering-time compensation for the unported TypeOpCopy TYPE_INT
+// propagation -- NOT a reason to change the metatype ordering.
 func (s *printCState) inferSignedConstType(vn *Varnode) Datatype {
 	// Only matters when signed and unsigned representations differ (high bit set).
 	highBitSet := false
