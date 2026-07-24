@@ -39,17 +39,51 @@ func NewRuleAndMask(group string) *RuleAndMask {
 	return r
 }
 
+// apply is a faithful port of RuleAndMask::applyOp (ruleaction.cc:310), collapsing
+// an unnecessary INT_AND via non-zero-bit (NZMask) and consume analysis.
+//
+// The all-ones algebraic shortcuts are kept ahead of the faithful path: they
+// handle "all-ones & X => X" in either operand slot without depending on a prior
+// commutative normalization moving the constant to slot 1, matching prior Go
+// behavior exactly (a strict subset of what the NZMask logic below also removes).
 func (r *RuleAndMask) apply(op *PcodeOp, data *Funcdata) int {
-	if isZeroConst(op.Input(0)) || isZeroConst(op.Input(1)) {
-		return rewriteToConst(data, op, 0)
-	}
 	if isAllOnesConst(op.Input(0)) {
 		return rewriteToCopy(data, op, op.Input(1))
 	}
 	if isAllOnesConst(op.Input(1)) {
 		return rewriteToCopy(data, op, op.Input(0))
 	}
-	return 0
+	out := op.Output()
+	if out == nil {
+		return 0
+	}
+	size := out.Size()
+	if size > 8 { // C++: size > sizeof(uintb)
+		return 0
+	}
+	mask1 := op.Input(0).NZMask()
+	var andmask uint64
+	if mask1 != 0 {
+		andmask = mask1 & op.Input(1).NZMask()
+	}
+	var vn *Varnode
+	switch {
+	case andmask == 0: // result of AND is always zero
+		vn = data.NewConstant(size, 0)
+	case andmask&out.Consumed() == 0: // surviving bits are all consumed away
+		vn = data.NewConstant(size, 0)
+	case andmask == mask1: // AND keeps every possibly-nonzero bit of input(0)
+		if !op.Input(1).IsConstant() {
+			return 0
+		}
+		vn = op.Input(0)
+	default:
+		return 0
+	}
+	if !vn.IsHeritageKnown() {
+		return 0
+	}
+	return rewriteToCopy(data, op, vn)
 }
 
 type RuleOrCollapse struct{ batchRule }
