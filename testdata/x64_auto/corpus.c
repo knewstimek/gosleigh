@@ -502,3 +502,17 @@ int probe_3d(int *a, int i, int j, int k) { return a[i * 100 + j * 10 + k]; }
 unsigned probe_ret_and(unsigned a, unsigned b) { return a & b; }
 unsigned probe_ret_not(unsigned x) { return ~x; }
 long long probe_ret_wide(int a, int b) { return (long long)a + b; }
+
+/* --- session11 batch 4: control-flow / pointer idioms (self-contained) --- */
+
+int probe_early_return(int *a, int n) {
+	for (int i = 0; i < n; i++) if (a[i] < 0) return i;
+	return -1;
+}
+int probe_ptr2ptr(int **pp) { return **pp; }
+int probe_continue_sum(int *a, int n) {
+	int s = 0;
+	for (int i = 0; i < n; i++) { if (a[i] == 0) continue; s += a[i]; }
+	return s;
+}
+long long probe_mixed_sign(int a, unsigned b) { return (long long)a + b; }
