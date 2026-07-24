@@ -44,12 +44,19 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
    살리는데, **`loadGuard` 리스트(동적 LOAD 주소의 min/max offset 범위)가 ValueSet 기반 index-range 분석에 의존** =
    Ghidra 최난이도 서브시스템 중 하나(대규모 단독 포팅, 전 LOAD/STORE 함수 영향 broad). repro: `int f(int n){int
    t[4]={10,20,30,40}; return t[n&3];}`.
-2. **[#6 타입 back-prop family -- find_max 착지]** `probe_find_max`(포인터 element 타입)는 세션12 착지(`TypeOrder`
-   pointee 재귀). **잔여 = struct 혼합폭 cast(`probe_struct`) + sar_round signedness.** #6 find_max 교훈: driver
-   `inferPropagateEdge`는 INT_SLESS input↔input 전파를 이미 가졌고(세션12 초기 "input↔input 부재" 가설은 오진), 진짜
-   근본은 `TypeOrder`(datatype.go)가 **포인터 pointee 재귀를 안 해** ptr-to-int와 ptr-to-undefined4를 equal(0)로 봐서
-   먼저 온 undefined4*가 int*를 못 밀려나던 것 -> C++ TypePointer::compare 재귀 포팅으로 해결. struct case도 유사
-   타입전파일 수 있으나(세션11 lateral revert 이력) 착수 전 INFER_TRACE류 계측 필수. broad(전 함수 타입) 게이트 필수.
+2. **[#6 타입 back-prop family -- find_max 착지, struct/sar_round 잔여]** `probe_find_max`는 세션12 착지(`TypeOrder`
+   pointee 재귀; 초기 "input↔input 부재" 가설은 오진 -- driver inferPropagateEdge에 이미 있음). **잔여 2건(세션12 측정,
+   전부 broad/비-bounded)**:
+   - **`probe_sar_round`** (`(x + (x>>31 & 7)) >> 3`): gosleigh `param_1 + (param_1>>0x1f & 7U) >> 3` vs golden
+     `(int)(param_1 + (param_1>>0x1f & 7U)) >> 3` -- **`(int)` cast 누락**. "단순 cast 추가"가 아님: 근본은 합의 타입
+     (`param_1 + (..&7U)`)을 gosleigh는 **int**, Ghidra는 **uint**로 타이핑 -> INT_SRIGHT(arith) input이 uint면 signed
+     cast 필요. = INT_ADD/INT_AND **signedness 전파**(uint 상수 &7U가 결과를 uint로) 미포팅. shiftValueInputCast
+     (typeop_cast.go:590)는 로직 자체는 C++ 일치, varnode vs High type-facing 차이 + 합 signedness가 근본. broad.
+   - **`probe_struct`** (`struct{int a;int b;long long c;} *p; return (ll)p->a+p->b+p->c`): gosleigh `+ param_1[2]`
+     (int* 첨자=4바이트 read) vs golden `+ *(longlong *)(param_1 + 2)` -- **8바이트 필드 c를 4바이트로 read + `(longlong *)`
+     cast 누락**. 근본=PTRADD pointee가 scale=4인데 8바이트로 widening(역전파가 8바이트 로드/반환에서 pointee 덮음) +
+     8바이트 int를 "longlong" 아닌 "int"로 명명. 세션11이 subscript-width 가드만 넣었다 lateral로 revert(PTRADD pointee
+     sizing 부재). deep. 착수 전 INFER_TRACE 계측 + C++ TypeOpPtradd/Load propagateType 대조 필수. broad(전 함수 타입) 게이트.
 3. **[대규모] FP 서브시스템**(faverage): XMM param 미복구. 아래 FP 특성화.
 4. **[cosmetic]** #8 -x*c fold, #10 for 과승격 등. ROI 낮음.
 **[세션12 #7 완료 기록]** 누산기(dowhile, `1f6a4cb`)와 loop-head snapshot(binsearch, `3995622`) 양대 케이스 착지.
