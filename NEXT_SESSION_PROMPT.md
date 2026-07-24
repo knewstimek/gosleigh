@@ -10,12 +10,15 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (master `48bd5b4` origin 푸시, 전 게이트 green -- 세션10 룰 5건 완결 + 비-룰 레이어 감사 착수)
+## 현재 상태 (master `f541dc6` origin 푸시, 전 게이트 green -- 세션11 반환타입 fix + 감사맵 실측 재검증)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **10/13**,
-  x64_auto **31/32**, production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
-- x64_auto 잔여 **1건** = **switch_dense**. corpus2 잔여 **3건** = **add_pt** / **caller** / **faverage**.
-  (전부 하네스 한계/FP 선언된 미포팅/휴리스틱 거부 -- 묻힌 휴리스틱 아님. 상세 아래 감사맵.)
-- 세션8/9/10 상세는 CHANGELOG. 다음 작업은 아래 "다음 작업" + 감사맵.
+  x64_auto **41/42**(세션11 프로브 10건 추가로 분모 증가, switch_dense만 non-match),
+  production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
+- **[세션11]** 반환타입 LOAD-경계 fix 착지(`0720f83`): `inferReturnType`의 `hasArithmeticAncestor`가 LOAD의
+  주소 산술을 따라가 raw memory-read 반환을 잘못 int로 승격하던 것을 LOAD 경계에서 차단(undefined%d 유지). +
+  goldengap 프로브 10건으로 감사맵 #1 반증/#2 측정불가/#3 부분확정 + 신규 #6(struct 혼합폭 cast 누락) 특성화
+  (아래 감사맵 세션11 블록). 잔여 golden = switch_dense(imagebase 하네스) + corpus2 add_pt/caller/faverage.
+- 세션8/9/10 상세는 CHANGELOG. 다음 작업은 아래 "다음 작업" + 감사맵(세션11 블록 = 최신).
 
 ### [세션10 후속 감사맵] 비-룰 레이어 무표기 HOT divergence -- 다음 세션 최대 광맥
 룰 감사(12건 완결)를 엔진 나머지로 확장. `known mismatch` 마커 ~200개는 **전부 명시 선언**(숨은 휴리스틱 아님,
@@ -33,6 +36,44 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 mergeAddrTied가 exact (space,offset,size)만 -> C++ overlapLoc 확장 부재. printc.go markPrologueOps/inferSignedConstType는
 render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법: 워커 발견을 그대로 믿지 말고 C++ 원문 실측 검증(세션10에
 워커 metatype 오진 반증). 착지 시 전 골든 게이트 -- #1/#3는 출력 shape 바꿀 수 있어 특히 주의.**
+
+### [세션11] 감사맵 #1/#2/#3 실측 재검증 (goldengap 프로브) + 신규 divergence #6
+
+세션11은 감사맵 latent 항목을 **goldengap 프로브(실측)로 확정/반증**했다. 하네스가 단일함수 base-0 격리라
+외부콜/전역이 전부 out-of-image인 점이 측정 경계를 규정한다.
+- **#1 (AddTreeState 2-pass distribute) 반증**: `arr[(i+j)*3]`(probe_distribute), `arr[i*3+j*3]`(probe_dist_factor),
+  `arr[(i+j)*3+j]`(probe_dist_mixed) 3-shape 전부 **byte-identical**. 특히 dist_mixed는 Ghidra가 `(i+j)*3+j`를
+  `i*3 + j*4`로 distribute하는 것까지 Gosleigh가 동일 재현. **표준 `ptr[(x+y)*c]` shape에서 divergence 없음**
+  (세션10 metatype 반증과 동형). 감사맵 #1 "shape divergence" 주장은 이 shape들에선 미발화. 커밋 `9c4a6f8`(회귀 프로브).
+- **#2 (mergeIndirect addrForce) 측정 불가**: addrForce 로컬이 call을 넘으려면 콜이 필요한데 하네스에선 콜리가
+  항상 out-of-image(caller와 동일 클래스). probe_addrforce는 `void(void)`+콜리 `local_71`(코드주소를 `local_%x`로
+  오명명)로 붕괴 -- 전부 하네스 산물이라 #2를 이 하네스로 clean 측정 불가. **콜리 명명 `func_%x` fallback은
+  renderCallTarget(printc.go:4078)에 이미 있으나 direct-const 경로만 -- 콜 타깃이 상수 인식 안 되면 로컬로 샘. 실사용
+  (풀이미지 로드)에선 콜이 심볼로 resolve되므로 저영향.**
+- **#3 (markExplicitBase) 부분 확정 + 인프라 갭**: C++ coreaction.cc:3024-3065은 addrtied 블록 안에서 ZEXT/PIECE를
+  **조건부**로만 return -1 하고 ZEXT(vn 포함 addrtied 출력)/PIECE(내부 struct)는 fall through. Go action_mark.go:99-101은
+  `IsAddrTied()||IsMapped()||IsProtoPartial()`을 무조건 return -1로 축약(확정 divergence). 단 **ZEXT 슬라이스만 포팅
+  가능**(Contains/LoneDescend 존재), PIECE 분기는 `PieceNode.findRoot`/`isPartialRoot`/`overlapJoin` **미포팅**이라
+  faithful 불가. 게다가 clean C로 트리거 난해(array_2d_sum MATCH가 시사하듯 현 코퍼스 dormant). broad blast(explicit/
+  implied 분류=전 함수 렌더) 대비 confirmed benefit 없어 미착수. C++ 3062-3065(def=PIECE+in0 protoPartial->explicit)도 Go 누락.
+
+**[신규 #6 -- struct 혼합폭 필드 로드: cast 누락 (HOT, 실측 확정, 미착지=깊은 타입전파)]**
+- 재현: `struct PrbS{int a;int b;long long c;}; long long f(struct PrbS*p){return (long long)p->a+p->b+p->c;}`
+  (goldengap `probe_struct`). Ghidra: `... + *(longlong *)(param_1 + 2)`. Gosleigh: `... + param_1[2]`
+  (**int* 첨자 = 4바이트 read, 8바이트 필드인데 폭 손실 + `(longlong *)` cast 누락**).
+- 근본(LOADCAST 계측 확정, ssadump): 세 번째 필드 LOAD는 `PTRADD(RCX,#0x2,#0x4)`(scale 4) 주소 + 8바이트 출력.
+  `typeOpLoad.GetInputCast`(typeop_cast.go:411)에서 reqtype=out.type=**int/8**, curtype=주소 pointee=**int/8**
+  -> 둘이 같아 `CastStandard`가 nil -> cast 미삽입. **즉 PTRADD pointee가 scale=4인데도 int/4가 아닌 int/8로
+  widening됐고(역전파가 8바이트 로드/반환에서 pointee를 덮음), 8바이트 타입이 "longlong"이 아닌 "int"로 오명명.**
+  Ghidra는 PTRADD pointee를 scale에 고정(int/4)해 reqtype(longlong/8)과 불일치 -> `(longlong *)` 삽입.
+- 두 갈래 수정 필요: (1) **subscript 폭 가드**(printc.go `tryRenderSubscript`): accessSize(load out/store value 크기)를
+  받아 `accessSize != pointeeSize`면 subscript 거부(INT_ADD/PTRADD 두 분기 모두). C++ opLoad/checkArrayDeref는
+  크기 일치 때만 첨자화(printc.cc:506-537, 899). **단 이 가드만 넣으면 `*(param_1+2)`가 되어 여전히 4바이트(cast
+  없음) -- lateral move. 반드시 (2)와 함께.** (2) **진짜 근본**: PTRADD pointee를 scale-크기로 고정(int/4 유지)
+  또는 8바이트 int를 longlong으로 명명. 그러면 GetInputCast가 자연히 `(longlong *)` 삽입. 대상=typeop.go
+  typeOpPtradd/typeOpLoad PropagateType + 8바이트 int 명명(datatype.go). **broad blast(타입전파)라 단독 세션 + 전
+  골든 게이트 필수.** 성공기준: goldengap `probe_struct` MATCH(재추가). 세션11은 (1) 임시 구현 후 (2) 부재로 lateral임을
+  확인하고 되돌림 -- 반환타입 LOAD-경계 fix(`0720f83`)만 clean 착지.
 
 ### [세션8 룰 전수 감사 -- 세션10 완결] 동명 다른 룰 12건 전부 착지
 
