@@ -86,16 +86,21 @@ render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법
   `Block_2:0x3f`(0x37의 return-load `mov eax,[rsp+4]` 스킵) vs C++ `0x37`. **주의: 루프백 라벨 `0xffffffffffffffe8`
   (=-0x18)은 branch-target 버그 아님 -- ssadump blockHeader가 loop-head MULTIEQUAL의 첫 op 주소를 쓰는데 스택 phi가
   varnode 주소(-0x18)를 가지는 display 아티팩트(SeqNum/MULTIEQUAL 배치 이슈). CFG 자체는 정상 추정.**
-- **근본 미확정(stage-dump 툴 필요)**: 세션11 초기 가설 "-0x14 heritage 미등록"은 **약함** -- 스택은 세션8
-  `c54d295`로 이미 등록된 heritage space(buildInfoList가 전 space 포함, heritage.go:204/funcdata.go:434). 따라서
-  -0x14 소실은 heritage 등록 자체보다 (a) -0x14 특정 접근패턴의 SSA construction, (b) deadcode, (c) return-recovery
-  (`ApplyGuardReturnsLive`가 0x37의 `EAX=[rsp+4]`를 RETURN에 미배선 -> EAX 사장 -> s 연쇄 deadcode) 중 하나일
-  가능성. **확정 사실만: s(-0x14)+반환 전멸 / 입력바이트 완전 / C++ 코어는 동일바이트로 s 완복구(엔진버그 확정) /
-  트리거=do-while+둘째 스택로컬(dowhile_count 단일=MATCH, sum_loop for+accum=MATCH).**
-- **다음 착수법: 파이프라인 stage별 SSA 덤프 툴부터(현재 ssadump는 최종 SSA만 -> s가 언제 사라지는지 못 봄).
-  heritage 직후 / deadcode 전후 / return-recovery 후 3-스냅샷으로 소실 시점 확정 후 수정.** decomp_dbg
-  `break start <action>`로 C++ 단계 대조 병행. flow/heritage/deadcode 딥 + 회귀위험이라 단독 세션.
-  성공기준: goldengap `probe_dowhile`(재추가) MATCH + ssadiff 100%. **흔한 패턴의 심각 correctness 버그라 고우선.**
+- **근본 정밀 확정(SSA_DUMP_AFTER stage-dump으로 국소화, 세션11에 툴 신설 -- 아래 툴 섹션)**: s는 heritage에
+  정상 등록됨(초기 "미등록" 가설 반증). 소실은 **store-to-load forward가 SSA dominance를 위반**해서다:
+  루프 body(Block 1)에 `0x1e:2: r8 = s(-0x14 phi) + i(-0x18 phi)` (누산기), `0x22:2: s[-0x14] = r8` (스택 store).
+  exit(Block 2, 0x37)의 return-reload `u = s[-0x14]`(스택 load)가 **copy-prop/store-forward로 `r8(0x1e:2)`로 치환**됨.
+  그런데 **r8 def(0x1e:2)는 루프 내부라 exit(Block 2)를 dominate 못 함** -> Block 2에 r8 참조 4개(load/ZEXT48/copy/
+  `return r8`)가 전부 dominance 위반. 다음 deadcode 라운드가 이 invalid 참조를 제거 -> `return(#0x0)` (반환 소실)
+  -> s 연쇄 deadcode -> `void(void)`. **stage 추적(SSA_DUMP_AFTER=heritage,deadcode,returnrecovery,restructure...):
+  stage9(restructure)까지 exit는 정상 스택 reload `u=s[-0x14]` -> stage10 라운드에서 r8로 forward -> stage13 deadcode가
+  return 입력 제거.** C++ 코어는 이 forward를 안 해 exit 스택 reload를 유지(dominance 정상) -> `return EAX`.
+- **수정 방향**: store-to-load forward(또는 RulePropagateCopy 계열)가 **store가 load를 dominate할 때만** forward하도록
+  가드(루프 back-edge 넘는 forward 금지). 정확한 culprit 액션은 SSA_DUMP_AFTER를 stage9~10 사이 액션들로 좁혀 확정할
+  것(툴 있음). **copy-prop은 broad-blast라 dominance 가드 추가 시 전 골든 게이트 필수 + decomp_dbg ssadiff 대조.**
+  확정 사실: 입력바이트 완전 / C++ 코어 동일바이트로 s 완복구(엔진버그) / 트리거=do-while+둘째 스택로컬
+  (dowhile_count 단일=MATCH, sum_loop for+accum=MATCH -- for는 exit 구조가 달라 미발화). **흔한 패턴의 심각
+  correctness 버그(계산+반환 드롭)라 고우선.** 성공기준: goldengap `probe_dowhile`(재추가) MATCH + ssadiff 100%.
 
 **[신규 #8 -- `-x*c` 정규화 미fold (cosmetic, 저위험이나 발진 룰이라 미착수)]**
 - 재현: `int f(int x){ return -x*3; }`. Ghidra: `param_1 * -3`. Gosleigh: `-param_1 * 3`(동값, 미정규화).
@@ -243,6 +248,13 @@ C++ `array_expr`(printc.cc:76, spacing=1)와 불일치해 선언 경로만 `loca
   tools/ssadiff/README.md.
 - **decomp_dbg**: `tools/decomp_dbg.exe`(CPUI_DEBUG Ghidra 12.0.4 core 콘솔) -- print C/raw/tree varnode/
   cover high, break start <action>. savefile: tools/captures/. 재빌드/인스트루먼트: tools/BUILD_NOTES.md.
+- **SSA stage-dump (세션11 신설, action.go)**: `SSA_DUMP_AFTER="heritage,deadcode,returnrecovery,restructure_varnode,
+  merge,setcasts,..." go run ./cmd/ssadump --golden <골든> --func <이름> 2>stages.txt` -- 액션명 substring 매칭 시
+  그 액션 직후 전(全)함수 SSA를 stderr로 덤프. **ssadump는 최종 SSA만 보여주지만 이건 파이프라인 stage별 스냅샷**이라
+  varnode/op가 **언제** 사라지는지 정확히 짚는다(세션11에 #7 do-while의 s 소실을 store-forward dominance 위반으로
+  국소화한 결정타). env 미설정 시 완전 inert(액션당 문자열 비교 1회). 액션명 목록 = action.go `NewAction*("...")`
+  + GetName()(heritage/guardreturns/returnrecovery/deadcode/restructure_varnode/returnsplit/activereturn/merge*/
+  copymarker/setcasts 등). 반복 파이프라인이라 같은 액션이 여러 라운드 덤프됨(라운드별 diff로 전이 추적).
 - **바이트 무결성 감사 스크립트**: capstone으로 골든 bytes의 분기 타깃 검사(경계 밖/명령어 중간). 세션5
   scratchpad에서 사용 -- 필요 시 CHANGELOG 세션5 참조해 재작성(수십 줄).
 - 골든 파이프라인: testdata/x64_corpus*/ + x64_auto/ (build.py + run_ghidra.py + GenGoldens.java).
