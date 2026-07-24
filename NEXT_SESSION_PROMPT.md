@@ -31,9 +31,14 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 
 ### == 세션12 다음 우선순위 (가치×tractability 순) ==
 세션12는 #9(착지) + #7 누산기(착지) + #7 loop-head snapshot(착지)를 처리했다. 남은 gap(전부 실측 확정, deep):
-1. **[#13 -- 최우선] `probe_local_arr` 로컬 배열 init store 드롭** (`int t[4]={..}; return t[n&3]`): 동적인덱스 읽기가 특정
-   슬롯 store와 정적연결 안돼 deadcode -> 배열 미초기화 + `auStack_18` vs `local_18` 네이밍. varmap/AliasChecker
-   aggregate liveness. repro는 corpus에서 제거(세션12), 상세 아래 옛 #13 블록.
+1. **[#13 -- 최우선] `probe_local_arr` 로컬 배열 init store 드롭** (`int t[4]={..}; return t[n&3]`): 배열 미초기화 방출
+   (`local_18[0]=10;` 등 4개 소실) + `auStack_18` vs `local_18` 네이밍. **세션12 실측 확정 근본**: gosleigh SSA에
+   store 4개가 **아예 없음**(ssadump: 동적 LOAD `*(PTRADD(RSP-0x18, n&3, 4))`만 남고 상수 10/20/30/40 store 전멸) =
+   heritage 단계에서 소멸. 근본 = **heritage `guardLoads`/`guardStores` 미포팅**(heritage.cc:1538/1570, gosleigh
+   heritage.go:1511 주석이 "unported" 명시). guardLoads는 동적 LOAD를 이전 STORE들과 aliasing(INDIRECT/COPY 삽입)해
+   살리는데, **`loadGuard` 리스트(동적 LOAD 주소의 min/max offset 범위)가 ValueSet 기반 index-range 분석에 의존** =
+   Ghidra 최난이도 서브시스템 중 하나(대규모 단독 포팅, 전 LOAD/STORE 함수 영향 broad). repro: `int f(int n){int
+   t[4]={10,20,30,40}; return t[n&3];}`.
 2. **[#6 타입 back-prop family]** struct 혼합폭 cast / find_max element / sar_round signedness. broad 타입전파. 아래 옛 #6.
 3. **[대규모] FP 서브시스템**(faverage): XMM param 미복구. 아래 FP 특성화.
 4. **[cosmetic]** #8 -x*c fold, #10 for 과승격 등. ROI 낮음.
