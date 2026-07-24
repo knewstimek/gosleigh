@@ -340,16 +340,23 @@ func (r *RuleHumptyOr) apply(op *PcodeOp, data *Funcdata) int {
 	if c.NZMask()&aMask == 0 {
 		return 0 // RuleAndDistribute would reverse us
 	}
-	// Gosleigh-specific complement to the two C++ guards above. When `a` is a
-	// constant mask that fully covers b or c, C++ never reaches this rule: its
-	// constants are canonically in slot 1, so RuleAndMask has already reduced the
-	// covered `a & x => x`, leaving the INT_OR with a single AND. Gosleigh's rule
-	// and traversal order does not guarantee that pre-reduction runs before this
-	// rule inspects the INT_OR, and RuleAndDistribute's trivial-cover branch
-	// (ruleaction.cc:1289-1290) fires on exactly the `a & (b|c)` this rule would
-	// create -- so without this guard the two rules flip the same op forever.
-	// Skipping here reproduces C++'s effective behavior (the covered AND collapses
-	// and HumptyOr does not fire).
+	// Oscillation guard (not present in C++). RuleHumptyOr and RuleAndDistribute are
+	// exact inverses: this rule folds (a&b)|(a&c) into a&(b|c), and RuleAndDistribute's
+	// trivial-cover branch (ruleaction.cc:1289-1290) distributes it straight back when
+	// the constant `a` fully covers b or c. In C++ the pair does not livelock: its
+	// ActionPool collapses the intermediate `a&x => x` (via RuleAndMask, since `a`
+	// covers x) before this rule can re-factor, so the INT_OR is left with a single
+	// AND and HumptyOr stops. Gosleigh ports the whole neighbourhood faithfully --
+	// RuleTermOrder canonicalizes the constant into slot 1 (action.go, ahead of
+	// RuleAndMask, exactly like C++ coreaction.cc:5524/5540), RuleAndMask and
+	// RuleAndDistribute match line-for-line -- but Gosleigh's action-pool fixpoint
+	// re-fires this inverse pair on the SAME op before the transient child AND that
+	// AndDistribute spawns is ever traversed and reduced, so the two flip forever
+	// (measured: 55858 iterations on the 6502 program). Declining exactly the case
+	// AndDistribute would reverse breaks the livelock and is byte-identical to C++ on
+	// every golden. The real root cause is action-pool processing order, not this
+	// rule; fixing that (so the intermediate reduces before re-factoring) would let
+	// this guard be removed. Do NOT "fix" RuleTermOrder -- it is already faithful.
 	if a.IsConstant() {
 		if b.NZMask()&aMask == b.NZMask() {
 			return 0
