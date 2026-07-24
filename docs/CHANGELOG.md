@@ -7,9 +7,15 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ### 2026-07-24 (세션11): 반환타입 LOAD-경계 fix + goldengap 프로브로 감사맵 실측 재검증 (master `0013c8e`)
 
-자율주행. **엔진 fix 1건 착지 + 감사맵 latent 항목 실측 재검증 + 신규 divergence 5건 특성화 + MATCH 회귀
-프로브 20건 추가**. 방법론: goldengap로 자기완결적(외부심볼/전역 없음) C 관용구를 프로브 -> speculation을
+자율주행. **엔진 fix 2건 착지 + 진단툴 1건 신설 + 감사맵 latent 항목 실측 재검증 + 신규 divergence 특성화(4 family)
++ MATCH 회귀 프로브 다수**. 방법론: goldengap로 자기완결적(외부심볼/전역 없음) C 관용구를 프로브 -> speculation을
 Ghidra 12.0.4 실측으로 전환. 하네스가 단일함수 base-0 격리라 외부콜/전역이 전부 out-of-image인 게 측정 경계.
+
+**착지2(`4f8d0e0`) -- prologue paramVns를 param HV instances로 구축(byte-fill store 드롭 수정)**: `markPrologueOps`
+(printc.go render 휴리스틱)가 `*p=(char)param_2`(memset) store를 callee-saved spill로 오분류해 드롭(for body 빈
+채로 방출). 근본(stage-dump→STORE_DEBUG 계측): paramVns를 `vn.High()==paramHV` AllVarnodes 스캔으로 만들었는데 1바이트
+param 슬라이스(DL)가 param_2 HV(RDX 8바이트)에 back-link 없어 RDX를 놓침 -> store값 DL이 비-param spill로 마킹. 수정=
+`hv.Instances()`로 paramVns 구축 + val이 param storage에 overlap하면 skip. probe_memset MATCH, 전 골든 무회귀.
 
 **착지(`0720f83`) -- 반환타입 LOAD-경계 fix**: `inferReturnType`의 `hasArithmeticAncestor`(printc.go)가 LOAD의
 def input(주소)까지 재귀해 raw memory-read 반환(`*(undefined4*)(base+idx)`)을 잘못 arithmetic으로 판정 ->

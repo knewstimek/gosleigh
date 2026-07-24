@@ -18,7 +18,8 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
 ## 현재 상태 (2026-07-24 세션11, master `f541dc6` origin 푸시, 전 게이트 green)
 
 **권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`**. 요약:
-- **[세션11] 반환타입 LOAD-경계 fix(`0720f83`) + 감사맵 실측 재검증(goldengap 프로브 10건)**. `inferReturnType`의
+- **[세션11] 엔진 fix 2건(`0720f83` 반환타입 LOAD-경계 / `4f8d0e0` prologue paramVns=byte-fill store 드롭) +
+  진단툴 SSA_DUMP_AFTER(`6ac87b1`) + 감사맵 실측 재검증(goldengap 프로브)**. `inferReturnType`의
   `hasArithmeticAncestor`가 LOAD 주소 산술을 따라가 raw memory-read 반환을 int로 오승격하던 것을 LOAD 경계 차단
   (undefined%d 유지, Ghidra 실측 일치). 프로브로 감사맵 **#1(AddTreeState distribute) 반증**(3-shape byte-identical,
   Ghidra의 `(i+j)*3+j`->`i*3+j*4` distribute까지 동일 재현), **#2(mergeIndirect) 하네스 측정불가**(외부콜 out-of-image),
