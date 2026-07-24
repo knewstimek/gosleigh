@@ -15,9 +15,18 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-24 세션9, master `e336502` origin 푸시, 전 게이트 green)
+## 현재 상태 (2026-07-24 세션10, master `d9d52f0` origin 푸시, 전 게이트 green)
 
 **권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`**. 요약:
+- **[세션10] 동명 다른 룰 감사 완결 -- 잔여 5건 전부 착지, 회귀 0**(`60b66a9` Rule2Comp2Mult /
+  `7c0e31c` RuleBoolZext / `992ed24` RuleOrCompare / `6a8d953` RulePushMulti 정리 / `d9d52f0` RuleHumptyOr).
+  세션8 감사의 name-collision 12건 완결(세션8:3 + 세션9:4 + 세션10:5). **세션9가 차단/revert했던 2건 해소**:
+  Rule2Comp2Mult는 batchARuleFactories에서 RuleMultNegOne(C++ actcleanup 전용) 제거로 역쌍 co-pool 발진 해소;
+  RuleHumptyOr는 계측으로 발진 사이클 규명(공유 상수 a가 c 완전덮음 -> AndDistribute trivial-cover 왕복,
+  55858회) 후 C++엔 없는 가드 1개(상수 a가 b/c 완전덮음이면 skip = AndDistribute 발화조건의 여집합, C++
+  선-환원의 효과적 등가)로 착지. 병렬: Sonnet 워커 2슬롯(rules_ext/rules_misc 독립파일)이 초안, Opus가 C++
+  대조+골든게이트+커밋(단일 커미터). **코퍼스 출력 바이트 무변경**(정규화 국면 정합만, 렌더 무영향). 상세 CHANGELOG 세션10.
+  **교훈: pcode 배치 통과 != 발진 없음 -- 발진은 pkg/bridge 실디컴파일에서만 났고 계측이 정답.**
 - **[세션9] 동명 다른 룰 4건 착지**(`801caf8` RuleShiftPiece / `6bd4dbf` RuleDoubleSub / `4f7b84a`
   RuleRightShiftAnd / `bbc5906` RuleZextCommute) -- 전부 진짜 C++ 룰 포팅 + 기존 중복/死 본체 드롭, 회귀 0
   (x64_auto 31/32, corpus2 10/13, tree 10/10 유지, `go test ./...` green). 추가로 **`RuleAndMask`
@@ -128,14 +137,14 @@ stale였던 이유 = 마일스톤 완료 후 해당 미시작 섹션을 지우�
   세션6에 emitter 버그로 판명돼 이미 MATCH -- 예시도 stale).
 - struct/union 타입 복구, reloc/FP(corpus2 P5-P8 / faverage), PARITY_AUDIT 미포팅 opcode 잔여. (스택 파라미터는
   세션8 A2 스택 param `991be09`+heritage refinement `c54d295`로, CONCAT44 렌더는 `6521fd2`로 해소.)
-- **[세션8 신규 부채] 동명 다른 룰 -- 잔여 4건 + 차단 1건**: 룰 감사(`b0d1476`)가 Go 룰 이름은 같은데 C++과
-  다른 룰 12건을 확인. 세션8 3건(`31539bc`/`0fa8787`) + **세션9 4건 착지**(`801caf8` RuleShiftPiece /
-  `6bd4dbf` RuleDoubleSub / `4f7b84a` RuleRightShiftAnd / `bbc5906` RuleZextCommute, 전부 회귀 0) +
-  `a67beda` RuleAndMask NZMask/consume 커버리지 완성(#5가 연 부채 해소).
-  **잔여 순수 미착수 4건 = RuleHumptyOr / RuleOrCompare / RuleBoolZext / RulePushMulti(정리)**.
-  **차단 1건 = Rule2Comp2Mult**: 진짜 룰 포팅 시 전 golden green이나 `rules_copy.go` 테스트 배치가
-  2COMP<->MULT-1 양방향 룰을 같은 풀에 co-pooling해 `go test` 무한 발진 -- 그 배치를 analysis/cleanup 분리로
-  고쳐야 착지. 상세 = NEXT_SESSION_PROMPT 표. **룰 감사는 이름이 아니라 getOpList+본체로 대조.**
+- **[세션8 신규 부채 -- 세션10 완결] 동명 다른 룰 12건 전부 해소**: 룰 감사(`b0d1476`)가 Go 룰 이름은 같은데
+  C++과 다른 룰 12건을 확인. 세션8 3건(`31539bc`/`0fa8787`) + 세션9 4건(`801caf8`/`6bd4dbf`/`4f7b84a`/`bbc5906`
+  + `a67beda` RuleAndMask 커버리지 + `e336502` RuleAndDistribute 충실화) + **세션10 5건**(`60b66a9` Rule2Comp2Mult /
+  `7c0e31c` RuleBoolZext / `992ed24` RuleOrCompare / `6a8d953` RulePushMulti 정리 / `d9d52f0` RuleHumptyOr).
+  세션9가 차단/revert했던 Rule2Comp2Mult(co-pool 발진)와 RuleHumptyOr(선-환원 순서 발진)도 세션10 착지. 전부 회귀 0.
+  **교훈(영구 보존): 룰 감사는 이름이 아니라 getOpList+본체로 대조. `action.go` actprop.AddRule이 유일 authority
+  (AddBatch* factory는 테스트 전용). 방향 반대 룰 쌍의 발진은 pcode 배치가 아니라 pkg/bridge 실디컴파일에서만
+  드러날 수 있어 계측이 정답.**
 
 
 ## 완료 마일스톤 (상세는 CHANGELOG)
