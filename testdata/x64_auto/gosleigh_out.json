@@ -30,7 +30,7 @@
     },
     {
       "name": "switch_dense",
-      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x4570) + 0x1d38))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
+      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x4670) + 0x1e38))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
     },
     {
       "name": "switch_sparse",
@@ -199,6 +199,18 @@
     {
       "name": "probe_3d",
       "output": "\nundefined4 probe_3d(longlong param_1,int param_2,int param_3,int param_4)\n\n{\nreturn *(undefined4 *)(param_1 + (longlong)(param_3 * 10 + param_4 + param_2 * 100) * 4);\n}\n"
+    },
+    {
+      "name": "probe_ret_and",
+      "output": "\nuint probe_ret_and(uint param_1,uint param_2)\n\n{\nreturn param_1 \u0026 param_2;\n}\n"
+    },
+    {
+      "name": "probe_ret_not",
+      "output": "\nuint probe_ret_not(uint param_1)\n\n{\nreturn ~param_1;\n}\n"
+    },
+    {
+      "name": "probe_ret_wide",
+      "output": "\nlonglong probe_ret_wide(int param_1,int param_2)\n\n{\nreturn (longlong)param_1 + (longlong)param_2;\n}\n"
     }
   ]
 }

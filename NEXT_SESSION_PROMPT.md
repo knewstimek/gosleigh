@@ -99,6 +99,26 @@ render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법
   **주의: 이 룰은 RuleMultNegOne과 역쌍 co-pool 발진 이력(세션9 차단/세션10 가드로 착지)이라 발화조건 확대는 고위험.**
   cosmetic(동값)이라 ROI 낮음. 착수 시 `go test ./pkg/pcode/`+`./pkg/bridge/` 발진 게이트 필수.
 
+**[신규 #9 -- 비교 반환/대입 미collapse: `RuleConditionalMove`가 스텁 (HOT, 최다빈도 패턴, 최고가치, 다부품)]**
+- 재현: `int f(int a,int b){ return a==b; }` (goldengap `probe_ret_eq`/`probe_ret_lt`/`probe_ret_uge`, 세션11 제거).
+  MSVC /Od는 **실제 분기**로 bool을 materialize(`cmp; jne; mov [rsp],1; jmp; mov [rsp],0; mov eax,[rsp]` -- 디스어셈블 확인,
+  SETcc 아님). Ghidra: `bool f(int,int){ return param_1 == param_2; }`. **Gosleigh: `undefined4` + `if(c){local=1}else{local=0}
+  return local`** -- if/else와 stack local을 그대로 방출(collapse 실패).
+- 근본(확정): `rules_misc.go:821 RuleConditionalMove.apply`는 **스텁** -- MULTIEQUAL의 모든 입력이 **동일**할 때만 COPY로
+  축약(=C++ 9499-9503 trivial 부분케이스 only). C++ `RuleConditionalMove::applyOp`(ruleaction.cc:9392-9551 +
+  checkBoolean:9280 + gatherExpression:9307 + constructBool:9348 + CloneBlockOps)의 **2-입력 conditional-move 본체가
+  통째 미포팅**(이름만 같은 룰 = 세션8-10 name-collision 클래스인데 미포착/미표기). SSA 확인: MULTIEQUAL(1,0) +
+  조건 `ECX==EDX`가 정확히 형성돼 있음(gosleigh `probe_ret_eq` ssadump) -- 룰만 없어서 미발화.
+- **다부품(단일 룰 포팅으로 부족)**: (1) both-constant 케이스(9498-9525, CloneBlockOps 불필요): 블록구조(inblock0/1/
+  rootblock/CBRANCH) + path0istrue + `MULTIEQUAL(1,0)`->`INT_ZEXT(cond)`(sz>1) 또는 `COPY/BOOL_NEGATE`(sz==1). ~60-80줄.
+  (2) **bool 반환 렌더 미검증**: 포팅 후 `zext(a==b)` 반환이 Ghidra처럼 `bool return a==b`로 축약되려면 subvariable/
+  bool-flow + 반환타입=bool 추론이 동작해야 함(현 코퍼스에 bool 반환 MATCH 함수 0개 = 이 경로 untested). (3) 비상수
+  케이스(BOOL_AND/OR, 9449-9548)는 CloneBlockOps(gatherExpression/constructBool) 필요 = 별도 대공사.
+- 대상: rules_misc.go RuleConditionalMove(스텁 교체) + FlowBlock API(In/SizeOut/TrueOut/isBooleanFlip/LastOp) +
+  op-surgery(opUninsert/opInsertBegin/opBoolNegate) + 렌더/subvar 검증. **게이트: goldengap probe_ret_eq/lt/uge
+  재추가 MATCH + 전 골든 + pcode/bridge 발진 + 구조화 회귀(if/else collapse가 타 함수 오발화 주의).** 세션11은
+  스텁임을 실측 확정하고 다부품이라 미착수 -- **이게 다음 세션 최우선(최다빈도 C 패턴).**
+
 ### [세션8 룰 전수 감사 -- 세션10 완결] 동명 다른 룰 12건 전부 착지
 
 세션8 감사가 **Go 룰 156개를 C++ `getOpList`와 기계 대조**해 "이름만 같고 다른 룰" 12건을 확인(전부 `action.go`

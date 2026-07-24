@@ -601,13 +601,49 @@
           "byte-identical (indent-insensitive)"
         ]
       }
+    },
+    {
+      "name": "probe_ret_and",
+      "entry": 13280,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_ret_not",
+      "entry": 13312,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_ret_wide",
+      "entry": 13344,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 50,
-    "match": 49,
+    "total": 53,
+    "match": 52,
     "tag_counts": {
-      "MATCH": 49,
+      "MATCH": 52,
       "TYPECAST": 1
     }
   }

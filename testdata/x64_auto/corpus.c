@@ -496,3 +496,9 @@ long long probe_widen(int x, int y) { return (long long)x * y; }
 int probe_narrow(long long x) { return (int)x + 1; }
 unsigned probe_mask(unsigned x) { return (x >> 4) & 0xF; }
 int probe_3d(int *a, int i, int j, int k) { return a[i * 100 + j * 10 + k]; }
+
+/* --- session11 batch 3: return-type / render stress (self-contained) --- */
+
+unsigned probe_ret_and(unsigned a, unsigned b) { return a & b; }
+unsigned probe_ret_not(unsigned x) { return ~x; }
+long long probe_ret_wide(int a, int b) { return (long long)a + b; }
