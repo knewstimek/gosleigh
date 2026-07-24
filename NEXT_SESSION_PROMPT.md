@@ -82,15 +82,20 @@ render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법
 - **입력 무결성 OK 확인**(핸드오프 붕괴형-mismatch 프로토콜): 골든 64바이트 디스어셈블 시 `03c8`(s+=i)/`89442404`(store s)/
   `8b442404`(return-load s) 전부 존재 = 바이트 완전. **decomp_dbg(C++ 코어, 동일 격리 바이트) ssadiff: C++은 s(-0x14
   슬롯)의 phi/`ECX=s+i`/`EAX=ECX`/`return EAX`를 완벽 복구.** 즉 gosleigh 엔진 버그 확정.
-- 증상 국소화(ssadiff): gosleigh SSA에 `s0xffffffffffffffec`(-0x14, =s) 전(全) op 부재. 분기 타깃도 발산 --
-  gosleigh 루프백 `Block_1:0xffffffffffffffe8`(=-0x18, **잘못**) + exit `Block_2:0x3f`(0x37의 return-load 스킵)
-  vs C++ 루프백 `0x17` + exit `0x37`. **가설(미확정): -0x14 스택 슬롯이 heritage 미등록 -> [rsp+4] 접근 전부 미해소
-  -> 0x37 블록(return-load) 소실 -> exit가 0x3f로 밀림 -> s deadcode.** cf. `dowhile_count`(단일 로컬 do-while)는
-  MATCH, `sum_loop`(for + accumulator)도 MATCH -> **트리거 = do-while + 둘째 스택 로컬(누산기)의 조합.**
-- 대상 후보: funcdata.go:416-445 heritageNewStackSlots(슬롯 discovery 순서) / heritage.go HeritageRange /
-  bridge.go collectHeritageSpace, 또는 do-while 루프백의 flow/블록경계 계산. **flow/heritage 딥 + 회귀위험이라
-  단독 세션 + decomp_dbg ssadiff 대조 필수. 흔한 패턴(do-while 누산기)의 심각한 correctness 버그라 우선순위 높음.**
-  성공기준: goldengap `probe_dowhile`(재추가) MATCH + ssadiff 100%.
+- 증상 국소화(ssadiff): gosleigh SSA에 `s0xffffffffffffffec`(-0x14, =s) 전(全) op 부재. gosleigh exit는
+  `Block_2:0x3f`(0x37의 return-load `mov eax,[rsp+4]` 스킵) vs C++ `0x37`. **주의: 루프백 라벨 `0xffffffffffffffe8`
+  (=-0x18)은 branch-target 버그 아님 -- ssadump blockHeader가 loop-head MULTIEQUAL의 첫 op 주소를 쓰는데 스택 phi가
+  varnode 주소(-0x18)를 가지는 display 아티팩트(SeqNum/MULTIEQUAL 배치 이슈). CFG 자체는 정상 추정.**
+- **근본 미확정(stage-dump 툴 필요)**: 세션11 초기 가설 "-0x14 heritage 미등록"은 **약함** -- 스택은 세션8
+  `c54d295`로 이미 등록된 heritage space(buildInfoList가 전 space 포함, heritage.go:204/funcdata.go:434). 따라서
+  -0x14 소실은 heritage 등록 자체보다 (a) -0x14 특정 접근패턴의 SSA construction, (b) deadcode, (c) return-recovery
+  (`ApplyGuardReturnsLive`가 0x37의 `EAX=[rsp+4]`를 RETURN에 미배선 -> EAX 사장 -> s 연쇄 deadcode) 중 하나일
+  가능성. **확정 사실만: s(-0x14)+반환 전멸 / 입력바이트 완전 / C++ 코어는 동일바이트로 s 완복구(엔진버그 확정) /
+  트리거=do-while+둘째 스택로컬(dowhile_count 단일=MATCH, sum_loop for+accum=MATCH).**
+- **다음 착수법: 파이프라인 stage별 SSA 덤프 툴부터(현재 ssadump는 최종 SSA만 -> s가 언제 사라지는지 못 봄).
+  heritage 직후 / deadcode 전후 / return-recovery 후 3-스냅샷으로 소실 시점 확정 후 수정.** decomp_dbg
+  `break start <action>`로 C++ 단계 대조 병행. flow/heritage/deadcode 딥 + 회귀위험이라 단독 세션.
+  성공기준: goldengap `probe_dowhile`(재추가) MATCH + ssadiff 100%. **흔한 패턴의 심각 correctness 버그라 고우선.**
 
 **[신규 #8 -- `-x*c` 정규화 미fold (cosmetic, 저위험이나 발진 룰이라 미착수)]**
 - 재현: `int f(int x){ return -x*3; }`. Ghidra: `param_1 * -3`. Gosleigh: `-param_1 * 3`(동값, 미정규화).
