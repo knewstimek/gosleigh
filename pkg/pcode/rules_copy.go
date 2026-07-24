@@ -348,7 +348,11 @@ var batchARuleFactories = []batchARuleFactory{
 	func(group string) Rule { return NewRuleSLess2Zero(group) },
 	func(group string) Rule { return NewRuleEqual2Zero(group) },
 	func(group string) Rule { return NewRuleEqual2Constant(group) },
-	func(group string) Rule { return NewRuleMultNegOne(group) },
+	// RuleMultNegOne is deliberately NOT registered here. C++ places it only in
+	// the cleanup pool (actcleanup, action.go:1428), never in an analysis pool.
+	// It is the exact inverse of Rule2Comp2Mult (`V * -1 => -V` vs `-V => V * -1`),
+	// so co-registering the pair in this analysis batch makes the convergence loop
+	// oscillate forever. Matching the C++ pool placement is the parity fix.
 	func(group string) Rule { return NewRuleNegateNegate(group) },
 	func(group string) Rule { return NewRuleSubNormal(group) },
 	func(group string) Rule { return NewRuleSborrow(group) },
