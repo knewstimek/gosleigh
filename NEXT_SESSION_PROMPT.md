@@ -37,7 +37,20 @@ mergeAddrTied가 exact (space,offset,size)만 -> C++ overlapLoc 확장 부재. p
 render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법: 워커 발견을 그대로 믿지 말고 C++ 원문 실측 검증(세션10에
 워커 metatype 오진 반증). 착지 시 전 골든 게이트 -- #1/#3는 출력 shape 바꿀 수 있어 특히 주의.**
 
-### [세션11] 감사맵 #1/#2/#3 실측 재검증 (goldengap 프로브) + 신규 divergence #6
+### [세션11] 감사맵 #1/#2/#3 실측 재검증 (goldengap 프로브) + 신규 divergence #6~#12
+
+**== 다음 세션 우선순위 맵 (세션11 프로브 발굴, 전부 C++ 실측 확정) ==**
+gap이 4개 family로 수렴한다. 각 family는 별개 근본이라 하나씩 단독 세션. 가치×tractability 순:
+1. **[최우선] #9 비교 반환/대입 미collapse** (RuleConditionalMove 스텁): `return a==b`가 if/else+stack local로 방출.
+   **최다빈도 C 패턴**이라 최고가치. 다부품(룰 포팅 + bool 반환 렌더 + subvar). 상세 아래 #9.
+2. **[심각-correctness] param/return recovery 붕괴 2건**: **#7** do-while 누산기(반환값이 EAX->ECX 이동 후 deadcode),
+   **#12** 1바이트 반환(SubvariableFlow 후 1바이트 param unjustified -> deadcode). 둘 다 함수가 `void`로 붕괴(계산+반환
+   드롭). decomp_dbg ssadiff로 엔진버그 확정. deadcode가 param/return justify보다 먼저 도는 액션순서 의심 공통. 상세 #7/#12.
+3. **[타입전파 back-prop family] #6 struct 혼합폭 cast + find_max pointer element**: Ghidra의 풍부한 타입 역전파
+   (load-size->pointer, 부호비교->element) 미포팅 -> undefined%d* 유지 + 여분 cast. broad-blast 타입전파. 상세 #6.
+4. **[cosmetic 저우선] #8** -x*c 미fold, **#10** for 과승격, dot `;` 줄바꿈(umulhi-class). 동값/형식, 회귀위험 대비 ROI 낮음.
+**착수 공통: goldengap 프로브 재추가 -> decomp_dbg ssadiff로 C++ 대조 -> SSA_DUMP_AFTER stage-dump으로 소실/발산 시점
+확정(세션11 신설 툴) -> faithful 수정 -> 전 골든+pcode/bridge 발진 게이트. broad-blast(타입전파/copy-prop)는 특히 주의.**
 
 세션11은 감사맵 latent 항목을 **goldengap 프로브(실측)로 확정/반증**했다. 하네스가 단일함수 base-0 격리라
 외부콜/전역이 전부 out-of-image인 점이 측정 경계를 규정한다.
