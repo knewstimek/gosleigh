@@ -10,14 +10,17 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (master `1f6a4cb` origin 푸시, 전 게이트 green -- 세션12 엔진 fix 2건: #9 + #7 누산기)
+## 현재 상태 (master `3995622` origin 푸시, 전 게이트 green -- 세션12 엔진 fix 3건: #9 + #7 누산기 + #7 snapshot)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **10/13**,
-  x64_auto **106/107**(switch_dense만 non-match), production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
+  x64_auto **107/108**(switch_dense만 non-match), production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
 - **[세션12 착지 2건]**(전 골든 무회귀):
   - `94af189` **#9 both-constant conditional-move collapse** (`return a==b` -> `bool f(){return a==b;}`):
     RuleConditionalMove 스텁을 C++ both-constant 분기(ruleaction.cc:9498-9524)로 충실 포팅 + **ActionRedundBranch
     활성화**(스텁이었음 -- RemoveBranch/branchRemoveInternal 포팅으로 redundant CBRANCH 제거) + bool 타입명(`_Bool`->`bool`,
     type.cc:291). probe_ret_eq/lt/uge MATCH. (splice 케이스 = spliceBlockBasic 미포팅, 렌더 무영향으로 문서화 skip.)
+  - `3995622` **#7 loop-head snapshot fix** (binsearch류 조건부 루프변수 업데이트): markPrologueOps
+    isSelfReferentialMultiequal이 stack-slot 루프변수 merge phi를 ESP-vacuous로 오분류 -> 업데이트+snapshot 전체
+    cascade 억제하던 것. **stack-space phi는 vacuous 아님 가드**(1줄, 회귀 0). probe_binsearch MATCH.
   - `1f6a4cb` **#7 누산기 루프 렌더 fix** (`s+=i` do-while -> 루프-body 업데이트 복구 + `return local_14`):
     **오진 정정 = 이번 세션 핵심 교훈.** NEXT_SESSION 옛 #7 가설("Merge가 register ECX를 stack local_14와 coalesce
     못함")은 **실측 반증** -- MergeMarker는 정상 coalesce하고 ActionMarkExplicit도 explicit 마킹함(MERGE_SKIP_DEBUG
@@ -27,21 +30,17 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 - **다음 작업 권위 = 아래 "== 세션12 다음 우선순위 =="**(바로 아래 신규 블록). 그 아래 세션11/8/6 블록은 역사 참고용.
 
 ### == 세션12 다음 우선순위 (가치×tractability 순) ==
-세션12는 #9(최우선, 착지)와 #7 누산기(착지)를 처리했다. 남은 gap(전부 실측 확정, deep):
-1. **[#7 잔여 -- 최우선] `probe_binsearch` 루프-head snapshot** (`while(lo<=hi){mid=(lo+hi)/2; ...; lo=mid+1/hi=mid-1;}`):
-   세션12 누산기 fix로 `return iVar1`은 복구됐으나 **루프 변수 업데이트(`local_14=iVar1+1`, `local_10=iVar1-1`,
-   `iVar1=(local_14+local_10)/2`)와 init(`local_14=0; local_10=param_2-1`)가 여전히 소실 + 미선언**. 누산기와 다른 점:
-   업데이트 op이 **자기 phi 출력이 아닌 다른 변수(iVar1 snapshot)를 읽음** -> 세션12 markReturnOnlyCopies back-edge
-   가드(op이 소비자-phi 출력을 읽을 때만 발화)가 안 걸림. gcd-family(iVar1 loop-head snapshot, swapped 변수). 착수법:
-   probe_binsearch 재추가(repro는 CHANGELOG 세션12) -> MERGE_SKIP_DEBUG류 계측으로 어느 억제 경로(markPrologueOps
-   isSelfReferentialMultiequal? markReturnOnlyCopies 다른 분기? merge iVar1 snapshot?)가 업데이트를 드롭하는지 확정.
-   **주의: 세션12 실측 교훈 -- #7은 Merge가 아니라 렌더 억제(prologueOps/returnOnly) 근본. 계측 먼저, 가설 금지.**
-2. **[#13] `probe_local_arr` 로컬 배열 init store 드롭** (`int t[4]={..}; return t[n&3]`): 동적인덱스 읽기가 특정
+세션12는 #9(착지) + #7 누산기(착지) + #7 loop-head snapshot(착지)를 처리했다. 남은 gap(전부 실측 확정, deep):
+1. **[#13 -- 최우선] `probe_local_arr` 로컬 배열 init store 드롭** (`int t[4]={..}; return t[n&3]`): 동적인덱스 읽기가 특정
    슬롯 store와 정적연결 안돼 deadcode -> 배열 미초기화 + `auStack_18` vs `local_18` 네이밍. varmap/AliasChecker
    aggregate liveness. repro는 corpus에서 제거(세션12), 상세 아래 옛 #13 블록.
-3. **[#6 타입 back-prop family]** struct 혼합폭 cast / find_max element / sar_round signedness. broad 타입전파. 아래 옛 #6.
-4. **[대규모] FP 서브시스템**(faverage): XMM param 미복구. 아래 FP 특성화.
-5. **[cosmetic]** #8 -x*c fold, #10 for 과승격 등. ROI 낮음.
+2. **[#6 타입 back-prop family]** struct 혼합폭 cast / find_max element / sar_round signedness. broad 타입전파. 아래 옛 #6.
+3. **[대규모] FP 서브시스템**(faverage): XMM param 미복구. 아래 FP 특성화.
+4. **[cosmetic]** #8 -x*c fold, #10 for 과승격 등. ROI 낮음.
+**[세션12 #7 완료 기록]** 누산기(dowhile, `1f6a4cb`)와 loop-head snapshot(binsearch, `3995622`) 양대 케이스 착지.
+binsearch 근본 = markPrologueOps `isSelfReferentialMultiequal`가 ESP register live-through phi용인데 stack-slot
+루프변수 merge phi(한 브랜치서 값 불변->출력이 입력으로 되돌아옴)에 오발화 -> 업데이트+snapshot 전체 cascade 억제.
+**stack-space phi는 vacuous 아님 가드 1줄**로 해결(회귀 0). 계측=EMIT_TRACE(임시). insort류도 이 클래스라 해결됐을 것.
 **착수 공통: goldengap 프로브 재추가 -> 계측(SSA_DUMP_AFTER/MERGE_SKIP_DEBUG류)으로 소실 시점 확정 -> faithful 수정
 -> 전 골든+pcode/bridge 발진 게이트. 렌더 억제 휴리스틱(markPrologueOps/markReturnOnlyCopies/renderReturnValueFrag)은
 broad하니 전 골든 필수.** 아래는 세션11 시점 상세 기록(역사 -- #7/#9는 세션12에 대부분 처리, 위 블록이 최신 권위).

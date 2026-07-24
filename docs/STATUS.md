@@ -15,10 +15,14 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-25 세션12, master `1f6a4cb` origin 푸시, 전 게이트 green)
+## 현재 상태 (2026-07-25 세션12, master `3995622` origin 푸시, 전 게이트 green)
 
 **권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md` (== 세션12 다음 우선순위 == 블록)**. 요약:
-- **[세션12] 엔진 fix 2건 착지(전 골든 무회귀), x64_auto 102->106/107**:
+- **[세션12] 엔진 fix 3건 착지(전 골든 무회귀), x64_auto 102->107/108**:
+  - `3995622` **#7 loop-head snapshot fix**: binsearch류(조건부 루프변수 업데이트 + `iVar1=(lo+hi)/2` snapshot)가
+    루프변수 전부 미선언/미대입으로 방출되던 것. 근본=markPrologueOps `isSelfReferentialMultiequal`(ESP register
+    live-through phi용)이 stack-slot 루프변수 merge phi에 오발화 -> 업데이트+snapshot cascade 억제. stack-space phi는
+    vacuous 아님 가드 1줄로 전체 cascade 해결(회귀 0). probe_binsearch MATCH. #7 양대 케이스(누산기+snapshot) 완료.
   - `94af189` **#9 both-constant conditional-move collapse**: RuleConditionalMove 스텁을 C++ both-constant 분기
     (ruleaction.cc:9498-9524) 충실 포팅 + **ActionRedundBranch 활성화**(스텁 -> RemoveBranch/branchRemoveInternal
     포팅으로 redundant CBRANCH 제거) + bool 타입명 `_Bool`->`bool`(type.cc:291). `return a==b` -> `bool f(){return
