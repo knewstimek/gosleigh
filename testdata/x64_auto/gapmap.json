@@ -913,13 +913,37 @@
           "byte-identical (indent-insensitive)"
         ]
       }
+    },
+    {
+      "name": "probe_bytecopy",
+      "entry": 14720,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_sum_bytes",
+      "entry": 14816,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 76,
-    "match": 75,
+    "total": 78,
+    "match": 77,
     "tag_counts": {
-      "MATCH": 75,
+      "MATCH": 77,
       "TYPECAST": 1
     }
   }
