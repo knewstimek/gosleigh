@@ -27,8 +27,9 @@ Go-only 19, C++-only 21(그중 11은 명시적 stub).
 **진행(2026-07-24 세션9)**: #1/#2/#6 세션8 착지 + **#3 `RuleShiftPiece`(`801caf8`) / #4 `RuleDoubleSub`(`6bd4dbf`) /
 #5 `RuleRightShiftAnd`(`4f7b84a`) / #10 `RuleZextCommute`(`bbc5906`) 세션9 착지**(전부 전 게이트 green, 회귀 0).
 추가로 **`RuleAndMask` NZMask/consume 커버리지 완성**(`a67beda`, C++ ruleaction.cc:310 충실 포팅 -- #5가 연 부채 해소)
-+ **`RuleAndDistribute` 충실 포팅**(`e336502`, ruleaction.cc:1260 -- benefit-guard 없던 과공격적 부분포팅 교정,
-#7 RuleHumptyOr 발진원 제거해 언블록).
++ **`RuleAndDistribute` 충실 포팅**(`e336502`, ruleaction.cc:1260 -- benefit-guard 없던 과공격적 부분포팅 교정).
+이로써 #7 RuleHumptyOr의 **RuleAndDistribute-측 발진원은 제거**됐으나, 실제 포팅 시도는 **별도 발진**(공통 a가
+상수로 b/c 완전덮음 + `const&b` 선-환원 순서 gap)으로 `pkg/bridge`에서 행 -> revert(표 #7 노트에 정밀 근본).
 **#9 `Rule2Comp2Mult`는 차단**(위 표 참조 -- 프로덕션 검증 완료, 테스트 배치 co-pooling만 고치면 착지 가능).
 **잔여 순수 미착수 4건 = #7 `RuleHumptyOr` / #8 `RuleOrCompare` / #11 `RuleBoolZext` / #12 `RulePushMulti`(정리)**.
 착지 방법론(세션9 확립): (a) 진짜 C++ 룰 포팅, (b) 기존 동명 본체가 다른 등록룰의 중복/死코드인지 확인,

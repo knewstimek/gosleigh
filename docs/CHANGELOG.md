@@ -33,8 +33,9 @@ COPY(in0) 세 케이스 추가(기존 all-ones 단축 유지 = strict superset).
 INT_AND->INT_OR 분배하던 과공격적 부분포팅(benefit-guard 전무) -- parity 이탈이자 RuleHumptyOr 역방향 발진원.
 충실 포팅으로 **beneficial일 때만 분배**(한 쪽이 마스크로 소거 `(ormask & othermask)==0`, 또는 상수 other가 한 쪽
 완전덮음 trivial), `othermask==0`(RuleAndMask 담당)/`==fullmask` skip, other 비상수 허용, NewOpBefore 블록삽입.
-이로써 distribute/factor 쌍이 C++처럼 NZMask로 상호배타 -> **#7 RuleHumptyOr 언블록**. 제거된 과공격적 분배는
-코퍼스 무영향(전 골든 유지).
+이로써 distribute/factor 쌍의 RuleAndDistribute-측 발진원 제거. 제거된 과공격적 분배는 코퍼스 무영향(전 골든 유지).
+(#7 RuleHumptyOr 실제 포팅은 별도 발진 -- 공통 a가 상수로 b/c 완전덮음 + `const&b` 선-환원 순서 gap으로
+`pkg/bridge` 행 -> revert. 정밀 근본/착지조건은 NEXT_SESSION_PROMPT #7 노트.)
 
 **게이트**: TREE_MAP 10/10, X64_CORPUS 8/8, X64_SWITCH byte-MATCH, X64_BREADTH 3/3, X64_CORPUS2 10/13,
 x64_auto 31/32, `go test ./...` green, `go vet` clean. **잔여 순수 미착수 4건 = RuleHumptyOr / RuleOrCompare /
