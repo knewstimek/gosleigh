@@ -8,7 +8,7 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 ### 2026-07-24 (세션11): 반환타입 LOAD-경계 fix + goldengap 프로브로 감사맵 실측 재검증 (master `0013c8e`)
 
 자율주행. **엔진 fix 1건 착지 + 감사맵 latent 항목 실측 재검증 + 신규 divergence 5건 특성화 + MATCH 회귀
-프로브 16건 추가**. 방법론: goldengap로 자기완결적(외부심볼/전역 없음) C 관용구를 프로브 -> speculation을
+프로브 20건 추가**. 방법론: goldengap로 자기완결적(외부심볼/전역 없음) C 관용구를 프로브 -> speculation을
 Ghidra 12.0.4 실측으로 전환. 하네스가 단일함수 base-0 격리라 외부콜/전역이 전부 out-of-image인 게 측정 경계.
 
 **착지(`0720f83`) -- 반환타입 LOAD-경계 fix**: `inferReturnType`의 `hasArithmeticAncestor`(printc.go)가 LOAD의
@@ -38,7 +38,7 @@ int로 오승격. LOAD는 값-provenance 체인을 끊으므로(로드값 타입
   **다음 세션 최우선**(다부품: 룰 포팅 + bool 반환 렌더 + subvar).
 - **#10 for-loop 과승격**: `while(n-->0)`를 Ghidra는 while(true)+break, gosleigh는 for로 승격. cosmetic 저우선.
 
-**MATCH 회귀 프로브 16건 추가**(x64_auto 32->57, MATCH 56/57, switch_dense만 잔여): 분배/시프트/포인터차/폭변환/
+**MATCH 회귀 프로브 20건 추가**(x64_auto 32->61, MATCH 60/61, switch_dense만 잔여): 분배/시프트/포인터차/폭변환/
 마스크/3D인덱싱/early-return/이중역참조/continue/부호혼합 등 -- 흔한 관용구가 충실함을 실측 확정. 커밋 `9c4a6f8`/
 `f541dc6`/`3c149b0`/`32858dd`/`0013c8e`. **교훈: latent 감사항목은 goldengap 프로브로 speculation->실측 전환;
 붕괴형 mismatch는 decomp_dbg ssadiff로 입력 무결성부터.**

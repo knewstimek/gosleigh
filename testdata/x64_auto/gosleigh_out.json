@@ -227,6 +227,22 @@
     {
       "name": "probe_mixed_sign",
       "output": "\nlonglong probe_mixed_sign(int param_1,uint param_2)\n\n{\nreturn (longlong)param_1 + (ulonglong)param_2;\n}\n"
+    },
+    {
+      "name": "probe_negconst",
+      "output": "\nint probe_negconst(int param_1)\n\n{\nreturn param_1 + -5;\n}\n"
+    },
+    {
+      "name": "probe_hexbig",
+      "output": "\nuint probe_hexbig(uint param_1)\n\n{\nreturn param_1 | 0xdeadbeef;\n}\n"
+    },
+    {
+      "name": "probe_const64",
+      "output": "\nlonglong probe_const64(longlong param_1)\n\n{\nreturn param_1 + 0x100000000;\n}\n"
+    },
+    {
+      "name": "probe_shiftmask",
+      "output": "\nuint probe_shiftmask(uint param_1)\n\n{\nreturn param_1 \u003c\u003c 8 | param_1 \u003e\u003e 0x18;\n}\n"
     }
   ]
 }

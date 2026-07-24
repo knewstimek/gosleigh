@@ -12,7 +12,7 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 
 ## 현재 상태 (master `f541dc6` origin 푸시, 전 게이트 green -- 세션11 반환타입 fix + 감사맵 실측 재검증)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **10/13**,
-  x64_auto **41/42**(세션11 프로브 10건 추가로 분모 증가, switch_dense만 non-match),
+  x64_auto **60/61**(세션11 프로브 20건 추가로 분모 증가, switch_dense만 non-match),
   production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
 - **[세션11]** 반환타입 LOAD-경계 fix 착지(`0720f83`): `inferReturnType`의 `hasArithmeticAncestor`가 LOAD의
   주소 산술을 따라가 raw memory-read 반환을 잘못 int로 승격하던 것을 LOAD 경계에서 차단(undefined%d 유지). +

@@ -24,7 +24,7 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   Ghidra의 `(i+j)*3+j`->`i*3+j*4` distribute까지 동일 재현), **#2(mergeIndirect) 하네스 측정불가**(외부콜 out-of-image),
   **#3(markExplicitBase) 부분확정**(ZEXT 슬라이스만 포팅가능/PIECE는 PieceNode 미포팅/현 코퍼스 dormant), **신규 #6
   특성화**(struct 혼합폭 필드 로드 cast 누락 = PTRADD pointee widening 깊은 타입전파, NEXT_SESSION 세션11 블록).
-  x64_auto 41/42(프로브 추가로 분모 증가). **교훈: latent 감사항목은 goldengap 프로브로 speculation->실측 전환.**
+  x64_auto 60/61(프로브 20건 추가로 분모 증가, switch_dense만 잔여). **교훈: latent 감사항목은 goldengap 프로브로 speculation->실측 전환.**
 - **[세션10 후속: 비-룰 레이어 parity 감사 + 2건 착지]** (`48bd5b4` 등). 룰 감사를 엔진 나머지로 확장
   (Sonnet 워커 2슬롯이 25개 파일 수집, Opus가 C++ 대조 검증). 결과: `known mismatch` 마커 **~200개 전부
   명시적 선언**(숨은 휴리스틱 아님, 대다수 DORMANT=현 코퍼스 미발화 기능) + **무표기 HOT divergence ~8건** 발견.
