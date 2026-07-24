@@ -2,7 +2,7 @@
 
 goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldengap/goldengap.py report`로 재생성).
 
-71/72 MATCH (indent-insensitive).
+75/76 MATCH (indent-insensitive).
 
 ## 함수별 분류
 
@@ -80,9 +80,13 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `probe_ret_char` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `probe_ret_ll` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `probe_ret_ushort` | MATCH | MATCH: byte-identical (indent-insensitive) |
+| `probe_fib` | MATCH | MATCH: byte-identical (indent-insensitive) |
+| `probe_power` | MATCH | MATCH: byte-identical (indent-insensitive) |
+| `probe_stride_sum` | MATCH | MATCH: byte-identical (indent-insensitive) |
+| `probe_reverse_arr` | MATCH | MATCH: byte-identical (indent-insensitive) |
 
 ## 태그 분포
 
-- MATCH: 71
+- MATCH: 75
 - TYPECAST: 1
 
