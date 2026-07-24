@@ -45,8 +45,8 @@
     {
       "name": "switch_dense",
       "entry": 10432,
-      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0d7f2500008b8481382900004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
-      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000028e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x77a0)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
+      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0d872600008b8481382900004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
+      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000028e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x78a8)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
     },
     {
       "name": "switch_sparse",
@@ -497,6 +497,12 @@
       "entry": 15456,
       "bytes": "8954241048894c24084883ec18c744240401000000c7042400000000eb088b0424ffc08904248b4424283904247d1948630424488b4c24208b5424040faf14818bc289442404ebd68b4424044883c418c3",
       "c": "\r\nint probe_running_prod(longlong param_1,int param_2)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  \r\n  local_14 = 1;\r\n  for (local_18 = 0; local_18 < param_2; local_18 = local_18 + 1) {\r\n    local_14 = local_14 * *(int *)(param_1 + (longlong)local_18 * 4);\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_memset",
+      "entry": 15552,
+      "bytes": "44894424188954241048894c24084883ec18c7042400000000eb088b0424ffc08904248b4424303904247d1348630424488b4c24200fb6542428881401ebdc4883c418c3",
+      "c": "\r\nvoid probe_memset(longlong param_1,undefined1 param_2,int param_3)\r\n\r\n{\r\n  undefined4 local_18;\r\n  \r\n  for (local_18 = 0; local_18 < param_3; local_18 = local_18 + 1) {\r\n    *(undefined1 *)(param_1 + local_18) = param_2;\r\n  }\r\n  return;\r\n}\r\n\r\n"
     }
   ]
 }

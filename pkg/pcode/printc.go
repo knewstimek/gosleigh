@@ -4548,16 +4548,21 @@ func (s *printCState) markPrologueOps() {
 			}
 		}
 	}
-	// Also check FuncProto params (set by ApplyCallingConvention).
+	// Also check FuncProto params (set by ApplyCallingConvention). Iterate the
+	// param HighVariable's own instances rather than scanning AllVarnodes for
+	// High()==hv: a 1-byte param slice (e.g. DL for an `undefined1 param_2` whose
+	// full-width instance is the 8-byte RDX) may not carry a back-link so the
+	// scan misses it, dropping RDX from paramVns. Missing it makes markPrologueOps
+	// misclassify a real `*p = (char)param_2` store as a callee-saved spill and
+	// drop it (empty memset loop body). The instance list is authoritative.
 	if fp := s.fd.GetFuncProto(); fp != nil {
 		for i := 0; i < fp.NumParams(); i++ {
 			hv := fp.GetParam(i)
 			if hv == nil {
 				continue
 			}
-			// Mark all varnodes belonging to this param HighVariable.
-			for _, vn := range s.fd.GetVarnodeBank().AllVarnodes() {
-				if vn != nil && vn.High() == hv {
+			for _, vn := range hv.Instances() {
+				if vn != nil {
 					paramVns[vn] = true
 				}
 			}
@@ -4580,6 +4585,23 @@ func (s *printCState) markPrologueOps() {
 		}
 		// val is a register-space (or ram-space) input varnode. If it's a param, keep it.
 		if paramVns[val] {
+			continue
+		}
+		// ...or if it is a sub-register piece of a param (e.g. DL as the low byte of
+		// the RDX param): a 1-byte param slice does not share the param's exact
+		// Varnode/HighVariable, so paramVns misses it, but storing it (memset-style
+		// `*p = (char)c`) is a real memory write, not a callee-saved spill. Keep any
+		// value whose storage overlaps a known param's storage.
+		isParamPiece := false
+		for pvn := range paramVns {
+			if pvn.Space() == val.Space() &&
+				val.Offset() >= pvn.Offset() &&
+				val.Offset()+uint64(val.Size()) <= pvn.Offset()+uint64(pvn.Size()) {
+				isParamPiece = true
+				break
+			}
+		}
+		if isParamPiece {
 			continue
 		}
 		// This is a callee-saved register store. Mark it.
