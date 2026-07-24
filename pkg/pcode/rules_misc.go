@@ -805,27 +805,123 @@ func (r *RulePushMulti) apply(op *PcodeOp, data *Funcdata) int {
 // RulePushPtr). It used to be a PTRADD/PTRSUB zero-offset collapse here, which
 // was unrelated to the C++ rule of the same name and never fired on any golden.
 
+// RuleShiftPiece is a faithful port of RuleShiftPiece::applyOp
+// (ruleaction.cc:3773-3870). It converts a "shift and add" back into a PIECE:
+//
+//	(zext(V) << 8*sizeof(W)) + zext(W)  =>  concat(V, W)
+//
+// The add carrier may be INT_ADD, INT_OR, or INT_XOR, and either operand order
+// is handled by the shiftop/zextloop swap. A special CDQ/IDIV form, where the
+// high half is the arithmetic sign extension of the low half, folds to a SEXT.
+//
+// The previous body under this name was a byte-for-byte duplicate of
+// RuleConcatShift (INT_RIGHT canceling PIECE); that case is still covered by the
+// separately registered RuleConcatShift, so replacing it here loses no coverage.
 type RuleShiftPiece struct{ batchRule }
 
 func NewRuleShiftPiece(group string) *RuleShiftPiece {
 	r := &RuleShiftPiece{}
-	r.batchRule = newBatchRule(group, "shiftpiece", []OpCode{CPUI_INT_LEFT, CPUI_INT_RIGHT}, r.apply, func(g string) Rule { return NewRuleShiftPiece(g) })
+	r.batchRule = newBatchRule(group, "shiftpiece", []OpCode{CPUI_INT_OR, CPUI_INT_XOR, CPUI_INT_ADD}, r.apply, func(g string) Rule { return NewRuleShiftPiece(g) })
 	return r
 }
 
 func (r *RuleShiftPiece) apply(op *PcodeOp, data *Funcdata) int {
-	if op.Code() != CPUI_INT_RIGHT {
+	in0 := op.Input(0)
+	in1 := op.Input(1)
+	if in0 == nil || !in0.IsWritten() || in1 == nil || !in1.IsWritten() {
 		return 0
 	}
-	piece := definedBy(op.Input(0), CPUI_PIECE)
-	if piece == nil {
+	shiftop := in0.Def()
+	zextloop := in1.Def()
+	if shiftop == nil || zextloop == nil {
 		return 0
 	}
-	amt, ok := constantValue(op.Input(1))
-	if !ok || amt != uint64(piece.Input(1).Size()*8) || outputSize(op) != piece.Input(0).Size() {
+	// Normalize so shiftop is the INT_LEFT (the high, shifted piece).
+	if shiftop.Code() != CPUI_INT_LEFT {
+		if zextloop.Code() != CPUI_INT_LEFT {
+			return 0
+		}
+		shiftop, zextloop = zextloop, shiftop
+	}
+	if !shiftop.Input(1).IsConstant() {
 		return 0
 	}
-	return rewriteToCopy(data, op, piece.Input(0))
+	shiftIn := shiftop.Input(0)
+	if shiftIn == nil || !shiftIn.IsWritten() {
+		return 0
+	}
+	zexthiop := shiftIn.Def()
+	if zexthiop == nil || (zexthiop.Code() != CPUI_INT_ZEXT && zexthiop.Code() != CPUI_INT_SEXT) {
+		return 0
+	}
+	hiVal := zexthiop.Input(0) // most significant piece (PIECE slot 0)
+	if hiVal.IsConstant() {
+		// Normally ZEXT of a constant collapses naturally; only intervene when
+		// the constant is too wide for that to happen (C++: sizeof(uintb) == 8).
+		if hiVal.Size() < 8 {
+			return 0
+		}
+	} else if hiVal.IsFree() {
+		return 0
+	}
+	sa := int32(shiftop.Input(1).Offset())
+	concatsize := sa + 8*hiVal.Size()
+	if op.Output().Size()*8 < concatsize {
+		return 0
+	}
+	if zextloop.Code() != CPUI_INT_ZEXT {
+		// Special case triggered by CDQ:IDIV -- the high half is the arithmetic
+		// sign extension (INT_SRIGHT by width-1) of SUBPIECE(bigVn, 0). This
+		// would fall to the base case but interacts with RuleSubZext.
+		if !hiVal.IsWritten() {
+			return 0
+		}
+		rShiftOp := hiVal.Def()
+		if rShiftOp == nil || rShiftOp.Code() != CPUI_INT_SRIGHT || !rShiftOp.Input(1).IsConstant() {
+			return 0
+		}
+		lowVn := rShiftOp.Input(0)
+		if lowVn == nil || !lowVn.IsWritten() {
+			return 0
+		}
+		subop := lowVn.Def()
+		if subop == nil || subop.Code() != CPUI_SUBPIECE || subop.Input(1).Offset() != 0 {
+			return 0
+		}
+		bigVn := zextloop.Output()
+		if subop.Input(0) != bigVn { // verify link through SUBPIECE low part
+			return 0
+		}
+		rsa := int32(rShiftOp.Input(1).Offset())
+		if rsa != lowVn.Size()*8-1 { // shift must copy sign-bit through high part
+			return 0
+		}
+		if (bigVn.NZMask() >> uint(sa)) != 0 { // original high bytes must be zero
+			return 0
+		}
+		if sa != 8*lowVn.Size() {
+			return 0
+		}
+		rewriteOp(data, op, CPUI_INT_SEXT, lowVn)
+		return 1
+	}
+	lowVal := zextloop.Input(0) // least significant piece (PIECE slot 1)
+	if lowVal.IsFree() {
+		return 0
+	}
+	if sa != 8*lowVal.Size() {
+		return 0
+	}
+	if concatsize == op.Output().Size()*8 {
+		rewriteOp(data, op, CPUI_PIECE, hiVal, lowVal)
+	} else {
+		newop := data.NewOpBefore(op, CPUI_PIECE, hiVal, lowVal)
+		data.NewUniqueOut(concatsize/8, newop)
+		data.OpSetOpcode(op, zexthiop.Code())
+		data.OpRemoveInput(op, 1)
+		data.OpSetInput(op, newop.Output(), 0)
+	}
+	return 1
 }
 
 type RuleConcatLeftShift struct{ batchRule }
