@@ -576,3 +576,14 @@ int probe_stride_sum(int *a, int n, int k) {
 void probe_reverse_arr(int *a, int n) {
 	for (int i = 0; i < n / 2; i++) { int t = a[i]; a[i] = a[n-1-i]; a[n-1-i] = t; }
 }
+
+/* --- session11 batch 10: string/byte operations (void-return, uncovered) --- */
+
+void probe_bytecopy(char *d, char *s, int n) {
+	for (int i = 0; i < n; i++) d[i] = s[i];
+}
+int probe_sum_bytes(unsigned char *p, int n) {
+	int s = 0;
+	for (int i = 0; i < n; i++) s += p[i];
+	return s;
+}
