@@ -394,7 +394,11 @@ func markImpliedCheckCover(data *Funcdata, vn *Varnode) bool {
 			return false
 		}
 	}
-	if op.Code() == CPUI_CALL || op.Code() == CPUI_LOAD {
+	// C++ checkImpliedCover (coreaction.cc:3408) guards with op->isCall(), which
+	// covers CPUI_CALL, CPUI_CALLIND and CPUI_CALLOTHER -- not a bare CPUI_CALL
+	// compare. An indirect/other call output must also honour the crossing-call
+	// cover test before it can be folded implied.
+	if op.IsCall() || op.Code() == CPUI_LOAD {
 		for _, callOp := range data.GetPcodeOpBank().AllOps() {
 			if callOp == nil || callOp.IsDead() || !callOp.IsCall() {
 				continue

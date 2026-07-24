@@ -391,6 +391,28 @@ func inferPropagateEdge(data *Funcdata, tf *TypeFactory, op *PcodeOp, invn, outv
 			return inferPropagateAddIn2Out(data, tf, altPtr, op, inslot)
 		}
 		return nil
+	case CPUI_PTRADD:
+		// Mirror TypeOpPtradd::propagateType (typeop.cc:2270-2283): identical to
+		// PTRSUB except slot 2 (the element-size constant) never carries the
+		// pointer type. PTRADD is what RulePtrArith/AddTreeState emit for array
+		// index computations, so without this the element pointer type stops
+		// propagating at every indexed access on each InferTypes sweep.
+		if inslot == 2 || outslot == 2 {
+			return nil // Don't propagate along this edge
+		}
+		if inslot != -1 && outslot != -1 {
+			return nil // Must propagate input <-> output
+		}
+		if alttype.Metatype() != TYPE_PTR {
+			return nil
+		}
+		if inslot == -1 {
+			return nil // Don't propagate pointer types output -> input
+		}
+		if altPtr, ok := alttype.(*Pointer); ok {
+			return inferPropagateAddIn2Out(data, tf, altPtr, op, inslot)
+		}
+		return nil
 	case CPUI_COPY, CPUI_MULTIEQUAL:
 		if inslot != -1 && outslot != -1 {
 			return nil // Must propagate input <-> output
