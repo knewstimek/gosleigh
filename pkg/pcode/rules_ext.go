@@ -194,16 +194,38 @@ type RuleZextCommute struct{ batchRule }
 
 func NewRuleZextCommute(group string) *RuleZextCommute {
 	r := &RuleZextCommute{}
-	r.batchRule = newBatchRule(group, "zextcommute", []OpCode{CPUI_INT_ZEXT, CPUI_INT_SEXT}, r.apply, func(g string) Rule { return NewRuleZextCommute(g) })
+	r.batchRule = newBatchRule(group, "zextcommute", []OpCode{CPUI_INT_RIGHT}, r.apply, func(g string) Rule { return NewRuleZextCommute(g) })
 	return r
 }
 
+// apply is a faithful port of RuleZextCommute::applyOp (ruleaction.cc:4852):
+// zext(V) >> W => zext(V >> W), pushing the shift under the zero-extension.
+//
+// The prior body under this name bypassed a COPY under an extension
+// (ext(COPY(V)) => ext(V)), which duplicates RulePropagateCopy (it inlines any
+// COPY-defined input on every op), so replacing it loses no coverage.
 func (r *RuleZextCommute) apply(op *PcodeOp, data *Funcdata) int {
-	copyop := definedBy(op.Input(0), CPUI_COPY)
-	if copyop == nil {
+	zextvn := op.Input(0)
+	if zextvn == nil || !zextvn.IsWritten() {
 		return 0
 	}
-	rewriteOp(data, op, op.Code(), copyop.Input(0))
+	zextop := zextvn.Def()
+	if zextop == nil || zextop.Code() != CPUI_INT_ZEXT {
+		return 0
+	}
+	zextin := zextop.Input(0)
+	if zextin.IsFree() {
+		return 0
+	}
+	savn := op.Input(1)
+	if !savn.IsConstant() && savn.IsFree() {
+		return 0
+	}
+	newop := data.NewOpBefore(op, CPUI_INT_RIGHT, zextin, savn)
+	data.NewUniqueOut(zextin.Size(), newop)
+	data.OpRemoveInput(op, 1)
+	data.OpSetInput(op, newop.Output(), 0)
+	data.OpSetOpcode(op, CPUI_INT_ZEXT)
 	return 1
 }
 
