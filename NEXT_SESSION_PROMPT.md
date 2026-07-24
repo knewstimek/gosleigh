@@ -74,6 +74,12 @@ render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법
   typeOpPtradd/typeOpLoad PropagateType + 8바이트 int 명명(datatype.go). **broad blast(타입전파)라 단독 세션 + 전
   골든 게이트 필수.** 성공기준: goldengap `probe_struct` MATCH(재추가). 세션11은 (1) 임시 구현 후 (2) 부재로 lateral임을
   확인하고 되돌림 -- 반환타입 LOAD-경계 fix(`0720f83`)만 clean 착지.
+- **#6 동류(타입전파 back-prop): `probe_find_max`**(세션11 프로브, 제거). `int f(int*a,int n){int m=a[0];
+  for(i=1..) if(a[i]>m) m=a[i]; return m;}`. Ghidra: `int *param_1` + `if(m < param_1[i])`. Gosleigh:
+  `undefined4 *param_1` + `if(m < (int)param_1[i])`(여분 cast). 근본=**부호비교 INT_LESS의 int 피연산자 타입을 배열
+  element/pointer로 역전파 못함**(TypeOpIntSless/Less::propagateType back-edge). #6과 같은 "Ghidra의 풍부한 타입
+  back-propagation 미포팅" family. broad-blast 타입전파. **정리(형식/저severity): `probe_dot`(내적)은 긴 식에서
+  `;`가 줄바꿈되는 PrettyEmitter 포맷 차이 = umulhi-class 기존 갭(그룹토큰 스트림), 의미 무관.**
 
 **[신규 #7 -- do-while + accumulator: 누산기+반환값 통째 드롭 (HOT, 심각, C++ 실측 확정, 미착지=flow/heritage 딥)]**
 - 재현: `int f(int n){ int i=0,s=0; do{ s+=i; i++; } while(i<n); return s; }` (goldengap `probe_neg`가 아니라

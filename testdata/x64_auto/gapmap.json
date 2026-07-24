@@ -781,13 +781,49 @@
           "byte-identical (indent-insensitive)"
         ]
       }
+    },
+    {
+      "name": "probe_sum_pos",
+      "entry": 13904,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_strlen2",
+      "entry": 14016,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_count_bits",
+      "entry": 14080,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 65,
-    "match": 64,
+    "total": 68,
+    "match": 67,
     "tag_counts": {
-      "MATCH": 64,
+      "MATCH": 67,
       "TYPECAST": 1
     }
   }

@@ -45,8 +45,8 @@
     {
       "name": "switch_dense",
       "entry": 10176,
-      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0d1f2000008b8481382800004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
-      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000027e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x7040)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
+      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0d372100008b8481382800004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
+      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000027e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x7158)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
     },
     {
       "name": "switch_sparse",
@@ -389,6 +389,24 @@
       "entry": 13872,
       "bytes": "48894c2408488b442408488b00c3",
       "c": "\r\nundefined8 probe_ret_load8(undefined8 *param_1)\r\n\r\n{\r\n  return *param_1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_sum_pos",
+      "entry": 13904,
+      "bytes": "8954241048894c24084883ec18c744240400000000c7042400000000eb088b0424ffc08904248b4424283904247d2948630424488b4c2420833c81007e1848630424488b4c24208b04818b4c240403c88bc189442404ebc68b4424044883c418c3",
+      "c": "\r\nint probe_sum_pos(longlong param_1,int param_2)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  \r\n  local_14 = 0;\r\n  for (local_18 = 0; local_18 < param_2; local_18 = local_18 + 1) {\r\n    if (0 < *(int *)(param_1 + (longlong)local_18 * 4)) {\r\n      local_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\r\n    }\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_strlen2",
+      "entry": 14016,
+      "bytes": "48894c24084883ec18c704240000000048630424488b4c24200fbe040185c0740a8b0424ffc0890424ebe58b04244883c418c3",
+      "c": "\r\nint probe_strlen2(longlong param_1)\r\n\r\n{\r\n  undefined4 local_18;\r\n  \r\n  for (local_18 = 0; *(char *)(param_1 + local_18) != '\\0'; local_18 = local_18 + 1) {\r\n  }\r\n  return local_18;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_count_bits",
+      "entry": 14080,
+      "bytes": "894c24084883ec18c7042400000000837c242000741d8b44242083e0018b0c2403c88bc18904248b442420d1e889442420ebdc8b04244883c418c3",
+      "c": "\r\nint probe_count_bits(uint param_1)\r\n\r\n{\r\n  undefined4 local_res8;\r\n  undefined4 local_18;\r\n  \r\n  local_18 = 0;\r\n  for (local_res8 = param_1; local_res8 != 0; local_res8 = local_res8 >> 1) {\r\n    local_18 = local_18 + (local_res8 & 1);\r\n  }\r\n  return local_18;\r\n}\r\n\r\n"
     }
   ]
 }
