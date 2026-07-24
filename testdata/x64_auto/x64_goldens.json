@@ -45,8 +45,8 @@
     {
       "name": "switch_dense",
       "entry": 10432,
-      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0d8f2700008b8481382900004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
-      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000028e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x79b0)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
+      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0d8f2800008b8481382900004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
+      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000028e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x7ab0)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
     },
     {
       "name": "switch_sparse",
@@ -569,6 +569,12 @@
       "entry": 16080,
       "bytes": "48894c2408488b44240848d1e8c3",
       "c": "\r\nulonglong probe_ret_ull(ulonglong param_1)\r\n\r\n{\r\n  return param_1 >> 1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_ret_uchar",
+      "entry": 16112,
+      "bytes": "894c24088b44240825ff000000c3",
+      "c": "\r\nundefined1 probe_ret_uchar(undefined1 param_1)\r\n\r\n{\r\n  return param_1;\r\n}\r\n\r\n"
     }
   ]
 }
