@@ -15,9 +15,20 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-24 세션10, master `d9d52f0` origin 푸시, 전 게이트 green)
+## 현재 상태 (2026-07-24 세션10, master `48bd5b4` origin 푸시, 전 게이트 green)
 
 **권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`**. 요약:
+- **[세션10 후속: 비-룰 레이어 parity 감사 + 2건 착지]** (`48bd5b4` 등). 룰 감사를 엔진 나머지로 확장
+  (Sonnet 워커 2슬롯이 25개 파일 수집, Opus가 C++ 대조 검증). 결과: `known mismatch` 마커 **~200개 전부
+  명시적 선언**(숨은 휴리스틱 아님, 대다수 DORMANT=현 코퍼스 미발화 기능) + **무표기 HOT divergence ~8건** 발견.
+  **검증 후 착지 2건**(`48bd5b4`, dormant on 현 코퍼스라 회귀 0): #4 `checkImpliedCover`가 `op.Code()==CPUI_CALL`
+  리터럴 -> `op.IsCall()`(CALLIND/CALLOTHER 누락, coreaction.cc:3408) / #5 PTRADD 타입전파 누락 -> `TypeOpPtradd`
+  포팅(typeop.cc:2270, propagateAddIn2Out 재사용). **큰 미착지 3건**: AddTreeState distribute 반쪽포팅
+  (addtreestate.go, 2-pass fixup 부재) / merge.go mergeIndirect 부재 / markExplicitBase isAddrTied 축약. 상세=NEXT_SESSION 감사맵.
+  **오도 주석 정정 3건**(`57cd36b`/`a1db831`/`48bd5b4`): RuleHumptyOr 가드 근본(ActionPool은 C++과 동일 -- 잠재
+  룰셋 발산이지 인프라 결함 아님) + inferSignedConstType의 "metatype 순서 버그"(printc.go) -> **실측 반증**: Go
+  metatype 값(datatype.go:11-15)이 C++ type.hh와 바이트 동일, 순서는 충실. **교훈: 오도 주석이 숨은 휴리스틱보다
+  큰 개삽질 위험 -- 근본 주장은 C++ 실측으로 재검증, 코드/주석 믿지 말 것.**
 - **[세션10] 동명 다른 룰 감사 완결 -- 잔여 5건 전부 착지, 회귀 0**(`60b66a9` Rule2Comp2Mult /
   `7c0e31c` RuleBoolZext / `992ed24` RuleOrCompare / `6a8d953` RulePushMulti 정리 / `d9d52f0` RuleHumptyOr).
   세션8 감사의 name-collision 12건 완결(세션8:3 + 세션9:4 + 세션10:5). **세션9가 차단/revert했던 2건 해소**:

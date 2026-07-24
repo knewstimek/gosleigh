@@ -10,11 +10,29 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (master `d9d52f0` origin 푸시, 전 게이트 green -- 세션10 룰 5건 = 동명 다른 룰 감사 완결)
+## 현재 상태 (master `48bd5b4` origin 푸시, 전 게이트 green -- 세션10 룰 5건 완결 + 비-룰 레이어 감사 착수)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **10/13**,
   x64_auto **31/32**, production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
 - x64_auto 잔여 **1건** = **switch_dense**. corpus2 잔여 **3건** = **add_pt** / **caller** / **faverage**.
-- 세션8/9/10 상세는 CHANGELOG. 다음 작업은 아래 "다음 작업".
+  (전부 하네스 한계/FP 선언된 미포팅/휴리스틱 거부 -- 묻힌 휴리스틱 아님. 상세 아래 감사맵.)
+- 세션8/9/10 상세는 CHANGELOG. 다음 작업은 아래 "다음 작업" + 감사맵.
+
+### [세션10 후속 감사맵] 비-룰 레이어 무표기 HOT divergence -- 다음 세션 최대 광맥
+룰 감사(12건 완결)를 엔진 나머지로 확장. `known mismatch` 마커 ~200개는 **전부 명시 선언**(숨은 휴리스틱 아님,
+대다수 DORMANT). 문제는 **무표기(선언 안 된) HOT divergence**. Opus 검증 완료분:
+
+| # | 위치 | C++ 참조 | gap | 상태 |
+|---|---|---|---|---|
+| 4 | action_mark.go checkImpliedCover | coreaction.cc:3408 `op->isCall()` | `CPUI_CALL` 리터럴 -> CALLIND/CALLOTHER 누락 | **착지 `48bd5b4`** |
+| 5 | action_infertypes.go inferPropagateEdge | typeop.cc:2270 TypeOpPtradd | PTRADD 타입전파 미배선(배열인덱스마다 끊김) | **착지 `48bd5b4`** |
+| 1 | addtreestate.go AddTreeState | ruleaction.cc:6036-6069/6463-6493 | 2-pass distribute fixup(preventDistribution/isDistributeUsed/distributeIntMultAdd) 부재 = 단일 pass 반쪽포팅. `ptr[(x+y)*c]` 인덱싱 재구성 shape/term-set divergence | **미착지(최대/최난)** |
+| 2 | merge.go MergeMarker | merge.cc:846-882 mergeIndirect | addrForce 분기+snipOutputInterference 부재, 모든 marker를 mergeOp 균일 처리. addrForce 로컬이 call 넘어 살 때 | **미착지** |
+| 3 | action_mark.go markExplicitBase | coreaction.cc:3024-3065 | isAddrTied fallthrough 예외(ZEXT/SUBPIECE/PIECE)를 무조건 return -1로 축약. 혼합크기 addrtied 로컬 explicit/implied 분류(모든 함수) | **미착지** |
+
+추가 무표기(2차): merge.go mergeAdjacentCopies가 `Type()`(전파값) 비교 -> C++은 `outputTypeLocal/inputTypeLocal`(intrinsic);
+mergeAddrTied가 exact (space,offset,size)만 -> C++ overlapLoc 확장 부재. printc.go markPrologueOps/inferSignedConstType는
+render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법: 워커 발견을 그대로 믿지 말고 C++ 원문 실측 검증(세션10에
+워커 metatype 오진 반증). 착지 시 전 골든 게이트 -- #1/#3는 출력 shape 바꿀 수 있어 특히 주의.**
 
 ### [세션8 룰 전수 감사 -- 세션10 완결] 동명 다른 룰 12건 전부 착지
 

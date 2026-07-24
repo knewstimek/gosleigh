@@ -5,6 +5,34 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-24 (세션10 후속): 비-룰 레이어 parity 감사 + 무표기 divergence 2건 착지 (master `48bd5b4`)
+룰 감사(12건 완결)를 엔진 나머지로 확장. Sonnet 워커 2슬롯이 pkg/pcode 25개 파일에서 non-faithfulness 마커를
+수집(비중첩 분할), Opus가 C++ 원문 대조로 **검증**(워커 발견을 그대로 믿지 않음 -- 실제로 워커의 metatype 오진을 반증).
+
+**정량 결과**: `known mismatch` 명시 마커 **~200개**(전부 선언됨 = 숨은 휴리스틱 아님, 대다수 DORMANT: FP/jumptable/
+IOP-space/LaneDivide/segment/structured-type/this-pointer/division-form 등 현 코퍼스 미발화). **무표기(선언 안 된)
+HOT divergence ~8건** 발견.
+
+**검증 후 착지 2건** (`48bd5b4`, 둘 다 dormant on x64_auto라 출력 바이트 무변경, 전 게이트 green):
+- #4 `ActionMarkImplied::checkImpliedCover` -- Go가 `op.Code()==CPUI_CALL` 리터럴로 loads-crossing-calls 가드 -> C++
+  `op->isCall()`(coreaction.cc:3408, CALL/CALLIND/CALLOTHER)로 수정. 간접호출 출력이 call 넘어 잘못 implied 접히던 것.
+- #5 `TypeOpPtradd::propagateType`(typeop.cc:2270) 미배선 -> PTRADD가 default로 빠져 배열인덱스마다 포인터 타입전파
+  중단. PTRSUB 로직 + slot2 가드 미러(이미 있는 propagateAddIn2Out 재사용). action_infertypes.go에 케이스 추가.
+
+**큰 미착지 3건** (실제 gap, 각각 신중한 C++ 포팅 필요 -- NEXT_SESSION 감사맵):
+- **AddTreeState distribute 반쪽포팅**(addtreestate.go): C++ 2-pass fixup(preventDistribution/isDistributeUsed +
+  distributeIntMultAdd 물리 재작성 + 재수렴, ruleaction.cc:6463-6493)을 단일 pass로. `ptr[(x+y)*c]` 인덱싱 재구성 divergence.
+- **merge.go MergeMarker**: `mergeIndirect`(merge.cc:846-882, addrForce 분기 + snipOutputInterference) 부재, 모든 marker를 mergeOp로 균일 처리. addrForce 로컬이 call 넘어 살 때 영향.
+- **action_mark.go markExplicitBase**: C++ isAddrTied fallthrough 예외(ZEXT/SUBPIECE/PIECE, coreaction.cc:3024-3065)를 무조건 return -1로 축약. 혼합크기 접근 addrtied 로컬의 explicit-vs-implied 분류.
+
+**오도 주석 정정 3건**(핵심 교훈): RuleHumptyOr 가드 근본(`57cd36b`/`a1db831` -- C++ ActionPool::processOp
+가 Gosleigh와 구조 동일임을 action.cc:822 대조로 확인 -> "인프라 순서 결함"이 아니라 **역쌍 룰의 잠재 발산이
+C++에도 latent**, Ghidra는 트리거 형태를 안 만들 뿐) + inferSignedConstType의 "Go metatype 순서 버그"(`48bd5b4`
+printc.go) -> **실측 반증**: datatype.go:11-15가 C++ type.hh:81-86과 바이트 동일(INT=14,UINT=13), 순서는 충실.
+**교훈: 근본 주장은 코드/주석 믿지 말고 C++ 실측으로 재검증 -- 오도 주석이 숨은 휴리스틱보다 개삽질 위험 큼.**
+
+---
+
 ### 2026-07-24 (세션10): 동명 다른 룰 감사 완결 -- 잔여 5건 전부 착지, 회귀 0 (master `d9d52f0`)
 자율주행 세션(감독관 Opus + Sonnet 워커 2슬롯 병렬). 세션8 룰 감사가 남긴 12건 중 잔여 5건(#7/#8/#9/#11/#12)을
 전부 착지 -- **name-collision 감사 12건 완결**(세션8: 3, 세션9: 4, 세션10: 5). 방법론은 세션9와 동일(진짜 C++
