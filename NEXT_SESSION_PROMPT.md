@@ -142,9 +142,15 @@ gap이 4개 family로 수렴한다. 각 family는 별개 근본이라 하나씩 
   조건 `ECX==EDX`가 정확히 형성돼 있음(gosleigh `probe_ret_eq` ssadump) -- 룰만 없어서 미발화.
 - **다부품(단일 룰 포팅으로 부족)**: (1) both-constant 케이스(9498-9525, CloneBlockOps 불필요): 블록구조(inblock0/1/
   rootblock/CBRANCH) + path0istrue + `MULTIEQUAL(1,0)`->`INT_ZEXT(cond)`(sz>1) 또는 `COPY/BOOL_NEGATE`(sz==1). ~60-80줄.
-  (2) **bool 반환 렌더 미검증**: 포팅 후 `zext(a==b)` 반환이 Ghidra처럼 `bool return a==b`로 축약되려면 subvariable/
-  bool-flow + 반환타입=bool 추론이 동작해야 함(현 코퍼스에 bool 반환 MATCH 함수 0개 = 이 경로 untested). (3) 비상수
-  케이스(BOOL_AND/OR, 9449-9548)는 CloneBlockOps(gatherExpression/constructBool) 필요 = 별도 대공사.
+  (2) **bool 반환 렌더 미검증(세션11 예측)**: 룰만 넣으면 `local=INT_ZEXT(a==b); return local`(inline시 `return
+  zext(a==b)`). `inferReturnType`(printc.go)에 **TYPE_BOOL/zext-drop 처리 없음**(세션11 확인) -> 산출 예측 =
+  `undefined4 f(){ return (uint)(a==b); }`(구조는 개선되나 **bool 아님 = non-MATCH**). Ghidra `bool return a==b`엔
+  subvariable/bool-flow + 반환타입=bool 추론 추가 필요(현 코퍼스에 bool 반환 MATCH 함수 0개 = 이 경로 untested). 즉
+  **both-constant 룰 단독 착지는 partial(project 규범상 미착지)**이라 세션11 미착수 -- 룰+렌더 동반 세션 필요.
+  **단, both-constant 룰은 기존 골든에 MULTIEQUAL(상수,상수) 부재라 회귀 0(게이트 증명) -> 룰+렌더를 한 세션에 묶으면
+  안전.** (3) 비상수 케이스(BOOL_AND/OR, 9449-9548)는 CloneBlockOps(gatherExpression/constructBool) 필요 = 별도 대공사.
+  API 메모(세션11): 블록 in-edge는 `op.Parent()`(BlockBasic).getIn(i) + `asBasic(*FlowBlock)->*BlockBasic`.LastOp()로
+  CBRANCH 접근(action_nodejoin.go 선례), BooleanFlip=`HasFlag(PcodeOpBooleanFlip)`, ZEXT 삽입=OpUninsert+OpSetOpcode.
 - 대상: rules_misc.go RuleConditionalMove(스텁 교체) + FlowBlock API(In/SizeOut/TrueOut/isBooleanFlip/LastOp) +
   op-surgery(opUninsert/opInsertBegin/opBoolNegate) + 렌더/subvar 검증. **게이트: goldengap probe_ret_eq/lt/uge
   재추가 MATCH + 전 골든 + pcode/bridge 발진 + 구조화 회귀(if/else collapse가 타 함수 오발화 주의).** 세션11은
