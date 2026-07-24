@@ -457,3 +457,31 @@ long probe_dist_factor(long *arr, long i, long j) {
 long probe_dist_mixed(long *arr, long i, long j) {
 	return arr[(i + j) * 3 + j];
 }
+
+/* --- self-contained divergence probes (no external symbols/globals) --- */
+
+/* unsigned division by constant -> magic-number multiply (RuleDivOpt). */
+unsigned probe_udiv(unsigned x) { return x / 7u; }
+
+/* signed division by constant -> signed magic + sign correction. */
+int probe_sdiv(int x) { return x / 7; }
+
+/* signed modulo by constant. */
+int probe_smod(int x) { return x % 10; }
+
+/* select / max via ternary. */
+int probe_ternary(int a, int b) { return a > b ? a : b; }
+
+/* nested ternary clamp. */
+int probe_clamp(int x) { return x < 0 ? 0 : (x > 100 ? 100 : x); }
+
+
+/* short sign-extension into int arithmetic. */
+int probe_sext(short s) { return s + 1; }
+
+/* char array accumulation loop (byte load, sign extend). */
+int probe_charsum(char *s, int n) {
+	int t = 0;
+	for (int i = 0; i < n; i++) t += s[i];
+	return t;
+}
