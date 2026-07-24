@@ -30,7 +30,10 @@ int로 오승격. LOAD는 값-provenance 체인을 끊으므로(로드값 타입
   scale=4인데 int/8로 widening(역전파) + 8B int가 "longlong" 아닌 "int" 오명명 -> GetInputCast가 cast 억제. 깊은 타입전파.
 - **#7 do-while + accumulator 누산기+반환 통째 드롭 (심각)**: `do{s+=i;i++;}while(i<n);return s`가 `void(void)`로
   붕괴. **입력 무결성 OK + decomp_dbg(C++ 코어 동일 격리 바이트) ssadiff로 gosleigh 엔진 버그 확정**(C++은 s 완복구).
-  트리거 = do-while + 둘째 스택 로컬. dowhile_count(단일)/sum_loop(for+accum)은 MATCH. flow/heritage 딥, 고우선.
+  **신설 SSA_DUMP_AFTER stage-dump 툴(`6ac87b1`, action.go env-gated)로 근본 정밀 확정**: s는 heritage 정상 등록
+  (초기 "미등록" 가설 반증) -> store-to-load forward가 exit reload `u=s[-0x14]`를 루프 내부 누산기 r8로 치환 ->
+  r8 def가 루프 body라 exit dominate 불가(SSA 위반) -> deadcode가 invalid `return r8` 제거 -> void. 수정=forward를
+  store dominates load일 때만 허용. 트리거=do-while+둘째 스택 로컬(dowhile_count/sum_loop=MATCH). copy-prop broad-blast.
 - **#8 `-x*c` 미fold**: `-x*3`->`-param_1*3` vs Ghidra `param_1*-3`. cosmetic, Rule2Comp2Mult 발진위험이라 defer.
 - **#9 비교 반환/대입 미collapse (최고가치, 최다빈도)**: `return a==b`가 `if(c){x=1}else{x=0}return x`로 방출.
   근본 = **`RuleConditionalMove`(rules_misc.go:821)가 스텁**(identical-input collapse만 = C++ trivial 부분케이스).
@@ -40,8 +43,10 @@ int로 오승격. LOAD는 값-provenance 체인을 끊으므로(로드값 타입
 
 **MATCH 회귀 프로브 20건 추가**(x64_auto 32->61, MATCH 60/61, switch_dense만 잔여): 분배/시프트/포인터차/폭변환/
 마스크/3D인덱싱/early-return/이중역참조/continue/부호혼합 등 -- 흔한 관용구가 충실함을 실측 확정. 커밋 `9c4a6f8`/
-`f541dc6`/`3c149b0`/`32858dd`/`0013c8e`. **교훈: latent 감사항목은 goldengap 프로브로 speculation->실측 전환;
-붕괴형 mismatch는 decomp_dbg ssadiff로 입력 무결성부터.**
+`f541dc6`/`3c149b0`/`32858dd`/`0013c8e`. **신설 툴 `SSA_DUMP_AFTER`(`6ac87b1`, action.go)**: 파이프라인 stage별
+SSA 스냅샷(ssadump는 최종만) -- op/varnode가 **언제** 사라지는지 짚어 #7을 store-forward dominance 위반으로 국소화.
+env 미설정 시 inert. **교훈: latent 감사항목은 goldengap 프로브로 speculation->실측 전환; 붕괴형 mismatch는
+decomp_dbg ssadiff로 입력 무결성부터; "언제 사라지나"는 stage-dump으로.**
 
 ---
 
