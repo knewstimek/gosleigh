@@ -1297,13 +1297,25 @@
           "byte-identical (indent-insensitive)"
         ]
       }
+    },
+    {
+      "name": "probe_find_max",
+      "entry": 17120,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 108,
-    "match": 107,
+    "total": 109,
+    "match": 108,
     "tag_counts": {
-      "MATCH": 107,
+      "MATCH": 108,
       "TYPECAST": 1
     }
   }

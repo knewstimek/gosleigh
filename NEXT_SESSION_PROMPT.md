@@ -10,9 +10,14 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (master `3995622` origin 푸시, 전 게이트 green -- 세션12 엔진 fix 3건: #9 + #7 누산기 + #7 snapshot)
+## 현재 상태 (master origin 푸시, 전 게이트 green -- 세션12 엔진 fix 4건: #9 + #7 누산기 + #7 snapshot + #6 find_max)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **10/13**,
-  x64_auto **107/108**(switch_dense만 non-match), production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
+  x64_auto **108/109**(switch_dense만 non-match), production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
+- **[세션12 fix4] #6 find_max = `TypeOrder` 포인터 pointee 재귀**: 배열 element 타입추론(`int *param_1` vs
+  `undefined4 *param_1` + 여분 `(int)` cast). 근본=TypeOrder(datatype.go)가 pointee 재귀 없이 ptr-to-int/ptr-to-
+  undefined4를 equal(0)로 판정 -> 먼저 적용된 undefined4*를 더 specific한 int*가 못 밀어냄. C++ TypePointer::compare
+  재귀 포팅(회귀 0). **또 오진 정정**: "input↔input 전파 부재" 가설(단일-slot 인터페이스만 보고 assume)은 반증 --
+  driver inferPropagateEdge에 INT_SLESS input↔input 이미 있음. 실측=INFER_TRACE 임시계측.
 - **[세션12 착지 2건]**(전 골든 무회귀):
   - `94af189` **#9 both-constant conditional-move collapse** (`return a==b` -> `bool f(){return a==b;}`):
     RuleConditionalMove 스텁을 C++ both-constant 분기(ruleaction.cc:9498-9524)로 충실 포팅 + **ActionRedundBranch
@@ -39,14 +44,12 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
    살리는데, **`loadGuard` 리스트(동적 LOAD 주소의 min/max offset 범위)가 ValueSet 기반 index-range 분석에 의존** =
    Ghidra 최난이도 서브시스템 중 하나(대규모 단독 포팅, 전 LOAD/STORE 함수 영향 broad). repro: `int f(int n){int
    t[4]={10,20,30,40}; return t[n&3];}`.
-2. **[#6 타입 back-prop family]** struct 혼합폭 cast / find_max element / sar_round signedness. **세션12 실측 확정
-   근본**: gosleigh `TypeOp.PropagateType` 인터페이스가 **input↔output 두 방향만** 모델링(typeop.go:15-27 "partial
-   -- E5 subset")하고 **input↔input 전파 부재**. C++ `TypeOpIntSless/Equal::propagateType`(typeop.cc:1035/947)는
-   inslot/outslot 둘 다 입력일 때(input<->input) TYPE_INT를 상대 피연산자로 전파 -> find_max `local_14(int) <
-   param_1[i]`에서 int가 param_1[i]로 역전파 -> `int *param_1`(cast 제거). gosleigh는 이 엣지가 없어 `undefined4
-   *param_1` + 여분 `(int)` cast 유지. **수정 = PropagateType 인터페이스+InferTypes driver에 input↔input 엣지 추가**
-   (전 함수 타입추론 영향 broad, 세션11이 struct case 시도 후 lateral로 revert한 이력). repro: `int f(int*a,int n){int
-   m=a[0]; for(i=1..)if(a[i]>m)m=a[i]; return m;}`. 상세 아래 옛 #6.
+2. **[#6 타입 back-prop family -- find_max 착지]** `probe_find_max`(포인터 element 타입)는 세션12 착지(`TypeOrder`
+   pointee 재귀). **잔여 = struct 혼합폭 cast(`probe_struct`) + sar_round signedness.** #6 find_max 교훈: driver
+   `inferPropagateEdge`는 INT_SLESS input↔input 전파를 이미 가졌고(세션12 초기 "input↔input 부재" 가설은 오진), 진짜
+   근본은 `TypeOrder`(datatype.go)가 **포인터 pointee 재귀를 안 해** ptr-to-int와 ptr-to-undefined4를 equal(0)로 봐서
+   먼저 온 undefined4*가 int*를 못 밀려나던 것 -> C++ TypePointer::compare 재귀 포팅으로 해결. struct case도 유사
+   타입전파일 수 있으나(세션11 lateral revert 이력) 착수 전 INFER_TRACE류 계측 필수. broad(전 함수 타입) 게이트 필수.
 3. **[대규모] FP 서브시스템**(faverage): XMM param 미복구. 아래 FP 특성화.
 4. **[cosmetic]** #8 -x*c fold, #10 for 과승격 등. ROI 낮음.
 **[세션12 #7 완료 기록]** 누산기(dowhile, `1f6a4cb`)와 loop-head snapshot(binsearch, `3995622`) 양대 케이스 착지.

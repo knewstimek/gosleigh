@@ -15,10 +15,14 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-25 세션12, master `3995622` origin 푸시, 전 게이트 green)
+## 현재 상태 (2026-07-25 세션12, master origin 푸시, 전 게이트 green)
 
 **권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md` (== 세션12 다음 우선순위 == 블록)**. 요약:
-- **[세션12] 엔진 fix 3건 착지(전 골든 무회귀), x64_auto 102->107/108**:
+- **[세션12] 엔진 fix 4건 착지(전 골든 무회귀), x64_auto 102->108/109**:
+  - **#6 find_max = `TypeOrder` 포인터 pointee 재귀**: 배열 element 타입추론(`int *param_1`). 근본=TypeOrder
+    (datatype.go)가 pointee 재귀 없이 ptr-to-int/ptr-to-undefined4를 equal로 봐서 먼저 온 undefined4*를 int*가 못
+    밀어냄. C++ TypePointer::compare 재귀 포팅. **오진 정정**: driver는 INT_SLESS input↔input 이미 가짐(초기 "부재"
+    가설 반증), 진짜 근본은 TypeOrder. 계측=INFER_TRACE.
   - `3995622` **#7 loop-head snapshot fix**: binsearch류(조건부 루프변수 업데이트 + `iVar1=(lo+hi)/2` snapshot)가
     루프변수 전부 미선언/미대입으로 방출되던 것. 근본=markPrologueOps `isSelfReferentialMultiequal`(ESP register
     live-through phi용)이 stack-slot 루프변수 merge phi에 오발화 -> 업데이트+snapshot cascade 억제. stack-space phi는

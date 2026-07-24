@@ -45,8 +45,8 @@
     {
       "name": "switch_dense",
       "entry": 10432,
-      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0ddf2b00008b8481382900004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
-      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000028e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x7e00)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
+      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0de72c00008b8481382900004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
+      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000028e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x7f08)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
     },
     {
       "name": "switch_sparse",
@@ -647,6 +647,12 @@
       "entry": 16960,
       "bytes": "44894424188954241048894c24084883ec18c7442404000000008b442428ffc8894424088b442408394424047f538b4424088b4c240403c88bc1992bc2d1f889042448630424488b4c24208b54243039148175058b0424eb2d48630424488b4c24208b5424303914817d0b8b0424ffc089442404eb098b0424ffc889442408eba3b8ffffffff4883c418c3",
       "c": "\r\nint probe_binsearch(longlong param_1,int param_2,int param_3)\r\n\r\n{\r\n  int iVar1;\r\n  int local_14;\r\n  int local_10;\r\n  \r\n  local_14 = 0;\r\n  local_10 = param_2 + -1;\r\n  while( true ) {\r\n    if (local_10 < local_14) {\r\n      return -1;\r\n    }\r\n    iVar1 = (local_14 + local_10) / 2;\r\n    if (*(int *)(param_1 + (longlong)iVar1 * 4) == param_3) break;\r\n    if (*(int *)(param_1 + (longlong)iVar1 * 4) < param_3) {\r\n      local_14 = iVar1 + 1;\r\n    }\r\n    else {\r\n      local_10 = iVar1 + -1;\r\n    }\r\n  }\r\n  return iVar1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_find_max",
+      "entry": 17120,
+      "bytes": "8954241048894c24084883ec18b804000000486bc000488b4c24208b040189442404c7042401000000eb088b0424ffc08904248b4424283904247d2448630424488b4c24208b5424043914817e1048630424488b4c24208b048189442404ebcb8b4424044883c418c3",
+      "c": "\r\nint probe_find_max(int *param_1,int param_2)\r\n\r\n{\r\n  int local_18;\r\n  int local_14;\r\n  \r\n  local_14 = *param_1;\r\n  for (local_18 = 1; local_18 < param_2; local_18 = local_18 + 1) {\r\n    if (local_14 < param_1[local_18]) {\r\n      local_14 = param_1[local_18];\r\n    }\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
     }
   ]
 }
