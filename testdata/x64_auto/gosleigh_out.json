@@ -30,7 +30,7 @@
     },
     {
       "name": "switch_dense",
-      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x5308) + 0x29d0))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
+      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x5418) + 0x2ae0))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
     },
     {
       "name": "switch_sparse",
@@ -395,6 +395,22 @@
     {
       "name": "probe_count_eq",
       "output": "\nint probe_count_eq(longlong param_1,int param_2,int param_3)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nif (*(int *)(param_1 + (longlong)local_18 * 4) == param_3) {\nlocal_14 = local_14 + 1;\n}\n}\nreturn local_14;\n}\n"
+    },
+    {
+      "name": "probe_compound",
+      "output": "\nint probe_compound(int *param_1,int param_2)\n\n{\n*param_1 = *param_1 + param_2;\nreturn *param_1;\n}\n"
+    },
+    {
+      "name": "probe_clearbit",
+      "output": "\nuint probe_clearbit(uint param_1,byte param_2)\n\n{\nreturn param_1 \u0026 ~(1 \u003c\u003c (param_2 \u0026 0x1f));\n}\n"
+    },
+    {
+      "name": "probe_setbit",
+      "output": "\nuint probe_setbit(uint param_1,byte param_2)\n\n{\nreturn param_1 | 1 \u003c\u003c (param_2 \u0026 0x1f);\n}\n"
+    },
+    {
+      "name": "probe_rotr",
+      "output": "\nuint probe_rotr(uint param_1,byte param_2)\n\n{\nreturn param_1 \u003e\u003e (param_2 \u0026 0x1f) | param_1 \u003c\u003c (0x20 - param_2 \u0026 0x1f);\n}\n"
     }
   ]
 }

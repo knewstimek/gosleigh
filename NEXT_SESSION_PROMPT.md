@@ -112,6 +112,11 @@ MATCH, ret_param·#7 반환 복구)**. 신설 진단툴 SSA_DUMP_AFTER(stage별 
   element/pointer로 역전파 못함**(TypeOpIntSless/Less::propagateType back-edge). #6과 같은 "Ghidra의 풍부한 타입
   back-propagation 미포팅" family. broad-blast 타입전파. **정리(형식/저severity): `probe_dot`(내적)은 긴 식에서
   `;`가 줄바꿈되는 PrettyEmitter 포맷 차이 = umulhi-class 기존 갭(그룹토큰 스트림), 의미 무관.**
+- **#6 동류(cast-insertion signedness): `probe_sar_round`**(세션11 프로브, 제거). `(x + (x>>31 & 7)) >> 3`(÷8 반올림).
+  Ghidra: `(int)(param_1 + (param_1>>0x1f & 7U)) >> 3`. Gosleigh: `(int)` 누락 -> `>> 3`이 C에서 logical(unsigned)로
+  오해석. 근본=INT_SRIGHT input[0]이 signed여야 하나 `param_1+(..&7U)` 합을 gosleigh는 int(Ghidra는 uint)로 타이핑 +
+  gosleigh `shiftValueInputCast`가 `TypeReadFacing`(varnode) 사용, C++은 `getHighTypeReadFacing`(HighVariable) 사용.
+  로직은 C++과 동일(typeop_cast.go:590), 차이는 타입 signedness 전파 + High/varnode 타입 미분리. broad-blast 타입전파.
 
 **[신규 #7 -- do-while + accumulator: 누산기+반환값 통째 드롭 (HOT, 심각, C++ 실측 확정, 미착지=flow/heritage 딥)]**
 - 재현: `int f(int n){ int i=0,s=0; do{ s+=i; i++; } while(i<n); return s; }` (goldengap `probe_neg`가 아니라

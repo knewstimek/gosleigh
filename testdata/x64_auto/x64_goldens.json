@@ -45,8 +45,8 @@
     {
       "name": "switch_dense",
       "entry": 10432,
-      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0da72900008b8481382900004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
-      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000028e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x7bc8)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
+      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0db72a00008b8481382900004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
+      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000028e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x7cd8)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
     },
     {
       "name": "switch_sparse",
@@ -593,6 +593,30 @@
       "entry": 16352,
       "bytes": "44894424188954241048894c24084883ec18c744240400000000c7042400000000eb088b0424ffc08904248b4424283904247d1e48630424488b4c24208b542430391481750a8b442404ffc089442404ebd18b4424044883c418c3",
       "c": "\r\nint probe_count_eq(longlong param_1,int param_2,int param_3)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  \r\n  local_14 = 0;\r\n  for (local_18 = 0; local_18 < param_2; local_18 = local_18 + 1) {\r\n    if (*(int *)(param_1 + (longlong)local_18 * 4) == param_3) {\r\n      local_14 = local_14 + 1;\r\n    }\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_compound",
+      "entry": 16464,
+      "bytes": "8954241048894c2408488b4424088b0003442410488b4c24088901488b4424088b00c3",
+      "c": "\r\nint probe_compound(int *param_1,int param_2)\r\n\r\n{\r\n  *param_1 = *param_1 + param_2;\r\n  return *param_1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_clearbit",
+      "entry": 16512,
+      "bytes": "89542410894c24084883ec188b442428b901000000890c240fb6c88b0424d3e0f7d08b4c242023c88bc14883c418c3",
+      "c": "\r\nuint probe_clearbit(uint param_1,byte param_2)\r\n\r\n{\r\n  return param_1 & ~(1 << (param_2 & 0x1f));\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_setbit",
+      "entry": 16576,
+      "bytes": "89542410894c24084883ec188b442428b901000000890c240fb6c88b0424d3e08b4c24200bc88bc14883c418c3",
+      "c": "\r\nuint probe_setbit(uint param_1,byte param_2)\r\n\r\n{\r\n  return param_1 | 1 << (param_2 & 0x1f);\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_rotr",
+      "entry": 16640,
+      "bytes": "89542410894c24088b4424100fb6c88b442408d3e8b9200000002b4c24108b542408d3e28bca0bc1c3",
+      "c": "\r\nuint probe_rotr(uint param_1,byte param_2)\r\n\r\n{\r\n  return param_1 >> (param_2 & 0x1f) | param_1 << (0x20 - param_2 & 0x1f);\r\n}\r\n\r\n"
     }
   ]
 }
