@@ -516,3 +516,10 @@ int probe_continue_sum(int *a, int n) {
 	return s;
 }
 long long probe_mixed_sign(int a, unsigned b) { return (long long)a + b; }
+
+/* --- session11 batch 5: constant / render stress (self-contained) --- */
+
+int probe_negconst(int x) { return x + -5; }
+unsigned probe_hexbig(unsigned x) { return x | 0xdeadbeef; }
+long long probe_const64(long long x) { return x + 0x100000000LL; }
+unsigned probe_shiftmask(unsigned x) { return (x << 8) | (x >> 24); }
