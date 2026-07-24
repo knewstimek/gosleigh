@@ -555,3 +555,24 @@ short probe_ret_short(int x) { return (short)(x + 1); }
 char probe_ret_char(int x) { return (char)(x + 1); }
 long long probe_ret_ll(int x) { return (long long)x * 1000; }
 unsigned short probe_ret_ushort(unsigned x) { return (unsigned short)(x >> 3); }
+
+/* --- session11 batch 9: realistic algorithms (conditional-light) --- */
+
+int probe_fib(int n) {
+	int a = 0, b = 1;
+	for (int i = 0; i < n; i++) { int t = a + b; a = b; b = t; }
+	return a;
+}
+int probe_power(int base, int exp) {
+	int r = 1;
+	for (int i = 0; i < exp; i++) r *= base;
+	return r;
+}
+int probe_stride_sum(int *a, int n, int k) {
+	int s = 0;
+	for (int i = 0; i < n; i += k) s += a[i];
+	return s;
+}
+void probe_reverse_arr(int *a, int n) {
+	for (int i = 0; i < n / 2; i++) { int t = a[i]; a[i] = a[n-1-i]; a[n-1-i] = t; }
+}

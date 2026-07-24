@@ -30,7 +30,7 @@
     },
     {
       "name": "switch_dense",
-      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x4998) + 0x2160))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
+      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x4bb8) + 0x2380))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
     },
     {
       "name": "switch_sparse",
@@ -287,6 +287,22 @@
     {
       "name": "probe_ret_ushort",
       "output": "\nuint probe_ret_ushort(uint param_1)\n\n{\nreturn param_1 \u003e\u003e 3;\n}\n"
+    },
+    {
+      "name": "probe_fib",
+      "output": "\nint probe_fib(int param_1)\n\n{\nint iVar1;\nundefined4 local_18;\nundefined4 local_14;\nundefined4 local_10;\n\nlocal_10 = 0;\nlocal_14 = 1;\nfor (local_18 = 0; local_18 \u003c param_1; local_18 = local_18 + 1) {\niVar1 = local_10 + local_14;\nlocal_10 = local_14;\nlocal_14 = iVar1;\n}\nreturn local_10;\n}\n"
+    },
+    {
+      "name": "probe_power",
+      "output": "\nint probe_power(int param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 1;\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nlocal_14 = local_14 * param_1;\n}\nreturn local_14;\n}\n"
+    },
+    {
+      "name": "probe_stride_sum",
+      "output": "\nint probe_stride_sum(longlong param_1,int param_2,int param_3)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + param_3) {\nlocal_14 = local_14 + *(int *)(param_1 + (longlong)local_18 * 4);\n}\nreturn local_14;\n}\n"
+    },
+    {
+      "name": "probe_reverse_arr",
+      "output": "\nvoid probe_reverse_arr(longlong param_1,int param_2)\n\n{\nundefined4 uVar1;\nundefined4 local_18;\n\nfor (local_18 = 0; local_18 \u003c param_2 / 2; local_18 = local_18 + 1) {\nuVar1 = *(undefined4 *)(param_1 + (longlong)local_18 * 4);\n*(undefined4 *)(param_1 + (longlong)local_18 * 4) =\n*(undefined4 *)(param_1 + (longlong)((param_2 + -1) - local_18) * 4);\n*(undefined4 *)(param_1 + (longlong)((param_2 + -1) - local_18) * 4) = uVar1;\n}\nreturn;\n}\n"
     }
   ]
 }

@@ -178,6 +178,10 @@ gap이 4개 family로 수렴한다. 각 family는 별개 근본이라 하나씩 
   gosleigh보다 엄격 -- 아마 body가 second iterator(`p++`=local_res8)를 수정 + `n--`가 post-decr-in-condition일 때
   for 거부). **저우선**: cosmetic + 구조화 수정은 정상 for 다수(sum_loop 등) 회귀 위험. 대상 후보 action_forloops.go
   findLoopVariable 가드. C++ 참조: PrintC for-emission + BlockWhileDo 구조화.
+- **#10 동류(구조화): `probe_gcd2`**(세션11 프로브, 제거). `while(b){t=b;b=a%b;a=t;}`. Ghidra: `local_res10=param_2`를
+  루프 밖 hoist + 임시 `iVar1`. Gosleigh: `while(local_res10=param_2, local_res10!=0){ param_2 = a%b; ... }`
+  (init을 while 코마-식에 넣고 param_2를 임시로 재사용). init-hoist vs 코마-폼 + 임시변수 materialization 차이(둘 다
+  gcd 정확 계산). cosmetic 저우선, 루프-rotation/변수수명 구조화 영역.
 
 ### [세션8 룰 전수 감사 -- 세션10 완결] 동명 다른 룰 12건 전부 착지
 
