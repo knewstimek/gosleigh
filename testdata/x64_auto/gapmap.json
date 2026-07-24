@@ -997,13 +997,25 @@
           "byte-identical (indent-insensitive)"
         ]
       }
+    },
+    {
+      "name": "probe_memset",
+      "entry": 15552,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 83,
-    "match": 82,
+    "total": 84,
+    "match": 83,
     "tag_counts": {
-      "MATCH": 82,
+      "MATCH": 83,
       "TYPECAST": 1
     }
   }

@@ -169,12 +169,13 @@ gap이 4개 family로 수렴한다. 각 family는 별개 근본이라 하나씩 
   unjustparams(stage19/22)의 1바이트 param 등록보다 먼저 돌아 조기 제거. 대상=SubvariableFlow 후 param/return
   justify(paramactive.go / ActionInputPrototype / unjustparams) + 1바이트 input 등록. **흔한 패턴(바이트/char 반환
   함수)이라 심각.** 성공기준: goldengap `probe_ret_uchar`(재추가) MATCH + ssadiff.
-- **#12 동류 -- `probe_memset` 저장 드롭(심각)**: `void f(char*p,int c,int n){for(i) p[i]=(char)c;}`. Ghidra:
-  `*(undefined1*)(param_1+i) = param_2`(store 렌더). Gosleigh: **for body 비어있음**(store 통째 드롭). ssadiff:
-  store op은 SSA에 존재(`*(const,addr) = DL(i)`, `const`은 ssadump 라벨 -- bytecopy도 동일) BUT 저장값이 **1바이트
-  param 레지스터 DL(=param_2 저바이트)**. bytecopy(로드바이트 store)/toupper_buf(계산바이트 store)는 렌더됨 -> **1바이트
-  param을 param_2로 materialize 못해 그 store가 렌더에서 드롭**. #12 1바이트-param family(render/materialize 컴포넌트).
-  흔한 패턴(byte-fill). 성공기준: goldengap `probe_memset` MATCH.
+- **[착지 세션11] `probe_memset` 저장 드롭 FIXED** (`markPrologueOps` param-instance 수정): `void f(char*p,int c,int n)
+  {for(i) p[i]=(char)c;}`가 for body 비어있게(store 드롭) 방출되던 것. 근본(stage-dump→STORE_DEBUG 계측)=**markPrologueOps
+  (printc.go, render 휴리스틱)가 store를 callee-saved spill로 오분류**. 이유: paramVns를 `vn.High()==paramHV`
+  AllVarnodes 스캔으로 구축했는데 **1바이트 param 슬라이스(DL)가 param_2의 HV(RDX 8바이트)에 back-link 없어 스캔이 RDX를
+  놓침** -> paramVns에 param_2 부재 -> store값 DL이 "비-param 레지스터" spill로 마킹 -> emit 스킵. 수정: paramVns를
+  `hv.Instances()`로 구축(authoritative) + val이 param storage에 overlap하면(1바이트 슬라이스) skip. **uchar(#12
+  잔여)와는 다른 root**(memset=render 휴리스틱, uchar=subvar deadcode). 전 골든 무회귀. **uchar는 아래 #12에 잔존.**
 - **경미(형식/local-type, 별도 세션 불필요)**: `probe_toupper_buf`=사실상 byte-identical, 루프변수만 `undefined4`(golden)
   vs `int`(gosleigh)=local 타입추론 차이. `probe_scale_arr`=WRAP(긴 식 `;` 줄바꿈, umulhi-class 포맷). `probe_dot`도 동류.
 

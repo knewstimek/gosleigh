@@ -609,3 +609,7 @@ int probe_running_prod(int *a, int n) {
 	for (int i = 0; i < n; i++) p *= a[i];
 	return p;
 }
+
+void probe_memset(char *p, int c, int n) {
+	for (int i = 0; i < n; i++) p[i] = (char)c;
+}
