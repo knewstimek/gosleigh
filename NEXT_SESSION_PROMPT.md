@@ -47,9 +47,11 @@ gap이 4개 family로 수렴한다. 각 family는 별개 근본이라 하나씩 
    반환레지스터에서 소스레지스터로 copy-prop돼 이후 deadcode가 반환을 비우던 것(함수 `void` 붕괴). 근본=gosleigh
    RulePropagateCopy에 C++ line 3953 `if(op->isReturnCopy()) return 0` 가드 부재(gosleigh는 RETURN opcode에
    PcodeOpReturnCopy 플래그 있으나 미사용). **가드 추가로 short_ident 완전 MATCH, ret_param 반환 복구, #7 void 탈출**
-   (전 골든 무회귀). **잔여 2건**: (a) #7 do-while은 void는 벗어났으나 루프 body의 `s+=i` 누산이 빠지고 `return
-   local_14+local_18`로 접힘(별개 loop-carried accumulator 이슈 -- SSA_DUMP_AFTER로 재추적). (b) #12 uchar(1바이트
-   반환 SubvariableFlow 후 unjustified -> deadcode)는 이 가드로 미해결(다른 root). 상세 #7/#12.
+   (전 골든 무회귀). **잔여 2건**: (a) #7 do-while은 void는 벗어났고 **SSA도 정확**(s...ec phi가 `ECX=s+i` 누산,
+   반환=ECX)이나 **렌더에서 루프 body `local_14 = local_14+local_18`가 빠지고 `return local_14+local_18`로 인라인**.
+   근본=**Merge가 레지스터 ECX(s+i 결과=phi 입력)를 스택로컬 s...ec(phi 출력=local_14)와 coalesce 못함** -> 렌더가
+   ECX를 local_14로 인식 못해 루프-body 대입을 놓침(register↔stack phi coalescing, Merge 코어, deep. cf. 감사맵
+   #2 merge family). (b) #12 uchar(1바이트 반환 SubvariableFlow 후 unjustified -> deadcode)는 이 가드로 미해결(다른 root). 상세 #7/#12.
 3. **[타입전파 back-prop family] #6 struct 혼합폭 cast + find_max pointer element**: Ghidra의 풍부한 타입 역전파
    (load-size->pointer, 부호비교->element) 미포팅 -> undefined%d* 유지 + 여분 cast. broad-blast 타입전파. 상세 #6.
 4. **[cosmetic 저우선] #8** -x*c 미fold, **#10** for 과승격, dot `;` 줄바꿈(umulhi-class). 동값/형식, 회귀위험 대비 ROI 낮음.
