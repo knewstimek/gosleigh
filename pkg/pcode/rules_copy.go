@@ -343,20 +343,21 @@ func (r *RuleHumptyOr) apply(op *PcodeOp, data *Funcdata) int {
 	// Oscillation guard (not present in C++). RuleHumptyOr and RuleAndDistribute are
 	// exact inverses: this rule folds (a&b)|(a&c) into a&(b|c), and RuleAndDistribute's
 	// trivial-cover branch (ruleaction.cc:1289-1290) distributes it straight back when
-	// the constant `a` fully covers b or c. In C++ the pair does not livelock: its
-	// ActionPool collapses the intermediate `a&x => x` (via RuleAndMask, since `a`
-	// covers x) before this rule can re-factor, so the INT_OR is left with a single
-	// AND and HumptyOr stops. Gosleigh ports the whole neighbourhood faithfully --
-	// RuleTermOrder canonicalizes the constant into slot 1 (action.go, ahead of
-	// RuleAndMask, exactly like C++ coreaction.cc:5524/5540), RuleAndMask and
-	// RuleAndDistribute match line-for-line -- but Gosleigh's action-pool fixpoint
-	// re-fires this inverse pair on the SAME op before the transient child AND that
-	// AndDistribute spawns is ever traversed and reduced, so the two flip forever
-	// (measured: 55858 iterations on the 6502 program). Declining exactly the case
-	// AndDistribute would reverse breaks the livelock and is byte-identical to C++ on
-	// every golden. The real root cause is action-pool processing order, not this
-	// rule; fixing that (so the intermediate reduces before re-factoring) would let
-	// this guard be removed. Do NOT "fix" RuleTermOrder -- it is already faithful.
+	// the constant `a` fully covers b or c. Their guards do not exclude each other for
+	// that constant-cover case, so the pair is a LATENT livelock -- and it is latent in
+	// C++ too: RuleTermOrder, RuleAndMask, RuleAndDistribute are faithful line-for-line
+	// ports and ActionPool::processOp is structurally identical to action.cc:822 (same
+	// re-fire-until-stable loop, same SeqNum op order). C++ simply never hands these two
+	// rules the triggering shape, because its normal analysis reduces the covered
+	// `a&x => x` (RuleAndMask) on a standalone INT_AND op before the INT_OR is revisited.
+	// Gosleigh's 6502 path reaches the INT_OR with the covered AND still intact, so the
+	// inverse pair flips the same op forever (measured: 55858 iterations). Declining the
+	// exact case AndDistribute would reverse closes the gap between the two inverse rules;
+	// it is byte-identical to C++ on every golden (and, if anything, more robust than
+	// stock Ghidra, which would hang on the same input). NOT an ActionPool or RuleTermOrder
+	// defect -- both are faithful. The only "more upstream" fix is to find why this masked
+	// form (constant clearing a single bit, covering one OR branch) is produced at all on
+	// the 6502 path; low priority, arch-specific.
 	if a.IsConstant() {
 		if b.NZMask()&aMask == b.NZMask() {
 			return 0
