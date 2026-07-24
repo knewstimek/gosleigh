@@ -485,3 +485,14 @@ int probe_charsum(char *s, int n) {
 	for (int i = 0; i < n; i++) t += s[i];
 	return t;
 }
+
+/* --- session11 batch 2: type/shift/cast idioms (self-contained) --- */
+
+unsigned probe_ushr(unsigned x) { return x >> 3; }
+int probe_sshr(int x) { return x >> 3; }
+long long probe_ll_shift(long long x) { return x << 40; }
+long probe_ptrdiff(int *a, int *b) { return a - b; }
+long long probe_widen(int x, int y) { return (long long)x * y; }
+int probe_narrow(long long x) { return (int)x + 1; }
+unsigned probe_mask(unsigned x) { return (x >> 4) & 0xF; }
+int probe_3d(int *a, int i, int j, int k) { return a[i * 100 + j * 10 + k]; }

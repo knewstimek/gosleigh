@@ -75,6 +75,30 @@ render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법
   골든 게이트 필수.** 성공기준: goldengap `probe_struct` MATCH(재추가). 세션11은 (1) 임시 구현 후 (2) 부재로 lateral임을
   확인하고 되돌림 -- 반환타입 LOAD-경계 fix(`0720f83`)만 clean 착지.
 
+**[신규 #7 -- do-while + accumulator: 누산기+반환값 통째 드롭 (HOT, 심각, C++ 실측 확정, 미착지=flow/heritage 딥)]**
+- 재현: `int f(int n){ int i=0,s=0; do{ s+=i; i++; } while(i<n); return s; }` (goldengap `probe_neg`가 아니라
+  `probe_dowhile` -- 세션11에 제거, 재현코드는 이 문단). MSVC /Od: i=[rsp](-0x18), s=[rsp+4](-0x14).
+  Ghidra: 두 로컬 + `return local_14`(=s). **Gosleigh: `void(void)` -- 누산기 s와 반환값을 통째로 드롭.**
+- **입력 무결성 OK 확인**(핸드오프 붕괴형-mismatch 프로토콜): 골든 64바이트 디스어셈블 시 `03c8`(s+=i)/`89442404`(store s)/
+  `8b442404`(return-load s) 전부 존재 = 바이트 완전. **decomp_dbg(C++ 코어, 동일 격리 바이트) ssadiff: C++은 s(-0x14
+  슬롯)의 phi/`ECX=s+i`/`EAX=ECX`/`return EAX`를 완벽 복구.** 즉 gosleigh 엔진 버그 확정.
+- 증상 국소화(ssadiff): gosleigh SSA에 `s0xffffffffffffffec`(-0x14, =s) 전(全) op 부재. 분기 타깃도 발산 --
+  gosleigh 루프백 `Block_1:0xffffffffffffffe8`(=-0x18, **잘못**) + exit `Block_2:0x3f`(0x37의 return-load 스킵)
+  vs C++ 루프백 `0x17` + exit `0x37`. **가설(미확정): -0x14 스택 슬롯이 heritage 미등록 -> [rsp+4] 접근 전부 미해소
+  -> 0x37 블록(return-load) 소실 -> exit가 0x3f로 밀림 -> s deadcode.** cf. `dowhile_count`(단일 로컬 do-while)는
+  MATCH, `sum_loop`(for + accumulator)도 MATCH -> **트리거 = do-while + 둘째 스택 로컬(누산기)의 조합.**
+- 대상 후보: funcdata.go:416-445 heritageNewStackSlots(슬롯 discovery 순서) / heritage.go HeritageRange /
+  bridge.go collectHeritageSpace, 또는 do-while 루프백의 flow/블록경계 계산. **flow/heritage 딥 + 회귀위험이라
+  단독 세션 + decomp_dbg ssadiff 대조 필수. 흔한 패턴(do-while 누산기)의 심각한 correctness 버그라 우선순위 높음.**
+  성공기준: goldengap `probe_dowhile`(재추가) MATCH + ssadiff 100%.
+
+**[신규 #8 -- `-x*c` 정규화 미fold (cosmetic, 저위험이나 발진 룰이라 미착수)]**
+- 재현: `int f(int x){ return -x*3; }`. Ghidra: `param_1 * -3`. Gosleigh: `-param_1 * 3`(동값, 미정규화).
+  SSA: gosleigh `INT_2COMP(x) * 3` 유지. Ghidra는 2COMP를 계수 -1로 접어 `x * -3`.
+- 근본: `Rule2Comp2Mult`(INT_2COMP=>x*-1, 세션10 `60b66a9`)가 MULT-feed 케이스에 미발화 + 중첩상수MULT fold 부재.
+  **주의: 이 룰은 RuleMultNegOne과 역쌍 co-pool 발진 이력(세션9 차단/세션10 가드로 착지)이라 발화조건 확대는 고위험.**
+  cosmetic(동값)이라 ROI 낮음. 착수 시 `go test ./pkg/pcode/`+`./pkg/bridge/` 발진 게이트 필수.
+
 ### [세션8 룰 전수 감사 -- 세션10 완결] 동명 다른 룰 12건 전부 착지
 
 세션8 감사가 **Go 룰 156개를 C++ `getOpList`와 기계 대조**해 "이름만 같고 다른 룰" 12건을 확인(전부 `action.go`

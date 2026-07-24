@@ -505,13 +505,109 @@
           "byte-identical (indent-insensitive)"
         ]
       }
+    },
+    {
+      "name": "probe_ushr",
+      "entry": 12976,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_sshr",
+      "entry": 13008,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_ll_shift",
+      "entry": 13040,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_ptrdiff",
+      "entry": 13072,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_widen",
+      "entry": 13120,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_narrow",
+      "entry": 13152,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_mask",
+      "entry": 13184,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_3d",
+      "entry": 13216,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 42,
-    "match": 41,
+    "total": 50,
+    "match": 49,
     "tag_counts": {
-      "MATCH": 41,
+      "MATCH": 49,
       "TYPECAST": 1
     }
   }

@@ -30,7 +30,7 @@
     },
     {
       "name": "switch_dense",
-      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x4470) + 0x1c38))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
+      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x4570) + 0x1d38))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
     },
     {
       "name": "switch_sparse",
@@ -167,6 +167,38 @@
     {
       "name": "probe_charsum",
       "output": "\nint probe_charsum(longlong param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nlocal_14 = local_14 + *(char *)(param_1 + local_18);\n}\nreturn local_14;\n}\n"
+    },
+    {
+      "name": "probe_ushr",
+      "output": "\nuint probe_ushr(uint param_1)\n\n{\nreturn param_1 \u003e\u003e 3;\n}\n"
+    },
+    {
+      "name": "probe_sshr",
+      "output": "\nint probe_sshr(int param_1)\n\n{\nreturn param_1 \u003e\u003e 3;\n}\n"
+    },
+    {
+      "name": "probe_ll_shift",
+      "output": "\nlonglong probe_ll_shift(longlong param_1)\n\n{\nreturn param_1 \u003c\u003c 0x28;\n}\n"
+    },
+    {
+      "name": "probe_ptrdiff",
+      "output": "\nlonglong probe_ptrdiff(longlong param_1,longlong param_2)\n\n{\nreturn param_1 - param_2 \u003e\u003e 2;\n}\n"
+    },
+    {
+      "name": "probe_widen",
+      "output": "\nlonglong probe_widen(int param_1,int param_2)\n\n{\nreturn (longlong)param_1 * (longlong)param_2;\n}\n"
+    },
+    {
+      "name": "probe_narrow",
+      "output": "\nint probe_narrow(int param_1)\n\n{\nreturn param_1 + 1;\n}\n"
+    },
+    {
+      "name": "probe_mask",
+      "output": "\nuint probe_mask(uint param_1)\n\n{\nreturn param_1 \u003e\u003e 4 \u0026 0xf;\n}\n"
+    },
+    {
+      "name": "probe_3d",
+      "output": "\nundefined4 probe_3d(longlong param_1,int param_2,int param_3,int param_4)\n\n{\nreturn *(undefined4 *)(param_1 + (longlong)(param_3 * 10 + param_4 + param_2 * 100) * 4);\n}\n"
     }
   ]
 }
