@@ -43,7 +43,7 @@ render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법
 gap이 4개 family로 수렴한다. 각 family는 별개 근본이라 하나씩 단독 세션. 가치×tractability 순:
 1. **[최우선] #9 비교 반환/대입 미collapse** (RuleConditionalMove 스텁): `return a==b`가 if/else+stack local로 방출.
    **최다빈도 C 패턴**이라 최고가치. 다부품(룰 포팅 + bool 반환 렌더 + subvar). 상세 아래 #9.
-2. **[일부 착지 세션11] 반환-레지스터 이동 붕괴 = RulePropagateCopy ReturnCopy 가드 (`<copyfix>`)**: 반환값이 ABI
+2. **[일부 착지 세션11] 반환-레지스터 이동 붕괴 = RulePropagateCopy ReturnCopy 가드 (`5d3727d`)**: 반환값이 ABI
    반환레지스터에서 소스레지스터로 copy-prop돼 이후 deadcode가 반환을 비우던 것(함수 `void` 붕괴). 근본=gosleigh
    RulePropagateCopy에 C++ line 3953 `if(op->isReturnCopy()) return 0` 가드 부재(gosleigh는 RETURN opcode에
    PcodeOpReturnCopy 플래그 있으나 미사용). **가드 추가로 short_ident 완전 MATCH, ret_param 반환 복구, #7 void 탈출**
