@@ -5,6 +5,46 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-24 (세션11): 반환타입 LOAD-경계 fix + goldengap 프로브로 감사맵 실측 재검증 (master `0013c8e`)
+
+자율주행. **엔진 fix 1건 착지 + 감사맵 latent 항목 실측 재검증 + 신규 divergence 5건 특성화 + MATCH 회귀
+프로브 16건 추가**. 방법론: goldengap로 자기완결적(외부심볼/전역 없음) C 관용구를 프로브 -> speculation을
+Ghidra 12.0.4 실측으로 전환. 하네스가 단일함수 base-0 격리라 외부콜/전역이 전부 out-of-image인 게 측정 경계.
+
+**착지(`0720f83`) -- 반환타입 LOAD-경계 fix**: `inferReturnType`의 `hasArithmeticAncestor`(printc.go)가 LOAD의
+def input(주소)까지 재귀해 raw memory-read 반환(`*(undefined4*)(base+idx)`)을 잘못 arithmetic으로 판정 ->
+int로 오승격. LOAD는 값-provenance 체인을 끊으므로(로드값 타입은 pointee가 결정, 주소 산술 무관) LOAD에서 재귀
+중단. Ghidra 실측(probe_distribute golden = undefined4) 일치. 전 골든/pcode/bridge green.
+
+**감사맵 실측 재검증(goldengap 프로브)**:
+- **#1 AddTreeState 2-pass distribute 반증**: `arr[(i+j)*3]`/`arr[i*3+j*3]`/`arr[(i+j)*3+j]` 3-shape 전부
+  byte-identical. Ghidra가 `(i+j)*3+j`->`i*3+j*4` distribute하는 것까지 Gosleigh 동일 재현. 표준 `ptr[(x+y)*c]`
+  shape에선 divergence 없음(세션10 metatype 반증과 동형).
+- **#2 mergeIndirect**: 하네스로 측정 불가(addrForce가 call 넘으려면 콜 필요한데 콜리가 항상 out-of-image).
+- **#3 markExplicitBase**: 부분 확정(action_mark.go:99-101이 addrtied 블록을 무조건 return -1로 축약 = C++
+  coreaction.cc:3024-3065의 ZEXT/PIECE fall-through 상실). ZEXT 슬라이스만 포팅 가능(PIECE는 PieceNode 미포팅),
+  현 코퍼스 dormant, broad blast 대비 benefit 없어 미착수.
+
+**신규 divergence 5건 특성화(전부 C++ 실측 확정, 미착지 -- 상세=NEXT_SESSION 세션11 블록)**:
+- **#6 struct 혼합폭 필드 로드 cast 누락**: `p->c`(8B, int* 기반)를 `param_1[2]`(4B)로 렌더. 근본 = PTRADD pointee가
+  scale=4인데 int/8로 widening(역전파) + 8B int가 "longlong" 아닌 "int" 오명명 -> GetInputCast가 cast 억제. 깊은 타입전파.
+- **#7 do-while + accumulator 누산기+반환 통째 드롭 (심각)**: `do{s+=i;i++;}while(i<n);return s`가 `void(void)`로
+  붕괴. **입력 무결성 OK + decomp_dbg(C++ 코어 동일 격리 바이트) ssadiff로 gosleigh 엔진 버그 확정**(C++은 s 완복구).
+  트리거 = do-while + 둘째 스택 로컬. dowhile_count(단일)/sum_loop(for+accum)은 MATCH. flow/heritage 딥, 고우선.
+- **#8 `-x*c` 미fold**: `-x*3`->`-param_1*3` vs Ghidra `param_1*-3`. cosmetic, Rule2Comp2Mult 발진위험이라 defer.
+- **#9 비교 반환/대입 미collapse (최고가치, 최다빈도)**: `return a==b`가 `if(c){x=1}else{x=0}return x`로 방출.
+  근본 = **`RuleConditionalMove`(rules_misc.go:821)가 스텁**(identical-input collapse만 = C++ trivial 부분케이스).
+  실제 2-입력 conditional-move(ruleaction.cc:9392-9551)가 통째 미포팅 = 이름만 같은 룰(세션8-10 감사 미포착).
+  **다음 세션 최우선**(다부품: 룰 포팅 + bool 반환 렌더 + subvar).
+- **#10 for-loop 과승격**: `while(n-->0)`를 Ghidra는 while(true)+break, gosleigh는 for로 승격. cosmetic 저우선.
+
+**MATCH 회귀 프로브 16건 추가**(x64_auto 32->57, MATCH 56/57, switch_dense만 잔여): 분배/시프트/포인터차/폭변환/
+마스크/3D인덱싱/early-return/이중역참조/continue/부호혼합 등 -- 흔한 관용구가 충실함을 실측 확정. 커밋 `9c4a6f8`/
+`f541dc6`/`3c149b0`/`32858dd`/`0013c8e`. **교훈: latent 감사항목은 goldengap 프로브로 speculation->실측 전환;
+붕괴형 mismatch는 decomp_dbg ssadiff로 입력 무결성부터.**
+
+---
+
 ### 2026-07-24 (세션10 후속): 비-룰 레이어 parity 감사 + 무표기 divergence 2건 착지 (master `48bd5b4`)
 룰 감사(12건 완결)를 엔진 나머지로 확장. Sonnet 워커 2슬롯이 pkg/pcode 25개 파일에서 non-faithfulness 마커를
 수집(비중첩 분할), Opus가 C++ 원문 대조로 **검증**(워커 발견을 그대로 믿지 않음 -- 실제로 워커의 metatype 오진을 반증).
