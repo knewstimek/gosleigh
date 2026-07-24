@@ -675,3 +675,6 @@ int probe_compound(int *p, int v) { *p += v; return *p; }
 unsigned probe_clearbit(unsigned x, int n) { return x & ~(1u << n); }
 unsigned probe_setbit(unsigned x, int n) { return x | (1u << n); }
 unsigned probe_rotr(unsigned x, int n) { return (x >> n) | (x << (32 - n)); }
+
+/* --- session11 batch 18: algorithm kernels --- */
+
