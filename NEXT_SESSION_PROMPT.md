@@ -119,6 +119,15 @@ render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법
   재추가 MATCH + 전 골든 + pcode/bridge 발진 + 구조화 회귀(if/else collapse가 타 함수 오발화 주의).** 세션11은
   스텁임을 실측 확정하고 다부품이라 미착수 -- **이게 다음 세션 최우선(최다빈도 C 패턴).**
 
+**[신규 #10 -- for-loop 과승격 (cosmetic, 저severity, 구조화 회귀위험)]**
+- 재현: `int f(int*p,int n){ int s=0; while(n-->0) s+=*p++; return s; }` (goldengap `probe_ptr_incr`, 세션11 제거).
+  Ghidra: `while(true){ if(local_res10<1) break; ...; local_res10 += -1; }`. Gosleigh: `for(local_res10=param_2;
+  0<local_res10; local_res10+=-1){ ... }`. **의미 동일**(조건 `0<n` === `!(n<1)`), 루프 구조화만 차이 -- gosleigh
+  ActionForLoops가 Ghidra가 while(true)+break로 남기는 루프를 for로 승격. 근본 미확정(Ghidra for-승격 가드가
+  gosleigh보다 엄격 -- 아마 body가 second iterator(`p++`=local_res8)를 수정 + `n--`가 post-decr-in-condition일 때
+  for 거부). **저우선**: cosmetic + 구조화 수정은 정상 for 다수(sum_loop 등) 회귀 위험. 대상 후보 action_forloops.go
+  findLoopVariable 가드. C++ 참조: PrintC for-emission + BlockWhileDo 구조화.
+
 ### [세션8 룰 전수 감사 -- 세션10 완결] 동명 다른 룰 12건 전부 착지
 
 세션8 감사가 **Go 룰 156개를 C++ `getOpList`와 기계 대조**해 "이름만 같고 다른 룰" 12건을 확인(전부 `action.go`
