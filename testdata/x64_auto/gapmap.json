@@ -1057,13 +1057,49 @@
           "byte-identical (indent-insensitive)"
         ]
       }
+    },
+    {
+      "name": "probe_sign",
+      "entry": 15792,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_first_neg",
+      "entry": 15840,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_classify",
+      "entry": 15920,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 88,
-    "match": 87,
+    "total": 91,
+    "match": 90,
     "tag_counts": {
-      "MATCH": 87,
+      "MATCH": 90,
       "TYPECAST": 1
     }
   }

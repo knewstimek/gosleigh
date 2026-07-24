@@ -30,7 +30,7 @@
     },
     {
       "name": "switch_dense",
-      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x4fe8) + 0x26b0))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
+      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x50f0) + 0x27b8))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
     },
     {
       "name": "switch_sparse",
@@ -351,6 +351,18 @@
     {
       "name": "probe_short_ident",
       "output": "\nundefined2 probe_short_ident(undefined2 param_1)\n\n{\nreturn param_1;\n}\n"
+    },
+    {
+      "name": "probe_sign",
+      "output": "\nundefined8 probe_sign(int param_1)\n\n{\nundefined8 uVar1;\n\nif (param_1 \u003c 1) {\nif (param_1 \u003c 0) {\nuVar1 = 0xffffffff;\n}\nelse {\nuVar1 = 0;\n}\n}\nelse {\nuVar1 = 1;\n}\nreturn uVar1;\n}\n"
+    },
+    {
+      "name": "probe_first_neg",
+      "output": "\nint probe_first_neg(longlong param_1,int param_2)\n\n{\nint local_18;\n\nlocal_18 = 0;\nwhile( true ) {\nif (param_2 \u003c= local_18) {\nreturn -1;\n}\nif (*(int *)(param_1 + (longlong)local_18 * 4) \u003c 0) break;\nlocal_18 = local_18 + 1;\n}\nreturn local_18;\n}\n"
+    },
+    {
+      "name": "probe_classify",
+      "output": "\nundefined8 probe_classify(int param_1)\n\n{\nundefined8 uVar1;\n\nif (param_1 \u003c 10) {\nuVar1 = 0;\n}\nelse if (param_1 \u003c 100) {\nuVar1 = 1;\n}\nelse {\nuVar1 = 2;\n}\nreturn uVar1;\n}\n"
     }
   ]
 }

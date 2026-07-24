@@ -51,7 +51,11 @@ gap이 4개 family로 수렴한다. 각 family는 별개 근본이라 하나씩 
    반환=ECX)이나 **렌더에서 루프 body `local_14 = local_14+local_18`가 빠지고 `return local_14+local_18`로 인라인**.
    근본=**Merge가 레지스터 ECX(s+i 결과=phi 입력)를 스택로컬 s...ec(phi 출력=local_14)와 coalesce 못함** -> 렌더가
    ECX를 local_14로 인식 못해 루프-body 대입을 놓침(register↔stack phi coalescing, Merge 코어, deep. cf. 감사맵
-   #2 merge family). (b) #12 uchar(1바이트 반환 SubvariableFlow 후 unjustified -> deadcode)는 이 가드로 미해결(다른 root). 상세 #7/#12.
+   #2 merge family). (b) #12 uchar(1바이트 반환 SubvariableFlow 후 unjustified -> deadcode)는 이 가드로 미해결(다른 root).
+   (c) **`probe_clamp2`(multi-branch clamp)도 `void` 붕괴 -- copy-prop 이동 아님(반환이 EAX에 머묾)**. 근본=guardReturns가
+   **8바이트 ZEXT48 phi(RAX)와 4바이트 param phi(EAX)를 중복 생성** -> deadcode가 반환을 4바이트 phi에서 분리(EAX/RAX
+   4-8바이트 return-register-size 중복, SubvariableFlow 연관, deep). 즉 반환-붕괴 family는 3개 sub-root:
+   copy-prop 이동[착지 `5d3727d`]/multi-branch ZEXT phi 중복[clamp2]/subvar 1바이트[uchar]. 상세 #7/#12.
 3. **[타입전파 back-prop family] #6 struct 혼합폭 cast + find_max pointer element**: Ghidra의 풍부한 타입 역전파
    (load-size->pointer, 부호비교->element) 미포팅 -> undefined%d* 유지 + 여분 cast. broad-blast 타입전파. 상세 #6.
 4. **[cosmetic 저우선] #8** -x*c 미fold, **#10** for 과승격, dot `;` 줄바꿈(umulhi-class). 동값/형식, 회귀위험 대비 ROI 낮음.
