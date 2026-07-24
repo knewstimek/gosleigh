@@ -503,6 +503,30 @@
       "entry": 15552,
       "bytes": "44894424188954241048894c24084883ec18c7042400000000eb088b0424ffc08904248b4424303904247d1348630424488b4c24200fb6542428881401ebdc4883c418c3",
       "c": "\r\nvoid probe_memset(longlong param_1,undefined1 param_2,int param_3)\r\n\r\n{\r\n  undefined4 local_18;\r\n  \r\n  for (local_18 = 0; local_18 < param_3; local_18 = local_18 + 1) {\r\n    *(undefined1 *)(param_1 + local_18) = param_2;\r\n  }\r\n  return;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_short_add",
+      "entry": 15632,
+      "bytes": "668954241066894c24080fbf4424080fbf4c241003c1c3",
+      "c": "\r\nint probe_short_add(short param_1,short param_2)\r\n\r\n{\r\n  return (int)param_1 + (int)param_2;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_write_through",
+      "entry": 15664,
+      "bytes": "8954241048894c2408488b4424088b4c24108908c3",
+      "c": "\r\nvoid probe_write_through(undefined4 *param_1,undefined4 param_2)\r\n\r\n{\r\n  *param_1 = param_2;\r\n  return;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_byte_store2",
+      "entry": 15696,
+      "bytes": "8854241048894c2408b801000000486bc000488b4c24080fb6542410881401b801000000486bc001488b4c24080fb6542410881401c3",
+      "c": "\r\nvoid probe_byte_store2(undefined1 *param_1,undefined1 param_2)\r\n\r\n{\r\n  *param_1 = param_2;\r\n  param_1[1] = param_2;\r\n  return;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_short_ident",
+      "entry": 15760,
+      "bytes": "66894c24080fb7442408c3",
+      "c": "\r\nundefined2 probe_short_ident(undefined2 param_1)\r\n\r\n{\r\n  return param_1;\r\n}\r\n\r\n"
     }
   ]
 }

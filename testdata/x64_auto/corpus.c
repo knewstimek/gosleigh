@@ -613,3 +613,11 @@ int probe_running_prod(int *a, int n) {
 void probe_memset(char *p, int c, int n) {
 	for (int i = 0; i < n; i++) p[i] = (char)c;
 }
+
+/* --- session11 batch 12: param materialization / byte-short param / store render --- */
+
+int probe_short_add(short a, short b) { return a + b; }
+void probe_write_through(int *p, int v) { *p = v; }
+void probe_byte_store2(char *p, char c) { p[0] = c; p[1] = c; }
+short probe_short_ident(short x) { return x; }
+

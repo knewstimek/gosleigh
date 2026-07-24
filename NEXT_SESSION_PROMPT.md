@@ -43,9 +43,13 @@ render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법
 gap이 4개 family로 수렴한다. 각 family는 별개 근본이라 하나씩 단독 세션. 가치×tractability 순:
 1. **[최우선] #9 비교 반환/대입 미collapse** (RuleConditionalMove 스텁): `return a==b`가 if/else+stack local로 방출.
    **최다빈도 C 패턴**이라 최고가치. 다부품(룰 포팅 + bool 반환 렌더 + subvar). 상세 아래 #9.
-2. **[심각-correctness] param/return recovery 붕괴 2건**: **#7** do-while 누산기(반환값이 EAX->ECX 이동 후 deadcode),
-   **#12** 1바이트 반환(SubvariableFlow 후 1바이트 param unjustified -> deadcode). 둘 다 함수가 `void`로 붕괴(계산+반환
-   드롭). decomp_dbg ssadiff로 엔진버그 확정. deadcode가 param/return justify보다 먼저 도는 액션순서 의심 공통. 상세 #7/#12.
+2. **[일부 착지 세션11] 반환-레지스터 이동 붕괴 = RulePropagateCopy ReturnCopy 가드 (`<copyfix>`)**: 반환값이 ABI
+   반환레지스터에서 소스레지스터로 copy-prop돼 이후 deadcode가 반환을 비우던 것(함수 `void` 붕괴). 근본=gosleigh
+   RulePropagateCopy에 C++ line 3953 `if(op->isReturnCopy()) return 0` 가드 부재(gosleigh는 RETURN opcode에
+   PcodeOpReturnCopy 플래그 있으나 미사용). **가드 추가로 short_ident 완전 MATCH, ret_param 반환 복구, #7 void 탈출**
+   (전 골든 무회귀). **잔여 2건**: (a) #7 do-while은 void는 벗어났으나 루프 body의 `s+=i` 누산이 빠지고 `return
+   local_14+local_18`로 접힘(별개 loop-carried accumulator 이슈 -- SSA_DUMP_AFTER로 재추적). (b) #12 uchar(1바이트
+   반환 SubvariableFlow 후 unjustified -> deadcode)는 이 가드로 미해결(다른 root). 상세 #7/#12.
 3. **[타입전파 back-prop family] #6 struct 혼합폭 cast + find_max pointer element**: Ghidra의 풍부한 타입 역전파
    (load-size->pointer, 부호비교->element) 미포팅 -> undefined%d* 유지 + 여분 cast. broad-blast 타입전파. 상세 #6.
 4. **[cosmetic 저우선] #8** -x*c 미fold, **#10** for 과승격, dot `;` 줄바꿈(umulhi-class). 동값/형식, 회귀위험 대비 ROI 낮음.

@@ -1009,13 +1009,61 @@
           "byte-identical (indent-insensitive)"
         ]
       }
+    },
+    {
+      "name": "probe_short_add",
+      "entry": 15632,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_write_through",
+      "entry": 15664,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_byte_store2",
+      "entry": 15696,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_short_ident",
+      "entry": 15760,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 84,
-    "match": 83,
+    "total": 88,
+    "match": 87,
     "tag_counts": {
-      "MATCH": 83,
+      "MATCH": 87,
       "TYPECAST": 1
     }
   }

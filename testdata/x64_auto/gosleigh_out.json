@@ -335,6 +335,22 @@
     {
       "name": "probe_memset",
       "output": "\nvoid probe_memset(longlong param_1,undefined1 param_2,int param_3)\n\n{\nundefined4 local_18;\n\nfor (local_18 = 0; local_18 \u003c param_3; local_18 = local_18 + 1) {\n*(undefined1 *)(param_1 + local_18) = param_2;\n}\nreturn;\n}\n"
+    },
+    {
+      "name": "probe_short_add",
+      "output": "\nint probe_short_add(short param_1,short param_2)\n\n{\nreturn (int)param_1 + (int)param_2;\n}\n"
+    },
+    {
+      "name": "probe_write_through",
+      "output": "\nvoid probe_write_through(undefined4 *param_1,undefined4 param_2)\n\n{\n*param_1 = param_2;\nreturn;\n}\n"
+    },
+    {
+      "name": "probe_byte_store2",
+      "output": "\nvoid probe_byte_store2(undefined1 *param_1,undefined1 param_2)\n\n{\n*param_1 = param_2;\nparam_1[1] = param_2;\nreturn;\n}\n"
+    },
+    {
+      "name": "probe_short_ident",
+      "output": "\nundefined2 probe_short_ident(undefined2 param_1)\n\n{\nreturn param_1;\n}\n"
     }
   ]
 }
