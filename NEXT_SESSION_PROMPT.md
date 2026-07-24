@@ -46,6 +46,25 @@ Go-only 19, C++-only 21(그중 11은 명시적 stub).
 | 11 | `RuleBoolZext` | `{INT_ZEXT}` `zext(V)*-1` 계열 5형 (3001) | `{EQUAL,NOTEQUAL}` bool 비교만 | 중 |
 | 12 | `RulePushMulti` | `{MULTIEQUAL}` 2-branch phi CSE (1062) | phi 입력 동일 치환 -- **Go판은 미등록 死코드**(진짜는 `RulePushMultiME`로 포팅됨) | 하(정리) |
 
+**[세션9 잔여 4건 착수 노트 -- 착수 전 반드시 읽을 것. 세션9가 C++/Go 대조까지 마친 결과]**
+- **#7 `RuleHumptyOr`** (ruleaction.cc:5350, `{INT_OR}` `(a&b)|(a&c)=>a&(b|c)`): 상수 케이스(b,c 둘 다 상수)는
+  `b|c`가 a의 전 비트 덮으면 COPY(a), 아니면 AND(a,b|c). **비상수 케이스가 함정** -- `a&(b|c)`를 만드는데
+  역방향 룰 `RuleAndDistribute`(rules_misc.go:188, `(X|Y)&const=>(X&c)|(Y&c)`)와 발진 가능. C++은 양쪽에
+  NZMask 가드로 상호배타(RuleHumptyOr가 `(b.NZMask & a.NZMask)==0 return 0` 두 줄, ruleaction.cc:5407-5408)를
+  두지만 **Go `RuleAndDistribute`엔 대응 NZMask 가드가 없다(부분포팅)**. -> 진짜 RuleHumptyOr만 넣으면 Go에서만
+  발진할 수 있음(Rule2Comp2Mult 부류). **RuleAndDistribute의 NZMask 가드까지 같이 충실화하는 2-룰 협조 수정**
+  필요. 기존 Go 본체(`{PIECE}` concat(sub(V,hi),sub(V,0))=>V, rules_copy.go:262)가 다른 룰 중복인지도 확인.
+- **#11 `RuleBoolZext`** (ruleaction.cc:3015, `{INT_ZEXT}` `zext(bool)*-1` 5형): `op.Output().loneDescend()`로
+  **전진 탐색**(ZEXT출력의 유일소비 MULT -> 그 출력의 유일소비 ADD/EQUAL/NOTEQUAL/AND/OR)해 BOOL_NEGATE/
+  BOOL_AND/BOOL_OR 생성. `isBooleanValue` 판정 필요. ~80줄, subtle. 역방향 파트너는 없어 발진 위험은 낮으나
+  규모가 큼 -- 단독 슬롯. 기존 Go 본체(`{EQUAL,NOTEQUAL}` bool 비교)는 다른 룰일 가능성 -- 보존 여부 판정.
+- **#8 `RuleOrCompare`** (ruleaction.cc:10816, `{INT_OR}` `(V|W)==0 => (V==0)&&(W==0)`): OR을 **복합조건으로 분해**
+  (BOOL_AND 생성). 제어/조건식 구조를 바꾸므로 렌더 영향 큼 -- 착수 전 대상 골든에서 실제 발화하는지부터 실측.
+- **#12 `RulePushMulti`** (ruleaction.cc:1062, `{MULTIEQUAL}` 2-branch phi CSE): 진짜는 이미 `RulePushMultiME`로
+  포팅됨. Go의 동명 `RulePushMulti`(rules_misc.go:782)는 **어디에도 미등록된 死코드** -- 정리(삭제)만 하면 됨. 최저위험.
+- **공통 게이트(세션9 확립)**: 착지 전 반드시 `go test ./pkg/pcode/`(배치 발진) -> 5개 loader 골든 -> goldengap.
+  방향 반대 룰 쌍은 프로덕션 풀 분리를 봐도 **테스트 배치 co-pooling 발진**을 별도로 확인(Rule2Comp2Mult 교훈).
+
 **~~위험 1건~~ (세션8에 해소, `31539bc`)**: Go의 `RuleNotDistribute`는 비트 드모르간으로 식을 **전개**한다(1 op -> 3 op).
 그런데 Ghidra에서 되접는 `RuleBitUndistribute`는 Gosleigh에서 **stub**이다. 되돌릴 경로가 없는 **편도 발산**이라
 `~(a&b)`가 `~a|~b`로 출력될 위험이 있다. -> **제거 실험 결과 코퍼스 발화 0**이라 출력 바이트 동일했고, C++ BOOL_NEGATE판을 포팅해 넣었다.
