@@ -600,30 +600,147 @@ func (r *RuleOrSextForm) apply(op *PcodeOp, data *Funcdata) int {
 	return 0
 }
 
+// RuleBoolZext simplifies boolean expressions of the form zext(V) * -1:
+//
+//	(zext(V)*-1)+1             =>  zext(!V)
+//	(zext(V)*-1)==-1           =>  V==true
+//	(zext(V)*-1)!=-1           =>  V!=true
+//	(zext(V)*-1)&(zext(W)*-1)  =>  zext(V&&W)*-1
+//	(zext(V)*-1)|(zext(W)*-1)  =>  zext(V||W)*-1
+//	(zext(V)*-1)^(zext(W)*-1)  =>  zext(V^^W)*-1
+//
+// C++ parity: RuleBoolZext, ruleaction.cc:3001-3124. The previous body under
+// this name matched {INT_EQUAL,INT_NOTEQUAL} and folded zext(bool)==0/1
+// directly to BOOL_NEGATE/COPY; that shortcut is not RuleBoolZext -- it is
+// the two-rule chain RuleZextEliminate (ruleaction.cc:2499, narrows
+// zext(V)==c to V==c when no bits are lost) composed with RuleBooleanNegate
+// (ruleaction.cc:2957, V==false=>!V / V==true=>V). Both are already
+// registered on the "analysis" group ahead of/after this rule (action.go),
+// so the fixed-point rule engine reaches the same result via that chain.
 type RuleBoolZext struct{ batchRule }
 
 func NewRuleBoolZext(group string) *RuleBoolZext {
 	r := &RuleBoolZext{}
-	r.batchRule = newBatchRule(group, "boolzext", []OpCode{CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL}, r.apply, func(g string) Rule { return NewRuleBoolZext(g) })
+	r.batchRule = newBatchRule(group, "boolzext", []OpCode{CPUI_INT_ZEXT}, r.apply, func(g string) Rule { return NewRuleBoolZext(g) })
 	return r
 }
 
+// RuleBoolZext::applyOp -- ruleaction.cc:3015. op is the INT_ZEXT.
 func (r *RuleBoolZext) apply(op *PcodeOp, data *Funcdata) int {
-	lhs, _, val, ok := normalizeCompareConst(op)
-	if !ok || val > 1 {
+	boolVn1 := op.Input(0)
+	if !isBoolLike(boolVn1) {
 		return 0
 	}
-	ext := definedBy(lhs, CPUI_INT_ZEXT)
-	if ext == nil || !isBoolLike(ext.Input(0)) {
+
+	multop1 := op.Output().LoneDescend()
+	if multop1 == nil || multop1.Code() != CPUI_INT_MULT {
 		return 0
 	}
-	negate := op.Code() == CPUI_INT_NOTEQUAL
-	if val == 0 {
-		negate = !negate
+	if !multop1.Input(1).IsConstant() {
+		return 0
 	}
-	if negate {
-		rewriteOp(data, op, CPUI_BOOL_NEGATE, ext.Input(0))
+	coeff := multop1.Input(1).Offset()
+	if coeff != maskForSize(multop1.Input(1).Size()) {
+		return 0
+	}
+	size := multop1.Output().Size()
+
+	// If we reached here, we are multiplying extended boolean by -1.
+	actionop := multop1.Output().LoneDescend()
+	if actionop == nil {
+		return 0
+	}
+	var opc OpCode
+	switch actionop.Code() {
+	case CPUI_INT_ADD:
+		if !actionop.Input(1).IsConstant() {
+			return 0
+		}
+		if actionop.Input(1).Offset() == 1 {
+			newop := data.NewOp(1, op.Addr())
+			data.OpSetOpcode(newop, CPUI_BOOL_NEGATE) // Negate the boolean
+			vn := data.NewUniqueOut(1, newop)
+			data.OpSetInput(newop, boolVn1, 0)
+			data.OpInsertBefore(newop, op)
+			data.OpSetInput(op, vn, 0)
+			data.OpRemoveInput(actionop, 1) // eliminate the INT_ADD operator
+			data.OpSetOpcode(actionop, CPUI_COPY)
+			data.OpSetInput(actionop, op.Output(), 0) // propagate past the INT_MULT operator
+			return 1
+		}
+		return 0
+	case CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL:
+		if !actionop.Input(1).IsConstant() {
+			return 0
+		}
+		val := actionop.Input(1).Offset()
+
+		// Change comparison of extended boolean to 0 or -1
+		// to comparison of unextended boolean to 0 or 1.
+		if val == coeff {
+			val = 1
+		} else if val != 0 {
+			return 0 // Not comparing with 0 or -1
+		}
+
+		data.OpSetInput(actionop, boolVn1, 0)
+		data.OpSetInput(actionop, data.NewConstant(1, val), 1)
 		return 1
+	case CPUI_INT_AND:
+		opc = CPUI_BOOL_AND
+	case CPUI_INT_OR:
+		opc = CPUI_BOOL_OR
+	case CPUI_INT_XOR:
+		opc = CPUI_BOOL_XOR
+	default:
+		return 0
 	}
-	return rewriteToCopy(data, op, ext.Input(0))
+
+	// Apparently doing logical ops with extended boolean.
+
+	// Check that the other side is also an extended boolean.
+	var multop2 *PcodeOp
+	if multop1 == actionop.Input(0).Def() {
+		multop2 = actionop.Input(1).Def()
+	} else {
+		multop2 = actionop.Input(0).Def()
+	}
+	if multop2 == nil || multop2.Code() != CPUI_INT_MULT {
+		return 0
+	}
+	if !multop2.Input(1).IsConstant() {
+		return 0
+	}
+	coeff2 := multop2.Input(1).Offset()
+	if coeff2 != maskForSize(size) {
+		return 0
+	}
+	zextop2 := multop2.Input(0).Def()
+	if zextop2 == nil || zextop2.Code() != CPUI_INT_ZEXT {
+		return 0
+	}
+	boolVn2 := zextop2.Input(0)
+	if !isBoolLike(boolVn2) {
+		return 0
+	}
+
+	// Do the boolean calculation on unextended boolean values
+	// and then extend the result.
+	newop := data.NewOp(2, actionop.Addr())
+	newres := data.NewUniqueOut(1, newop)
+	data.OpSetOpcode(newop, opc)
+	data.OpSetInput(newop, boolVn1, 0)
+	data.OpSetInput(newop, boolVn2, 1)
+	data.OpInsertBefore(newop, actionop)
+
+	newzext := data.NewOp(1, actionop.Addr())
+	newzout := data.NewUniqueOut(size, newzext)
+	data.OpSetOpcode(newzext, CPUI_INT_ZEXT)
+	data.OpSetInput(newzext, newres, 0)
+	data.OpInsertBefore(newzext, actionop)
+
+	data.OpSetOpcode(actionop, CPUI_INT_MULT)
+	data.OpSetInput(actionop, newzout, 0)
+	data.OpSetInput(actionop, data.NewConstant(size, coeff2), 1)
+	return 1
 }
