@@ -665,3 +665,6 @@ int probe_count_eq(int *a, int n, int v) {
 	for (int i = 0; i < n; i++) if (a[i] == v) c++;
 	return c;
 }
+
+/* --- session11 batch 16: floating point (characterize FP subsystem gap) --- */
+

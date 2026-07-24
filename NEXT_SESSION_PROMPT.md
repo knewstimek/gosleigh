@@ -194,6 +194,13 @@ ReturnCopy 가드로 FIXED(probe_ret_uchar MATCH). 아래 "SubvariableFlow 후 u
 - **경미(형식/local-type, 별도 세션 불필요)**: `probe_toupper_buf`=사실상 byte-identical, 루프변수만 `undefined4`(golden)
   vs `int`(gosleigh)=local 타입추론 차이. `probe_scale_arr`=WRAP(긴 식 `;` 줄바꿈, umulhi-class 포맷). `probe_dot`도 동류.
 
+**[FP 서브시스템 특성화 (세션11 goldengap 프로브 -- faverage 갭의 실체)]**: `float f(float a,float b){return a+b;}`
+(fadd), `double`(dmul), `(float)x`(int2float), `(int)x`(float2int), `double s=0; for(..)s+=a[i]`(dsum_loop) 전부
+**void 붕괴**. 근본: **XMM 레지스터 FP param이 param으로 미복구 -> FLOAT_ADD/MULT 등 FP op 입력 없음 -> 연쇄 deadcode ->
+void**. int2float는 int param만 복구/float 반환 유실, dsum_loop는 FP 누산기(double s) 통째 드롭(int 카운터만 남음).
+= FP 서브시스템(XMM param 복구 + FLOAT_* op + float/double 타입 렌더) 통째 미포팅 확정. faverage와 동일 근본. **대규모
+포팅(XMM ProtoModel param + typeop FLOAT_* + double.go FP + 렌더). 단독 대형세션.**
+
 **[신규 #13 -- 로컬 배열 init store가 동적 인덱스 읽기에서 드롭 (심각, C++ 실측 확정)]**
 - 재현: `int f(int n){ int t[4]={10,20,30,40}; return t[n&3]; }` (goldengap `probe_local_arr`, 세션11 제거). Ghidra:
   `local_18[0]=10; ...[3]=0x28; return local_18[(int)(param_1&3)];`. **Gosleigh: init store 4개 통째 부재**
@@ -282,7 +289,7 @@ C++ `array_expr`(printc.cc:76, spacing=1)와 불일치해 선언 경로만 `loca
 |---|---|---|
 | `add_pt` | **이름만 다름** -- golden `uStackX_c`/`uStackX_14`(C++ 코어 네이밍, Java DB 변수 없는 슬롯). 어느 슬롯을 Java가 잡았을지 모델링은 순수 휴리스틱이라 **parity 규칙상 금지** | (보류) |
 | `caller` | **현 하네스로 strict MATCH 불가**(C++ 코어조차 `func_0x...`). 잔여 실무 = `uVar2 = (ulonglong)param_N;` 죽은 문장(8->4바이트 축소 = consume-bit deadcode/SubvariableFlow) | 중 |
-| `faverage` | FP 서브시스템 통째 갭 | 대 |
+| `faverage` | FP 서브시스템 통째 갭 (세션11 특성화 -- 아래) | 대 |
 | `switch_dense` | imagebase/reloc(주소 상수·`&__ImageBase`). caller처럼 하네스 한계 가능성 -- **착수 전 확인 필요** | 대 |
 - **세션6 후속5 착지(`53fce49`) = char 리터럴 렌더**: `renderConstant`(printc.go)에 char-print 분기 추가
   (size-1 signed int -> `'\0'`, C++ type.cc:3642 cacheCoreTypes 재현). strlen_style strict MATCH. 상세 CHANGELOG 세션6 후속5.
