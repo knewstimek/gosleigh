@@ -5,7 +5,7 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
-### 2026-07-24 (세션9): 동명 다른 룰 4건 + RuleAndMask 완성, 회귀 0 (master `a67beda`)
+### 2026-07-24 (세션9): 동명 다른 룰 4건 + RuleAndMask/RuleAndDistribute 충실화, 회귀 0 (master `e336502`)
 자율주행 세션(Opus 직접). 세션8 룰 감사가 남긴 "동명 다른 룰" 12건 중 잔여 9건에서 4건 착지. 방법론:
 (1) 진짜 C++ 룰(`getOpList`+본체) 대조, (2) 기존 동명 Go 본체가 다른 등록룰의 중복/死코드인지 확인,
 (3) `go test ./pkg/pcode/`로 테스트 배치 발진부터 검증, (4) 전 golden 게이트 `-count=1` 2회.
@@ -28,6 +28,13 @@ vs actcleanup(cleanup) 분리라 프로덕션은 정상. 착지하려면 그 배
 0/all-ones 상수만 처리하던 부분포팅. `andmask==0`->0, `(andmask & consume)==0`->0, `andmask==mask1 && in1상수`->
 COPY(in0) 세 케이스 추가(기존 all-ones 단축 유지 = strict superset). 마지막 케이스가 #5(RuleRightShiftAnd
 `4f7b84a`)에서 드롭한 바깥-AND 제거를 시프트 입력 국한 없이 **일반적으로 재흡수** -- 그때 연 부채 정식 해소.
+
+**추가 착지 `e336502` = `RuleAndDistribute` 충실 포팅** (ruleaction.cc:1260): 기존 Go판은 other가 상수면 무조건
+INT_AND->INT_OR 분배하던 과공격적 부분포팅(benefit-guard 전무) -- parity 이탈이자 RuleHumptyOr 역방향 발진원.
+충실 포팅으로 **beneficial일 때만 분배**(한 쪽이 마스크로 소거 `(ormask & othermask)==0`, 또는 상수 other가 한 쪽
+완전덮음 trivial), `othermask==0`(RuleAndMask 담당)/`==fullmask` skip, other 비상수 허용, NewOpBefore 블록삽입.
+이로써 distribute/factor 쌍이 C++처럼 NZMask로 상호배타 -> **#7 RuleHumptyOr 언블록**. 제거된 과공격적 분배는
+코퍼스 무영향(전 골든 유지).
 
 **게이트**: TREE_MAP 10/10, X64_CORPUS 8/8, X64_SWITCH byte-MATCH, X64_BREADTH 3/3, X64_CORPUS2 10/13,
 x64_auto 31/32, `go test ./...` green, `go vet` clean. **잔여 순수 미착수 4건 = RuleHumptyOr / RuleOrCompare /
