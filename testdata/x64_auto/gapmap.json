@@ -1285,13 +1285,25 @@
           "byte-identical (indent-insensitive)"
         ]
       }
+    },
+    {
+      "name": "probe_binsearch",
+      "entry": 16960,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 107,
-    "match": 106,
+    "total": 108,
+    "match": 107,
     "tag_counts": {
-      "MATCH": 106,
+      "MATCH": 107,
       "TYPECAST": 1
     }
   }

@@ -4640,6 +4640,19 @@ func (s *printCState) markPrologueOps() {
 		if out == nil {
 			return false
 		}
+		// The vacuous case this targets is a stack-pointer (ESP/EIP) register
+		// live-through phi at a loop header -- a register/unique value that
+		// recirculates without feeding real C. A stack-slot phi output, by
+		// contrast, is a real named local: in a loop where one branch leaves the
+		// variable unchanged (`if (c) lo = mid+1;`), the merge phi legitimately
+		// takes its own output as the unchanged-path input, which is NOT vacuous.
+		// Treating it as vacuous cascades -- the update (`lo = mid+1`) and the
+		// loop-head snapshot feeding it (iVar1) get marked prologue and the loop
+		// body empties (probe_binsearch). Restrict the classification to non-stack
+		// storage so real stack locals are never suppressed.
+		if out.Space() != nil && out.Space().Kind == address.SpaceKindStack {
+			return false
+		}
 		// A MULTIEQUAL is self-referential when its output is one of its own consumers.
 		for _, grandConsumer := range out.DescendIter() {
 			if grandConsumer == consumer {
