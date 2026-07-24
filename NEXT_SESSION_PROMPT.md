@@ -10,7 +10,7 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (master `bbc5906` origin 푸시, 전 게이트 green -- 세션9 룰 4건 착지)
+## 현재 상태 (master `a67beda` origin 푸시, 전 게이트 green -- 세션9 룰 4건 + RuleAndMask 완성)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **10/13**,
   x64_auto **31/32**, production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
 - x64_auto 잔여 **1건** = **switch_dense**. (룰 감사 잔여 10건은 아래 표 -- 다음 세션 최대 광맥)
@@ -26,6 +26,7 @@ Go-only 19, C++-only 21(그중 11은 명시적 stub).
 
 **진행(2026-07-24 세션9)**: #1/#2/#6 세션8 착지 + **#3 `RuleShiftPiece`(`801caf8`) / #4 `RuleDoubleSub`(`6bd4dbf`) /
 #5 `RuleRightShiftAnd`(`4f7b84a`) / #10 `RuleZextCommute`(`bbc5906`) 세션9 착지**(전부 전 게이트 green, 회귀 0).
+추가로 **`RuleAndMask` NZMask/consume 커버리지 완성**(`a67beda`, C++ ruleaction.cc:310 충실 포팅 -- #5가 연 부채 해소).
 **#9 `Rule2Comp2Mult`는 차단**(위 표 참조 -- 프로덕션 검증 완료, 테스트 배치 co-pooling만 고치면 착지 가능).
 **잔여 순수 미착수 4건 = #7 `RuleHumptyOr` / #8 `RuleOrCompare` / #11 `RuleBoolZext` / #12 `RulePushMulti`(정리)**.
 착지 방법론(세션9 확립): (a) 진짜 C++ 룰 포팅, (b) 기존 동명 본체가 다른 등록룰의 중복/死코드인지 확인,
@@ -37,7 +38,7 @@ Go-only 19, C++-only 21(그중 11은 명시적 stub).
 | 2 | ~~`RuleZextEliminate`~~ | `{EQUAL,NOTEQUAL,LESS,LESSEQUAL}` `zext(V)==c => V==c` (2491) | `{INT_ZEXT}` COPY/fold | **착지** (기존 본체는 `RuleZextIdentity`로 보존. **발화 계측 701진입/0발화** -- 비교 피연산자가 이 시점엔 이미 ZEXT가 아님. 왜인지 추적이 후속) |
 | 3 | ~~`RuleShiftPiece`~~ | `{INT_ADD,OR,XOR}` `(zext(V)<<16)+zext(W) => concat` (3773) | `{INT_LEFT,RIGHT}` -- **RuleConcatShift와 본체 완전 동일(중복)** | **착지 `801caf8`** (중복 본체 드롭, INT_RIGHT+PIECE는 RuleConcatShift가 계속 커버. CDQ/IDIV SEXT 특수형 포함) |
 | 4 | ~~`RuleDoubleSub`~~ | `{SUBPIECE}` `sub(sub(V,c),d) => sub(V,c+d)` (1798) | `{INT_SUB}` 산술 뺄셈 접기 | **착지 `6bd4dbf`** (INT_SUB 접기는 死코드 -- RuleSub2Add가 모든 INT_SUB를 ADD로 먼저 변환) |
-| 5 | ~~`RuleRightShiftAnd`~~ | `{INT_RIGHT,SRIGHT}` 시프트 **안쪽** 마스크 제거 (568) | `{INT_AND}` 시프트 **바깥** 마스크 제거(방향 반대) | **착지 `4f7b84a`** (드롭한 바깥-AND는 C++ RuleAndMask의 NZMask 커버 케이스 -- 그 완성이 후속 부채) |
+| 5 | ~~`RuleRightShiftAnd`~~ | `{INT_RIGHT,SRIGHT}` 시프트 **안쪽** 마스크 제거 (568) | `{INT_AND}` 시프트 **바깥** 마스크 제거(방향 반대) | **착지 `4f7b84a`** (드롭한 바깥-AND는 C++ RuleAndMask의 NZMask 커버 케이스 -- **`a67beda`로 RuleAndMask NZMask/consume 커버리지 완성해 정식 흡수, 부채 해소**) |
 | 6 | ~~`RuleNotDistribute`~~ | `{BOOL_NEGATE}` 불리언 드모르간 (1139) | `{INT_NEGATE}` **비트** 드모르간 | **착지 `31539bc`** (발명 룰은 코퍼스에서 발화 0이라 제거해도 출력 바이트 동일) |
 | 7 | `RuleHumptyOr` | `{INT_OR}` `(V&W)|(V&X) => V&(W|X)` (5339) | `{PIECE}` 조각 재결합 | 중 |
 | 8 | `RuleOrCompare` | `{INT_OR}` `(V|W)==0 => (V==0)&&(W==0)` (10805) | `{BOOL_OR}` `<`+`==` => `<=` | 중 |

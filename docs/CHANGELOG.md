@@ -5,7 +5,7 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
-### 2026-07-24 (세션9): 동명 다른 룰 4건 착지, 회귀 0 (master `bbc5906`)
+### 2026-07-24 (세션9): 동명 다른 룰 4건 + RuleAndMask 완성, 회귀 0 (master `a67beda`)
 자율주행 세션(Opus 직접). 세션8 룰 감사가 남긴 "동명 다른 룰" 12건 중 잔여 9건에서 4건 착지. 방법론:
 (1) 진짜 C++ 룰(`getOpList`+본체) 대조, (2) 기존 동명 Go 본체가 다른 등록룰의 중복/死코드인지 확인,
 (3) `go test ./pkg/pcode/`로 테스트 배치 발진부터 검증, (4) 전 golden 게이트 `-count=1` 2회.
@@ -23,6 +23,11 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 `RuleMultNegOne`(MULT-1->2COMP)을 **같은 풀에 co-pooling**해 `go test`가 **무한 발진**. C++은 actprop(analysis)
 vs actcleanup(cleanup) 분리라 프로덕션은 정상. 착지하려면 그 배치를 analysis/cleanup 분리로 고쳐야 함(전용세션).
 **교훈**: 방향 반대 룰 쌍은 프로덕션 풀 분리를 봐도 안심 말고 반드시 배치 발진을 `go test`로 검증할 것.
+
+**추가 착지 `a67beda` = `RuleAndMask` NZMask/consume 커버리지 완성** (ruleaction.cc:310 충실 포팅): 기존 Go판은
+0/all-ones 상수만 처리하던 부분포팅. `andmask==0`->0, `(andmask & consume)==0`->0, `andmask==mask1 && in1상수`->
+COPY(in0) 세 케이스 추가(기존 all-ones 단축 유지 = strict superset). 마지막 케이스가 #5(RuleRightShiftAnd
+`4f7b84a`)에서 드롭한 바깥-AND 제거를 시프트 입력 국한 없이 **일반적으로 재흡수** -- 그때 연 부채 정식 해소.
 
 **게이트**: TREE_MAP 10/10, X64_CORPUS 8/8, X64_SWITCH byte-MATCH, X64_BREADTH 3/3, X64_CORPUS2 10/13,
 x64_auto 31/32, `go test ./...` green, `go vet` clean. **잔여 순수 미착수 4건 = RuleHumptyOr / RuleOrCompare /
