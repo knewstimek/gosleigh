@@ -194,6 +194,15 @@ ReturnCopy 가드로 FIXED(probe_ret_uchar MATCH). 아래 "SubvariableFlow 후 u
 - **경미(형식/local-type, 별도 세션 불필요)**: `probe_toupper_buf`=사실상 byte-identical, 루프변수만 `undefined4`(golden)
   vs `int`(gosleigh)=local 타입추론 차이. `probe_scale_arr`=WRAP(긴 식 `;` 줄바꿈, umulhi-class 포맷). `probe_dot`도 동류.
 
+**[신규 #13 -- 로컬 배열 init store가 동적 인덱스 읽기에서 드롭 (심각, C++ 실측 확정)]**
+- 재현: `int f(int n){ int t[4]={10,20,30,40}; return t[n&3]; }` (goldengap `probe_local_arr`, 세션11 제거). Ghidra:
+  `local_18[0]=10; ...[3]=0x28; return local_18[(int)(param_1&3)];`. **Gosleigh: init store 4개 통째 부재**
+  (`return auStack_18[...]`만, 배열 미초기화). SSA(ssadump)에 store가 아예 없음 = 일찍 deadcode.
+- 근본: 읽기가 **동적 인덱스**(`param&3`)라 특정 슬롯 store와 정적 연결 불가 -> stores가 "consumer 없음"으로 deadcode.
+  Ghidra는 배열을 aggregate로 보고 동적읽기가 전 슬롯을 산다고 처리(AliasChecker/varmap). gosleigh는 그 alias 분석
+  부재. + 배열명 `auStack_18` vs `local_18`(ScopeLocal 배열 naming). 세션8 array_init_then_sum/varmap 영역(deep).
+  성공기준: goldengap `probe_local_arr` MATCH.
+
 **[신규 #10 -- for-loop 과승격 (cosmetic, 저severity, 구조화 회귀위험)]**
 - 재현: `int f(int*p,int n){ int s=0; while(n-->0) s+=*p++; return s; }` (goldengap `probe_ptr_incr`, 세션11 제거).
   Ghidra: `while(true){ if(local_res10<1) break; ...; local_res10 += -1; }`. Gosleigh: `for(local_res10=param_2;

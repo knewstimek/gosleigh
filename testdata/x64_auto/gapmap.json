@@ -1153,13 +1153,49 @@
           "byte-identical (indent-insensitive)"
         ]
       }
+    },
+    {
+      "name": "probe_find_ptr",
+      "entry": 16144,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_max_idx",
+      "entry": 16240,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_count_eq",
+      "entry": 16352,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 96,
-    "match": 95,
+    "total": 99,
+    "match": 98,
     "tag_counts": {
-      "MATCH": 95,
+      "MATCH": 98,
       "TYPECAST": 1
     }
   }
