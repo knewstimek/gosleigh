@@ -724,25 +724,90 @@ type RuleOrCompare struct{ batchRule }
 
 func NewRuleOrCompare(group string) *RuleOrCompare {
 	r := &RuleOrCompare{}
-	r.batchRule = newBatchRule(group, "orcompare", []OpCode{CPUI_BOOL_OR}, r.apply, func(g string) Rule { return NewRuleOrCompare(g) })
+	// C++ parity: RuleOrCompare fires on CPUI_INT_OR (ruleaction.cc:10805-10874).
+	// `(V | W) == 0` => `(V==0) && (W==0)`
+	// `(V | W) != 0` => `(V!=0) || (W!=0)`
+	r.batchRule = newBatchRule(group, "orcompare", []OpCode{CPUI_INT_OR}, r.apply, func(g string) Rule { return NewRuleOrCompare(g) })
 	return r
 }
 
+// apply is the faithful port of RuleOrCompare::applyOp (ruleaction.cc:10816-10874).
+// The rule only fires when EVERY descendant of the INT_OR's output is an
+// INT_EQUAL/INT_NOTEQUAL comparison against constant 0 -- a single
+// non-matching descendant blocks the rule entirely (C++ early "return 0"
+// inside the scan loop).
 func (r *RuleOrCompare) apply(op *PcodeOp, data *Funcdata) int {
-	left := op.Input(0).Def()
-	right := op.Input(1).Def()
-	if left == nil || right == nil {
+	outvn := op.Output()
+	if outvn == nil {
 		return 0
 	}
-	if left.Code() == CPUI_INT_LESS && right.Code() == CPUI_INT_EQUAL && sameCompareOperands(left, right) {
-		rewriteOp(data, op, CPUI_INT_LESSEQUAL, left.Input(0), left.Input(1))
-		return 1
+	// Snapshot descendants up front. The rewrite loop below reassigns each
+	// comparison's inputs (data.OpSetInput), which detaches it from outvn's
+	// live descend list mid-iteration -- C++ guards the same hazard by
+	// advancing its list iterator before mutating; a snapshot slice is the
+	// Go-idiomatic equivalent.
+	descendants := outvn.DescendIter()
+
+	hasCompares := false
+	for _, compOp := range descendants {
+		opc := compOp.Code()
+		if opc != CPUI_INT_EQUAL && opc != CPUI_INT_NOTEQUAL {
+			return 0
+		}
+		if !isZeroConst(compOp.Input(1)) {
+			return 0
+		}
+		hasCompares = true
 	}
-	if right.Code() == CPUI_INT_LESS && left.Code() == CPUI_INT_EQUAL && sameCompareOperands(left, right) {
-		rewriteOp(data, op, CPUI_INT_LESSEQUAL, right.Input(0), right.Input(1))
-		return 1
+	if !hasCompares {
+		return 0
 	}
-	return 0
+
+	v := op.Input(0)
+	w := op.Input(1)
+	// C++ parity: ruleaction.cc:10838-10839 -- V and W must be in SSA form.
+	if v.IsFree() {
+		return 0
+	}
+	if w.IsFree() {
+		return 0
+	}
+
+	for _, equalOp := range descendants {
+		opc := equalOp.Code()
+
+		zeroV := data.NewConstant(v.Size(), 0)
+		zeroW := data.NewConstant(w.Size(), 0)
+
+		eqV := data.NewOp(2, equalOp.Addr())
+		data.OpSetOpcode(eqV, opc)
+		data.OpSetInput(eqV, v, 0)
+		data.OpSetInput(eqV, zeroV, 1)
+
+		eqW := data.NewOp(2, equalOp.Addr())
+		data.OpSetOpcode(eqW, opc)
+		data.OpSetInput(eqW, w, 0)
+		data.OpSetInput(eqW, zeroW, 1)
+
+		eqVOut := data.NewUniqueOut(1, eqV)
+		eqWOut := data.NewUniqueOut(1, eqW)
+
+		// Make sure the split comparisons are already defined before the
+		// original op is rewired to consume them.
+		data.OpInsertBefore(eqV, equalOp)
+		data.OpInsertBefore(eqW, equalOp)
+
+		// The original INT_EQUAL becomes BOOL_AND; INT_NOTEQUAL becomes BOOL_OR.
+		joinOpc := CPUI_BOOL_AND
+		if opc == CPUI_INT_NOTEQUAL {
+			joinOpc = CPUI_BOOL_OR
+		}
+		data.OpSetOpcode(equalOp, joinOpc)
+		data.OpSetInput(equalOp, eqVOut, 0)
+		data.OpSetInput(equalOp, eqWOut, 1)
+	}
+
+	return 1
 }
 
 type RuleConditionalMove struct{ batchRule }
@@ -1067,13 +1132,6 @@ func combineNestedShift(op *PcodeOp, data *Funcdata, opcode OpCode) int {
 func replaceInputSlot(data *Funcdata, op *PcodeOp, slot int, vn *Varnode) {
 	data.OpUnsetInput(op, slot)
 	data.OpSetInput(op, vn, slot)
-}
-
-func sameCompareOperands(left *PcodeOp, right *PcodeOp) bool {
-	if left == nil || right == nil || left.NumInput() != 2 || right.NumInput() != 2 {
-		return false
-	}
-	return sameValue(left.Input(0), right.Input(0)) && sameValue(left.Input(1), right.Input(1))
 }
 
 func isSingleBitMask(val uint64) bool {
