@@ -54,7 +54,9 @@ MATCH, ret_param·#7 반환 복구)**. 신설 진단툴 SSA_DUMP_AFTER(stage별 
    반환=ECX)이나 **렌더에서 루프 body `local_14 = local_14+local_18`가 빠지고 `return local_14+local_18`로 인라인**.
    근본=**Merge가 레지스터 ECX(s+i 결과=phi 입력)를 스택로컬 s...ec(phi 출력=local_14)와 coalesce 못함** -> 렌더가
    ECX를 local_14로 인식 못해 루프-body 대입을 놓침(register↔stack phi coalescing, Merge 코어, deep. cf. 감사맵
-   #2 merge family). (b) **[정정: uchar도 이 가드로 FIXED]** -- 세션11에 "uchar=다른 root(subvar)"라 봤으나 오진(세션10
+   #2 merge family). **[세션11 확인: 이 Merge-coalescing 잔여가 고임팩트 -- probe_binsearch/gcd_sub/insort_pass 등
+   흔한 realistic 루프(계산값으로 루프변수 갱신)를 전부 깨뜨림. #9 다음으로 중요. 루프-body 대입 소실 + for-과승격(#10)
+   동반.]** (b) **[정정: uchar도 이 가드로 FIXED]** -- 세션11에 "uchar=다른 root(subvar)"라 봤으나 오진(세션10
    교훈 재현), ReturnCopy 가드가 short_ident/uchar/ret_param·#7 반환을 모두 복구. (c) **`probe_clamp2`(multi-branch
    clamp)는 여전히 `void` 붕괴 -- copy-prop 이동 아님(반환이 EAX에 머묾)**. 근본=guardReturns가 **8바이트 ZEXT48
    phi(RAX)와 4바이트 param phi(EAX)를 중복 생성** -> deadcode가 반환을 4바이트 phi에서 분리(EAX/RAX 4-8바이트
