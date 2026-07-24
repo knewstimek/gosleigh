@@ -40,7 +40,10 @@ render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법
 ### [세션11] 감사맵 #1/#2/#3 실측 재검증 (goldengap 프로브) + 신규 divergence #6~#12
 
 **== 다음 세션 우선순위 맵 (세션11 프로브 발굴, 전부 C++ 실측 확정) ==**
-gap이 4개 family로 수렴한다. 각 family는 별개 근본이라 하나씩 단독 세션. 가치×tractability 순:
+**세션11 착지 3건**(전 골든 무회귀): `0720f83` 반환타입 LOAD-경계 / `4f8d0e0` byte-fill store 드롭(prologue paramVns=
+hv.Instances) / **`5d3727d` RulePropagateCopy ReturnCopy 가드 = 반환-레지스터-이동 붕괴 family(short_ident·uchar
+MATCH, ret_param·#7 반환 복구)**. 신설 진단툴 SSA_DUMP_AFTER(stage별 SSA). 아래는 **남은** gap(가치×tractability 순,
+전부 deep/large infra라 단독 세션):
 1. **[최우선] #9 비교 반환/대입 미collapse** (RuleConditionalMove 스텁): `return a==b`가 if/else+stack local로 방출.
    **최다빈도 C 패턴**이라 최고가치. 다부품(룰 포팅 + bool 반환 렌더 + subvar). 상세 아래 #9.
 2. **[일부 착지 세션11] 반환-레지스터 이동 붕괴 = RulePropagateCopy ReturnCopy 가드 (`5d3727d`)**: 반환값이 ABI
@@ -57,9 +60,14 @@ gap이 4개 family로 수렴한다. 각 family는 별개 근본이라 하나씩 
    phi(RAX)와 4바이트 param phi(EAX)를 중복 생성** -> deadcode가 반환을 4바이트 phi에서 분리(EAX/RAX 4-8바이트
    return-register-size 중복, deep). 즉 반환-붕괴 family: copy-prop 이동[착지 `5d3727d`, short_ident/uchar/ret_param/#7
    반환 복구]는 해결, **잔여 = multi-branch ZEXT phi 중복[clamp2]만**. 상세 #7.
-3. **[타입전파 back-prop family] #6 struct 혼합폭 cast + find_max pointer element**: Ghidra의 풍부한 타입 역전파
+3. **[심각-correctness] #13 로컬 배열 init store 드롭** (`int t[4]={..}; return t[n&3]`): 동적인덱스 읽기가 특정슬롯
+   store와 정적연결 안돼 deadcode -> 배열 미초기화 방출. aggregate/AliasChecker liveness(varmap 영역). 상세 아래 #13.
+4. **[타입전파 back-prop family] #6 struct 혼합폭 cast + find_max pointer element**: Ghidra의 풍부한 타입 역전파
    (load-size->pointer, 부호비교->element) 미포팅 -> undefined%d* 유지 + 여분 cast. broad-blast 타입전파. 상세 #6.
-4. **[cosmetic 저우선] #8** -x*c 미fold, **#10** for 과승격, dot `;` 줄바꿈(umulhi-class). 동값/형식, 회귀위험 대비 ROI 낮음.
+5. **[대규모 단독세션] FP 서브시스템**(faverage): XMM param 미복구 -> FP op 붕괴 -> void. FLOAT_* typeop + double.go +
+   float/double 렌더 통째. 상세 아래 FP 특성화.
+6. **[cosmetic 저우선] #8** -x*c 미fold, **#10** for 과승격, dot/scale_arr `;` 줄바꿈(umulhi-class), 미사용 param
+   undefined vs 구체타입. 동값/형식, 회귀위험 대비 ROI 낮음.
 **착수 공통: goldengap 프로브 재추가 -> decomp_dbg ssadiff로 C++ 대조 -> SSA_DUMP_AFTER stage-dump으로 소실/발산 시점
 확정(세션11 신설 툴) -> faithful 수정 -> 전 골든+pcode/bridge 발진 게이트. broad-blast(타입전파/copy-prop)는 특히 주의.**
 
