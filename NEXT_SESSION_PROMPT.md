@@ -86,21 +86,23 @@ render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법
   `Block_2:0x3f`(0x37의 return-load `mov eax,[rsp+4]` 스킵) vs C++ `0x37`. **주의: 루프백 라벨 `0xffffffffffffffe8`
   (=-0x18)은 branch-target 버그 아님 -- ssadump blockHeader가 loop-head MULTIEQUAL의 첫 op 주소를 쓰는데 스택 phi가
   varnode 주소(-0x18)를 가지는 display 아티팩트(SeqNum/MULTIEQUAL 배치 이슈). CFG 자체는 정상 추정.**
-- **근본 정밀 확정(SSA_DUMP_AFTER stage-dump으로 국소화, 세션11에 툴 신설 -- 아래 툴 섹션)**: s는 heritage에
-  정상 등록됨(초기 "미등록" 가설 반증). 소실은 **store-to-load forward가 SSA dominance를 위반**해서다:
-  루프 body(Block 1)에 `0x1e:2: r8 = s(-0x14 phi) + i(-0x18 phi)` (누산기), `0x22:2: s[-0x14] = r8` (스택 store).
-  exit(Block 2, 0x37)의 return-reload `u = s[-0x14]`(스택 load)가 **copy-prop/store-forward로 `r8(0x1e:2)`로 치환**됨.
-  그런데 **r8 def(0x1e:2)는 루프 내부라 exit(Block 2)를 dominate 못 함** -> Block 2에 r8 참조 4개(load/ZEXT48/copy/
-  `return r8`)가 전부 dominance 위반. 다음 deadcode 라운드가 이 invalid 참조를 제거 -> `return(#0x0)` (반환 소실)
-  -> s 연쇄 deadcode -> `void(void)`. **stage 추적(SSA_DUMP_AFTER=heritage,deadcode,returnrecovery,restructure...):
-  stage9(restructure)까지 exit는 정상 스택 reload `u=s[-0x14]` -> stage10 라운드에서 r8로 forward -> stage13 deadcode가
-  return 입력 제거.** C++ 코어는 이 forward를 안 해 exit 스택 reload를 유지(dominance 정상) -> `return EAX`.
-- **수정 방향**: store-to-load forward(또는 RulePropagateCopy 계열)가 **store가 load를 dominate할 때만** forward하도록
-  가드(루프 back-edge 넘는 forward 금지). 정확한 culprit 액션은 SSA_DUMP_AFTER를 stage9~10 사이 액션들로 좁혀 확정할
-  것(툴 있음). **copy-prop은 broad-blast라 dominance 가드 추가 시 전 골든 게이트 필수 + decomp_dbg ssadiff 대조.**
-  확정 사실: 입력바이트 완전 / C++ 코어 동일바이트로 s 완복구(엔진버그) / 트리거=do-while+둘째 스택로컬
-  (dowhile_count 단일=MATCH, sum_loop for+accum=MATCH -- for는 exit 구조가 달라 미발화). **흔한 패턴의 심각
-  correctness 버그(계산+반환 드롭)라 고우선.** 성공기준: goldengap `probe_dowhile`(재추가) MATCH + ssadiff 100%.
+- **근본 국소화(SSA_DUMP_AFTER stage-dump, 세션11 신설 툴 -- 아래 툴 섹션). [정정: 세션11 초기 "dominance violation"
+  주장은 오류 -- 세션10 교훈대로 재검증하니 반증됨. r8 def는 루프 body지만 exit는 body 통해서만 도달 -> r8가 exit를
+  dominate함(위반 아님).]** 확정된 기전: **반환값이 ABI 반환 레지스터 EAX에서 누산기 레지스터 ECX로 이동**한 것이 근본.
+  - stage1-9: exit(Block 2, 0x37)가 `EAX = ZEXT48(s[-0x14] 스택 reload)` -> `return EAX` (정상, EAX=반환레지스터).
+  - stage10 라운드: exit 스택 reload `u = s[-0x14]`가 **store-to-load forward로 in-loop 누산기 `ECX(=r0x8, 0x1e:2 =
+    s+i)`로 치환**. 동시에 `return`이 `EAX`->`ECX(0x1e:2)`로 바뀜(+ dead `EAX=ECX` copy 생성).
+  - stage13 deadcode: 반환이 ECX(비-반환레지스터)를 참조 -> EAX에 반환값 없음 -> 반환 입력 제거 + dead EAX-materialize
+    op 제거 -> `return(#0x0)` -> s 연쇄 deadcode -> `void(void)`.
+  C++ 코어는 exit 스택 reload를 forward하지 않고 유지 -> `EAX = [rsp+4]` -> `return EAX`(반환값이 EAX에 남음).
+- **수정 방향(가설, 미확정)**: store-to-load forward/copy-prop이 **반환값을 ABI 반환 레지스터(EAX) 밖으로 옮기지
+  않도록**(또는 in-loop store를 exit reload로 forward하지 않도록 -- Ghidra는 heritage된 스택 값을 reload로 유지).
+  **정확한 culprit 룰/액션 미확정**: stage9->10 사이 액션(actprop pool 내 rule일 가능성 -- 현 stage-dump은 action
+  단위라 pool 결과만 봄, rule 단위 계측 필요할 수 있음). SSA_DUMP_AFTER를 그 구간으로 좁혀 확정할 것. C++ 대응 rule
+  (RuleLoadVarnode/store-forward 또는 propagateCopy의 반환레지스터 가드)을 찾아 faithful 대조. **copy-prop broad-blast
+  -> 전 골든 게이트 + decomp_dbg ssadiff 필수.** 확정 사실: 입력바이트 완전 / C++ 동일바이트로 s 완복구(엔진버그) /
+  트리거=do-while+둘째 스택로컬(dowhile_count 단일=MATCH, sum_loop for+accum=MATCH). **흔한 패턴의 심각 correctness
+  버그(계산+반환 드롭)라 고우선.** 성공기준: goldengap `probe_dowhile`(재추가) MATCH + ssadiff 100%.
 
 **[신규 #8 -- `-x*c` 정규화 미fold (cosmetic, 저위험이나 발진 룰이라 미착수)]**
 - 재현: `int f(int x){ return -x*3; }`. Ghidra: `param_1 * -3`. Gosleigh: `-param_1 * 3`(동값, 미정규화).
