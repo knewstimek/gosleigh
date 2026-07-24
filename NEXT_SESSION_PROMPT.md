@@ -1,4 +1,4 @@
-# 다음 세션 프롬프트 (2026-07-25 세션12 갱신, 엔진 tip `1f6a4cb`)
+# 다음 세션 프롬프트 (2026-07-25 세션12 갱신, 엔진 tip `01904b6`, 문서 tip `880f607`)
 
 ## THE mission (절대 잊지 말 것)
 Ghidra C++ 디컴파일러 엔진을 Go로 **byte-identical** 포팅. 실제 .sla(x86/x64/ARM) 로드해 임의 실제 함수를
@@ -70,7 +70,7 @@ broad하니 전 골든 필수.** 아래는 세션11 시점 상세 기록(역사 
 ### [세션10 후속 감사맵] 비-룰 레이어 무표기 HOT divergence
 **★세션11 실측 재검증(아래 표는 세션10 시점 -- 갱신): #1 반증(distribute는 3-shape byte-identical로 충실),
 #2 하네스 측정불가(외부콜 out-of-image), #3 부분확정(ZEXT만 포팅가능/PIECE 미포팅/dormant). #4·#5 착지 유지.
-최신은 line ~42 세션11 우선순위 맵.**
+최신 권위는 문서 상단 "세션12 다음 우선순위" 블록.**
 룰 감사(12건 완결)를 엔진 나머지로 확장. `known mismatch` 마커 ~200개는 **전부 명시 선언**(숨은 휴리스틱 아님,
 대다수 DORMANT). 문제는 **무표기(선언 안 된) HOT divergence**. Opus 검증 완료분:
 
@@ -89,7 +89,12 @@ render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법
 
 ### [세션11] 감사맵 #1/#2/#3 실측 재검증 (goldengap 프로브) + 신규 divergence #6~#12
 
-**== 다음 세션 우선순위 맵 (세션11 프로브 발굴, 전부 C++ 실측 확정) ==**
+**★★ 아래 세션11 "다음 세션 우선순위 맵"과 #6~#13 상세 블록은 폐기(역사). 세션12에 #9 착지 / #7 양대 케이스 착지 /
+#6 find_max 착지 / #13·#6struct·#6sar_round·FP는 실측 재국소화(NEXT_SESSION 상단 "세션12 다음 우선순위" 블록이 유일
+권위). 아래 "[최우선] #9 스텁", "#7 residual", "#6 find_max/struct/sar 상세"의 "미착수" 서술은 전부 stale이니 무시 --
+상세 착지 기록은 CHANGELOG 세션12. ★★**
+
+**== [폐기 -- 세션11 시점] 다음 세션 우선순위 맵 (세션11 프로브 발굴, 전부 C++ 실측 확정) ==**
 **세션11 착지 3건**(전 골든 무회귀): `0720f83` 반환타입 LOAD-경계 / `4f8d0e0` byte-fill store 드롭(prologue paramVns=
 hv.Instances) / **`5d3727d` RulePropagateCopy ReturnCopy 가드 = 반환-레지스터-이동 붕괴 family(short_ident·uchar
 MATCH, ret_param·#7 반환 복구)**. 신설 진단툴 SSA_DUMP_AFTER(stage별 SSA). 아래는 **남은** gap(가치×tractability 순,
@@ -410,9 +415,9 @@ C++ `array_expr`(printc.cc:76, spacing=1)와 불일치해 선언 경로만 `loca
 - 골든 파이프라인: testdata/x64_corpus*/ + x64_auto/ (build.py + run_ghidra.py + GenGoldens.java).
   코퍼스 바이너리는 gitignore -- 부재 시 각 build.py 재실행. elfs는 `go run testdata/elfs/gen_import_pe.go`.
 
-## 다음 작업 (역사 -- 아래는 세션8 시점, 대부분 착지완료. **최신 권위는 line ~42 세션11 우선순위 맵**)
+## 다음 작업 (역사 -- 아래는 세션8 시점, 전부 착지완료. **최신 권위는 문서 상단 "세션12 다음 우선순위" 블록**)
 **★stale 주의: 이 섹션 이하(세션8/6-era)의 "다음 작업"·"이게 최신 권위"·잔여 카운트(29/32 등)는 전부 그 세션 시점
-기록이다. 세션8-11에 대부분 착지했고 현재 x64_auto는 102/103. 착수 전 반드시 위 세션11 블록을 권위로 삼을 것.**
+기록이다. 세션8-12에 착지했고 현재 x64_auto는 108/109(switch_dense만 잔여). 착수 전 반드시 상단 세션12 블록을 권위로 삼을 것.**
 
 ### [2026-07-24 세션8 결과 -- ~~이게 최신 권위~~ (역사)] master `2f08090`, x64_auto **29/32**, corpus2 8/13
 

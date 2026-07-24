@@ -125,10 +125,10 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   CHANGELOG 2026-07-17 세션4 참조.
 
 
-## 다음 작업 (권위 = 루트 NEXT_SESSION_PROMPT.md 세션11 우선순위 맵. 아래 인용은 세션8 시점 역사 -- 대부분 착지완료)
+## 다음 작업 (권위 = 루트 NEXT_SESSION_PROMPT.md "세션12 다음 우선순위" 블록. 아래 인용은 세션8 시점 역사 -- 전부 착지완료)
 
 > **~~[최신]~~ (역사, 세션8 시점) 2026-07-24 세션8 (master `e3a573f`): 착지 8건, corpus2 8/13, x64_auto 29/32.**
-> **★stale: 아래 array_init_then_sum은 세션8에 MATCH 착지완료, 현재 x64_auto 102/103. 최신은 NEXT_SESSION 세션11.**
+> **★stale: 아래 array_init_then_sum은 세션8에 MATCH 착지완료, 현재 x64_auto 108/109. 최신은 NEXT_SESSION 세션12.**
 > 남은 미스매치와 근본(세션8 시점 기록):
 > - **array_init_then_sum**: 상류 3단이 막혀 있다 -- (1) `Funcdata.Spacebase()`가 `UpdateType(ptr)`만 해서
 >   spacebase 포인터 타입이 InferTypes에 덮임(C++ funcdata.cc:264는 `updateType(ptr,**true,true**)`),
@@ -163,8 +163,10 @@ stale였던 이유 = 마일스톤 완료 후 해당 미시작 섹션을 지우�
 
 - **isLoopCondMultiequal band-aid**(merge.go, H8-debt-1 잔여): 세션5 cover fix 이후 dowhile_count는 트림
   자체가 불필요해졌으나 gcd는 여전히 forceOutputTrim 경로로 통과(무회귀 확인). 원리화는 broad/위험, 별도 세션.
-- **heritage guardStores/guardLoads 미포팅**(heritage.go ~1077 주석): clamp3와 무관함이 세션5에 확인됐지만
-  LOAD/STORE 많은 함수에서 발화할 수 있는 부채로 잔존.
+- **heritage guardStores/guardLoads 미포팅**(heritage.go:1511 주석): clamp3와 무관함이 세션5에 확인됐지만
+  LOAD/STORE 많은 함수에서 발화할 수 있는 부채로 잔존. **세션12 확정: 이게 #13 로컬 배열 init store 드롭
+  (`int t[4]={..}; return t[n&3]`)의 근본** -- 동적 LOAD가 이전 STORE들과 aliasing 안 돼 store 전부 deadcode.
+  포팅 규모 = ValueSet 기반 loadGuard index-range 분석(대규모). 상세 NEXT_SESSION_PROMPT.md #13.
 - **SeqNum.Order != 블록 실행 위치(전역)**: cover 소비자만 세션5에 국소 해결(`97084fa`). 다른 Order 소비자
   (double.go, funcdata.go, rules_misc.go, merge.go 정렬)는 여전히 stale decode order -- 측정된 실패는 없음.
   완전 포팅은 Order를 opTree 맵 키에서 분리해야 함(별도 세션).
