@@ -385,13 +385,25 @@
           "byte-identical (indent-insensitive)"
         ]
       }
+    },
+    {
+      "name": "probe_distribute",
+      "entry": 12448,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 32,
-    "match": 31,
+    "total": 33,
+    "match": 32,
     "tag_counts": {
-      "MATCH": 31,
+      "MATCH": 32,
       "TYPECAST": 1
     }
   }
