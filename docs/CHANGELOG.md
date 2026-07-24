@@ -5,9 +5,9 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
-### 2026-07-25 (세션12): #9 conditional-move collapse + #7 누산기 루프 렌더 fix (master `1f6a4cb`)
+### 2026-07-25 (세션12): #9 conditional-move collapse + #7 루프 렌더 fix 2건(누산기+snapshot) (master `3995622`)
 
-자율주행, Opus 직접. **엔진 fix 2건 착지(전 골든 무회귀), x64_auto 102/103 -> 106/107**(switch_dense만 non-match).
+자율주행, Opus 직접. **엔진 fix 3건 착지(전 골든 무회귀), x64_auto 102/103 -> 107/108**(switch_dense만 non-match).
 
 **착지1(`94af189`) -- #9 both-constant conditional-move collapse**: `return a==b`가 `undefined4 f(){if(c)local=1;
 else local=0; return local;}`로 방출되던 것(최다빈도 C 패턴). 3-부품 fix:
@@ -36,10 +36,19 @@ return s;`가 루프-body `s+=i` 소실 + `return local_14+local_18`(should `ret
   transparent로 봐서 `local_14=local_14+i`를 "return-only 중간값"으로 오억제 -> **op이 그 phi의 출력을 입력으로
   읽으면(loop back-edge) opaque 가드** 추가. (2) `renderReturnValueFrag`가 resolveForReturn으로 EAX->ECX(COPY)->
   INT_ADD를 찾아 무조건 인라인 -> **resolved varnode가 explicit면 이름 사용(인라인 금지)** 가드 추가. 둘 다 렌더 사이드.
-- probe_dowhile MATCH. **잔여 #7 = probe_binsearch**: loop-head snapshot(iVar1) + swapped 변수(gcd-family) -- `return
-  iVar1`은 복구됐으나 루프 변수 업데이트(`local_14=iVar1+1` 등)가 여전히 소실(업데이트 op이 자기 phi가 아닌 iVar1을
-  읽어 back-edge 가드 미발화). 다른 억제 경로. repro: `int f(int*a,int n,int key){int lo=0,hi=n-1; while(lo<=hi){int
-  mid=(lo+hi)/2; if(a[mid]==key)return mid; if(a[mid]<key)lo=mid+1; else hi=mid-1;} return -1;}`.
+- probe_dowhile MATCH.
+
+**착지3(`3995622`) -- #7 loop-head snapshot fix (binsearch류 = 조건부 루프변수 업데이트)**: `while(lo<=hi){int
+mid=(lo+hi)/2; if(a[mid]==key)return mid; if(a[mid]<key)lo=mid+1; else hi=mid-1;} return -1;`가 루프변수(lo/hi/mid)
+전부 **미선언+미대입**으로 방출(컴파일 불가). 근본(EMIT_TRACE 계측): 드롭된 문장 전부 `prologue=true`. 두 함수가
+cascade: (1) markPrologueOps `isSelfReferentialMultiequal`이 stack-slot 루프변수 merge phi를 vacuous로 오분류 ->
+업데이트(`lo=mid+1`)를 prologue 마킹, (2) 그 결과 markReturnOnlyCopies가 snapshot iVar1의 소비자(업데이트들)를 전부
+transparent로 봐서 iVar1도 return-only 마킹. **근본 = `isSelfReferentialMultiequal`이 ESP/EIP register live-through
+loop phi(vacuous 재순환)용인데 stack-slot 루프변수 merge phi에 오발화**: 루프에서 한 브랜치가 값을 안 바꾸면
+(`else`서 lo 불변) merge phi가 자기 출력을 unchanged-path 입력으로 정당하게 취함 -> self-ref로 잡힘. 수정 =
+**stack-space phi 출력은 vacuous 아님(실제 named local) 가드 1줄** -> 전체 cascade 해소(업데이트+snapshot 전부 복구).
+probe_binsearch MATCH, gcd 등 루프 골든 무회귀(register-space ESP phi는 여전히 vacuous 유지). **#7 양대 케이스(누산기
+dowhile + loop-head snapshot binsearch) 완료. insort류 조건부 루프변수도 이 클래스라 해결됐을 것.**
 
 **방법론 교훈(영구)**: "빈 함수/void 붕괴/드롭된 문장" 증상은 엔진(Merge/SSA) 갭으로 보이지만 **렌더 억제 휴리스틱
 (markPrologueOps/markReturnOnlyCopies/renderReturnValueFrag -- 전부 C++ 비충실 Gosleigh 근사)이 HOT 근본**일 수
