@@ -15,17 +15,18 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-24 세션11, master `f541dc6` origin 푸시, 전 게이트 green)
+## 현재 상태 (2026-07-24 세션11, master `c9bb66d` origin 푸시, 전 게이트 green)
 
-**권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`**. 요약:
-- **[세션11] 엔진 fix 2건(`0720f83` 반환타입 LOAD-경계 / `4f8d0e0` prologue paramVns=byte-fill store 드롭) +
-  진단툴 SSA_DUMP_AFTER(`6ac87b1`) + 감사맵 실측 재검증(goldengap 프로브)**. `inferReturnType`의
-  `hasArithmeticAncestor`가 LOAD 주소 산술을 따라가 raw memory-read 반환을 int로 오승격하던 것을 LOAD 경계 차단
-  (undefined%d 유지, Ghidra 실측 일치). 프로브로 감사맵 **#1(AddTreeState distribute) 반증**(3-shape byte-identical,
-  Ghidra의 `(i+j)*3+j`->`i*3+j*4` distribute까지 동일 재현), **#2(mergeIndirect) 하네스 측정불가**(외부콜 out-of-image),
-  **#3(markExplicitBase) 부분확정**(ZEXT 슬라이스만 포팅가능/PIECE는 PieceNode 미포팅/현 코퍼스 dormant), **신규 #6
-  특성화**(struct 혼합폭 필드 로드 cast 누락 = PTRADD pointee widening 깊은 타입전파, NEXT_SESSION 세션11 블록).
-  x64_auto 60/61(프로브 20건 추가로 분모 증가, switch_dense만 잔여). **교훈: latent 감사항목은 goldengap 프로브로 speculation->실측 전환.**
+**권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md` (line ~42 세션11 우선순위 맵)**. 요약:
+- **[세션11] 엔진 fix 3건 착지(전 골든 무회귀) + 진단툴 신설 + gap 지형 완전 매핑**:
+  `0720f83` 반환타입 LOAD-경계(inferReturnType hasArithmeticAncestor가 LOAD 주소산술 추적) / `4f8d0e0` byte-fill
+  store 드롭(markPrologueOps가 1바이트 param 슬라이스를 spill 오분류 -> paramVns를 hv.Instances로) / `5d3727d`
+  RulePropagateCopy ReturnCopy 가드(반환값이 EAX->소스레지스터 이동 후 deadcode 붕괴하던 것 -- short_ident·uchar MATCH,
+  ret_param·#7 반환 복구). 진단툴 **SSA_DUMP_AFTER**(`6ac87b1`, action.go stage별 SSA)가 근본 국소화 결정타.
+  감사맵 **#1(distribute) 반증**(3-shape byte-identical)/**#2 하네스 측정불가**/**#3 부분확정** + 신규 divergence
+  **#6~#13 + FP 특성화**(전부 NEXT_SESSION 세션11 우선순위 맵). x64_auto 102/103(goldengap 프로브 ~70건, switch_dense만
+  잔여). **교훈: latent 감사항목은 goldengap 프로브로 speculation->실측 전환; 과잉 root-cause 단정 2회 자기정정
+  (세션10 교훈 실천); 3 fix 공통 = gosleigh에 플래그/인프라 있으나 C++ 가드 미적용.**
 - **[세션10 후속: 비-룰 레이어 parity 감사 + 2건 착지]** (`48bd5b4` 등). 룰 감사를 엔진 나머지로 확장
   (Sonnet 워커 2슬롯이 25개 파일 수집, Opus가 C++ 대조 검증). 결과: `known mismatch` 마커 **~200개 전부
   명시적 선언**(숨은 휴리스틱 아님, 대다수 DORMANT=현 코퍼스 미발화 기능) + **무표기 HOT divergence ~8건** 발견.
@@ -102,10 +103,11 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   CHANGELOG 2026-07-17 세션4 참조.
 
 
-## 다음 작업 (우선순위)
+## 다음 작업 (권위 = 루트 NEXT_SESSION_PROMPT.md 세션11 우선순위 맵. 아래 인용은 세션8 시점 역사 -- 대부분 착지완료)
 
-> **[최신] 2026-07-24 세션8 (master `e3a573f` origin 푸시): 착지 8건, **corpus2 8/13, x64_auto 29/32**.
-> 남은 미스매치와 근본(전부 실측 확인됨):
+> **~~[최신]~~ (역사, 세션8 시점) 2026-07-24 세션8 (master `e3a573f`): 착지 8건, corpus2 8/13, x64_auto 29/32.**
+> **★stale: 아래 array_init_then_sum은 세션8에 MATCH 착지완료, 현재 x64_auto 102/103. 최신은 NEXT_SESSION 세션11.**
+> 남은 미스매치와 근본(세션8 시점 기록):
 > - **array_init_then_sum**: 상류 3단이 막혀 있다 -- (1) `Funcdata.Spacebase()`가 `UpdateType(ptr)`만 해서
 >   spacebase 포인터 타입이 InferTypes에 덮임(C++ funcdata.cc:264는 `updateType(ptr,**true,true**)`),
 >   (2) `propagateAddPointer`에 `CPUI_INT_ADD` 케이스 부재(C++ typeop.cc:1291-1313) -> RulePtrArith 미진입 ->

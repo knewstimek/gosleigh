@@ -10,17 +10,22 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (master `f541dc6` origin 푸시, 전 게이트 green -- 세션11 반환타입 fix + 감사맵 실측 재검증)
+## 현재 상태 (master `c9bb66d` origin 푸시, 전 게이트 green -- 세션11 엔진 fix 3건 + gap 지형 완전 매핑)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **10/13**,
-  x64_auto **60/61**(세션11 프로브 20건 추가로 분모 증가, switch_dense만 non-match),
+  x64_auto **102/103**(세션11 goldengap 프로브 ~70건 추가로 분모 증가, switch_dense만 non-match),
   production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
-- **[세션11]** 반환타입 LOAD-경계 fix 착지(`0720f83`): `inferReturnType`의 `hasArithmeticAncestor`가 LOAD의
-  주소 산술을 따라가 raw memory-read 반환을 잘못 int로 승격하던 것을 LOAD 경계에서 차단(undefined%d 유지). +
-  goldengap 프로브 10건으로 감사맵 #1 반증/#2 측정불가/#3 부분확정 + 신규 #6(struct 혼합폭 cast 누락) 특성화
-  (아래 감사맵 세션11 블록). 잔여 golden = switch_dense(imagebase 하네스) + corpus2 add_pt/caller/faverage.
-- 세션8/9/10 상세는 CHANGELOG. 다음 작업은 아래 "다음 작업" + 감사맵(세션11 블록 = 최신).
+- **[세션11 착지 3건]**(전 골든 무회귀): `0720f83` 반환타입 LOAD-경계 / `4f8d0e0` byte-fill store 드롭(prologue
+  paramVns=hv.Instances) / `5d3727d` RulePropagateCopy ReturnCopy 가드(반환-레지스터-이동 붕괴 family: short_ident·
+  uchar MATCH, ret_param·#7 반환 복구). **신설 진단툴 SSA_DUMP_AFTER**(stage별 SSA). 감사맵 #1 반증/#2 측정불가/#3
+  부분확정 + 신규 divergence #6~#13 + FP 특성화(전부 아래 세션11 블록에 우선순위 맵). 잔여 golden = switch_dense
+  (imagebase 하네스) + corpus2 add_pt/caller/faverage.
+- **다음 작업 권위 = 아래 "[세션11] ... == 다음 세션 우선순위 맵 =="**(line ~42). 그 아래 옛 세션6/8 "다음 작업"
+  블록들은 대부분 착지완료(stale, 역사 참고용 -- 세션8 "이게 최신 권위" 라벨은 무시). 세션8/9/10 상세는 CHANGELOG.
 
-### [세션10 후속 감사맵] 비-룰 레이어 무표기 HOT divergence -- 다음 세션 최대 광맥
+### [세션10 후속 감사맵] 비-룰 레이어 무표기 HOT divergence
+**★세션11 실측 재검증(아래 표는 세션10 시점 -- 갱신): #1 반증(distribute는 3-shape byte-identical로 충실),
+#2 하네스 측정불가(외부콜 out-of-image), #3 부분확정(ZEXT만 포팅가능/PIECE 미포팅/dormant). #4·#5 착지 유지.
+최신은 line ~42 세션11 우선순위 맵.**
 룰 감사(12건 완결)를 엔진 나머지로 확장. `known mismatch` 마커 ~200개는 **전부 명시 선언**(숨은 휴리스틱 아님,
 대다수 DORMANT). 문제는 **무표기(선언 안 된) HOT divergence**. Opus 검증 완료분:
 
@@ -360,9 +365,11 @@ C++ `array_expr`(printc.cc:76, spacing=1)와 불일치해 선언 경로만 `loca
 - 골든 파이프라인: testdata/x64_corpus*/ + x64_auto/ (build.py + run_ghidra.py + GenGoldens.java).
   코퍼스 바이너리는 gitignore -- 부재 시 각 build.py 재실행. elfs는 `go run testdata/elfs/gen_import_pe.go`.
 
-## 다음 작업 (우선순위)
+## 다음 작업 (역사 -- 아래는 세션8 시점, 대부분 착지완료. **최신 권위는 line ~42 세션11 우선순위 맵**)
+**★stale 주의: 이 섹션 이하(세션8/6-era)의 "다음 작업"·"이게 최신 권위"·잔여 카운트(29/32 등)는 전부 그 세션 시점
+기록이다. 세션8-11에 대부분 착지했고 현재 x64_auto는 102/103. 착수 전 반드시 위 세션11 블록을 권위로 삼을 것.**
 
-### [2026-07-24 세션8 결과 -- 이게 최신 권위] master `2f08090`, x64_auto **29/32**, corpus2 8/13
+### [2026-07-24 세션8 결과 -- ~~이게 최신 권위~~ (역사)] master `2f08090`, x64_auto **29/32**, corpus2 8/13
 
 **착지 8건** (상세 = CHANGELOG 2026-07-24 세션8-1~8):
 `365aa20` markImplied cover parity / `636f820` INT_SUB 출력토큰(bit_rotate MATCH) / `f3dc442` **detached op**
