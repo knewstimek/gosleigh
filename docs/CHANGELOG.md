@@ -30,10 +30,13 @@ int로 오승격. LOAD는 값-provenance 체인을 끊으므로(로드값 타입
   scale=4인데 int/8로 widening(역전파) + 8B int가 "longlong" 아닌 "int" 오명명 -> GetInputCast가 cast 억제. 깊은 타입전파.
 - **#7 do-while + accumulator 누산기+반환 통째 드롭 (심각)**: `do{s+=i;i++;}while(i<n);return s`가 `void(void)`로
   붕괴. **입력 무결성 OK + decomp_dbg(C++ 코어 동일 격리 바이트) ssadiff로 gosleigh 엔진 버그 확정**(C++은 s 완복구).
-  **신설 SSA_DUMP_AFTER stage-dump 툴(`6ac87b1`, action.go env-gated)로 근본 정밀 확정**: s는 heritage 정상 등록
-  (초기 "미등록" 가설 반증) -> store-to-load forward가 exit reload `u=s[-0x14]`를 루프 내부 누산기 r8로 치환 ->
-  r8 def가 루프 body라 exit dominate 불가(SSA 위반) -> deadcode가 invalid `return r8` 제거 -> void. 수정=forward를
-  store dominates load일 때만 허용. 트리거=do-while+둘째 스택 로컬(dowhile_count/sum_loop=MATCH). copy-prop broad-blast.
+  **신설 SSA_DUMP_AFTER stage-dump 툴(`6ac87b1`, action.go env-gated)로 근본 국소화**: s는 heritage 정상 등록
+  (초기 "미등록" 가설 반증). **[정정: 초기 "dominance violation" 주장은 재검증 결과 오류 -- r8 def는 루프 body지만
+  exit는 body 통해서만 도달해 dominate함. 세션10 교훈(과잉 root-cause 단정 회피) 실현.]** 확정 기전: 반환값이 ABI
+  반환 레지스터 **EAX에서 누산기 레지스터 ECX로 이동**. stage1-9는 `return EAX`(exit 스택 reload 정상), stage10에서
+  store-to-load forward가 reload를 in-loop ECX(0x1e:2=s+i)로 치환+return을 ECX로 변경 -> stage13 deadcode가 비-반환
+  레지스터 참조라 반환 비움 -> s 연쇄 사장. C++은 forward 안 하고 exit reload 유지 -> return EAX. 수정 방향(미확정)=
+  forward가 반환값을 EAX 밖으로 못 옮기게. 정확한 culprit 룰 미확정(rule 단위 계측 필요). copy-prop broad-blast.
 - **#8 `-x*c` 미fold**: `-x*3`->`-param_1*3` vs Ghidra `param_1*-3`. cosmetic, Rule2Comp2Mult 발진위험이라 defer.
 - **#9 비교 반환/대입 미collapse (최고가치, 최다빈도)**: `return a==b`가 `if(c){x=1}else{x=0}return x`로 방출.
   근본 = **`RuleConditionalMove`(rules_misc.go:821)가 스텁**(identical-input collapse만 = C++ trivial 부분케이스).
