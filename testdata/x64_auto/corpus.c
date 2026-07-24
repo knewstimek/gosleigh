@@ -683,3 +683,7 @@ unsigned probe_rotr(unsigned x, int n) { return (x >> n) | (x << (32 - n)); }
 int probe_ret_eq(int a, int b) { return a == b; }
 int probe_ret_lt(int a, int b) { return a < b; }
 int probe_ret_uge(unsigned a, unsigned b) { return a >= b; }
+
+/* added via goldengap add: probe_dowhile -- accumulator loop (s += i), the
+   common #7 case fixed by the loop-back-edge / explicit-return render guards */
+int probe_dowhile(int n) { int i=0,s=0; do { s+=i; i++; } while (i<n); return s; }
