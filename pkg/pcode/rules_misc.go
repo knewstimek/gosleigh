@@ -235,22 +235,30 @@ type RuleDoubleSub struct{ batchRule }
 
 func NewRuleDoubleSub(group string) *RuleDoubleSub {
 	r := &RuleDoubleSub{}
-	r.batchRule = newBatchRule(group, "doublesub", []OpCode{CPUI_INT_SUB}, r.apply, func(g string) Rule { return NewRuleDoubleSub(g) })
+	r.batchRule = newBatchRule(group, "doublesub", []OpCode{CPUI_SUBPIECE}, r.apply, func(g string) Rule { return NewRuleDoubleSub(g) })
 	return r
 }
 
+// apply is a faithful port of RuleDoubleSub::applyOp (ruleaction.cc:1806-1823),
+// collapsing chained SUBPIECE: sub(sub(V,c), d) => sub(V, c+d).
+//
+// The prior body under this name folded chained INT_SUB constants
+// ((V-c1)-c2 => V-(c1+c2)), which is dead: RuleSub2Add rewrites every INT_SUB
+// into V + (W * -1) before a second INT_SUB could stack, so that path never
+// fired. The C++ core has no such INT_SUB rule; additive constants fold through
+// RuleSub2Add + RuleCollectTerms instead.
+//
+// SUBPIECE's truncation operand is a constant by p-code invariant, so the
+// offsets are read directly (matching C++, which does not gate on isConstant).
 func (r *RuleDoubleSub) apply(op *PcodeOp, data *Funcdata) int {
-	inner := definedBy(op.Input(0), CPUI_INT_SUB)
+	inner := definedBy(op.Input(0), CPUI_SUBPIECE)
 	if inner == nil {
 		return 0
 	}
-	c1, ok1 := constantValue(inner.Input(1))
-	c2, ok2 := constantValue(op.Input(1))
-	if !ok1 || !ok2 {
-		return 0
-	}
-	size := outputOrInputSize(op)
-	rewriteOp(data, op, CPUI_INT_SUB, inner.Input(0), data.NewConstant(size, truncateToSize(c1+c2, size)))
+	offset1 := op.Input(1).Offset()
+	offset2 := inner.Input(1).Offset()
+	data.OpSetInput(op, inner.Input(0), 0) // skip middleman
+	data.OpSetInput(op, data.NewConstant(4, offset1+offset2), 1)
 	return 1
 }
 
