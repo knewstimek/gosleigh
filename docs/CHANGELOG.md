@@ -15,8 +15,9 @@ Ghidra 12.0.4 실측으로 전환. 하네스가 단일함수 base-0 격리라 �
 루프 누산기처럼 반환값을 다른 레지스터로 추적 가능한 함수가 `void`로 붕괴하던 것. 근본: copy-prop이 `return EAX`
 (EAX=EDX copy)를 `return EDX`로 propagate -> EDX가 반환레지스터 아니라 deadcode가 반환 비움 -> 전체 사장. C++
 ruleaction.cc:3953 `if(op->isReturnCopy()) return 0` 가드 부재. gosleigh는 return-copy COPY 폼 미plumb이나 CPUI_RETURN
-opcode에 PcodeOpReturnCopy 플래그 있음(typeop.go) -> 그 플래그로 가드. short_ident MATCH, ret_param/#7 반환 복구
-(void 탈출), 전 골든 무회귀(copy-prop broad인데). 잔여(별개 root): ret_param param-signature / #7 loop accumulator / #12 uchar subvar.
+opcode에 PcodeOpReturnCopy 플래그 있음(typeop.go) -> 그 플래그로 가드. short_ident/uchar MATCH, ret_param/#7 반환 복구
+(void 탈출), 전 골든 무회귀(copy-prop broad인데). **[정정] uchar도 이 가드로 FIXED(초기 "subvar 다른 root" 오진 --
+세션10 교훈 재현).** 잔여(별개 root): ret_param param-signature / #7 loop accumulator(Merge coalescing) / clamp2 multi-branch ZEXT phi 중복.
 
 **착지2(`4f8d0e0`) -- prologue paramVns를 param HV instances로 구축(byte-fill store 드롭 수정)**: `markPrologueOps`
 (printc.go render 휴리스틱)가 `*p=(char)param_2`(memset) store를 callee-saved spill로 오분류해 드롭(for body 빈

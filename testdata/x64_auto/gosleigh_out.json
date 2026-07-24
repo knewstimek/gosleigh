@@ -30,7 +30,7 @@
     },
     {
       "name": "switch_dense",
-      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x50f0) + 0x27b8))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
+      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x51f0) + 0x28b8))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
     },
     {
       "name": "switch_sparse",
@@ -379,6 +379,10 @@
     {
       "name": "probe_ret_ull",
       "output": "\nulonglong probe_ret_ull(ulonglong param_1)\n\n{\nreturn param_1 \u003e\u003e 1;\n}\n"
+    },
+    {
+      "name": "probe_ret_uchar",
+      "output": "\nundefined1 probe_ret_uchar(undefined1 param_1)\n\n{\nreturn param_1;\n}\n"
     }
   ]
 }

@@ -51,11 +51,12 @@ gap이 4개 family로 수렴한다. 각 family는 별개 근본이라 하나씩 
    반환=ECX)이나 **렌더에서 루프 body `local_14 = local_14+local_18`가 빠지고 `return local_14+local_18`로 인라인**.
    근본=**Merge가 레지스터 ECX(s+i 결과=phi 입력)를 스택로컬 s...ec(phi 출력=local_14)와 coalesce 못함** -> 렌더가
    ECX를 local_14로 인식 못해 루프-body 대입을 놓침(register↔stack phi coalescing, Merge 코어, deep. cf. 감사맵
-   #2 merge family). (b) #12 uchar(1바이트 반환 SubvariableFlow 후 unjustified -> deadcode)는 이 가드로 미해결(다른 root).
-   (c) **`probe_clamp2`(multi-branch clamp)도 `void` 붕괴 -- copy-prop 이동 아님(반환이 EAX에 머묾)**. 근본=guardReturns가
-   **8바이트 ZEXT48 phi(RAX)와 4바이트 param phi(EAX)를 중복 생성** -> deadcode가 반환을 4바이트 phi에서 분리(EAX/RAX
-   4-8바이트 return-register-size 중복, SubvariableFlow 연관, deep). 즉 반환-붕괴 family는 3개 sub-root:
-   copy-prop 이동[착지 `5d3727d`]/multi-branch ZEXT phi 중복[clamp2]/subvar 1바이트[uchar]. 상세 #7/#12.
+   #2 merge family). (b) **[정정: uchar도 이 가드로 FIXED]** -- 세션11에 "uchar=다른 root(subvar)"라 봤으나 오진(세션10
+   교훈 재현), ReturnCopy 가드가 short_ident/uchar/ret_param·#7 반환을 모두 복구. (c) **`probe_clamp2`(multi-branch
+   clamp)는 여전히 `void` 붕괴 -- copy-prop 이동 아님(반환이 EAX에 머묾)**. 근본=guardReturns가 **8바이트 ZEXT48
+   phi(RAX)와 4바이트 param phi(EAX)를 중복 생성** -> deadcode가 반환을 4바이트 phi에서 분리(EAX/RAX 4-8바이트
+   return-register-size 중복, deep). 즉 반환-붕괴 family: copy-prop 이동[착지 `5d3727d`, short_ident/uchar/ret_param/#7
+   반환 복구]는 해결, **잔여 = multi-branch ZEXT phi 중복[clamp2]만**. 상세 #7.
 3. **[타입전파 back-prop family] #6 struct 혼합폭 cast + find_max pointer element**: Ghidra의 풍부한 타입 역전파
    (load-size->pointer, 부호비교->element) 미포팅 -> undefined%d* 유지 + 여분 cast. broad-blast 타입전파. 상세 #6.
 4. **[cosmetic 저우선] #8** -x*c 미fold, **#10** for 과승격, dot `;` 줄바꿈(umulhi-class). 동값/형식, 회귀위험 대비 ROI 낮음.
@@ -166,7 +167,10 @@ gap이 4개 family로 수렴한다. 각 family는 별개 근본이라 하나씩 
   재추가 MATCH + 전 골든 + pcode/bridge 발진 + 구조화 회귀(if/else collapse가 타 함수 오발화 주의).** 세션11은
   스텁임을 실측 확정하고 다부품이라 미착수 -- **이게 다음 세션 최우선(최다빈도 C 패턴).**
 
-**[신규 #12 -- 1바이트 반환/param이 SubvariableFlow 후 void로 붕괴 (HOT, 심각, C++ 실측 확정)]**
+**[신규 #12 -- 1바이트 반환 void 붕괴 -- 착지 `5d3727d`(ReturnCopy 가드로 해결). 아래는 세션11 초기 오진 기록(교훈용)]**
+**정정: 이건 별개 root(SubvariableFlow deadcode)가 아니라 #7과 동일한 반환-레지스터-이동 root였고, RulePropagateCopy
+ReturnCopy 가드로 FIXED(probe_ret_uchar MATCH). 아래 "SubvariableFlow 후 unjustified" 진단은 오진 -- 세션10 교훈
+(과잉 root-cause 단정 회피)의 재현 사례. 실제로는 copy-prop이 반환값을 EAX 밖으로 옮긴 것이 근본.**
 - 재현: `unsigned char f(int x){ return (unsigned char)(x & 0xff); }` (goldengap `probe_ret_uchar`, 세션11 제거).
   바이트=`mov [rsp+8],ecx; mov eax,[rsp+8]; and eax,0xff; ret`. Ghidra: `undefined1 f(undefined1 param_1){ return
   param_1; }`. **Gosleigh: `void f(void){ return; }`** -- param/반환 전멸. decomp_dbg(동일 격리바이트): C++은
@@ -184,8 +188,9 @@ gap이 4개 family로 수렴한다. 각 family는 별개 근본이라 하나씩 
   (printc.go, render 휴리스틱)가 store를 callee-saved spill로 오분류**. 이유: paramVns를 `vn.High()==paramHV`
   AllVarnodes 스캔으로 구축했는데 **1바이트 param 슬라이스(DL)가 param_2의 HV(RDX 8바이트)에 back-link 없어 스캔이 RDX를
   놓침** -> paramVns에 param_2 부재 -> store값 DL이 "비-param 레지스터" spill로 마킹 -> emit 스킵. 수정: paramVns를
-  `hv.Instances()`로 구축(authoritative) + val이 param storage에 overlap하면(1바이트 슬라이스) skip. **uchar(#12
-  잔여)와는 다른 root**(memset=render 휴리스틱, uchar=subvar deadcode). 전 골든 무회귀. **uchar는 아래 #12에 잔존.**
+  `hv.Instances()`로 구축(authoritative) + val이 param storage에 overlap하면(1바이트 슬라이스) skip. memset=render
+  휴리스틱 root(byte-fill store 드롭). **uchar(byte 반환 void 붕괴)는 별개 root -- ReturnCopy 가드 `5d3727d`로 FIXED.**
+  전 골든 무회귀.
 - **경미(형식/local-type, 별도 세션 불필요)**: `probe_toupper_buf`=사실상 byte-identical, 루프변수만 `undefined4`(golden)
   vs `int`(gosleigh)=local 타입추론 차이. `probe_scale_arr`=WRAP(긴 식 `;` 줄바꿈, umulhi-class 포맷). `probe_dot`도 동류.
 
