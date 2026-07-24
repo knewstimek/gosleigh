@@ -167,27 +167,41 @@ type RuleRightShiftAnd struct{ batchRule }
 
 func NewRuleRightShiftAnd(group string) *RuleRightShiftAnd {
 	r := &RuleRightShiftAnd{}
-	r.batchRule = newBatchRule(group, "rightshiftand", []OpCode{CPUI_INT_AND}, r.apply, func(g string) Rule { return NewRuleRightShiftAnd(g) })
+	r.batchRule = newBatchRule(group, "rightshiftand", []OpCode{CPUI_INT_RIGHT, CPUI_INT_SRIGHT}, r.apply, func(g string) Rule { return NewRuleRightShiftAnd(g) })
 	return r
 }
 
+// apply is a faithful port of RuleRightShiftAnd::applyOp (ruleaction.cc:580-599):
+// drop an INT_AND mask that a following right shift makes redundant --
+// (V & mask) >> sa => V >> sa, when the mask keeps exactly the bits that survive
+// the shift (mask >> sa == fullMask(V) >> sa). Works for INT_RIGHT and INT_SRIGHT.
+//
+// The previous body under this name removed an *outer* AND over a shifted value
+// ((V>>sa) & lowMask(w-sa) => V>>sa), which is the NZMask-coverage case of C++
+// RuleAndMask (a mask covering every possibly-nonzero bit). It is dropped here as
+// the name-collision fix; the empirical gate run confirmed no golden depends on it.
 func (r *RuleRightShiftAnd) apply(op *PcodeOp, data *Funcdata) int {
-	for slot := 0; slot < 2; slot++ {
-		shiftop := definedBy(op.Input(slot), CPUI_INT_RIGHT)
-		if shiftop == nil {
-			continue
-		}
-		shift, ok := constantValue(shiftop.Input(1))
-		maskVal, maskOK := constantValue(op.Input(1 - slot))
-		if !ok || !maskOK || shift >= uint64(outputOrInputSize(op)*8) {
-			continue
-		}
-		expected := lowMask(uint64(outputOrInputSize(op)*8) - shift)
-		if maskVal == truncateToSize(expected, outputOrInputSize(op)) {
-			return rewriteToCopy(data, op, op.Input(slot))
-		}
+	sa, ok := constantValue(op.Input(1))
+	if !ok {
+		return 0
 	}
-	return 0
+	andOp := definedBy(op.Input(0), CPUI_INT_AND)
+	if andOp == nil {
+		return 0
+	}
+	maskConst, maskOK := constantValue(andOp.Input(1))
+	if !maskOK {
+		return 0
+	}
+	rootVn := andOp.Input(0)
+	if maskConst>>sa != maskForSize(rootVn.Size())>>sa {
+		return 0
+	}
+	if rootVn.IsFree() {
+		return 0
+	}
+	data.OpSetInput(op, rootVn, 0) // bypass the INT_AND
+	return 1
 }
 
 type RuleAndCommute struct{ batchRule }
