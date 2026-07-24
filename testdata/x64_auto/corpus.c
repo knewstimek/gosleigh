@@ -530,3 +530,21 @@ int probe_ret_deref(int *p) { return *p; }
 int probe_ret_subscript(int *p) { return p[3]; }
 int probe_ret_derefadd(int *p) { return *p + 1; }
 long long probe_ret_load8(long long *p) { return *p; }
+
+/* --- session11 batch 7: realistic multi-feature functions (self-contained) --- */
+
+int probe_sum_pos(int *a, int n) {
+	int s = 0;
+	for (int i = 0; i < n; i++) if (a[i] > 0) s += a[i];
+	return s;
+}
+int probe_strlen2(char *s) {
+	int n = 0;
+	while (s[n]) n++;
+	return n;
+}
+int probe_count_bits(unsigned x) {
+	int c = 0;
+	while (x) { c += x & 1; x >>= 1; }
+	return c;
+}
