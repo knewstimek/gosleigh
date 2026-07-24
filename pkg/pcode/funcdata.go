@@ -831,9 +831,36 @@ func (fd *Funcdata) RemoveUnreachableBlocks(bool, bool) bool {
 
 // RemoveDoNothingBlock is implemented in funcdata_donothing.go.
 
-// RemoveBranch removes a branch from the given basic block.
-// C++ parity: funcdata.hh Funcdata::removeBranch
-func (fd *Funcdata) RemoveBranch(*BlockBasic, int) {
+// branchRemoveInternal severs the out-edge numbered num from bb, removing the
+// branch instruction if the block had exactly two exits, and pruning the
+// corresponding MULTIEQUAL inputs in the target block.
+// C++ parity: funcdata_block.cc Funcdata::branchRemoveInternal.
+func (fd *Funcdata) branchRemoveInternal(bb *BlockBasic, num int) {
+	if bb.SizeOut() == 2 { // If there is no decision left
+		fd.OpDestroy(bb.LastOp()) // Remove the branch instruction
+	}
+	bbout := asBasic(bb.OutEdge(num).Point)
+	if bbout == nil {
+		return
+	}
+	blocknum := bbout.GetInIndex(&bb.FlowBlock)
+	fd.GetBasicBlocks().RemoveEdge(&bb.FlowBlock, &bbout.FlowBlock) // Sever (one) connection
+	// Prune the pruned in-edge's slot from any MULTIEQUAL in the target.
+	for _, op := range append([]*PcodeOp(nil), bbout.opSlice()...) {
+		if op.Code() != CPUI_MULTIEQUAL {
+			continue
+		}
+		fd.OpRemoveInput(op, blocknum)
+		fd.opZeroMulti(op)
+	}
+}
+
+// RemoveBranch removes out-edge num from bb (severing a redundant or determined
+// branch) and recomputes block structure.
+// C++ parity: funcdata_block.cc Funcdata::removeBranch.
+func (fd *Funcdata) RemoveBranch(bb *BlockBasic, num int) {
+	fd.branchRemoveInternal(bb, num)
+	fd.StructureReset()
 }
 
 // ---------------------------------------------------------------------------
@@ -1160,6 +1187,22 @@ func (fd *Funcdata) OpInsertEnd(op *PcodeOp, bb *BlockBasic) {
 	} else {
 		bb.InsertOpEnd(op)
 	}
+}
+
+// OpBoolNegate creates a CPUI_BOOL_NEGATE of vn (a fresh 1-byte unique output)
+// and inserts it before/after op, returning the negated result Varnode.
+// C++ parity: Funcdata::opBoolNegate (funcdata_op.cc:560).
+func (fd *Funcdata) OpBoolNegate(vn *Varnode, op *PcodeOp, insertafter bool) *Varnode {
+	negateop := fd.NewOp(1, op.Addr())
+	fd.OpSetOpcode(negateop, CPUI_BOOL_NEGATE)
+	resvn := fd.NewUniqueOut(1, negateop)
+	fd.OpSetInput(negateop, vn, 0)
+	if insertafter {
+		fd.OpInsertAfter(negateop, op)
+	} else {
+		fd.OpInsertBefore(negateop, op)
+	}
+	return resvn
 }
 
 // OpInsertBefore inserts op immediately before follow in follow's basic block.

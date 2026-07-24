@@ -678,3 +678,8 @@ unsigned probe_rotr(unsigned x, int n) { return (x >> n) | (x << (32 - n)); }
 
 /* --- session11 batch 18: algorithm kernels --- */
 
+
+/* added via goldengap add: probe_ret_eq */
+int probe_ret_eq(int a, int b) { return a == b; }
+int probe_ret_lt(int a, int b) { return a < b; }
+int probe_ret_uge(unsigned a, unsigned b) { return a >= b; }

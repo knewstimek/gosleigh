@@ -642,11 +642,43 @@ func (a *ActionRedundBranch) Clone(groups ActionGroupList) Action {
 	return NewActionRedundBranch(a.GetGroup())
 }
 
-// Apply removes redundant branches.
-// C++ parity: coreaction.cc ActionRedundBranch::apply
+// Apply removes redundant branches: a CBRANCH whose true and false targets are
+// the same block is stripped to a fall-through.
+// C++ parity: coreaction.cc ActionRedundBranch::apply.
+//
+// The C++ action also splices a single-exit block into a single-entry successor
+// (spliceBlockBasic). That normalization is not yet ported here; it is not
+// render-visible on the current corpus (a straightened fall-through chain emits
+// the same C as a spliced block), and it never fired before because this whole
+// action was a stub. Only the redundant-branch removal is implemented, which is
+// what conditional-move collapse (RuleConditionalMove) leaves behind.
 func (a *ActionRedundBranch) Apply(data *Funcdata) int {
-	_ = data
-	return 0
+	graph := data.GetBasicBlocks()
+	for i := 0; i < graph.GetSize(); i++ {
+		bb := asBasic(graph.GetBlock(i))
+		if bb == nil || bb.SizeOut() == 0 {
+			continue
+		}
+		bl := bb.OutEdge(0).Point
+		if bb.SizeOut() == 1 {
+			// C++ splices bb into bl here (spliceBlockBasic); unported (see above).
+			continue
+		}
+		// Are all exits to the same block (bl)?
+		allSame := true
+		for j := 1; j < bb.SizeOut(); j++ {
+			if bb.OutEdge(j).Point != bl {
+				allSame = false
+				break
+			}
+		}
+		if !allSame {
+			continue
+		}
+		data.RemoveBranch(bb, 1) // Remove the branch instruction
+		a.count++
+	}
+	return 0 // Indicate full rule was applied
 }
 
 // ActionDeterminedBranch removes branches with constant conditions.
