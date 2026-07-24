@@ -5,6 +5,31 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-07-24 (세션9): 동명 다른 룰 4건 착지, 회귀 0 (master `bbc5906`)
+자율주행 세션(Opus 직접). 세션8 룰 감사가 남긴 "동명 다른 룰" 12건 중 잔여 9건에서 4건 착지. 방법론:
+(1) 진짜 C++ 룰(`getOpList`+본체) 대조, (2) 기존 동명 Go 본체가 다른 등록룰의 중복/死코드인지 확인,
+(3) `go test ./pkg/pcode/`로 테스트 배치 발진부터 검증, (4) 전 golden 게이트 `-count=1` 2회.
+
+**착지 4건**:
+| 커밋 | 룰 | C++ 원본 | 기존 Go 동명 본체 처리 |
+|---|---|---|---|
+| `801caf8` | `RuleShiftPiece` | ruleaction.cc:3773 `{OR,XOR,ADD}` `(zext(V)<<8W)+zext(W)=>concat`, CDQ/IDIV SEXT 특수형 | RuleConcatShift 완전중복(INT_RIGHT+PIECE) -- 드롭, RuleConcatShift가 계속 커버 |
+| `6bd4dbf` | `RuleDoubleSub` | ruleaction.cc:1806 `{SUBPIECE}` `sub(sub(V,c),d)=>sub(V,c+d)` | INT_SUB 접기는 死코드(RuleSub2Add가 모든 INT_SUB->ADD 선변환) -- 드롭 |
+| `4f7b84a` | `RuleRightShiftAnd` | ruleaction.cc:580 `{INT_RIGHT,SRIGHT}` `(V&mask)>>sa=>V>>sa`(안쪽 AND 제거) | 바깥 AND 제거는 RuleAndMask NZMask 커버 케이스 -- 드롭(그 완성은 후속 부채) |
+| `bbc5906` | `RuleZextCommute` | ruleaction.cc:4852 `{INT_RIGHT}` `zext(V)>>W=>zext(V>>W)` | ext(COPY(V))=>ext(V)는 RulePropagateCopy 중복 -- 드롭 |
+
+**차단 1건 = `Rule2Comp2Mult`** (ruleaction.cc:3987 `{INT_2COMP}` `-V=>V*-1`): 진짜 룰 포팅 시 **전 golden green
+(프로덕션 액션트리 검증 완료)**이나 `rules_copy.go`의 테스트 전용 배치가 `Rule2Comp2Mult`(2COMP->MULT-1)와
+`RuleMultNegOne`(MULT-1->2COMP)을 **같은 풀에 co-pooling**해 `go test`가 **무한 발진**. C++은 actprop(analysis)
+vs actcleanup(cleanup) 분리라 프로덕션은 정상. 착지하려면 그 배치를 analysis/cleanup 분리로 고쳐야 함(전용세션).
+**교훈**: 방향 반대 룰 쌍은 프로덕션 풀 분리를 봐도 안심 말고 반드시 배치 발진을 `go test`로 검증할 것.
+
+**게이트**: TREE_MAP 10/10, X64_CORPUS 8/8, X64_SWITCH byte-MATCH, X64_BREADTH 3/3, X64_CORPUS2 10/13,
+x64_auto 31/32, `go test ./...` green, `go vet` clean. **잔여 순수 미착수 4건 = RuleHumptyOr / RuleOrCompare /
+RuleBoolZext / RulePushMulti(정리)**.
+
+---
+
 ### 2026-07-24 (세션8 총괄): x64_auto 25 -> 29/32, 자율주행 감독관 + Opus 병렬 2슬롯 (master `2f08090`)
 감독관 세션. 워커는 worktree 격리 + 파일 비중첩 분할 + 실측 우선(decomp_dbg/ssadiff/ssadump) + STOP 경계 +
 커밋금지(diff 보고). 감독관이 매 건 **C++ 원문 직접 대조** -> 파일 복사 -> 전 매트릭스 `-count=1` 2회 -> 커밋 -> push.

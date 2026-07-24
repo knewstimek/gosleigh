@@ -10,32 +10,39 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (master `e3a573f` origin 푸시, 전 게이트 green -- 감독관 재검증)
+## 현재 상태 (master `bbc5906` origin 푸시, 전 게이트 green -- 세션9 룰 4건 착지)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **10/13**,
   x64_auto **31/32**, production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
 - x64_auto 잔여 **1건** = **switch_dense**. (룰 감사 잔여 10건은 아래 표 -- 다음 세션 최대 광맥)
   corpus2 잔여 **3건** = **add_pt** / **caller** / **faverage**.
 - 세션8 상세는 아래 "[2026-07-24 세션8 결과]" 블록 + CHANGELOG 세션8-1~12.
 
-### [세션8 룰 전수 감사] 동명 다른 룰이 **12건 더** 있다 -- 다음 세션 최우선 광맥
+### [세션8 룰 전수 감사] 동명 다른 룰 -- 12건 중 7건 착지, 잔여 4건 + 차단 1건
 
 세션8에 `RuleSubRight`/`RulePushPtr` 2건이 "이름만 같고 완전히 다른 룰"로 드러나 포팅했는데, read-only 감사
 워커가 **Go 룰 156개를 C++ `getOpList`와 기계 대조**한 결과 같은 유형이 **12건 더** 나왔다. **전부 `action.go`
 `actprop`에 실제 등록되어 실행 중이다**(RulePushMulti 제외). 대조 총계: opcode 집합 일치 117, 불일치 31,
 Go-only 19, C++-only 21(그중 11은 명시적 stub).
 
+**진행(2026-07-24 세션9)**: #1/#2/#6 세션8 착지 + **#3 `RuleShiftPiece`(`801caf8`) / #4 `RuleDoubleSub`(`6bd4dbf`) /
+#5 `RuleRightShiftAnd`(`4f7b84a`) / #10 `RuleZextCommute`(`bbc5906`) 세션9 착지**(전부 전 게이트 green, 회귀 0).
+**#9 `Rule2Comp2Mult`는 차단**(위 표 참조 -- 프로덕션 검증 완료, 테스트 배치 co-pooling만 고치면 착지 가능).
+**잔여 순수 미착수 4건 = #7 `RuleHumptyOr` / #8 `RuleOrCompare` / #11 `RuleBoolZext` / #12 `RulePushMulti`(정리)**.
+착지 방법론(세션9 확립): (a) 진짜 C++ 룰 포팅, (b) 기존 동명 본체가 다른 등록룰의 중복/死코드인지 확인,
+(c) **`go test ./pkg/pcode/`로 배치 발진부터 검증**(Rule2Comp2Mult가 발진으로 반증된 교훈), (d) 전 golden 게이트.
+
 | # | 룰 | C++이 하는 일 (위치) | Go가 하는 일 | 우선순위 |
 |---|---|---|---|---|
 | 1 | ~~`RuleXorCollapse`~~ | `{INT_EQUAL,NOTEQUAL}` `(V^W)==0 => V==W` (ruleaction.cc:4058) | `{INT_XOR}` 항등원 정리 | **착지 `31539bc`** (기존 본체는 `RuleXorIdentity`로 보존) |
 | 2 | ~~`RuleZextEliminate`~~ | `{EQUAL,NOTEQUAL,LESS,LESSEQUAL}` `zext(V)==c => V==c` (2491) | `{INT_ZEXT}` COPY/fold | **착지** (기존 본체는 `RuleZextIdentity`로 보존. **발화 계측 701진입/0발화** -- 비교 피연산자가 이 시점엔 이미 ZEXT가 아님. 왜인지 추적이 후속) |
-| 3 | `RuleShiftPiece` | `{INT_ADD,OR,XOR}` `(zext(V)<<16)+zext(W) => concat` (3773) | `{INT_LEFT,RIGHT}` -- **RuleConcatShift와 본체 완전 동일(중복)** | **최상** |
-| 4 | `RuleDoubleSub` | `{SUBPIECE}` `sub(sub(V,c),d) => sub(V,c+d)` (1798) | `{INT_SUB}` 산술 뺄셈 접기 | 상 |
-| 5 | `RuleRightShiftAnd` | `{INT_RIGHT,SRIGHT}` 시프트 **안쪽** 마스크 제거 (568) | `{INT_AND}` 시프트 **바깥** 마스크 제거(방향 반대) | 상 |
+| 3 | ~~`RuleShiftPiece`~~ | `{INT_ADD,OR,XOR}` `(zext(V)<<16)+zext(W) => concat` (3773) | `{INT_LEFT,RIGHT}` -- **RuleConcatShift와 본체 완전 동일(중복)** | **착지 `801caf8`** (중복 본체 드롭, INT_RIGHT+PIECE는 RuleConcatShift가 계속 커버. CDQ/IDIV SEXT 특수형 포함) |
+| 4 | ~~`RuleDoubleSub`~~ | `{SUBPIECE}` `sub(sub(V,c),d) => sub(V,c+d)` (1798) | `{INT_SUB}` 산술 뺄셈 접기 | **착지 `6bd4dbf`** (INT_SUB 접기는 死코드 -- RuleSub2Add가 모든 INT_SUB를 ADD로 먼저 변환) |
+| 5 | ~~`RuleRightShiftAnd`~~ | `{INT_RIGHT,SRIGHT}` 시프트 **안쪽** 마스크 제거 (568) | `{INT_AND}` 시프트 **바깥** 마스크 제거(방향 반대) | **착지 `4f7b84a`** (드롭한 바깥-AND는 C++ RuleAndMask의 NZMask 커버 케이스 -- 그 완성이 후속 부채) |
 | 6 | ~~`RuleNotDistribute`~~ | `{BOOL_NEGATE}` 불리언 드모르간 (1139) | `{INT_NEGATE}` **비트** 드모르간 | **착지 `31539bc`** (발명 룰은 코퍼스에서 발화 0이라 제거해도 출력 바이트 동일) |
 | 7 | `RuleHumptyOr` | `{INT_OR}` `(V&W)|(V&X) => V&(W|X)` (5339) | `{PIECE}` 조각 재결합 | 중 |
 | 8 | `RuleOrCompare` | `{INT_OR}` `(V|W)==0 => (V==0)&&(W==0)` (10805) | `{BOOL_OR}` `<`+`==` => `<=` | 중 |
-| 9 | `Rule2Comp2Mult` | `{INT_2COMP}` `-V => V*-1` (3979) | `{INT_MULT}` 상수 접기 | 중 |
-| 10 | `RuleZextCommute` | `{INT_RIGHT}` `zext(V)>>W => zext(V>>W)` (4844) | `{ZEXT,SEXT}` COPY 우회(RulePropagateCopy와 중복) | 중 |
+| 9 | `Rule2Comp2Mult` | `{INT_2COMP}` `-V => V*-1` (3979) | `{INT_MULT}` 상수 접기 | **차단(전용세션)** -- 진짜 룰 포팅 시 **전 golden green(프로덕션 트리 검증 완료)**이나 `rules_copy.go`의 테스트 전용 배치가 `Rule2Comp2Mult`(2COMP->MULT-1)와 `RuleMultNegOne`(MULT-1->2COMP)을 **같은 풀에 co-pooling**해 `go test`가 **무한 발진**. C++은 actprop(analysis) vs actcleanup(cleanup) 분리라 프로덕션은 정상. 착지하려면 그 배치를 analysis/cleanup 분리로 고쳐야 함 |
+| 10 | ~~`RuleZextCommute`~~ | `{INT_RIGHT}` `zext(V)>>W => zext(V>>W)` (4844) | `{ZEXT,SEXT}` COPY 우회(RulePropagateCopy와 중복) | **착지 `bbc5906`** (중복 본체 드롭, RulePropagateCopy가 계속 커버. 배치 발진 없음 검증) |
 | 11 | `RuleBoolZext` | `{INT_ZEXT}` `zext(V)*-1` 계열 5형 (3001) | `{EQUAL,NOTEQUAL}` bool 비교만 | 중 |
 | 12 | `RulePushMulti` | `{MULTIEQUAL}` 2-branch phi CSE (1062) | phi 입력 동일 치환 -- **Go판은 미등록 死코드**(진짜는 `RulePushMultiME`로 포팅됨) | 하(정리) |
 

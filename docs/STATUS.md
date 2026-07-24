@@ -15,9 +15,13 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-24 세션8, master `e3a573f` origin 푸시, 전 게이트 green 감독관 재검증)
+## 현재 상태 (2026-07-24 세션9, master `bbc5906` origin 푸시, 전 게이트 green)
 
 **권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`**. 요약:
+- **[세션9] 동명 다른 룰 4건 착지**(`801caf8` RuleShiftPiece / `6bd4dbf` RuleDoubleSub / `4f7b84a`
+  RuleRightShiftAnd / `bbc5906` RuleZextCommute) -- 전부 진짜 C++ 룰 포팅 + 기존 중복/死 본체 드롭, 회귀 0
+  (x64_auto 31/32, corpus2 10/13, tree 10/10 유지, `go test ./...` green). Rule2Comp2Mult는 테스트 배치
+  co-pooling 발진으로 차단(아래 부채). 방법론 = "배치 발진부터 `go test ./pkg/pcode/`로 검증".
 - **[세션8] 자율주행 감독관 + Opus 병렬 2슬롯으로 착지 15건, x64_auto 25 -> 31/32, corpus2 8 -> 10/13.** 상세는 CHANGELOG 세션8-1~15.
   **동명 다른 룰 2건 발견**(`RuleSubRight`, `RulePushPtr`) -- 이름 충돌이 미포팅 룰을 가리고 있었다.
   룰 감사는 이름이 아니라 `getOpList`+본체로 대조할 것.
@@ -121,9 +125,13 @@ stale였던 이유 = 마일스톤 완료 후 해당 미시작 섹션을 지우�
   세션6에 emitter 버그로 판명돼 이미 MATCH -- 예시도 stale).
 - struct/union 타입 복구, reloc/FP(corpus2 P5-P8 / faverage), PARITY_AUDIT 미포팅 opcode 잔여. (스택 파라미터는
   세션8 A2 스택 param `991be09`+heritage refinement `c54d295`로, CONCAT44 렌더는 `6521fd2`로 해소.)
-- **[세션8 신규 최대 부채] 동명 다른 룰 잔여 9건**: 룰 감사(`b0d1476`)가 Go 룰 이름은 같은데 C++과 다른 룰
-  12건을 확인, 3건 포팅(`31539bc`/`0fa8787`). 잔여 9건(RuleShiftPiece/RuleZextCommute/RuleDoubleSub 등)은
-  전부 actprop에 등록돼 실행 중 -- NEXT_SESSION_PROMPT 표. **룰 감사는 이름이 아니라 getOpList+본체로 대조.**
+- **[세션8 신규 부채] 동명 다른 룰 -- 잔여 4건 + 차단 1건**: 룰 감사(`b0d1476`)가 Go 룰 이름은 같은데 C++과
+  다른 룰 12건을 확인. 세션8 3건(`31539bc`/`0fa8787`) + **세션9 4건 착지**(`801caf8` RuleShiftPiece /
+  `6bd4dbf` RuleDoubleSub / `4f7b84a` RuleRightShiftAnd / `bbc5906` RuleZextCommute, 전부 회귀 0).
+  **잔여 순수 미착수 4건 = RuleHumptyOr / RuleOrCompare / RuleBoolZext / RulePushMulti(정리)**.
+  **차단 1건 = Rule2Comp2Mult**: 진짜 룰 포팅 시 전 golden green이나 `rules_copy.go` 테스트 배치가
+  2COMP<->MULT-1 양방향 룰을 같은 풀에 co-pooling해 `go test` 무한 발진 -- 그 배치를 analysis/cleanup 분리로
+  고쳐야 착지. 상세 = NEXT_SESSION_PROMPT 표. **룰 감사는 이름이 아니라 getOpList+본체로 대조.**
 
 
 ## 완료 마일스톤 (상세는 CHANGELOG)
