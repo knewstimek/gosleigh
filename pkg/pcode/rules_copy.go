@@ -9,6 +9,17 @@ func NewRulePropagateCopy(group string) *RulePropagateCopy {
 }
 
 func (r *RulePropagateCopy) apply(op *PcodeOp, data *Funcdata) int {
+	// C++ parity: RulePropagateCopy::applyOp (ruleaction.cc:3953) skips a
+	// return-copy op. Gosleigh does not plumb the dedicated return-copy COPY form
+	// (double.go), so it flags the CPUI_RETURN opcode itself with PcodeOpReturnCopy
+	// (typeop.go). Propagating a COPY into the RETURN's input moves the return value
+	// off the ABI return register onto the copy's source register (e.g. `return EAX`
+	// where `EAX = EDX` becomes `return EDX`); a later deadcode round then empties
+	// the return because the source register is not the return register, collapsing
+	// the function to `void`. Keep the return-materializing COPY here, as Ghidra does.
+	if op.HasFlag(PcodeOpReturnCopy) {
+		return 0
+	}
 	changed := 0
 	for i := 0; i < op.NumInput(); i++ {
 		copyop := definedBy(op.Input(i), CPUI_COPY)
