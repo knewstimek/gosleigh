@@ -39,7 +39,14 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
    살리는데, **`loadGuard` 리스트(동적 LOAD 주소의 min/max offset 범위)가 ValueSet 기반 index-range 분석에 의존** =
    Ghidra 최난이도 서브시스템 중 하나(대규모 단독 포팅, 전 LOAD/STORE 함수 영향 broad). repro: `int f(int n){int
    t[4]={10,20,30,40}; return t[n&3];}`.
-2. **[#6 타입 back-prop family]** struct 혼합폭 cast / find_max element / sar_round signedness. broad 타입전파. 아래 옛 #6.
+2. **[#6 타입 back-prop family]** struct 혼합폭 cast / find_max element / sar_round signedness. **세션12 실측 확정
+   근본**: gosleigh `TypeOp.PropagateType` 인터페이스가 **input↔output 두 방향만** 모델링(typeop.go:15-27 "partial
+   -- E5 subset")하고 **input↔input 전파 부재**. C++ `TypeOpIntSless/Equal::propagateType`(typeop.cc:1035/947)는
+   inslot/outslot 둘 다 입력일 때(input<->input) TYPE_INT를 상대 피연산자로 전파 -> find_max `local_14(int) <
+   param_1[i]`에서 int가 param_1[i]로 역전파 -> `int *param_1`(cast 제거). gosleigh는 이 엣지가 없어 `undefined4
+   *param_1` + 여분 `(int)` cast 유지. **수정 = PropagateType 인터페이스+InferTypes driver에 input↔input 엣지 추가**
+   (전 함수 타입추론 영향 broad, 세션11이 struct case 시도 후 lateral로 revert한 이력). repro: `int f(int*a,int n){int
+   m=a[0]; for(i=1..)if(a[i]>m)m=a[i]; return m;}`. 상세 아래 옛 #6.
 3. **[대규모] FP 서브시스템**(faverage): XMM param 미복구. 아래 FP 특성화.
 4. **[cosmetic]** #8 -x*c fold, #10 for 과승격 등. ROI 낮음.
 **[세션12 #7 완료 기록]** 누산기(dowhile, `1f6a4cb`)와 loop-head snapshot(binsearch, `3995622`) 양대 케이스 착지.
