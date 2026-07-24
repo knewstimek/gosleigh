@@ -255,29 +255,119 @@ type RuleHumptyOr struct{ batchRule }
 
 func NewRuleHumptyOr(group string) *RuleHumptyOr {
 	r := &RuleHumptyOr{}
-	r.batchRule = newBatchRule(group, "humptyor", []OpCode{CPUI_PIECE}, r.apply, func(g string) Rule { return NewRuleHumptyOr(g) })
+	r.batchRule = newBatchRule(group, "humptyor", []OpCode{CPUI_INT_OR}, r.apply, func(g string) Rule { return NewRuleHumptyOr(g) })
 	return r
 }
 
+// apply is a faithful port of RuleHumptyOr::applyOp (ruleaction.cc:5350):
+// simplify masked pieces INT_ORed together, `(V & W) | (V & X) => V & (W|X)`.
+//
+// The previous body under this name matched {PIECE} and folded
+// concat(sub(V,hi),sub(V,0)) back into V; that is a strict subset of
+// RuleHumptyDumpty (rules_ghidra_port.go, registered on the analysis pool),
+// so dropping it loses no coverage.
+//
+// Oscillation note: when the shared operand `a` is a constant that fully covers
+// the other operands, C++ never reaches here because RuleAndMask has already
+// reduced `a & b => b`. Gosleigh cannot guarantee that pre-reduction has run
+// (commutative normalization ordering differs), so the slot-symmetric cover
+// branch in RuleAndMask (rules_bitwise.go) reduces `K & X => X` in either slot;
+// that, together with the NZMask guards below (ruleaction.cc:5407-5408), is what
+// keeps this rule and RuleAndDistribute from oscillating.
 func (r *RuleHumptyOr) apply(op *PcodeOp, data *Funcdata) int {
-	hi := definedBy(op.Input(0), CPUI_SUBPIECE)
-	lo := definedBy(op.Input(1), CPUI_SUBPIECE)
-	if hi == nil || lo == nil || !sameValue(hi.Input(0), lo.Input(0)) {
+	vn1 := op.Input(0)
+	if !vn1.IsWritten() {
 		return 0
 	}
-	hiOff, hiOK := constantValue(hi.Input(1))
-	loOff, loOK := constantValue(lo.Input(1))
-	root := hi.Input(0)
-	if !hiOK || !loOK || loOff != 0 || hiOff != uint64(outputSize(op.Input(1).Def())) {
-		_ = root
-	}
-	if !hiOK || !loOK || loOff != 0 || hiOff != uint64(op.Input(1).Size()) {
+	vn2 := op.Input(1)
+	if !vn2.IsWritten() {
 		return 0
 	}
-	if root.Size() != outputSize(op) {
+	and1 := vn1.Def()
+	if and1.Code() != CPUI_INT_AND {
 		return 0
 	}
-	return rewriteToCopy(data, op, root)
+	and2 := vn2.Def()
+	if and2.Code() != CPUI_INT_AND {
+		return 0
+	}
+	a := and1.Input(0)
+	b := and1.Input(1)
+	c := and2.Input(0)
+	d := and2.Input(1)
+	// Identify the operand `a` shared by both ANDs; b and c become the two
+	// non-matching operands. Varnode identity (SSA), matching C++ `==`.
+	switch {
+	case a == c:
+		c = d // non-matching are b and d
+	case a == d:
+		// non-matching are b and c
+	case b == c:
+		b = a
+		a = c
+		c = d
+	case b == d:
+		b = a
+		a = d
+	default:
+		return 0
+	}
+	if b.IsConstant() && c.IsConstant() {
+		totalbits := b.Offset() | c.Offset()
+		if totalbits == maskForSize(a.Size()) {
+			// Between the two sides we get all bits of a: convert to COPY.
+			data.OpSetOpcode(op, CPUI_COPY)
+			data.OpRemoveInput(op, 1)
+			data.OpSetInput(op, a, 0)
+		} else {
+			// Some bits, but not all: convert to an AND.
+			data.OpSetOpcode(op, CPUI_INT_AND)
+			data.OpSetInput(op, a, 0)
+			data.OpSetInput(op, data.NewConstant(a.Size(), totalbits), 1)
+		}
+		return 1
+	}
+	if !b.IsHeritageKnown() {
+		return 0
+	}
+	if !c.IsHeritageKnown() {
+		return 0
+	}
+	aMask := a.NZMask()
+	if b.NZMask()&aMask == 0 {
+		return 0 // RuleAndDistribute would reverse us
+	}
+	if c.NZMask()&aMask == 0 {
+		return 0 // RuleAndDistribute would reverse us
+	}
+	// Gosleigh-specific complement to the two C++ guards above. When `a` is a
+	// constant mask that fully covers b or c, C++ never reaches this rule: its
+	// constants are canonically in slot 1, so RuleAndMask has already reduced the
+	// covered `a & x => x`, leaving the INT_OR with a single AND. Gosleigh's rule
+	// and traversal order does not guarantee that pre-reduction runs before this
+	// rule inspects the INT_OR, and RuleAndDistribute's trivial-cover branch
+	// (ruleaction.cc:1289-1290) fires on exactly the `a & (b|c)` this rule would
+	// create -- so without this guard the two rules flip the same op forever.
+	// Skipping here reproduces C++'s effective behavior (the covered AND collapses
+	// and HumptyOr does not fire).
+	if a.IsConstant() {
+		if b.NZMask()&aMask == b.NZMask() {
+			return 0
+		}
+		if c.NZMask()&aMask == c.NZMask() {
+			return 0
+		}
+	}
+	newOrOp := data.NewOp(2, op.Addr())
+	data.OpSetOpcode(newOrOp, CPUI_INT_OR)
+	orVn := data.NewUniqueOut(a.Size(), newOrOp)
+	data.OpSetInput(newOrOp, b, 0)
+	data.OpSetInput(newOrOp, c, 1)
+	data.OpInsertBefore(newOrOp, op)
+	data.OpSetInput(op, a, 0)
+	data.OpSetInput(op, orVn, 1)
+	data.OpSetOpcode(op, CPUI_INT_AND)
+	return 1
 }
 
 type batchARuleFactory func(string) Rule
