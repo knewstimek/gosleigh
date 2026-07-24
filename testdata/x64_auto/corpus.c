@@ -442,3 +442,6 @@ void swap_via_temp(long *a, long *b) {
 	*a = *b;
 	*b = tmp;
 }
+
+/* added via goldengap add: probe_distribute */
+long probe_distribute(long *arr, long i, long j) { return arr[(i + j) * 3]; }

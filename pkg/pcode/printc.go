@@ -1041,6 +1041,15 @@ func hasArithAnc(vn *Varnode, depth int, visited map[*Varnode]bool) bool {
 	if def == nil {
 		return false
 	}
+	// A LOAD breaks the value-provenance chain: the loaded value's type comes
+	// from the pointer's target, never from the address arithmetic. Following
+	// LOAD's address inputs would misclassify a raw undefined%d memory read as
+	// "arithmetic" (its address is an INT_ADD/INT_MULT of the base+index) and
+	// wrongly default the return to int. Ghidra types such a return from the
+	// LOAD output's own (undefined) type, so stop here.
+	if def.Code() == CPUI_LOAD {
+		return false
+	}
 	switch def.Code() {
 	case CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_MULT, CPUI_INT_DIV, CPUI_INT_2COMP,
 		CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR,
