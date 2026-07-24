@@ -2,7 +2,7 @@
   "functions": [
     {
       "name": "sum_loop",
-      "entry": 9472,
+      "entry": 9728,
       "tags": [
         "MATCH"
       ],
@@ -14,7 +14,7 @@
     },
     {
       "name": "dowhile_count",
-      "entry": 9568,
+      "entry": 9824,
       "tags": [
         "MATCH"
       ],
@@ -26,7 +26,7 @@
     },
     {
       "name": "sum_pp_walk",
-      "entry": 9664,
+      "entry": 9920,
       "tags": [
         "MATCH"
       ],
@@ -38,7 +38,7 @@
     },
     {
       "name": "while_pretest_sum",
-      "entry": 9776,
+      "entry": 10032,
       "tags": [
         "MATCH"
       ],
@@ -50,7 +50,7 @@
     },
     {
       "name": "loop_forever_break",
-      "entry": 9872,
+      "entry": 10128,
       "tags": [
         "MATCH"
       ],
@@ -62,7 +62,7 @@
     },
     {
       "name": "nested_while_matrix",
-      "entry": 9968,
+      "entry": 10224,
       "tags": [
         "MATCH"
       ],
@@ -74,7 +74,7 @@
     },
     {
       "name": "while_countdown",
-      "entry": 10112,
+      "entry": 10368,
       "tags": [
         "MATCH"
       ],
@@ -86,7 +86,7 @@
     },
     {
       "name": "switch_dense",
-      "entry": 10176,
+      "entry": 10432,
       "tags": [
         "TYPECAST"
       ],
@@ -100,42 +100,6 @@
     },
     {
       "name": "switch_sparse",
-      "entry": 10336,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "switch_no_default",
-      "entry": 10416,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "switch_fallthrough",
-      "entry": 10512,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "array_2d_sum",
       "entry": 10592,
       "tags": [
         "MATCH"
@@ -147,8 +111,44 @@
       }
     },
     {
+      "name": "switch_no_default",
+      "entry": 10672,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "switch_fallthrough",
+      "entry": 10768,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "array_2d_sum",
+      "entry": 10848,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
       "name": "array_init_then_sum",
-      "entry": 10736,
+      "entry": 10992,
       "tags": [
         "MATCH"
       ],
@@ -160,7 +160,7 @@
     },
     {
       "name": "array_reverse_sum",
-      "entry": 10880,
+      "entry": 11136,
       "tags": [
         "MATCH"
       ],
@@ -172,7 +172,7 @@
     },
     {
       "name": "reverse_bytes_inplace",
-      "entry": 10976,
+      "entry": 11232,
       "tags": [
         "MATCH"
       ],
@@ -184,42 +184,6 @@
     },
     {
       "name": "bit_mask_shift_combo",
-      "entry": 11120,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "popcount_loop",
-      "entry": 11216,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "xor_swap_pair",
-      "entry": 11280,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "bit_rotate_left",
       "entry": 11376,
       "tags": [
         "MATCH"
@@ -231,8 +195,8 @@
       }
     },
     {
-      "name": "unsigned_wrap_compare",
-      "entry": 11424,
+      "name": "popcount_loop",
+      "entry": 11472,
       "tags": [
         "MATCH"
       ],
@@ -243,8 +207,8 @@
       }
     },
     {
-      "name": "longlong_combo",
-      "entry": 11488,
+      "name": "xor_swap_pair",
+      "entry": 11536,
       "tags": [
         "MATCH"
       ],
@@ -255,19 +219,7 @@
       }
     },
     {
-      "name": "sign_extend_boundary",
-      "entry": 11584,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "char_arith_promote",
+      "name": "bit_rotate_left",
       "entry": 11632,
       "tags": [
         "MATCH"
@@ -279,7 +231,7 @@
       }
     },
     {
-      "name": "short_arith_trunc",
+      "name": "unsigned_wrap_compare",
       "entry": 11680,
       "tags": [
         "MATCH"
@@ -291,8 +243,56 @@
       }
     },
     {
+      "name": "longlong_combo",
+      "entry": 11744,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "sign_extend_boundary",
+      "entry": 11840,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "char_arith_promote",
+      "entry": 11888,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "short_arith_trunc",
+      "entry": 11936,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
       "name": "cond_assign_abs",
-      "entry": 11728,
+      "entry": 11984,
       "tags": [
         "MATCH"
       ],
@@ -304,7 +304,7 @@
     },
     {
       "name": "minmax_chain4",
-      "entry": 11776,
+      "entry": 12032,
       "tags": [
         "MATCH"
       ],
@@ -316,7 +316,7 @@
     },
     {
       "name": "strlen_style",
-      "entry": 11952,
+      "entry": 12208,
       "tags": [
         "MATCH"
       ],
@@ -328,7 +328,7 @@
     },
     {
       "name": "memcpy_style",
-      "entry": 12016,
+      "entry": 12272,
       "tags": [
         "MATCH"
       ],
@@ -340,7 +340,7 @@
     },
     {
       "name": "multi_return_early",
-      "entry": 12112,
+      "entry": 12368,
       "tags": [
         "MATCH"
       ],
@@ -352,54 +352,6 @@
     },
     {
       "name": "nested_if_ladder_grade",
-      "entry": 12240,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "param_reuse_accum",
-      "entry": 12320,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "swap_via_temp",
-      "entry": 12384,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_distribute",
-      "entry": 12448,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_dist_factor",
       "entry": 12496,
       "tags": [
         "MATCH"
@@ -411,8 +363,8 @@
       }
     },
     {
-      "name": "probe_dist_mixed",
-      "entry": 12544,
+      "name": "param_reuse_accum",
+      "entry": 12576,
       "tags": [
         "MATCH"
       ],
@@ -423,19 +375,7 @@
       }
     },
     {
-      "name": "probe_udiv",
-      "entry": 12608,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_sdiv",
+      "name": "swap_via_temp",
       "entry": 12640,
       "tags": [
         "MATCH"
@@ -447,19 +387,7 @@
       }
     },
     {
-      "name": "probe_smod",
-      "entry": 12672,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_ternary",
+      "name": "probe_distribute",
       "entry": 12704,
       "tags": [
         "MATCH"
@@ -471,8 +399,80 @@
       }
     },
     {
+      "name": "probe_dist_factor",
+      "entry": 12752,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_dist_mixed",
+      "entry": 12800,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_udiv",
+      "entry": 12864,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_sdiv",
+      "entry": 12896,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_smod",
+      "entry": 12928,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_ternary",
+      "entry": 12960,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
       "name": "probe_clamp",
-      "entry": 12768,
+      "entry": 13024,
       "tags": [
         "MATCH"
       ],
@@ -484,7 +484,7 @@
     },
     {
       "name": "probe_sext",
-      "entry": 12848,
+      "entry": 13104,
       "tags": [
         "MATCH"
       ],
@@ -496,7 +496,7 @@
     },
     {
       "name": "probe_charsum",
-      "entry": 12880,
+      "entry": 13136,
       "tags": [
         "MATCH"
       ],
@@ -508,7 +508,7 @@
     },
     {
       "name": "probe_ushr",
-      "entry": 12976,
+      "entry": 13232,
       "tags": [
         "MATCH"
       ],
@@ -520,7 +520,7 @@
     },
     {
       "name": "probe_sshr",
-      "entry": 13008,
+      "entry": 13264,
       "tags": [
         "MATCH"
       ],
@@ -532,7 +532,7 @@
     },
     {
       "name": "probe_ll_shift",
-      "entry": 13040,
+      "entry": 13296,
       "tags": [
         "MATCH"
       ],
@@ -544,7 +544,7 @@
     },
     {
       "name": "probe_ptrdiff",
-      "entry": 13072,
+      "entry": 13328,
       "tags": [
         "MATCH"
       ],
@@ -556,90 +556,6 @@
     },
     {
       "name": "probe_widen",
-      "entry": 13120,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_narrow",
-      "entry": 13152,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_mask",
-      "entry": 13184,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_3d",
-      "entry": 13216,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_ret_and",
-      "entry": 13280,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_ret_not",
-      "entry": 13312,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_ret_wide",
-      "entry": 13344,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_early_return",
       "entry": 13376,
       "tags": [
         "MATCH"
@@ -651,8 +567,8 @@
       }
     },
     {
-      "name": "probe_ptr2ptr",
-      "entry": 13456,
+      "name": "probe_narrow",
+      "entry": 13408,
       "tags": [
         "MATCH"
       ],
@@ -663,8 +579,8 @@
       }
     },
     {
-      "name": "probe_continue_sum",
-      "entry": 13488,
+      "name": "probe_mask",
+      "entry": 13440,
       "tags": [
         "MATCH"
       ],
@@ -675,7 +591,43 @@
       }
     },
     {
-      "name": "probe_mixed_sign",
+      "name": "probe_3d",
+      "entry": 13472,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_ret_and",
+      "entry": 13536,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_ret_not",
+      "entry": 13568,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_ret_wide",
       "entry": 13600,
       "tags": [
         "MATCH"
@@ -687,7 +639,7 @@
       }
     },
     {
-      "name": "probe_negconst",
+      "name": "probe_early_return",
       "entry": 13632,
       "tags": [
         "MATCH"
@@ -699,8 +651,8 @@
       }
     },
     {
-      "name": "probe_hexbig",
-      "entry": 13664,
+      "name": "probe_ptr2ptr",
+      "entry": 13712,
       "tags": [
         "MATCH"
       ],
@@ -711,19 +663,7 @@
       }
     },
     {
-      "name": "probe_const64",
-      "entry": 13696,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_shiftmask",
+      "name": "probe_continue_sum",
       "entry": 13744,
       "tags": [
         "MATCH"
@@ -735,8 +675,68 @@
       }
     },
     {
+      "name": "probe_mixed_sign",
+      "entry": 13856,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_negconst",
+      "entry": 13888,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_hexbig",
+      "entry": 13920,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_const64",
+      "entry": 13952,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_shiftmask",
+      "entry": 14000,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
       "name": "probe_ret_deref",
-      "entry": 13776,
+      "entry": 14032,
       "tags": [
         "MATCH"
       ],
@@ -748,7 +748,7 @@
     },
     {
       "name": "probe_ret_subscript",
-      "entry": 13808,
+      "entry": 14064,
       "tags": [
         "MATCH"
       ],
@@ -760,7 +760,7 @@
     },
     {
       "name": "probe_ret_derefadd",
-      "entry": 13840,
+      "entry": 14096,
       "tags": [
         "MATCH"
       ],
@@ -772,7 +772,7 @@
     },
     {
       "name": "probe_ret_load8",
-      "entry": 13872,
+      "entry": 14128,
       "tags": [
         "MATCH"
       ],
@@ -784,42 +784,6 @@
     },
     {
       "name": "probe_sum_pos",
-      "entry": 13904,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_strlen2",
-      "entry": 14016,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_count_bits",
-      "entry": 14080,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_ret_short",
       "entry": 14160,
       "tags": [
         "MATCH"
@@ -831,8 +795,44 @@
       }
     },
     {
+      "name": "probe_strlen2",
+      "entry": 14272,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_count_bits",
+      "entry": 14336,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_ret_short",
+      "entry": 14416,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
       "name": "probe_ret_char",
-      "entry": 14192,
+      "entry": 14448,
       "tags": [
         "MATCH"
       ],
@@ -844,54 +844,6 @@
     },
     {
       "name": "probe_ret_ll",
-      "entry": 14224,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_ret_ushort",
-      "entry": 14256,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_fib",
-      "entry": 14288,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_power",
-      "entry": 14400,
-      "tags": [
-        "MATCH"
-      ],
-      "evidence": {
-        "MATCH": [
-          "byte-identical (indent-insensitive)"
-        ]
-      }
-    },
-    {
-      "name": "probe_stride_sum",
       "entry": 14480,
       "tags": [
         "MATCH"
@@ -903,8 +855,56 @@
       }
     },
     {
+      "name": "probe_ret_ushort",
+      "entry": 14512,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_fib",
+      "entry": 14544,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_power",
+      "entry": 14656,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_stride_sum",
+      "entry": 14736,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
       "name": "probe_reverse_arr",
-      "entry": 14592,
+      "entry": 14848,
       "tags": [
         "MATCH"
       ],
@@ -916,7 +916,7 @@
     },
     {
       "name": "probe_bytecopy",
-      "entry": 14720,
+      "entry": 14976,
       "tags": [
         "MATCH"
       ],
@@ -928,7 +928,67 @@
     },
     {
       "name": "probe_sum_bytes",
-      "entry": 14816,
+      "entry": 15072,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_hash31",
+      "entry": 15168,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_xor_reduce",
+      "entry": 15264,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_poly",
+      "entry": 15360,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_swap_nibbles",
+      "entry": 15408,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_running_prod",
+      "entry": 15456,
       "tags": [
         "MATCH"
       ],
@@ -940,10 +1000,10 @@
     }
   ],
   "summary": {
-    "total": 78,
-    "match": 77,
+    "total": 83,
+    "match": 82,
     "tag_counts": {
-      "MATCH": 77,
+      "MATCH": 82,
       "TYPECAST": 1
     }
   }

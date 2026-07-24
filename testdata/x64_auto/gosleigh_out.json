@@ -30,7 +30,7 @@
     },
     {
       "name": "switch_dense",
-      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x4cc8) + 0x2490))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
+      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x4ee0) + 0x25a8))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
     },
     {
       "name": "switch_sparse",
@@ -311,6 +311,26 @@
     {
       "name": "probe_sum_bytes",
       "output": "\nint probe_sum_bytes(longlong param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nlocal_14 = local_14 + (uint)*(byte *)(param_1 + local_18);\n}\nreturn local_14;\n}\n"
+    },
+    {
+      "name": "probe_hash31",
+      "output": "\nint probe_hash31(longlong param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nlocal_14 = local_14 * 0x1f + (int)*(char *)(param_1 + local_18);\n}\nreturn local_14;\n}\n"
+    },
+    {
+      "name": "probe_xor_reduce",
+      "output": "\nuint probe_xor_reduce(longlong param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nlocal_14 = local_14 ^ *(uint *)(param_1 + (longlong)local_18 * 4);\n}\nreturn local_14;\n}\n"
+    },
+    {
+      "name": "probe_poly",
+      "output": "\nint probe_poly(int param_1)\n\n{\nreturn param_1 * param_1 * param_1 + param_1 * 2 * param_1 + 4 + param_1 * 3;\n}\n"
+    },
+    {
+      "name": "probe_swap_nibbles",
+      "output": "\nuint probe_swap_nibbles(uint param_1)\n\n{\nreturn (param_1 \u0026 0xf0f0f0f0) \u003e\u003e 4 | (param_1 \u0026 0xf0f0f0f) \u003c\u003c 4;\n}\n"
+    },
+    {
+      "name": "probe_running_prod",
+      "output": "\nint probe_running_prod(longlong param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 1;\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nlocal_14 = local_14 * *(int *)(param_1 + (longlong)local_18 * 4);\n}\nreturn local_14;\n}\n"
     }
   ]
 }

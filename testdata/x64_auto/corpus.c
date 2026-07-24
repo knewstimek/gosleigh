@@ -587,3 +587,25 @@ int probe_sum_bytes(unsigned char *p, int n) {
 	for (int i = 0; i < n; i++) s += p[i];
 	return s;
 }
+
+/* --- session11 batch 11: arithmetic-heavy (hash/poly/bit, MATCH-likely) --- */
+
+int probe_hash31(char *p, int n) {
+	int h = 0;
+	for (int i = 0; i < n; i++) h = h * 31 + p[i];
+	return h;
+}
+int probe_xor_reduce(int *a, int n) {
+	int x = 0;
+	for (int i = 0; i < n; i++) x ^= a[i];
+	return x;
+}
+int probe_poly(int x) { return x * x * x + 2 * x * x + 3 * x + 4; }
+unsigned probe_swap_nibbles(unsigned x) {
+	return ((x & 0xf0f0f0f0) >> 4) | ((x & 0x0f0f0f0f) << 4);
+}
+int probe_running_prod(int *a, int n) {
+	int p = 1;
+	for (int i = 0; i < n; i++) p *= a[i];
+	return p;
+}
