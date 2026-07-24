@@ -48,13 +48,18 @@ Go-only 19, C++-only 21(그중 11은 명시적 stub).
 | 12 | `RulePushMulti` | `{MULTIEQUAL}` 2-branch phi CSE (1062) | phi 입력 동일 치환 -- **Go판은 미등록 死코드**(진짜는 `RulePushMultiME`로 포팅됨) | 하(정리) |
 
 **[세션9 잔여 4건 착수 노트 -- 착수 전 반드시 읽을 것. 세션9가 C++/Go 대조까지 마친 결과]**
-- **#7 `RuleHumptyOr`** (ruleaction.cc:5350, `{INT_OR}` `(a&b)|(a&c)=>a&(b|c)`): 상수 케이스(b,c 둘 다 상수)는
-  `b|c`가 a의 전 비트 덮으면 COPY(a), 아니면 AND(a,b|c). **비상수 케이스가 함정** -- `a&(b|c)`를 만드는데
-  역방향 룰 `RuleAndDistribute`(rules_misc.go:188, `(X|Y)&const=>(X&c)|(Y&c)`)와 발진 가능. C++은 양쪽에
-  NZMask 가드로 상호배타(RuleHumptyOr가 `(b.NZMask & a.NZMask)==0 return 0` 두 줄, ruleaction.cc:5407-5408)를
-  두지만 **Go `RuleAndDistribute`엔 대응 NZMask 가드가 없다(부분포팅)**. -> 진짜 RuleHumptyOr만 넣으면 Go에서만
-  발진할 수 있음(Rule2Comp2Mult 부류). **RuleAndDistribute의 NZMask 가드까지 같이 충실화하는 2-룰 협조 수정**
-  필요. 기존 Go 본체(`{PIECE}` concat(sub(V,hi),sub(V,0))=>V, rules_copy.go:262)가 다른 룰 중복인지도 확인.
+- **#7 `RuleHumptyOr`** (ruleaction.cc:5350, `{INT_OR}` `(a&b)|(a&c)=>a&(b|c)`) -- **2-룰 협조 전용세션**. 세션9
+  C++ 정독 결론: 상수 케이스(b,c 둘 다 상수)는 `b|c`가 a의 전 비트 덮으면 COPY(a), 아니면 AND(a,b|c). 비상수
+  케이스는 `a&(b|c)` 생성, 가드 `(b.NZMask & a.NZMask)==0 return 0` 2줄(5407-5408). 역방향 `RuleAndDistribute`
+  (ruleaction.cc:1260)는 `(A|B)&other=>(A&other)|(B&other)`를 **beneficial일 때만**(한 쪽이 마스크로 소거
+  `(ormask & othermask)==0`, 또는 상수 other가 한 쪽을 완전히 덮어 trivial) 분배하고, `othermask==0`(RuleAndMask
+  담당)/`othermask==fullmask`(무의미)는 skip. **이 NZMask 가드들 + RuleAndMask 선행 정규화(a가 b를 덮으면
+  `a&b`가 이미 b로 접혀 HumptyOr 입력이 안 됨)가 C++의 오실레이션 안전 장치다.** 그런데 **Go `RuleAndDistribute`
+  (rules_misc.go:188)는 other가 상수면 무조건 분배하는 과공격적 부분포팅** -- 가드 전무. 그 자체로 parity 버그 +
+  HumptyOr와 발진원. -> **착지하려면 (1) RuleAndDistribute를 ruleaction.cc:1260 충실 포팅(가드 전부)**, (2) 진짜
+  RuleHumptyOr 포팅, (3) 기존 Go HumptyOr `{PIECE}` 본체(concat(sub(V,hi),sub(V,0))=>V, rules_copy.go:262) 처분
+  판정. **주의: RuleAndDistribute는 현 코퍼스에서 활발히 발화** -- 충실화(덜 공격적)가 출력 바꿀 수 있어 전 게이트
+  회귀 확인 필수. RuleAndMask는 세션9에 이미 NZMask/consume 충실화됨(`a67beda`)이라 선행 정규화 전제는 충족.
 - **#11 `RuleBoolZext`** (ruleaction.cc:3015, `{INT_ZEXT}` `zext(bool)*-1` 5형): `op.Output().loneDescend()`로
   **전진 탐색**(ZEXT출력의 유일소비 MULT -> 그 출력의 유일소비 ADD/EQUAL/NOTEQUAL/AND/OR)해 BOOL_NEGATE/
   BOOL_AND/BOOL_OR 생성. `isBooleanValue` 판정 필요. ~80줄, subtle. 역방향 파트너는 없어 발진 위험은 낮으나
