@@ -2899,6 +2899,16 @@ func (s *printCState) renderReturnValueFrag(vn *Varnode) (ExprFragment, error) {
 	// C++ parity: ActionMarkImplied / PrintC::isImplied inlines single-consumer defs;
 	// here we apply the same heuristic at render time for return varnodes.
 	resolved, defOp := s.resolveForReturn(vn, 8)
+	// Do not inline the definition of an EXPLICIT varnode. An explicit output is a
+	// named C variable emitted as its own "name = expr;" statement (e.g. a loop
+	// accumulator `local_14 = local_14 + i;`); the return must reference it by name
+	// (`return local_14;`), not re-expand the expression -- re-expanding would
+	// duplicate the loop-body computation at the return and read stale post-loop
+	// values. Only implied (single-use) intermediates collapse into the return.
+	// C++ parity: PrintC names explicit varnodes; ActionMarkImplied inlines only implied defs.
+	if resolved != nil && resolved.IsExplicit() {
+		return s.renderVarnodeExpr(resolved)
+	}
 	if defOp != nil && !defOp.IsDead() && !defOp.IsMarker() {
 		switch defOp.Code() {
 		case CPUI_BRANCH, CPUI_CBRANCH, CPUI_BRANCHIND, CPUI_STORE, CPUI_RETURN,
@@ -4779,7 +4789,23 @@ func (s *printCState) markReturnOnlyCopies() {
 				case CPUI_RETURN:
 					hasReturnOrInline = true
 				case CPUI_MULTIEQUAL, CPUI_INDIRECT:
-					// Marker ops, always suppressed.
+					// Marker ops are normally transparent (suppressed by IsMarker at
+					// emit time). Exception: a loop-carried phi. When op also READS this
+					// marker's output, op computes the phi's next-iteration value from its
+					// current value and feeds it back -- e.g. `local_14 = local_14 + i`
+					// where local_14 is a loop phi. That assignment is a real loop-body
+					// statement, not a return-only intermediate; suppressing it silently
+					// drops the loop update (accumulator/loop-variable value vanishes and
+					// gets inlined at the return). Treat such a back-edge phi consumer as
+					// opaque so the update statement is emitted.
+					if mout := consumer.Output(); mout != nil {
+						for k := 0; k < op.NumInput(); k++ {
+							if op.Input(k) == mout {
+								allTransparent = false
+								break
+							}
+						}
+					}
 				default:
 					if s.prologueOps[consumer] {
 						// Already suppressed; transparent.

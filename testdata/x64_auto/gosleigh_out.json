@@ -30,7 +30,7 @@
     },
     {
       "name": "switch_dense",
-      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x5430) + 11000))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
+      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x5538) + 0x2c00))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
     },
     {
       "name": "switch_sparse",
@@ -423,6 +423,10 @@
     {
       "name": "probe_ret_uge",
       "output": "\nbool probe_ret_uge(uint param_1,uint param_2)\n\n{\nreturn param_2 \u003c= param_1;\n}\n"
+    },
+    {
+      "name": "probe_dowhile",
+      "output": "\nint probe_dowhile(int param_1)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_18 = 0;\nlocal_14 = 0;\ndo {\nlocal_14 = local_14 + local_18;\nlocal_18 = local_18 + 1;\n} while (local_18 \u003c param_1);\nreturn local_14;\n}\n"
     }
   ]
 }

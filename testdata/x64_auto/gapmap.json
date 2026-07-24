@@ -1273,13 +1273,25 @@
           "byte-identical (indent-insensitive)"
         ]
       }
+    },
+    {
+      "name": "probe_dowhile",
+      "entry": 16880,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 106,
-    "match": 105,
+    "total": 107,
+    "match": 106,
     "tag_counts": {
-      "MATCH": 105,
+      "MATCH": 106,
       "TYPECAST": 1
     }
   }
