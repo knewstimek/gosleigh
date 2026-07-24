@@ -905,35 +905,13 @@ func (r *RulePullsubIndirect) apply(op *PcodeOp, data *Funcdata) int {
 	return 1
 }
 
-type RulePushMulti struct{ batchRule }
-
-func NewRulePushMulti(group string) *RulePushMulti {
-	r := &RulePushMulti{}
-	r.batchRule = newBatchRule(group, "push_multi", []OpCode{CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR}, r.apply, func(g string) Rule { return NewRulePushMulti(g) })
-	return r
-}
-
-func (r *RulePushMulti) apply(op *PcodeOp, data *Funcdata) int {
-	for slot := 0; slot < op.NumInput(); slot++ {
-		phi := definedBy(op.Input(slot), CPUI_MULTIEQUAL)
-		if phi == nil || phi.NumInput() == 0 {
-			continue
-		}
-		base := phi.Input(0)
-		for i := 1; i < phi.NumInput(); i++ {
-			if !sameValue(base, phi.Input(i)) {
-				base = nil
-				break
-			}
-		}
-		if base == nil {
-			continue
-		}
-		replaceInputSlot(data, op, slot, base)
-		return 1
-	}
-	return 0
-}
+// The C++ RulePushMulti (2-branch MULTIEQUAL phi CSE, coreaction.cc:1062) is
+// faithfully ported as RulePushMultiME. A different Go-invented "push_multi"
+// rule used to live here, substituting a redundant MULTIEQUAL (all inputs
+// identical) into its arithmetic consumers; it was never registered in the
+// production pool (action.go) and its effect is already covered by
+// RuleConditionalMove (collapses the identical-input phi to a COPY) followed by
+// RulePropagateCopy, so it was removed.
 
 // RulePushPtr lives in rules_pointer.go (faithful port of C++ ruleaction.cc
 // RulePushPtr). It used to be a PTRADD/PTRSUB zero-offset collapse here, which
@@ -1410,7 +1388,6 @@ var batchCMiscRuleFactories = []batchCMiscRuleFactory{
 	func(group string) Rule { return NewRuleFuncPtrEncoding(group) },
 	func(group string) Rule { return NewRulePullsubMulti(group) },
 	func(group string) Rule { return NewRulePullsubIndirect(group) },
-	func(group string) Rule { return NewRulePushMulti(group) },
 	func(group string) Rule { return NewRulePushPtr(group) },
 	func(group string) Rule { return NewRuleShiftPiece(group) },
 	func(group string) Rule { return NewRuleConcatLeftShift(group) },

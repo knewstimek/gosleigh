@@ -22,7 +22,6 @@ func TestBatchCMisc(t *testing.T) {
 			"funcptrencoding",
 			"pullsub_multi",
 			"pullsub_indirect",
-			"push_multi",
 			"pushptr",
 		}
 		for _, name := range names {
