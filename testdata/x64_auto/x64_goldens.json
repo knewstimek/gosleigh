@@ -407,6 +407,30 @@
       "entry": 14080,
       "bytes": "894c24084883ec18c7042400000000837c242000741d8b44242083e0018b0c2403c88bc18904248b442420d1e889442420ebdc8b04244883c418c3",
       "c": "\r\nint probe_count_bits(uint param_1)\r\n\r\n{\r\n  undefined4 local_res8;\r\n  undefined4 local_18;\r\n  \r\n  local_18 = 0;\r\n  for (local_res8 = param_1; local_res8 != 0; local_res8 = local_res8 >> 1) {\r\n    local_18 = local_18 + (local_res8 & 1);\r\n  }\r\n  return local_18;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_ret_short",
+      "entry": 14160,
+      "bytes": "894c24088b442408ffc0c3",
+      "c": "\r\nint probe_ret_short(int param_1)\r\n\r\n{\r\n  return param_1 + 1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_ret_char",
+      "entry": 14192,
+      "bytes": "894c24088b442408ffc0c3",
+      "c": "\r\nint probe_ret_char(int param_1)\r\n\r\n{\r\n  return param_1 + 1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_ret_ll",
+      "entry": 14224,
+      "bytes": "894c240848634424084869c0e8030000c3",
+      "c": "\r\nlonglong probe_ret_ll(int param_1)\r\n\r\n{\r\n  return (longlong)param_1 * 1000;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_ret_ushort",
+      "entry": 14256,
+      "bytes": "894c24088b442408c1e803c3",
+      "c": "\r\nuint probe_ret_ushort(uint param_1)\r\n\r\n{\r\n  return param_1 >> 3;\r\n}\r\n\r\n"
     }
   ]
 }

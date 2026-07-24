@@ -137,6 +137,20 @@ render-time 근사(선언됨, 후자 주석은 `48bd5b4`로 정정). **착수법
   재추가 MATCH + 전 골든 + pcode/bridge 발진 + 구조화 회귀(if/else collapse가 타 함수 오발화 주의).** 세션11은
   스텁임을 실측 확정하고 다부품이라 미착수 -- **이게 다음 세션 최우선(최다빈도 C 패턴).**
 
+**[신규 #12 -- 1바이트 반환/param이 SubvariableFlow 후 void로 붕괴 (HOT, 심각, C++ 실측 확정)]**
+- 재현: `unsigned char f(int x){ return (unsigned char)(x & 0xff); }` (goldengap `probe_ret_uchar`, 세션11 제거).
+  바이트=`mov [rsp+8],ecx; mov eax,[rsp+8]; and eax,0xff; ret`. Ghidra: `undefined1 f(undefined1 param_1){ return
+  param_1; }`. **Gosleigh: `void f(void){ return; }`** -- param/반환 전멸. decomp_dbg(동일 격리바이트): C++은
+  `AL = CL; return AL`로 정상(1바이트 subvariable 축소). = gosleigh 엔진버그 확정.
+- 근본(SSA_DUMP_AFTER 추적): stage12(deadcode)까진 **정상** -- `EAX = (param&0xff); return EAX`(4바이트). 이후
+  **SubvariableFlow가 반환을 1바이트 `CL`(=r0x8:1, param 저바이트)로 축소**(stage17: `return r0x00000008:1(i)`,
+  C++의 `AL=CL`와 동형). 그런데 **1바이트 param(CL)이 input prototype에 justify 안 됨** -> 4바이트 체인은 dead(반환이
+  CL 씀), 1바이트 CL 참조는 "unjustified input" -> stage18 deadcode가 제거 -> `return(void)` -> 전체 붕괴. C++은
+  1바이트 param을 등록해 `return AL` 유지. **액션 순서/justify 문제 의심**: deadcode(stage18)가 activeparam/
+  unjustparams(stage19/22)의 1바이트 param 등록보다 먼저 돌아 조기 제거. 대상=SubvariableFlow 후 param/return
+  justify(paramactive.go / ActionInputPrototype / unjustparams) + 1바이트 input 등록. **흔한 패턴(바이트/char 반환
+  함수)이라 심각.** 성공기준: goldengap `probe_ret_uchar`(재추가) MATCH + ssadiff.
+
 **[신규 #10 -- for-loop 과승격 (cosmetic, 저severity, 구조화 회귀위험)]**
 - 재현: `int f(int*p,int n){ int s=0; while(n-->0) s+=*p++; return s; }` (goldengap `probe_ptr_incr`, 세션11 제거).
   Ghidra: `while(true){ if(local_res10<1) break; ...; local_res10 += -1; }`. Gosleigh: `for(local_res10=param_2;
