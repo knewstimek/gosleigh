@@ -45,8 +45,8 @@
     {
       "name": "switch_dense",
       "entry": 10176,
-      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0df71a00008b8481382800004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
-      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000027e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x6b18)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
+      "bytes": "894c24084883ec188b4424208904248b042483e80a890424833c2407774f48630424488d0d0f1c00008b8481382800004803c1ffe0b864000000eb36b865000000eb2fb866000000eb28b867000000eb21b868000000eb1ab869000000eb13b86a000000eb0cb86b000000eb05b8ffffffff4883c418c3",
+      "c": "\r\nundefined8 switch_dense(int param_1)\r\n\r\n{\r\n  undefined8 uVar1;\r\n  \r\n  if (param_1 - 10U < 8) {\r\n                    /* WARNING: Could not emulate address calculation at 0x000027e9 */\r\n                    /* WARNING: Treating indirect jump as call */\r\n    uVar1 = (*(code *)(&__ImageBase + *(uint *)((longlong)(int)(param_1 - 10U) * 4 + 0x6c30)))();\r\n    return uVar1;\r\n  }\r\n  return 0xffffffff;\r\n}\r\n\r\n"
     },
     {
       "name": "switch_sparse",
@@ -209,6 +209,48 @@
       "entry": 12544,
       "bytes": "44894424188954241048894c24088b4424188b4c241003c88bc16bc003034424184898488b4c24088b0481c3",
       "c": "\r\nundefined4 probe_dist_mixed(longlong param_1,int param_2,int param_3)\r\n\r\n{\r\n  return *(undefined4 *)(param_1 + (longlong)(param_2 * 3 + param_3 * 4) * 4);\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_udiv",
+      "entry": 12608,
+      "bytes": "894c240833d28b442408b907000000f7f1c3",
+      "c": "\r\nulonglong probe_udiv(uint param_1)\r\n\r\n{\r\n  return (ulonglong)param_1 / 7;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_sdiv",
+      "entry": 12640,
+      "bytes": "894c24088b44240899b907000000f7f9c3",
+      "c": "\r\nulonglong probe_sdiv(int param_1)\r\n\r\n{\r\n  return (longlong)param_1 / 7 & 0xffffffff;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_smod",
+      "entry": 12672,
+      "bytes": "894c24088b44240899b90a000000f7f98bc2c3",
+      "c": "\r\nulonglong probe_smod(int param_1)\r\n\r\n{\r\n  return (longlong)param_1 % 10 & 0xffffffff;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_ternary",
+      "entry": 12704,
+      "bytes": "89542410894c24084883ec188b442428394424207e098b442420890424eb078b4424288904248b04244883c418c3",
+      "c": "\r\nint probe_ternary(int param_1,int param_2)\r\n\r\n{\r\n  int local_18;\r\n  \r\n  local_18 = param_2;\r\n  if (param_2 < param_1) {\r\n    local_18 = param_1;\r\n  }\r\n  return local_18;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_clamp",
+      "entry": 12768,
+      "bytes": "894c24084883ec18837c2420007d0ac744240400000000eb1e837c2420647e09c7042464000000eb078b4424208904248b0424894424048b4424044883c418c3",
+      "c": "\r\nint probe_clamp(int param_1)\r\n\r\n{\r\n  int local_18;\r\n  int local_14;\r\n  \r\n  if (param_1 < 0) {\r\n    local_14 = 0;\r\n  }\r\n  else {\r\n    local_18 = param_1;\r\n    if (100 < param_1) {\r\n      local_18 = 100;\r\n    }\r\n    local_14 = local_18;\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_sext",
+      "entry": 12848,
+      "bytes": "66894c24080fbf442408ffc0c3",
+      "c": "\r\nint probe_sext(short param_1)\r\n\r\n{\r\n  return param_1 + 1;\r\n}\r\n\r\n"
+    },
+    {
+      "name": "probe_charsum",
+      "entry": 12880,
+      "bytes": "8954241048894c24084883ec18c744240400000000c7042400000000eb088b0424ffc08904248b4424283904247d1b48630424488b4c24200fbe04018b4c240403c88bc189442404ebd48b4424044883c418c3",
+      "c": "\r\nint probe_charsum(longlong param_1,int param_2)\r\n\r\n{\r\n  undefined4 local_18;\r\n  undefined4 local_14;\r\n  \r\n  local_14 = 0;\r\n  for (local_18 = 0; local_18 < param_2; local_18 = local_18 + 1) {\r\n    local_14 = local_14 + *(char *)(param_1 + local_18);\r\n  }\r\n  return local_14;\r\n}\r\n\r\n"
     }
   ]
 }

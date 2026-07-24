@@ -30,7 +30,7 @@
     },
     {
       "name": "switch_dense",
-      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x4358) + 0x1b20))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
+      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x4470) + 0x1c38))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
     },
     {
       "name": "switch_sparse",
@@ -139,6 +139,34 @@
     {
       "name": "probe_dist_mixed",
       "output": "\nundefined4 probe_dist_mixed(longlong param_1,int param_2,int param_3)\n\n{\nreturn *(undefined4 *)(param_1 + (longlong)(param_2 * 3 + param_3 * 4) * 4);\n}\n"
+    },
+    {
+      "name": "probe_udiv",
+      "output": "\nulonglong probe_udiv(uint param_1)\n\n{\nreturn (ulonglong)param_1 / 7;\n}\n"
+    },
+    {
+      "name": "probe_sdiv",
+      "output": "\nulonglong probe_sdiv(int param_1)\n\n{\nreturn (longlong)param_1 / 7 \u0026 0xffffffff;\n}\n"
+    },
+    {
+      "name": "probe_smod",
+      "output": "\nulonglong probe_smod(int param_1)\n\n{\nreturn (longlong)param_1 % 10 \u0026 0xffffffff;\n}\n"
+    },
+    {
+      "name": "probe_ternary",
+      "output": "\nint probe_ternary(int param_1,int param_2)\n\n{\nint local_18;\n\nlocal_18 = param_2;\nif (param_2 \u003c param_1) {\nlocal_18 = param_1;\n}\nreturn local_18;\n}\n"
+    },
+    {
+      "name": "probe_clamp",
+      "output": "\nint probe_clamp(int param_1)\n\n{\nint local_18;\nint local_14;\n\nif (param_1 \u003c 0) {\nlocal_14 = 0;\n}\nelse {\nlocal_18 = param_1;\nif (100 \u003c param_1) {\nlocal_18 = 100;\n}\nlocal_14 = local_18;\n}\nreturn local_14;\n}\n"
+    },
+    {
+      "name": "probe_sext",
+      "output": "\nint probe_sext(short param_1)\n\n{\nreturn param_1 + 1;\n}\n"
+    },
+    {
+      "name": "probe_charsum",
+      "output": "\nint probe_charsum(longlong param_1,int param_2)\n\n{\nundefined4 local_18;\nundefined4 local_14;\n\nlocal_14 = 0;\nfor (local_18 = 0; local_18 \u003c param_2; local_18 = local_18 + 1) {\nlocal_14 = local_14 + *(char *)(param_1 + local_18);\n}\nreturn local_14;\n}\n"
     }
   ]
 }
