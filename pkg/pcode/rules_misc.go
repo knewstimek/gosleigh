@@ -185,20 +185,81 @@ func NewRuleAndDistribute(group string) *RuleAndDistribute {
 	return r
 }
 
+// apply is a faithful port of RuleAndDistribute::applyOp (ruleaction.cc:1260),
+// distributing INT_AND through INT_OR -- (A|B) & other => (A&other) | (B&other) --
+// but ONLY when the result is genuinely simpler.
+//
+// The prior Go body distributed on any constant mask with no benefit test, which
+// is both a parity divergence (C++ never distributes unconditionally) and the
+// source of a would-be oscillation with RuleHumptyOr (the reverse factoring). The
+// guards below are what make the two mutually exclusive: distribute only if a side
+// cancels under the mask ((ormask & othermask)==0) or, for a constant mask, a side
+// is fully covered (trivial); skip othermask==0 (RuleAndMask's job) and
+// othermask==fullmask (no gain). other may be non-constant (heritage-known), as in
+// C++. New ANDs are spliced with NewOpBefore (proper block insertion).
 func (r *RuleAndDistribute) apply(op *PcodeOp, data *Funcdata) int {
-	for slot := 0; slot < 2; slot++ {
-		orop := definedBy(op.Input(slot), CPUI_INT_OR)
-		mask, ok := constantValue(op.Input(1 - slot))
-		if orop == nil || !ok {
+	out := op.Output()
+	if out == nil {
+		return 0
+	}
+	size := out.Size()
+	if size > 8 { // C++: size > sizeof(uintb)
+		return 0
+	}
+	fullmask := maskForSize(size)
+	var orop *PcodeOp
+	var othervn *Varnode
+	found := false
+	for i := 0; i < 2 && !found; i++ {
+		othervn = op.Input(1 - i)
+		if !othervn.IsHeritageKnown() {
 			continue
 		}
-		outSize := outputOrInputSize(op)
-		masked0 := newAuxBinaryOp(data, op.Addr(), CPUI_INT_AND, outSize, orop.Input(0), data.NewConstant(outSize, mask))
-		masked1 := newAuxBinaryOp(data, op.Addr(), CPUI_INT_AND, outSize, orop.Input(1), data.NewConstant(outSize, mask))
-		rewriteOp(data, op, CPUI_INT_OR, masked0.Output(), masked1.Output())
-		return 1
+		orvn := op.Input(i)
+		orop = orvn.Def()
+		if orop == nil || orop.Code() != CPUI_INT_OR {
+			continue
+		}
+		if !orop.Input(0).IsHeritageKnown() || !orop.Input(1).IsHeritageKnown() {
+			continue
+		}
+		othermask := othervn.NZMask()
+		if othermask == 0 { // this case picked up by RuleAndMask
+			continue
+		}
+		if othermask == fullmask { // nothing useful from distributing
+			continue
+		}
+		ormask1 := orop.Input(0).NZMask()
+		if ormask1&othermask == 0 { // AND would cancel if distributed
+			found = true
+			break
+		}
+		ormask2 := orop.Input(1).NZMask()
+		if ormask2&othermask == 0 { // AND would cancel if distributed
+			found = true
+			break
+		}
+		if othervn.IsConstant() {
+			if ormask1&othermask == ormask1 { // AND is trivial if distributed
+				found = true
+				break
+			}
+			if ormask2&othermask == ormask2 {
+				found = true
+				break
+			}
+		}
 	}
-	return 0
+	if !found {
+		return 0
+	}
+	newop1 := data.NewOpBefore(op, CPUI_INT_AND, orop.Input(0), othervn)
+	newvn1 := data.NewUniqueOut(size, newop1)
+	newop2 := data.NewOpBefore(op, CPUI_INT_AND, orop.Input(1), othervn)
+	newvn2 := data.NewUniqueOut(size, newop2)
+	rewriteOp(data, op, CPUI_INT_OR, newvn1, newvn2)
+	return 1
 }
 
 type RuleAndCompare struct{ batchRule }
