@@ -696,3 +696,6 @@ int probe_binsearch(int *a, int n, int key) {
 	while (lo<=hi) { int mid=(lo+hi)/2; if (a[mid]==key) return mid; if (a[mid]<key) lo=mid+1; else hi=mid-1; }
 	return -1;
 }
+
+/* added via goldengap add: probe_find_max */
+int probe_find_max(int *a, int n) { int m=a[0]; for (int i=1;i<n;i++) if (a[i]>m) m=a[i]; return m; }

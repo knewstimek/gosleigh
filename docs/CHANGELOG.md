@@ -5,9 +5,22 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
-### 2026-07-25 (세션12): #9 conditional-move collapse + #7 루프 렌더 fix 2건(누산기+snapshot) (master `3995622`)
+### 2026-07-25 (세션12): #9 conditional-move + #7 루프 렌더 2건 + #6 find_max TypeOrder (master 세션12 tip)
 
-자율주행, Opus 직접. **엔진 fix 3건 착지(전 골든 무회귀), x64_auto 102/103 -> 107/108**(switch_dense만 non-match).
+자율주행, Opus 직접. **엔진 fix 4건 착지(전 골든 무회귀), x64_auto 102/103 -> 108/109**(switch_dense만 non-match).
+
+**착지4(#6 find_max) -- `TypeOrder` 포인터 pointee 재귀**: `int f(int*a,int n){int m=a[0]; for(i=1..)if(a[i]>m)
+m=a[i]; return m;}`가 `undefined4 *param_1` + `local_14 < (int)param_1[i]`(여분 cast)로 방출. **오진 정정(세션12 두 번째)**:
+초기 가설 "PropagateType 인터페이스에 input↔input 전파 부재"는 반증 -- 실제 driver는 단일-slot `TypeOp.PropagateType`이
+아니라 `action_infertypes.go inferPropagateEdge`(inslot/outslot 모델링)이고 INT_SLESS input↔input을 **이미 가짐**
+(462-469). INFER_TRACE 임시계측으로 확정한 진짜 근본: **int가 비교로 a[i]까지 정상 전파되고 `*param_1`(a[0]) LOAD가
+param_1에 int* 전파도 계산하는데, `TypeOrder`(datatype.go)가 포인터 pointee 재귀를 안 해 ptr-to-int/ptr-to-undefined4를
+equal(order=0)로 판정** -> INFER-APPLY 계측: undefined4*가 먼저 적용되면 뒤에 온 int*가 order=0으로 거부됨(더 specific한데도).
+수정 = C++ `TypePointer::compare`(type.cc, ptrto 재귀) 포팅 -- submeta/size 동률 포인터는 wordsize 후 pointee를 level
+예산으로 재귀 비교. probe_find_max MATCH, 전 골든/corpus2 무회귀(broad 타입순서 변경인데). **교훈: 인터페이스 겉모습으로
+근본 assume 금지(단일-slot PropagateType은 실제 경로 아님). 증상=여분 cast+undefined 포인터일 때 TypeOrder 해상도부터 의심.**
+
+
 
 **착지1(`94af189`) -- #9 both-constant conditional-move collapse**: `return a==b`가 `undefined4 f(){if(c)local=1;
 else local=0; return local;}`로 방출되던 것(최다빈도 C 패턴). 3-부품 fix:

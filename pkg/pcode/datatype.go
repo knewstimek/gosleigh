@@ -503,11 +503,22 @@ func (p *PointerRel) WordSize() uint32 { return p.wordSize }
 // then size descending (larger size = earlier). A negative result means a
 // is more specific / larger than b.
 //
-// This models the base Datatype::compare only. Pointer/Array/Struct override
-// compare with additional recursive levels; the primitive leaf types that the
-// type-propagation sweep touches never descend past the base comparison, so the
-// override levels are intentionally not ported here.
+// This models the base Datatype::compare plus the TypePointer::compare override
+// (pointee recursion) -- required so a more-specific pointer (int*) can displace
+// a less-specific one (undefined4*) during type inference. Array/Struct override
+// levels remain unported (their leaves are not reached by the current sweeps).
 func TypeOrder(a, b Datatype) int {
+	return typeOrderLevel(a, b, 10)
+}
+
+// typeOrderLevel orders two data-types, recursing through pointer pointees with a
+// depth budget (level) to break cycles. Mirrors C++ Datatype::typeOrder ->
+// compare(op,10): the base compares submeta then size; TypePointer::compare adds
+// wordsize and a recursive pointee compare (type.cc TypePointer::compare). Without
+// the pointee recursion, ptr-to-int and ptr-to-undefined4 order equal, so a later
+// more-specific int* cannot displace an already-applied undefined4* during type
+// inference (probe_find_max: the array pointer stays undefined4*).
+func typeOrderLevel(a, b Datatype, level int) int {
 	if a == b {
 		return 0
 	}
@@ -519,6 +530,25 @@ func TypeOrder(a, b Datatype) int {
 	}
 	if a.Size() != b.Size() {
 		return int(b.Size() - a.Size())
+	}
+	// TypePointer::compare: equal submeta/size pointers compare wordsize, then the
+	// pointee recursively. Gosleigh's Pointer has no address-space field, so the
+	// C++ spaceid tie-break is omitted (all pointers share the default data space
+	// in this slice).
+	pa, aok := a.(*Pointer)
+	pb, bok := b.(*Pointer)
+	if aok && bok {
+		if pa.WordSize() != pb.WordSize() {
+			if pa.WordSize() < pb.WordSize() {
+				return -1
+			}
+			return 1
+		}
+		level--
+		if level < 0 {
+			return 0
+		}
+		return typeOrderLevel(pa.Pointee(), pb.Pointee(), level)
 	}
 	return 0
 }
