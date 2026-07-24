@@ -648,3 +648,20 @@ long long probe_ret_ll_shift2(long long x, int n) { return x << n; }
 unsigned long long probe_ret_ull(unsigned long long x) { return x >> 1; }
 
 unsigned char probe_ret_uchar(int x) { return (unsigned char)(x & 0xff); }
+
+/* --- session11 batch 15: pointer return / index tracking / local array --- */
+
+int *probe_find_ptr(int *a, int n, int v) {
+	for (int i = 0; i < n; i++) if (a[i] == v) return &a[i];
+	return 0;
+}
+int probe_max_idx(int *a, int n) {
+	int mi = 0;
+	for (int i = 1; i < n; i++) if (a[i] > a[mi]) mi = i;
+	return mi;
+}
+int probe_count_eq(int *a, int n, int v) {
+	int c = 0;
+	for (int i = 0; i < n; i++) if (a[i] == v) c++;
+	return c;
+}
