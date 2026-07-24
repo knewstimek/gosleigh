@@ -1,10 +1,33 @@
 package pcode
 
 import (
+	"fmt"
+	"os"
 	"sort"
 	"strings"
 	"sync"
 )
+
+// ssaDumpAfterActions is a comma-separated list of action-name substrings; when
+// SSA_DUMP_AFTER is set, ActionGroup.Apply prints the whole-function SSA to
+// stderr immediately after any action whose GetName() contains one of the
+// substrings. Diagnostic only (inert unless the env var is set) -- lets a
+// per-stage snapshot pinpoint where a varnode/op disappears across the
+// pipeline (e.g. heritage vs deadcode vs return-recovery). Mirrors the existing
+// env-gated diag toggles (GCD_DUMP/TREE_DIAG).
+var ssaDumpAfterActions = os.Getenv("SSA_DUMP_AFTER")
+
+// maybeDumpSSAAfter prints the SSA after `act` ran, if its name matches an
+// SSA_DUMP_AFTER substring. Called only when ssaDumpAfterActions != "".
+func maybeDumpSSAAfter(act Action, data *Funcdata) {
+	name := act.GetName()
+	for _, want := range strings.Split(ssaDumpAfterActions, ",") {
+		if want != "" && strings.Contains(name, want) {
+			fmt.Fprintf(os.Stderr, "\n===== SSA after action %q =====\n%s\n", name, DumpSSA(data, nil))
+			return
+		}
+	}
+}
 
 // ActionGroupList is the named group set used to derive root actions.
 // C++ parity: action.hh ActionGroupList
@@ -461,6 +484,9 @@ func (g *ActionGroup) Apply(data *Funcdata) int {
 	}
 	for g.state < len(g.list) {
 		res := g.list[g.state].Perform(data)
+		if ssaDumpAfterActions != "" {
+			maybeDumpSSAAfter(g.list[g.state], data)
+		}
 		if res > 0 {
 			g.count += res
 			if g.checkActionBreak() {
