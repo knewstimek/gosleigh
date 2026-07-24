@@ -621,3 +621,4 @@ void probe_write_through(int *p, int v) { *p = v; }
 void probe_byte_store2(char *p, char c) { p[0] = c; p[1] = c; }
 short probe_short_ident(short x) { return x; }
 
+
