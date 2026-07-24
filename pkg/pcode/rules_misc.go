@@ -818,17 +818,143 @@ func NewRuleConditionalMove(group string) *RuleConditionalMove {
 	return r
 }
 
-func (r *RuleConditionalMove) apply(op *PcodeOp, data *Funcdata) int {
-	if op.NumInput() == 0 {
-		return 0
+// condMoveCheckBoolean returns the root boolean Varnode feeding a MULTIEQUAL
+// input, or nil if the input is not a boolean value. A value is boolean if its
+// defining op has boolean output, or is a COPY of a 0/1 constant.
+// C++ parity: RuleConditionalMove::checkBoolean (ruleaction.cc:9279).
+func condMoveCheckBoolean(vn *Varnode) *Varnode {
+	if !vn.IsWritten() {
+		return nil
 	}
-	base := op.Input(0)
-	for i := 1; i < op.NumInput(); i++ {
-		if !sameValue(base, op.Input(i)) {
-			return 0
+	op := vn.Def()
+	if op.IsBoolOutput() {
+		return vn
+	}
+	if op.Code() == CPUI_COPY {
+		in := op.Input(0)
+		if in.IsConstant() {
+			if (in.Offset() &^ uint64(1)) == 0 {
+				return in
+			}
 		}
 	}
-	return rewriteToCopy(data, op, base)
+	return nil
+}
+
+// apply ports the both-constant branch of RuleConditionalMove::applyOp
+// (ruleaction.cc:9498-9524). A 2-input MULTIEQUAL whose inputs are both boolean
+// constants is a conditional move (`if (c) x=1; else x=0;`) that collapses to a
+// COPY / INT_ZEXT / BOOL_NEGATE of the controlling CBRANCH condition. The
+// non-constant and single-constant branches (9449-9492, 9526-9549) require
+// CloneBlockOps (gatherExpression/constructBool) which is not yet ported; those
+// cases bail (return 0).
+//
+// The prior Go stub here only collapsed all-identical inputs to a COPY, which is
+// redundant with the faithful RuleMultiCollapse (ruleaction.cc:3246, registered
+// in action.go) that absorbs identical/functional-equal phis; the same-offset
+// case below preserves that collapse for boolean constants.
+func (r *RuleConditionalMove) apply(op *PcodeOp, data *Funcdata) int {
+	if op.NumInput() != 2 { // MULTIEQUAL must have exactly 2 inputs
+		return 0
+	}
+	bool0 := condMoveCheckBoolean(op.Input(0))
+	if bool0 == nil {
+		return 0
+	}
+	bool1 := condMoveCheckBoolean(op.Input(1))
+	if bool1 == nil {
+		return 0
+	}
+	// Only the both-constant case is ported; the other branches need CloneBlockOps.
+	if !bool0.IsConstant() || !bool1.IsConstant() {
+		return 0
+	}
+
+	// Discover the diamond: rootblock -> {inblock0, inblock1} -> bb.
+	// Either inblock may be empty (a single-edge fall-through), in which case its
+	// rootblock is its own predecessor. C++ parity: ruleaction.cc:9414-9429.
+	bb := op.Parent()
+	inblock0 := bb.InEdge(0).Point
+	var rootblock0 *FlowBlock
+	if inblock0.SizeOut() == 1 {
+		if inblock0.SizeIn() != 1 {
+			return 0
+		}
+		rootblock0 = inblock0.InEdge(0).Point
+	} else {
+		rootblock0 = inblock0
+	}
+	inblock1 := bb.InEdge(1).Point
+	var rootblock1 *FlowBlock
+	if inblock1.SizeOut() == 1 {
+		if inblock1.SizeIn() != 1 {
+			return 0
+		}
+		rootblock1 = inblock1.InEdge(0).Point
+	} else {
+		rootblock1 = inblock1
+	}
+	if rootblock0 != rootblock1 {
+		return 0
+	}
+
+	// rootblock must end in CBRANCH; its condition drives the conditional move.
+	// C++ parity: ruleaction.cc:9432-9434.
+	rootBasic := asBasic(rootblock0)
+	if rootBasic == nil {
+		return 0
+	}
+	cbranch := rootBasic.LastOp()
+	if cbranch == nil || cbranch.Code() != CPUI_CBRANCH {
+		return 0
+	}
+
+	// gatherExpression is trivially true for constants (empty op list), so the
+	// C++ calls at 9437-9439 are elided here.
+
+	// C++ parity: ruleaction.cc:9441-9447.
+	var path0istrue bool
+	if rootblock0 != inblock0 {
+		path0istrue = rootblock0.TrueOut() == inblock0
+	} else {
+		path0istrue = rootblock0.TrueOut() != inblock1
+	}
+	if cbranch.HasFlag(PcodeOpBooleanFlip) {
+		path0istrue = !path0istrue
+	}
+
+	// From here a change is committed. C++ parity: ruleaction.cc:9496-9524.
+	data.OpUninsert(op)
+	sz := op.Output().Size()
+	if bool0.Offset() == bool1.Offset() {
+		data.OpRemoveInput(op, 1)
+		data.OpSetOpcode(op, CPUI_COPY)
+		data.OpSetInput(op, data.NewConstant(sz, bool0.Offset()), 0)
+		data.OpInsertBegin(op, bb)
+	} else {
+		data.OpRemoveInput(op, 1)
+		boolvn := cbranch.Input(1)
+		// needcomplement is true when the boolean sense of the condition is the
+		// opposite of what selecting the '1' constant requires.
+		needcomplement := (bool0.Offset() == 0) == path0istrue
+		if sz == 1 {
+			if needcomplement {
+				data.OpSetOpcode(op, CPUI_BOOL_NEGATE)
+			} else {
+				data.OpSetOpcode(op, CPUI_COPY)
+			}
+			data.OpInsertBegin(op, bb)
+			data.OpSetInput(op, boolvn, 0)
+		} else {
+			data.OpSetOpcode(op, CPUI_INT_ZEXT)
+			data.OpInsertBegin(op, bb)
+			if needcomplement {
+				boolvn = data.OpBoolNegate(boolvn, op, false)
+			}
+			data.OpSetInput(op, boolvn, 0)
+		}
+	}
+	return 1
 }
 
 type RuleFuncPtrEncoding struct{ batchRule }

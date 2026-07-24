@@ -1508,7 +1508,9 @@ func normalizedBaseType(base *Base, longSize int) Datatype {
 	}
 	switch base.Metatype() {
 	case TYPE_BOOL:
-		return sharedTypeFactory.GetBase(base.Size(), TYPE_BOOL, "_Bool")
+		// Ghidra names the boolean core type "bool" (type.cc:291-292
+		// TypeFactory metatype naming), not the C keyword "_Bool".
+		return sharedTypeFactory.GetBase(base.Size(), TYPE_BOOL, "bool")
 	case TYPE_FLOAT:
 		switch base.Size() {
 		case 4:

@@ -1237,13 +1237,49 @@
           "byte-identical (indent-insensitive)"
         ]
       }
+    },
+    {
+      "name": "probe_ret_eq",
+      "entry": 16688,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_ret_lt",
+      "entry": 16752,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
+    },
+    {
+      "name": "probe_ret_uge",
+      "entry": 16816,
+      "tags": [
+        "MATCH"
+      ],
+      "evidence": {
+        "MATCH": [
+          "byte-identical (indent-insensitive)"
+        ]
+      }
     }
   ],
   "summary": {
-    "total": 103,
-    "match": 102,
+    "total": 106,
+    "match": 105,
     "tag_counts": {
-      "MATCH": 102,
+      "MATCH": 105,
       "TYPECAST": 1
     }
   }

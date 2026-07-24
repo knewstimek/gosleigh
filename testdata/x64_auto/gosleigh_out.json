@@ -30,7 +30,7 @@
     },
     {
       "name": "switch_dense",
-      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x5418) + 0x2ae0))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
+      "output": "\nundefined8 switch_dense(int param_1)\n\n{\nundefined8 uVar1;\n\nif ((uint)(param_1 - 10U) \u003c 8) {\n/* WARNING: Could not emulate address calculation at 0x00000029 */\n/* WARNING: Treating indirect jump as call */\nuVar1 = (*(code *)((ulonglong)*(uint *)((longlong)(param_1 - 10U) * 4 + 0x5430) + 11000))();\nreturn uVar1;\n}\nreturn 0xffffffff;\n}\n"
     },
     {
       "name": "switch_sparse",
@@ -411,6 +411,18 @@
     {
       "name": "probe_rotr",
       "output": "\nuint probe_rotr(uint param_1,byte param_2)\n\n{\nreturn param_1 \u003e\u003e (param_2 \u0026 0x1f) | param_1 \u003c\u003c (0x20 - param_2 \u0026 0x1f);\n}\n"
+    },
+    {
+      "name": "probe_ret_eq",
+      "output": "\nbool probe_ret_eq(int param_1,int param_2)\n\n{\nreturn param_1 == param_2;\n}\n"
+    },
+    {
+      "name": "probe_ret_lt",
+      "output": "\nbool probe_ret_lt(int param_1,int param_2)\n\n{\nreturn param_1 \u003c param_2;\n}\n"
+    },
+    {
+      "name": "probe_ret_uge",
+      "output": "\nbool probe_ret_uge(uint param_1,uint param_2)\n\n{\nreturn param_2 \u003c= param_1;\n}\n"
     }
   ]
 }
