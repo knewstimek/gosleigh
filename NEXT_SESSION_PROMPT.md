@@ -10,7 +10,7 @@ Ghidra와 같은 C 출력까지. x64 실함수(register param) 성공이 명시 
 **선행 진단도 실측으로 재검증하라** (세션4 반증 3회). **붕괴형 mismatch(빈 함수/미초기화 read/CFG 파괴)는
 입력 무결성부터 의심하라** -- 세션5에서 "엔진 갭"이 골든 bytes 손상(GenGoldens island 버그)으로 반증됨.
 
-## 현재 상태 (master `a67beda` origin 푸시, 전 게이트 green -- 세션9 룰 4건 + RuleAndMask 완성)
+## 현재 상태 (master `e336502` origin 푸시, 전 게이트 green -- 세션9 룰 4건 + RuleAndMask/RuleAndDistribute 충실화)
 - tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 **10/13**,
   x64_auto **31/32**, production PASS, `go test ./...` green, `go vet ./pkg/...` clean.
 - x64_auto 잔여 **1건** = **switch_dense**. (룰 감사 잔여 10건은 아래 표 -- 다음 세션 최대 광맥)
@@ -26,7 +26,9 @@ Go-only 19, C++-only 21(그중 11은 명시적 stub).
 
 **진행(2026-07-24 세션9)**: #1/#2/#6 세션8 착지 + **#3 `RuleShiftPiece`(`801caf8`) / #4 `RuleDoubleSub`(`6bd4dbf`) /
 #5 `RuleRightShiftAnd`(`4f7b84a`) / #10 `RuleZextCommute`(`bbc5906`) 세션9 착지**(전부 전 게이트 green, 회귀 0).
-추가로 **`RuleAndMask` NZMask/consume 커버리지 완성**(`a67beda`, C++ ruleaction.cc:310 충실 포팅 -- #5가 연 부채 해소).
+추가로 **`RuleAndMask` NZMask/consume 커버리지 완성**(`a67beda`, C++ ruleaction.cc:310 충실 포팅 -- #5가 연 부채 해소)
++ **`RuleAndDistribute` 충실 포팅**(`e336502`, ruleaction.cc:1260 -- benefit-guard 없던 과공격적 부분포팅 교정,
+#7 RuleHumptyOr 발진원 제거해 언블록).
 **#9 `Rule2Comp2Mult`는 차단**(위 표 참조 -- 프로덕션 검증 완료, 테스트 배치 co-pooling만 고치면 착지 가능).
 **잔여 순수 미착수 4건 = #7 `RuleHumptyOr` / #8 `RuleOrCompare` / #11 `RuleBoolZext` / #12 `RulePushMulti`(정리)**.
 착지 방법론(세션9 확립): (a) 진짜 C++ 룰 포팅, (b) 기존 동명 본체가 다른 등록룰의 중복/死코드인지 확인,
@@ -56,10 +58,12 @@ Go-only 19, C++-only 21(그중 11은 명시적 stub).
   담당)/`othermask==fullmask`(무의미)는 skip. **이 NZMask 가드들 + RuleAndMask 선행 정규화(a가 b를 덮으면
   `a&b`가 이미 b로 접혀 HumptyOr 입력이 안 됨)가 C++의 오실레이션 안전 장치다.** 그런데 **Go `RuleAndDistribute`
   (rules_misc.go:188)는 other가 상수면 무조건 분배하는 과공격적 부분포팅** -- 가드 전무. 그 자체로 parity 버그 +
-  HumptyOr와 발진원. -> **착지하려면 (1) RuleAndDistribute를 ruleaction.cc:1260 충실 포팅(가드 전부)**, (2) 진짜
-  RuleHumptyOr 포팅, (3) 기존 Go HumptyOr `{PIECE}` 본체(concat(sub(V,hi),sub(V,0))=>V, rules_copy.go:262) 처분
-  판정. **주의: RuleAndDistribute는 현 코퍼스에서 활발히 발화** -- 충실화(덜 공격적)가 출력 바꿀 수 있어 전 게이트
-  회귀 확인 필수. RuleAndMask는 세션9에 이미 NZMask/consume 충실화됨(`a67beda`)이라 선행 정규화 전제는 충족.
+  HumptyOr와 발진원. -> **(1) RuleAndDistribute 충실 포팅은 세션9에 착지(`e336502`) = 발진원 제거, RuleHumptyOr
+  언블록.** RuleAndMask도 세션9 NZMask/consume 충실화(`a67beda`)로 선행 정규화 전제 충족. **남은 것: (2) 진짜
+  RuleHumptyOr 포팅**(ruleaction.cc:5350, swap 매칭 a==c/a==d/b==c/b==d + 상수/비상수 2브랜치 + NZMask 가드
+  5407-5408 + else 분기의 opInsertBefore) **+ (3) 기존 Go `{PIECE}` 본체**(concat(sub(V,hi),sub(V,0))=>V,
+  rules_copy.go:262)가 다른 룰 중복/死인지 판정(중복이면 드롭, 아니면 rename 보존). 이제 단일-룰 작업. 게이트:
+  `go test ./pkg/pcode/`(발진) -> 5 loader 골든 -> goldengap. 현 코퍼스 무발화 예상이라 golden 무변화면 정상.
 - **#11 `RuleBoolZext`** (ruleaction.cc:3015, `{INT_ZEXT}` `zext(bool)*-1` 5형): `op.Output().loneDescend()`로
   **전진 탐색**(ZEXT출력의 유일소비 MULT -> 그 출력의 유일소비 ADD/EQUAL/NOTEQUAL/AND/OR)해 BOOL_NEGATE/
   BOOL_AND/BOOL_OR 생성. `isBooleanValue` 판정 필요. ~80줄, subtle. 역방향 파트너는 없어 발진 위험은 낮으나

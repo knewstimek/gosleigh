@@ -15,13 +15,14 @@ Ghidra C++ 디컴파일러 엔진을 Go로 **동일 동작(identical behavior)**
   `accd8a9`) -- 레거시 테스트 하네스 13개를 트리 경로로 이전한 뒤 `pkg/pcode/action_stack_ptr_flow.go`
   파일 자체를 제거. H8-debt-2(Step1+Step2+Step3) 완전 종료.
 
-## 현재 상태 (2026-07-24 세션9, master `a67beda` origin 푸시, 전 게이트 green)
+## 현재 상태 (2026-07-24 세션9, master `e336502` origin 푸시, 전 게이트 green)
 
 **권위 문서 = 저장소 루트 `NEXT_SESSION_PROMPT.md`**. 요약:
 - **[세션9] 동명 다른 룰 4건 착지**(`801caf8` RuleShiftPiece / `6bd4dbf` RuleDoubleSub / `4f7b84a`
   RuleRightShiftAnd / `bbc5906` RuleZextCommute) -- 전부 진짜 C++ 룰 포팅 + 기존 중복/死 본체 드롭, 회귀 0
   (x64_auto 31/32, corpus2 10/13, tree 10/10 유지, `go test ./...` green). 추가로 **`RuleAndMask`
-  NZMask/consume 커버리지 완성**(`a67beda`, #5가 연 부채 해소). Rule2Comp2Mult는 테스트 배치
+  NZMask/consume 커버리지 완성**(`a67beda`, #5가 연 부채 해소) + **`RuleAndDistribute` 충실 포팅**(`e336502`,
+  benefit-guard 없던 과공격적 부분포팅 교정 -> #7 RuleHumptyOr 언블록). Rule2Comp2Mult는 테스트 배치
   co-pooling 발진으로 차단(아래 부채). 방법론 = "배치 발진부터 `go test ./pkg/pcode/`로 검증".
 - **[세션8] 자율주행 감독관 + Opus 병렬 2슬롯으로 착지 15건, x64_auto 25 -> 31/32, corpus2 8 -> 10/13.** 상세는 CHANGELOG 세션8-1~15.
   **동명 다른 룰 2건 발견**(`RuleSubRight`, `RulePushPtr`) -- 이름 충돌이 미포팅 룰을 가리고 있었다.
