@@ -49,6 +49,23 @@ func (sl *ScopeLocal) isNotMapped(off uint64, size int32) bool {
 	return false
 }
 
+// ClearDeadVarnodes frees unlocked input Varnodes nothing reads any more.
+// C++ parity: funcdata_varnode.cc Funcdata::clearDeadVarnodes.
+func (fd *Funcdata) ClearDeadVarnodes() {
+	for _, vn := range fd.vbank.AllVarnodes() {
+		if vn == nil || !vn.HasNoDescend() {
+			continue
+		}
+		// TODO known mismatch: C++ frees dead stack inputs too and destroys
+		// every free Varnode without descendants; printc's stack declaration
+		// pass still reads such leftovers (entryCoversVarnode), so only dead
+		// register inputs are freed here.
+		if vn.IsInput() && !vn.HasAddlFlags(VarnodeLockedInput) && vn.Space() != nil && vn.Space().Kind != address.SpaceKindStack {
+			fd.vbank.MakeFree(vn)
+		}
+	}
+}
+
 func spaceHighestOffset(spc *address.Space) uint64 {
 	if spc.AddrSize >= 8 {
 		return ^uint64(0)

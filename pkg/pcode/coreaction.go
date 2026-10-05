@@ -1089,6 +1089,7 @@ func (a *ActionInputPrototype) Apply(data *Funcdata) int {
 			scope.BuildFromVarnodes(data.GetVarnodeBank().AllVarnodes(), fp)
 			fp.SetInputLocked(true)
 		}
+		data.ClearDeadVarnodes()
 		return 0
 	}
 	// Gosleigh locks the input prototype in the main loop (ApplyActiveParamModel)
@@ -1099,7 +1100,12 @@ func (a *ActionInputPrototype) Apply(data *Funcdata) int {
 	if ev := data.EvalCurrentModel(); ev.IsMerged() && !fp.IsModelLocked() {
 		fp.SetModel(resolveFuncModel(data, ev))
 	}
+	// The main-loop lock is provisional: C++ derives the input map here, from
+	// the final inputs, so an input whose only use died since (MSVC's
+	// "push ecx" frame slot) is no parameter. Re-derive from the current SSA.
+	// C++ parity: coreaction.cc ActionInputPrototype::apply (unlocked branch).
 	recoverMissingStackParams(data, fp)
+	data.ClearDeadVarnodes()
 	return 0
 }
 
