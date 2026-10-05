@@ -620,7 +620,8 @@ func stripReturnIndirectRef(fd *Funcdata) {
 // Must be called AFTER ActionDeadCode so that non-return consumers introduced
 // by register-clobbering side-effects (e.g. OF flag from IMUL) have been pruned.
 // C++ parity: ActionReturnRecovery::apply + Funcdata::ancestorOpUse
-func applyReturnRecovery(fd *Funcdata) {
+func applyReturnRecovery(fd *Funcdata) bool {
+	changed := false
 	for _, op := range fd.GetPcodeOpBank().AllOps() {
 		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN {
 			continue
@@ -660,18 +661,28 @@ func applyReturnRecovery(fd *Funcdata) {
 			// reaches the RETURN is no evidence of a return value, and C++
 			// returns void there (ancestorOpUse CALL / indirect-creation false).
 			rescued := false
-			if def := retVn.Def(); def != nil && !def.IsDead() && def.IsCall() &&
+			if def := retVn.Def(); def != nil && !def.IsDead() &&
 				onlyReturnUse(retVn, op, retSlot, make(map[*Varnode]bool)) {
-				if fc := fd.callSpecsForOp(def); fc != nil && fc.IsBadJumpTable() {
-					rescued = true
+				// The carrier is the call output, or (before ActionActiveReturn
+				// commits it) the call's return-register creation.
+				callOp := def
+				if def.Code() == CPUI_INDIRECT && def.IsIndirectCreation() {
+					callOp = def.Input(1).GetIndirectCause()
+				}
+				if callOp != nil && callOp.IsCall() {
+					if fc := fd.callSpecsForOp(callOp); fc != nil && fc.IsBadJumpTable() {
+						rescued = true
+					}
 				}
 			}
 			if !rescued {
 				fd.OpUnsetInput(op, retSlot)
+				changed = true
 				op.SetNumInputs(retSlot)
 			}
 		}
 	}
+	return changed
 }
 
 // buildReturnOutput rewires a RETURN op to reflect the active return trials.
@@ -844,6 +855,14 @@ func ancestorOpUseReturn(vn *Varnode, retOp *PcodeOp, retSlot int, depth int, se
 		return false
 	case CPUI_CALL, CPUI_CALLIND:
 		return false
+	case CPUI_INDIRECT:
+		// An indirect creation (a call's killed/possible-output register) is
+		// no evidence of a returned value; a guard INDIRECT is traced through.
+		// C++ parity: funcdata_varnode.cc Funcdata::ancestorOpUse INDIRECT case.
+		if def.IsIndirectCreation() {
+			return false
+		}
+		return ancestorOpUseReturn(def.Input(0), retOp, retSlot, depth-1, seenME)
 	default:
 		return onlyReturnUse(vn, retOp, retSlot, make(map[*Varnode]bool))
 	}
