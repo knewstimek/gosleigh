@@ -39,6 +39,8 @@ import (
 	"flag"
 	"fmt"
 	"os"
+	"runtime"
+	"time"
 
 	"gosleigh/pkg/bridge"
 	"gosleigh/pkg/loader"
@@ -80,7 +82,14 @@ func main() {
 	cspecPath := flag.String("cspec", "testdata/sla/x86-64-win.cspec", "path to .cspec file")
 	outPath := flag.String("out", "", "output JSON path (default: stdout)")
 	maxInstr := flag.Int("max-instructions", 200, "max instructions per function")
+	pePath := flag.String("pe", "", "map this PE's sections at their linked VMAs and decompile each golden at its absolute entry (golden bytes are ignored)")
+	index := flag.Int("index", -1, "decompile only the golden at this index (-1 = all); lets a driver isolate each function in its own process")
+	memLimitMB := flag.Uint64("mem-limit-mb", 0, "exit with status 3 once the Go heap exceeds this many MB (0 = no limit)")
 	flag.Parse()
+
+	if *memLimitMB > 0 {
+		go memWatchdog(*memLimitMB << 20)
+	}
 
 	if *goldensPath == "" {
 		fmt.Fprintln(os.Stderr, "goldengap: -goldens is required")
@@ -98,9 +107,30 @@ func main() {
 		os.Exit(1)
 	}
 
-	out := resultFile{Functions: make([]funcResult, 0, len(gf.Functions))}
-	for _, fn := range gf.Functions {
-		out.Functions = append(out.Functions, decompileOne(fn, *slaPath, *pspecPath, *cspecPath, *maxInstr))
+	var sections []loader.PESection
+	if *pePath != "" {
+		if sections, err = loader.LoadPESections(*pePath); err != nil {
+			fmt.Fprintf(os.Stderr, "goldengap: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	fns := gf.Functions
+	if *index >= 0 {
+		if *index >= len(fns) {
+			fmt.Fprintf(os.Stderr, "goldengap: -index %d out of range (%d goldens)\n", *index, len(fns))
+			os.Exit(1)
+		}
+		fns = fns[*index : *index+1]
+	}
+
+	out := resultFile{Functions: make([]funcResult, 0, len(fns))}
+	for _, fn := range fns {
+		b := &loader.EngineBuilder{SLAPath: *slaPath, PspecPath: *pspecPath}
+		if sections != nil {
+			b.BaseAddr, b.Sections = uint64(fn.Entry), sections
+		}
+		out.Functions = append(out.Functions, decompileOne(fn, b, *cspecPath, *maxInstr))
 	}
 
 	enc, err := json.MarshalIndent(out, "", "  ")
@@ -119,11 +149,27 @@ func main() {
 	fmt.Fprintf(os.Stderr, "goldengap: wrote %d functions to %s\n", len(out.Functions), *outPath)
 }
 
+// memWatchdog kills the process once the Go heap passes limit bytes. Real
+// binaries can drive the engine into unbounded growth (rule oscillation that
+// keeps allocating), which no in-process recover can stop; the driver runs one
+// function per process and records exit status 3 as a memory blow-up.
+func memWatchdog(limit uint64) {
+	var ms runtime.MemStats
+	for range time.Tick(200 * time.Millisecond) {
+		runtime.ReadMemStats(&ms)
+		if ms.HeapAlloc > limit {
+			fmt.Fprintf(os.Stderr, "goldengap: heap %d MB exceeds limit\n", ms.HeapAlloc>>20)
+			os.Exit(3)
+		}
+	}
+}
+
 // decompileOne mirrors the pkg/loader x64_corpus2 diagnostic test's pipeline
 // (EngineBuilder.Build -> bridge.Build -> bridge.Decompile) for a single
 // golden function. The deferred recover matches that test's per-function
-// panic guard so one bad function does not abort the whole batch.
-func decompileOne(fn goldenEntry, slaPath, pspecPath, cspecPath string, maxInstr int) (res funcResult) {
+// panic guard so one bad function does not abort the whole batch. When b has
+// no Sections, the golden body bytes are mapped at base 0 (isolated harness).
+func decompileOne(fn goldenEntry, b *loader.EngineBuilder, cspecPath string, maxInstr int) (res funcResult) {
 	res.Name = fn.Name
 	defer func() {
 		if r := recover(); r != nil {
@@ -131,13 +177,16 @@ func decompileOne(fn goldenEntry, slaPath, pspecPath, cspecPath string, maxInstr
 		}
 	}()
 
-	prog, err := hex.DecodeString(fn.Bytes)
-	if err != nil {
-		res.Error = fmt.Sprintf("BYTES-ERR: %v", err)
-		return
+	if b.Sections == nil {
+		prog, err := hex.DecodeString(fn.Bytes)
+		if err != nil {
+			res.Error = fmt.Sprintf("BYTES-ERR: %v", err)
+			return
+		}
+		b.Bytes = prog
 	}
 
-	engine, base, err := (&loader.EngineBuilder{SLAPath: slaPath, PspecPath: pspecPath, Bytes: prog}).Build()
+	engine, base, err := b.Build()
 	if err != nil {
 		res.Error = fmt.Sprintf("BUILD-ERR: %v", err)
 		return
