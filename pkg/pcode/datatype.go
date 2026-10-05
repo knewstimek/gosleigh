@@ -87,6 +87,9 @@ const (
 	datatypeTypeIncomplete  datatypeFlags = 0x400
 	datatypeNeedsResolution datatypeFlags = 0x800
 	datatypePointerToArray  datatypeFlags = 0x10000
+	// datatypeTypedef marks a host typedef name over a base type (DWORD,
+	// UINT): it prints by its own name. C++ parity: Datatype::typedefImm set.
+	datatypeTypedef datatypeFlags = 0x20000
 )
 
 // Datatype is the common surface shared by the supported p-code data-types.

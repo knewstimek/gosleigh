@@ -29,6 +29,9 @@ func (f *TypeFactory) Intern(dt Datatype) Datatype {
 
 	switch typed := dt.(type) {
 	case *Base:
+		if typed.Flags()&datatypeTypedef != 0 {
+			return typed
+		}
 		if typed.SubMeta() == SUB_INT_CHAR && typed.Size() == 1 {
 			return f.GetChar(typed.Name())
 		}
@@ -62,6 +65,15 @@ func (f *TypeFactory) GetBase(size int32, meta metatype, name string) *Base {
 	value := NewBase(size, meta, name)
 	key := fmt.Sprintf("base:%d:%d:%s", value.Size(), value.Metatype(), value.Name())
 	return f.internBase(key, value)
+}
+
+// GetTypedefBase returns base under a typedef name. It prints by that name.
+// C++ parity: TypeFactory::getTypedef (base types only).
+func (f *TypeFactory) GetTypedefBase(name string, base *Base) *Base {
+	value := NewBase(base.Size(), base.Metatype(), name)
+	value.submeta = base.SubMeta()
+	value.flags |= datatypeTypedef
+	return f.internBase("typedef:"+name, value)
 }
 
 // GetChar returns the 1-byte character type (prints as a character / string).

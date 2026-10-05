@@ -37,6 +37,8 @@ type HostTypeDesc struct {
 	Elem  *HostTypeDesc
 	// Char marks a character type (Ghidra char="true").
 	Char bool
+	// Typedef is the name of a typedef over this type ("" = none).
+	Typedef string
 	// Fields are a structure's members.
 	Fields []HostFieldDesc
 }
@@ -61,6 +63,18 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 		return nil
 	}
 	tf := sharedTypeFactory
+	// A typedef of a base type is that base under the typedef's name, which
+	// is what prints (DWORD_PTR, MCIDEVICEID).
+	// TODO known mismatch: typedefs of pointers/aggregates resolve to the
+	// underlying type (TypeFactory::getTypedef not modeled).
+	if d.Typedef != "" {
+		under := *d
+		under.Typedef = ""
+		if b, ok := ResolveHostType(&under).(*Base); ok {
+			return tf.GetTypedefBase(d.Typedef, b)
+		}
+		return ResolveHostType(&under)
+	}
 	switch d.Meta {
 	case "ptr":
 		elem := ResolveHostType(d.Elem)

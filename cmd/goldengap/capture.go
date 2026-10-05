@@ -73,6 +73,8 @@ type captureData struct {
 
 // captureProto is the locked part of a host function prototype.
 type captureProto struct {
+	name, model            string
+	extraPop               int32
 	noReturn               bool
 	inputLocked, outLocked bool
 	params                 []pcode.HostParam
@@ -100,7 +102,7 @@ func loadCaptureData(path string, ram *address.Space) (*captureData, error) {
 			return
 		}
 		for i := range n.Kids {
-			if k := &n.Kids[i]; k.XMLName.Local == "type" {
+			if k := &n.Kids[i]; k.XMLName.Local == "type" || k.XMLName.Local == "def" {
 				types[k.attr("name")] = k
 			}
 		}
@@ -184,7 +186,7 @@ func loadCaptureData(path string, ram *address.Space) (*captureData, error) {
 // C++ parity: FuncProto::decode + ProtoStoreSymbol (isInputLocked is a void
 // lock or a type-locked first parameter).
 func parseCaptureProto(fn *xnode, types map[string]*xnode) captureProto {
-	cp := captureProto{noReturn: fn.attr("noreturn") == "true"}
+	cp := captureProto{name: fn.attr("name"), noReturn: fn.attr("noreturn") == "true", extraPop: pcode.ExtrapopUnknown}
 	slot := func(sym, at *xnode) pcode.HostParam {
 		p := pcode.HostParam{Space: at.attr("space"), Offset: parseUint(at.attr("offset")),
 			Size: int32(parseUint(at.attr("size"))), Name: sym.attr("name"), ThisPtr: sym.attr("thisptr") == "true"}
@@ -224,6 +226,10 @@ func parseCaptureProto(fn *xnode, types map[string]*xnode) captureProto {
 	if proto == nil {
 		return cp
 	}
+	cp.model = proto.attr("model")
+	if ep := proto.attr("extrapop"); ep != "" && ep != "unknown" {
+		cp.extraPop = int32(parseUint(ep))
+	}
 	cp.inputLocked = proto.attr("voidlock") == "true" || (len(ins) > 0 && ins[0].locked)
 	if cp.inputLocked {
 		for _, in := range ins {
@@ -251,10 +257,16 @@ func parseCaptureProto(fn *xnode, types map[string]*xnode) captureProto {
 // answer for a callee the core asked about.
 func (h hostWithData) QueryFunction(addr address.Address) (pcode.HostFunction, bool) {
 	hf, ok := h.HostScope.QueryFunction(addr)
-	if !ok || h.captureData == nil {
+	if h.captureData == nil {
 		return hf, ok
 	}
 	if cp, found := h.captureData.protos[addr.Offset]; found {
+		if !ok {
+			// A function the symbol table lacks (an external one behind an
+			// import slot): the capture holds all the core received.
+			hf = pcode.HostFunction{Name: cp.name, Model: cp.model, ExtraPop: cp.extraPop}
+			ok = true
+		}
 		hf.NoReturn = hf.NoReturn || cp.noReturn
 		hf.InputLocked, hf.OutputLocked = cp.inputLocked, cp.outLocked
 		hf.Params, hf.Output = cp.params, cp.output
@@ -276,6 +288,17 @@ func typeDesc(n *xnode, types map[string]*xnode, depth int) *pcode.HostTypeDesc 
 		return nil
 	case "void":
 		return &pcode.HostTypeDesc{Meta: "void"}
+	case "def": // typedef: the base type under the typedef's name
+		if len(n.Kids) == 0 {
+			return nil
+		}
+		base := typeDesc(&n.Kids[0], types, depth+1)
+		if base == nil {
+			return nil
+		}
+		td := *base
+		td.Typedef = n.attr("name")
+		return &td
 	case "type":
 	default:
 		return nil

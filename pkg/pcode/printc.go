@@ -1535,6 +1535,9 @@ func (s *printCState) normalizeTypeForDecl(dt Datatype) Datatype {
 	case *Enum:
 		return sharedTypeFactory.GetEnum(typed.Size(), typed.Metatype(), typed.Name(), typed.Values())
 	case *Base:
+		if typed.Flags()&datatypeTypedef != 0 {
+			return typed // a typedef prints by its name
+		}
 		return normalizedBaseType(typed, s.longSize())
 	default:
 		return dt

@@ -61,3 +61,52 @@ func markNoReturnHalts(fd *pcode.Funcdata) {
 		fd.Warning("Subroutine does not return", prev.Addr())
 	}
 }
+
+// directExternalCall turns a call through an import slot (CALLIND of the
+// slot's contents) into a direct CALL of the external function the host
+// knows at the slot, so its prototype applies from the start.
+// C++ reaches the same state through ActionDeindirect: FuncCallSpecs::
+// deindirect installs an indirect override and, when the external's locked
+// prototype does not fit the recovered trials, restarts the decompilation
+// with the call already resolved. Gosleigh has no restart, so it resolves the
+// call before flow.
+func directExternalCall(tr sla.InstructionTranslation, host pcode.HostScope) sla.InstructionTranslation {
+	if host == nil {
+		return tr
+	}
+	for i, op := range tr.Ops {
+		if op.OpCode != pcode.CPUI_CALLIND || len(op.Inputs) == 0 {
+			continue
+		}
+		target := op.Inputs[0]
+		var slot *pcode.VarnodeData
+		for j := i - 1; j >= 0; j-- {
+			d := tr.Ops[j]
+			if d.Output == nil || *d.Output != target {
+				continue
+			}
+			if d.OpCode == pcode.CPUI_COPY && len(d.Inputs) == 1 && d.Inputs[0].Space != nil && !d.Inputs[0].Space.IsConstant() {
+				in := d.Inputs[0]
+				slot = &in
+			}
+			break
+		}
+		if slot == nil {
+			return tr
+		}
+		at := slot.Address()
+		if _, ok := host.QueryExternalRef(at); !ok {
+			return tr
+		}
+		if _, ok := host.QueryFunction(at); !ok {
+			return tr
+		}
+		ops := append([]pcode.RawOp(nil), tr.Ops...)
+		ops[i].OpCode = pcode.CPUI_CALL
+		ops[i].Inputs = append([]pcode.VarnodeData(nil), op.Inputs...)
+		ops[i].Inputs[0] = pcode.VarnodeData{Space: slot.Space, Offset: slot.Offset, Size: 1}
+		tr.Ops = ops
+		return tr
+	}
+	return tr
+}
