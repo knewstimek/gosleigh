@@ -929,7 +929,7 @@ func (s *printCState) inferReturnType() Datatype {
 		return sharedTypeFactory.GetVoid()
 	}
 	for _, op := range s.fd.GetPcodeOpBank().AllOps() {
-		if op == nil || op.Code() != CPUI_RETURN {
+		if op == nil || op.Code() != CPUI_RETURN || op.HaltType() != 0 {
 			continue
 		}
 		vn := returnValue(op)
@@ -2646,10 +2646,10 @@ func (s *printCState) emitOps(bb *BlockBasic, suppressControl bool) error {
 			continue
 		}
 		// Skip ops marked as NonPrinting by ActionForLoops (iterate/initialize ops
-		// are emitted inside the for-loop header, not as body statements).
-		// C++ parity: PrintC skips ops where PcodeOp::notPrinted() is true
-		// (set by Funcdata::opMarkNonPrinting in BlockWhileDo::finalizePrinting).
-		if op.HasFlag(PcodeOpNonPrinting) {
+		// are emitted inside the for-loop header, not as body statements) and the
+		// artificial halt after a call that never returns.
+		// C++ parity: PcodeOp::notPrinted (marker|nonprinting|noreturn).
+		if op.HasFlag(PcodeOpNonPrinting | PcodeOpNoReturn) {
 			continue
 		}
 		// Skip prologue/epilogue register-save ops (PUSH EBP, PUSH EBX, etc.)
@@ -3335,6 +3335,9 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 	// character ('\0', 'A', '\n', ...). C++ parity: PrintC::pushConstant routes an
 	// isCharPrint type to pushCharConstant (printc.cc:1813/1821 -> 1669).
 	if lit, ok := renderCharConstant(vn, dt); ok {
+		return lit
+	}
+	if lit, ok := s.fd.stringLiteral(vn, dt); ok {
 		return lit
 	}
 	// When the constant carries only a generic TYPE_UINT (the default for untyped

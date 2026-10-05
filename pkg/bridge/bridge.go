@@ -352,6 +352,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 			return nil, err
 		}
 	}
+	markNoReturnHalts(fd)
 	for from, to := range zeroOpRedirect(records) {
 		if b := blockByAddr[to]; b != nil {
 			blockByAddr[from] = b
@@ -1175,6 +1176,7 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 			if t, ok := cfg.FlowOverrides[cur.Offset]; ok {
 				translation = applyFlowOverride(translation, t)
 			}
+			translation = haltAfterNoReturnCall(translation, cfg.HostScope)
 			// An instruction may legitimately emit no p-code (NOP, multi-byte
 			// NOP alignment padding). It is kept for flow; references to its
 			// address resolve to the next instruction (zeroOpRedirect).

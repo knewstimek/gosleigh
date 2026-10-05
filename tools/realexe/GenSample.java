@@ -142,7 +142,8 @@ public class GenSample extends GhidraScript {
 				.append(", \"cc\": ").append(jsonStr(cc == null ? "" : cc))
 				.append(", \"extrapop\": ").append(extrapop == ghidra.program.model.lang.PrototypeModel.UNKNOWN_EXTRAPOP ? "null" : String.valueOf(extrapop))
 				.append(", \"sigsrc\": ").append(jsonStr(f.getSignatureSource().toString()))
-				.append(", \"thunk\": ").append(f.isThunk()).append("}");
+				.append(", \"thunk\": ").append(f.isThunk())
+				.append(", \"noreturn\": ").append(f.hasNoReturn()).append("}");
 		}
 		sb.append("\n  ],\n  \"externals\": [\n");
 		first = true;

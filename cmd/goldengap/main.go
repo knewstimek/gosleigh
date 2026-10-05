@@ -228,6 +228,7 @@ func loadHostSymbols(path string) (*hostSymbols, error) {
 			Namespace string `json:"namespace"`
 			CC        string `json:"cc"`
 			ExtraPop  *int32 `json:"extrapop"`
+			NoReturn  bool   `json:"noreturn"`
 		} `json:"functions"`
 		Externals []struct {
 			Addr uint64 `json:"addr"`
@@ -246,7 +247,7 @@ func loadHostSymbols(path string) (*hostSymbols, error) {
 		if fn.Namespace != "" {
 			name = fn.Namespace + "::" + name
 		}
-		hf := pcode.HostFunction{Name: name, Model: fn.CC, ExtraPop: pcode.ExtrapopUnknown}
+		hf := pcode.HostFunction{Name: name, Model: fn.CC, ExtraPop: pcode.ExtrapopUnknown, NoReturn: fn.NoReturn}
 		if fn.ExtraPop != nil {
 			hf.ExtraPop = *fn.ExtraPop
 		}

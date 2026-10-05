@@ -137,7 +137,11 @@ func (fd *Funcdata) resolveGlobal(addr address.Address) *SymbolEntry {
 	if dt == nil {
 		dt = sharedTypeFactory.GetBase(hd.Size, TYPE_UNKNOWN, "")
 	}
-	e := gs.AddSymbol(hd.Name, dt, hd.Addr, hd.Size, VarnodeTypeLock|VarnodeNameLock)
+	fl := VarnodeTypeLock | VarnodeNameLock
+	if hd.ReadOnly {
+		fl |= VarnodeReadOnly
+	}
+	e := gs.AddSymbol(hd.Name, dt, hd.Addr, hd.Size, fl)
 	e.Symbol().namespace = hd.Namespace
 	return e
 }

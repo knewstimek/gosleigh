@@ -64,6 +64,8 @@ type HostFunction struct {
 	Name     string
 	Model    string
 	ExtraPop int32
+	// NoReturn: the function never returns (FuncProto::isNoReturn).
+	NoReturn bool
 }
 
 // C++ parity: FuncCallSpecs::FuncCallSpecs + FlowInfo::queryCall/setFuncdata:

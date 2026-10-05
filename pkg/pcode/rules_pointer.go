@@ -758,14 +758,22 @@ func (r *RulePtrsubCharConstant) apply(op *PcodeOp, data *Funcdata) int {
 	if !ok || outPtr.Pointee() == nil || !isCharPrintLike(outPtr.Pointee()) {
 		return 0
 	}
-	// C++ additionally requires the symbol data to sit in a read-only region and
-	// to look like a string (Scope::isReadOnly + StringManager::isString). Those
-	// facilities are not modelled here yet; the char-print guard above already
-	// prevents the &__ImageBase regression, and only genuine char-pointer
-	// spacebase references reach this point.
-	// TODO known mismatch: read-only + isString gating (ruleaction.cc L7390-7396).
 	base := op.Input(0).Offset()
 	off := op.Input(1).Offset()
+	// With a load image the C++ gates apply: the target is read-only and
+	// holds a string (Scope::isReadOnly + StringManager::isString).
+	// TODO known mismatch: without an image the gates are skipped.
+	if data.ImageReader() != nil {
+		if sp := op.Input(0).GetSpaceFromConst(); sp != nil {
+			at := address.Address{Space: sp, Offset: truncateToSize(base+off, op.Input(0).Size())}
+			if !data.isReadOnlyGlobal(at) {
+				return 0
+			}
+			if _, ok := data.stringData(at); !ok {
+				return 0
+			}
+		}
+	}
 	constant := data.NewConstant(op.Input(0).Size(), truncateToSize(base+off, op.Input(0).Size()))
 	BindSpaceConstant(constant, op.Input(0).GetSpaceFromConst())
 	SetVarnodeType(constant, outPtr)

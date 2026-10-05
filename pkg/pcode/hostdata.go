@@ -35,6 +35,8 @@ type HostTypeDesc struct {
 	Size  int32
 	Count int32 // array element count
 	Elem  *HostTypeDesc
+	// Char marks a character type (Ghidra char="true").
+	Char bool
 }
 
 var hostMetatypes = map[string]metatype{
@@ -65,6 +67,9 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 		return tf.GetArray(d.Count, elem)
 	case "void":
 		return tf.GetVoid()
+	}
+	if d.Char && d.Size == 1 {
+		return tf.GetChar(d.Name)
 	}
 	if m, ok := hostMetatypes[d.Meta]; ok {
 		return tf.GetBase(d.Size, m, d.Name)

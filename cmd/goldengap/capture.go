@@ -186,6 +186,7 @@ func typeDesc(n *xnode, types map[string]*xnode, depth int) *pcode.HostTypeDesc 
 		Meta:  n.attr("metatype"),
 		Size:  int32(parseUint(n.attr("size"))),
 		Count: int32(parseUint(n.attr("arraysize"))),
+		Char:  n.attr("char") == "true",
 	}
 	if len(n.Kids) > 0 && (d.Meta == "ptr" || d.Meta == "array") {
 		d.Elem = typeDesc(&n.Kids[0], types, depth+1)

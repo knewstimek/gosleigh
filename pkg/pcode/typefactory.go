@@ -29,6 +29,9 @@ func (f *TypeFactory) Intern(dt Datatype) Datatype {
 
 	switch typed := dt.(type) {
 	case *Base:
+		if typed.SubMeta() == SUB_INT_CHAR && typed.Size() == 1 {
+			return f.GetChar(typed.Name())
+		}
 		return f.GetBase(typed.Size(), typed.Metatype(), typed.Name())
 	case *Void:
 		return f.GetVoid()
@@ -59,6 +62,14 @@ func (f *TypeFactory) GetBase(size int32, meta metatype, name string) *Base {
 	value := NewBase(size, meta, name)
 	key := fmt.Sprintf("base:%d:%d:%s", value.Size(), value.Metatype(), value.Name())
 	return f.internBase(key, value)
+}
+
+// GetChar returns the 1-byte character type (prints as a character / string).
+// C++ parity: TypeChar (TypeBase(1,TYPE_INT) with submeta SUB_INT_CHAR).
+func (f *TypeFactory) GetChar(name string) *Base {
+	value := NewBase(1, TYPE_INT, name)
+	value.submeta = SUB_INT_CHAR
+	return f.internBase("char:"+name, value)
 }
 
 func (f *TypeFactory) GetVoid() *Void {

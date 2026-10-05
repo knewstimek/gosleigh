@@ -1017,9 +1017,23 @@ func (fd *Funcdata) CreateStackRef(spc *address.Space, off uint64, op *PcodeOp, 
 	if insertafter {
 		fd.OpInsertAfter(addop, op)
 	} else {
-		fd.OpInsertBefore(addop, op)
+		fd.OpInsertBefore(addop, firstOfIndirectRun(op))
 	}
 	return addout
+}
+
+// firstOfIndirectRun returns the first of the INDIRECT ops op causes that sit
+// right before it (op itself when there are none). The effects of a call
+// happen at the call, so an op meant to run "before the call" goes ahead of
+// them; C++ creates such ops (stack placeholders) before heritage adds the
+// INDIRECTs, Gosleigh may create them after.
+func firstOfIndirectRun(op *PcodeOp) *PcodeOp {
+	first := op
+	for prev := op.PreviousOp(); prev != nil && prev.Code() == CPUI_INDIRECT && prev.NumInput() > 1 &&
+		prev.Input(1).GetIndirectCause() == op; prev = prev.PreviousOp() {
+		first = prev
+	}
+	return first
 }
 
 // OpStackLoad builds a LOAD op that reads sz bytes from (SP + off) in spc.
