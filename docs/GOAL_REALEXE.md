@@ -1,28 +1,35 @@
 # GOAL: 실바이너리 parity (realexe)
 
-**목표**: 실제 링크된 PE의 임의 함수를 Ghidra와 동일한 C로 디컴파일. 진척 지표는 장난감 코퍼스(x64_auto)가 아니라
-`tools/realexe` 층화 샘플(카탈로그 `gosleigh.realexe.measure`)의 일치 수 + 토큰 유사도(sim). 기존 게이트
-(`gosleigh.gates` = `py -3 tools/gates.py`)는 매 단계 무회귀 + 골든 출력 바이트 동일 확인.
+**목표**: 실제 링크된 PE의 임의 함수를 Ghidra와 동일한 C로. 진척 지표 = `gosleigh.realexe.measure`(200 층화 샘플)의
+일치 수 + 토큰 유사도(sim). 매 단계 `gosleigh.gates`(`py -3 tools/gates.py`) 무회귀 + 게이트 골든 출력 바이트 동일.
 
-| 시점 | 커밋 | 일치 | sim |
+| 커밋 | 내용 | 일치 | sim |
 |---|---|---|---|
-| 기준선 | `60b3835` | 10/200 | (미측정) |
-| 스택 포인터 흐름 | `e467f63` | 10/200 | 0.411 |
-| call 스택 인자 사슬 | `e31d2b1` | 10/200 | 0.417 |
+| `60b3835` | 기준선 | 10 | - |
+| `e31d2b1` | 스택 포인터 흐름 + call 스택 인자 사슬 | 10 | 0.417 |
+| `320acb4` | 호스트 심볼(callee 이름) + merged 모델(thiscall/fastcall) | 14 | 0.485 |
+| `f98453d` | callee 프로토타입(extrapop/callee_pop), 반환 판정 | 14 | 0.506 |
+| `873ee2e` | 플래그 그룹 버그(incidental_copy), 미사용 call 출력 제거 | 17 | 0.522 |
 
-일치 수는 함수당 모든 갭이 풀려야 오르므로 sim으로 단계 효과를 본다.
+## 도구 (`tools/realexe/`)
+- `realexe.py analyze|sample|measure|capture`, `gaps.py`(불일치 유형 집계), `difffn.py`(인덱스별 diff).
+- **`capture`가 핵심**: `GenCapture.java`가 Ghidra 디버그 savefile을 만들고, `tools/decomp_dbg.exe`가 그 실바이너리
+  맥락 그대로 C++ 코어를 돌린다(골든을 재현함). 갭 원인은 이걸로 실측한다.
 
-## 남은 근본 갭 (실측, 영향 순)
+## 원칙 (이번 작업에서 확인)
+Gosleigh의 여러 층이 소형 골든 맞춤 재구현이었다. 실바이너리 갭의 근본은 대부분 (a) C++ 고리 누락(스텁/부분포팅)
+또는 (b) **코어가 Java(호스트)에서 받는 정보의 부재**다. (b)는 `pcode.HostScope`/`bridge.BuildConfig`로 공급한다 --
+이름 변환(IllegalCharCppTransformer), callee extrapop(purge+stackshift), flow override, 함수 로컬(localdb)은 하네스가
+Ghidra API로 Java와 같은 값을 덤프한다.
 
-Go 엔진의 상당 층이 C++ 구조가 아닌 소형 골든 맞춤 재구현이다. 실바이너리는 그 층을 통째로 C++ 구조로 교체해야 맞는다.
+## 남은 갭 (실측, 빈도 순 -- 갱신은 `gaps.py` + `capture`)
 
-| # | 층 | 현상 (200 샘플) | C++ 근거 | 상태 |
-|---|---|---|---|---|
-| P | 함수 프로토타입 층: FuncProto/ProtoStore/ProtoParameter, ActionInputPrototype(updateInputTypes), ProtoModelMerged/resolveModel, 이름있는 모델 집합 | `__thiscall` 46 + `__fastcall` 33 전부 불일치, ECX 입력이 `local_N`으로 샘 | fspec.cc FuncProto 3778~, 2700-2930, coreaction.cc 4718 | 미착수 |
-| H | 호스트 심볼 층: 코어가 Java(ScopeGhidra)에서 받는 함수/데이터 심볼. Gosleigh엔 공급 인터페이스 자체가 없음 | call 대상 `local_N`(Ghidra `FUN_`/FID명), `DAT_` 29, `vftable` 21, `ExceptionList` 16 | ghidra_arch/ScopeGhidra, printc.cc opCall/genericFunctionName | 미착수 |
-| N | 변수 명명 층: PrintC 자체 폴백(`local_%d(createIndex)`) 대신 Symbol + ScopeInternal::buildVariableName(`in_`/`unaff_`/`extraout_`) | `unaff_` 8, `extraout_` 2 등 | database.cc 2440-2500 | 미착수 |
-| R7 | p-code 0개 명령어에서 bridge 실패(`has no raw ops`) | 4% | - | 미조사 |
-| - | 부분 포팅 잔여: markNotMapped, guardCallOverlappingInput, tryOutput*Guard, store/load LoadGuard(ValueSet), heritage 전체 구조 | 개별 함수 | heritage.cc, varmap.cc | known mismatch 명시됨 |
-
-H는 하네스 쪽 덤프(GenSample이 프로그램 심볼표 출력) + 엔진 쪽 공급 인터페이스(Funcdata host scope)로 구성한다.
-C++ 코어 단독(콘솔)은 이름 없는 call 대상을 `func_0x...`로 찍는다 -- `FUN_`은 Java 쪽 이름이다.
+| # | 갭 | 근거 | 비고 |
+|---|---|---|---|
+| H3 | 전역 데이터 심볼(DAT_, vftable, TEB ExceptionList) + ActionConstantPtr isPointer + 호스트 타입 | ScopeGhidra queryContainer, coreaction.cc isPointer | tracked 레지스터(`ActionConstbase` 스텁, FS_OFFSET)와 묶임 |
+| R | 반환/출력 복구 경로가 C++ 구조와 다름(ActionReturnRecovery 단일 패스, post-deadcode Go-local 판정) | coreaction.cc 1909 | 반환 void/int 오판 |
+| P2 | Go는 메인루프에서 입력 프로토타입을 조기 잠금(ApplyActiveParamModel) -- C++은 ActionInputPrototype에서 | coreaction.cc 4718 | thiscall 스택 파라미터 누락 일부 |
+| E | PrettyEmitter가 식을 평면 문자열로 받아 C++ 줄바꿈 지점을 못 냄 | prettyprint.cc | 긴 FID 이름 줄바꿈 |
+| L | 라이브러리 함수 주석(FID plate comment), 네임스페이스 최소 출력 규칙 | printc.cc pushSymbolScope | 호스트 주석 공급 필요 |
+| X | panic 2건(IsLoopIn, renameRecurse 블록 인덱스) | - | 미조사 |
+| - | known mismatch: markNotMapped, guardCallOverlappingInput, LoadGuard(ValueSet), heritage 전체 구조 | heritage.cc, varmap.cc | |
