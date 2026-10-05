@@ -60,6 +60,10 @@ type BuildConfig struct {
 	// analysis marked CALL_RETURN.
 	FlowOverrides map[uint64]string
 
+	// Injections are the host-compiled call-fixup payloads, by call-site
+	// address (Java compiles the cspec <callfixup> snippets).
+	Injections map[uint64]HostInjection
+
 	// HostComments are the function's comments as the host sends them
 	// (Ghidra <commentdb>): type names "user1".."user3", "header", "warning",
 	// "warningheader"; Addr is an offset in the entry space.
@@ -270,6 +274,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 
 	summary := summarizeSpaces(records, cfg.Entry.Space)
 	fixFlowOverrideReturns(records, summary.constSpace)
+	injectWarnings := applyInjections(records, cfg.Injections, summary.constSpace)
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, summary.uniqueBase, summary.constSpace)
 	if err := attachEnvironment(fd, cfg); err != nil {
 		return nil, err
@@ -353,6 +358,9 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		}
 	}
 	markNoReturnHalts(fd)
+	for _, w := range injectWarnings {
+		fd.WarningHeader(w)
+	}
 	for from, to := range zeroOpRedirect(records) {
 		if b := blockByAddr[to]; b != nil {
 			blockByAddr[from] = b

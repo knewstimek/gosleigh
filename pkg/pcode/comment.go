@@ -112,6 +112,9 @@ func (fd *Funcdata) warningHeader(txt string) {
 	fd.AddComment(CommentWarningHeader, fd.baseAddr, msg+txt)
 }
 
+// WarningHeader is the exported warningHeader (bridge flow events).
+func (fd *Funcdata) WarningHeader(txt string) { fd.warningHeader(txt) }
+
 // headerComments returns the texts printed above the function, in database
 // order. C++ parity: CommentSorter::setupHeader(header_basic) +
 // PrintC::emitCommentFuncHeader.

@@ -320,6 +320,7 @@ func decompileOne(fn goldenEntry, b *loader.EngineBuilder, cspecPath string, max
 		CspecPath: cspecPath, SymbolName: displayName(fn), HostScope: withCapture(host, fn, base.Space),
 		HostLocals: hostLocals(fn), FlowOverrides: flowOverrides(fn), TrackedRegs: trackedRegs(fn),
 		HostComments: captureComments(fn),
+		Injections:   captureInjections(fn, host, base.Space),
 	})
 	if err != nil {
 		res.Error = fmt.Sprintf("BRIDGE-ERR: %v", err)

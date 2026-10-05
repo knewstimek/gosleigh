@@ -372,6 +372,111 @@ func captureComments(fn goldenEntry) []bridge.HostComment {
 	return out
 }
 
+// captureInjections returns fn's call-fixup payloads from the capture's
+// <injectdebug> (the payload the Java host compiled at each call site).
+func captureInjections(fn goldenEntry, host pcode.HostScope, ram *address.Space) map[uint64]bridge.HostInjection {
+	if captureDir == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(fmt.Sprintf("%s/%08x.xml", captureDir, fn.Entry))
+	if err != nil {
+		return nil
+	}
+	var root xnode
+	if xml.Unmarshal(raw, &root) != nil {
+		return nil
+	}
+	state := root.child("save_state")
+	if state == nil {
+		return nil
+	}
+	dbg := state.child("injectdebug")
+	if dbg == nil {
+		return nil
+	}
+	out := map[uint64]bridge.HostInjection{}
+	for i := range dbg.Kids {
+		in := &dbg.Kids[i]
+		if in.XMLName.Local != "inject" || in.attr("type") != "1" { // 1 = call fixup
+			continue
+		}
+		at, pl := in.child("addr"), in.child("payload")
+		if at == nil || pl == nil {
+			continue
+		}
+		var payload xnode
+		if xml.Unmarshal([]byte("<p>"+pl.text+"</p>"), &payload) != nil {
+			continue
+		}
+		inj := bridge.HostInjection{Name: in.attr("name")}
+		for j := range payload.Kids {
+			inst := &payload.Kids[j]
+			for k := range inst.Kids {
+				op := &inst.Kids[k]
+				if op.XMLName.Local != "op" || len(op.Kids) == 0 {
+					continue
+				}
+				hop := bridge.HostInjectOp{Code: pcode.OpCode(parseUint(op.attr("code")))}
+				vn := func(n *xnode) bridge.HostVarnode {
+					return bridge.HostVarnode{Space: n.attr("space"), Offset: parseUint(n.attr("offset")), Size: int32(parseUint(n.attr("size")))}
+				}
+				if first := &op.Kids[0]; first.XMLName.Local == "addr" {
+					v := vn(first)
+					hop.Out = &v
+				}
+				for _, n := range op.Kids[1:] {
+					if n.XMLName.Local == "addr" {
+						hop.In = append(hop.In, vn(&n))
+					}
+				}
+				inj.Ops = append(inj.Ops, hop)
+			}
+		}
+		addr := parseUint(at.attr("offset"))
+		inj.Callee = calleeAt(raw, addr, host, ram)
+		out[addr] = inj
+	}
+	return out
+}
+
+// calleeAt names the function a call fixup replaced: the call target of the
+// instruction at addr is not decoded here, so the capture's own function list
+// is used -- the injected callee is the one carrying an <inject> prototype.
+func calleeAt(raw []byte, _ uint64, host pcode.HostScope, ram *address.Space) string {
+	var root xnode
+	if xml.Unmarshal(raw, &root) != nil {
+		return ""
+	}
+	db := root.child("save_state").child("db")
+	if db == nil {
+		return ""
+	}
+	for i := range db.Kids {
+		sc := &db.Kids[i]
+		list := sc.child("symbollist")
+		if sc.XMLName.Local != "scope" || list == nil {
+			continue
+		}
+		for j := range list.Kids {
+			ms := &list.Kids[j]
+			if len(ms.Kids) == 0 || ms.Kids[0].XMLName.Local != "function" {
+				continue
+			}
+			fnode := &ms.Kids[0]
+			if p := fnode.child("prototype"); p == nil || p.child("inject") == nil {
+				continue
+			}
+			if at := ms.child("addr"); at != nil && host != nil && ram != nil {
+				if hf, ok := host.QueryFunction(address.Address{Space: ram, Offset: parseUint(at.attr("offset"))}); ok {
+					return hf.Name
+				}
+			}
+			return fnode.attr("name")
+		}
+	}
+	return ""
+}
+
 // QueryData returns the symbol whose storage contains addr (a label matches
 // its address only).
 func (cd *captureData) QueryData(addr address.Address) (pcode.HostData, bool) {
