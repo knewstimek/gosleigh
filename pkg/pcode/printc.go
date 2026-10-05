@@ -4074,7 +4074,9 @@ func (s *printCState) tryRenderSubscript(addrVn *Varnode) (ExprFragment, bool, e
 			return ExprFragment{}, false, err
 		}
 		if idxVn.IsConstant() {
-			frag := s.lang.PostfixExpr(baseExpr, fmt.Sprintf("[%d]", int64(idxVn.Offset())))
+			// The index prints like any integer constant (radix by
+			// PrintC::push_integer): param_1[0x28], not param_1[40].
+			frag := s.lang.PostfixExpr(baseExpr, "["+s.renderConstant(idxVn)+"]")
 			return frag, true, nil
 		}
 		idxExpr, err := s.renderVarnodeExpr(idxVn)
@@ -4112,7 +4114,7 @@ func (s *printCState) tryRenderSubscript(addrVn *Varnode) (ExprFragment, bool, e
 	if err != nil {
 		return ExprFragment{}, false, err
 	}
-	frag := s.lang.PostfixExpr(baseExpr, fmt.Sprintf("[%d]", index))
+	frag := s.lang.PostfixExpr(baseExpr, "["+formatIntegerLiteral(uint64(index), offsetVn.Size(), true)+"]")
 	return frag, true, nil
 }
 
