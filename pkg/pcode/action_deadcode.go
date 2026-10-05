@@ -14,7 +14,11 @@
 
 package pcode
 
-import "os"
+import (
+	"os"
+
+	"gosleigh/pkg/address"
+)
 
 // ActionDeadCode is a general dead store eliminator. It removes ops whose
 // output varnode has no consumers (NumDescend == 0) and no side effects.
@@ -133,7 +137,10 @@ func (a *ActionDeadCode) applyConsume(data *Funcdata) int {
 				continue
 			}
 			out := op.Output()
-			if out == nil || opHasSideEffects(op.Code()) {
+			if out == nil {
+				continue
+			}
+			if opHasSideEffects(op.Code()) && !deadIndirectCreationCandidate(op) {
 				continue
 			}
 			if ca.vacuous[out] {
@@ -152,6 +159,24 @@ func (a *ActionDeadCode) applyConsume(data *Funcdata) int {
 		return 1
 	}
 	return 0
+}
+
+// deadIndirectCreationCandidate reports an INDIRECT creation (a call killing
+// a register: no prior value flows through it) in the register space. C++
+// ActionDeadCode removes any op whose output is never consumed, INDIRECTs
+// included; Gosleigh keeps INDIRECTs conservatively because it does not gate
+// removal on per-space heritage progress (deadRemovalAllowed). A register
+// creation carries no guarded data-flow and the register space is heritaged
+// from the first pass, so removing it when unconsumed is the C++ outcome --
+// and it is what keeps an unused callee return value from being taken as the
+// call's output (checkOutputTrialUse sees the creation gone).
+// C++ parity: coreaction.cc ActionDeadCode::apply (deletion loop).
+func deadIndirectCreationCandidate(op *PcodeOp) bool {
+	if op.Code() != CPUI_INDIRECT || !op.IsIndirectCreation() {
+		return false
+	}
+	out := op.Output()
+	return out != nil && out.Space() != nil && out.Space().Kind == address.SpaceKindProcessor
 }
 
 // opHasSideEffects returns true for opcodes that must not be eliminated even
