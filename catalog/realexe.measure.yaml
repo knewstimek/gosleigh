@@ -1,0 +1,23 @@
+id: gosleigh.realexe.measure
+revision: 1
+summary: Decompile every sampled golden with Gosleigh (one process per function, heap/time limits) from scratch, then print match rate by size bucket
+use_when:
+  - measuring real-binary parity progress after an engine change (the GOAL_REALEXE progress metric)
+tags: [realexe, golden, measurement, parity]
+execution:
+  kind: cli
+  executable_ref: py
+  cwd: .
+  argv_template: [-3, tools/realexe/realexe.py, measure, --work, "{work}"]
+  trusted_for_run: true
+  timeout_sec: 7200
+  artifact_mode: metadata
+  preflight:
+    - {id: py.version, kind: executable, ref: py, requirement: required, argv: [-3, --version]}
+    - {id: go.version, kind: executable, ref: go, requirement: required, argv: [version]}
+arguments:
+  work: {type: string, required: true, description: "realexe work directory (must contain meta.json, goldens.json and the hashed bin/ snapshot)"}
+inputs: [tools/realexe/realexe.py, cmd/goldengap/main.go, "pkg/**/*.go"]
+outputs: ["{work}/GAPMAP.md", "{work}/gapmap.json", "{work}/results.jsonl"]
+docs: [docs/GOAL_REALEXE.md]
+cache_policy: disabled

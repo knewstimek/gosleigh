@@ -1,0 +1,22 @@
+id: gosleigh.realexe.analyze
+revision: 1
+summary: Snapshot a real PE (+same-stem pdb/map, sha256) into a work dir and analyze it once into a persistent Ghidra 12 project (PDB disabled)
+use_when:
+  - creating a real-binary parity corpus from a new build of a PE
+tags: [realexe, golden, ghidra, corpus]
+execution:
+  kind: cli
+  executable_ref: py
+  cwd: .
+  argv_template: [-3, tools/realexe/realexe.py, analyze, "{exe}", --work, "{work}"]
+  trusted_for_run: true
+  timeout_sec: 14400
+  artifact_mode: metadata
+  preflight:
+    - {id: py.version, kind: executable, ref: py, requirement: required, argv: [-3, --version]}
+arguments:
+  exe: {type: string, required: true, description: "Absolute path of the PE to snapshot (source build output; copied, never read again)"}
+  work: {type: string, required: true, description: "Work directory under local/realexe/ (gitignored), e.g. local/realexe/<stem>"}
+inputs: [tools/realexe/realexe.py, tools/realexe/DisablePdb.java]
+docs: [docs/GOAL_REALEXE.md]
+cache_policy: disabled

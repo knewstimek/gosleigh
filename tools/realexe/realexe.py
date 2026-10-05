@@ -273,6 +273,10 @@ def main():
 	pr.add_argument("--fresh", action="store_true", help="discard results.jsonl instead of resuming")
 	pp = sub.add_parser("report")
 	pp.add_argument("--work")
+	pm = sub.add_parser("measure", help="run --fresh + report (the progress metric)")
+	pm.add_argument("--work")
+	pm.add_argument("--timeout", type=int, default=30)
+	pm.add_argument("--mem-mb", type=int, default=2048)
 	args = p.parse_args()
 
 	if args.cmd == "analyze":
@@ -282,6 +286,9 @@ def main():
 		ok = do_sample(resolve_work(args), args.n, args.seed, args.max_bytes)
 	elif args.cmd == "run":
 		ok = do_run(resolve_work(args), args.timeout, args.mem_mb, args.fresh)
+	elif args.cmd == "measure":
+		work = resolve_work(args)
+		ok = do_run(work, args.timeout, args.mem_mb, True) and do_report(work)
 	else:
 		ok = do_report(resolve_work(args))
 	sys.exit(0 if ok else 1)
