@@ -114,9 +114,23 @@ public class GenSample extends GhidraScript {
 				sb.append(",\n");
 			}
 			first = false;
+			// extrapop exactly as FunctionPrototype.grabFromFunction computes it
+			// for the core: purge + model stackshift, else the model's extrapop.
+			ghidra.program.model.lang.PrototypeModel pm = f.getCallingConvention();
+			if (pm == null) {
+				pm = currentProgram.getCompilerSpec().getDefaultCallingConvention();
+			}
+			int purge = f.getStackPurgeSize();
+			int extrapop = (purge == Function.INVALID_STACK_DEPTH_CHANGE ||
+				purge == Function.UNKNOWN_STACK_DEPTH_CHANGE) ? pm.getExtrapop()
+						: purge + pm.getStackshift();
+			String cc = f.getCallingConventionName();
 			sb.append("    {\"entry\": ").append(f.getEntryPoint().getOffset())
 				.append(", \"name\": ").append(jsonStr(nt.simplify(f.getName())))
 				.append(", \"namespace\": ").append(jsonStr(nsPath(f.getParentNamespace(), nt)))
+				.append(", \"cc\": ").append(jsonStr(cc == null ? "" : cc))
+				.append(", \"extrapop\": ").append(extrapop == ghidra.program.model.lang.PrototypeModel.UNKNOWN_EXTRAPOP ? "null" : String.valueOf(extrapop))
+				.append(", \"sigsrc\": ").append(jsonStr(f.getSignatureSource().toString()))
 				.append(", \"thunk\": ").append(f.isThunk()).append("}");
 		}
 		sb.append("\n  ],\n  \"externals\": [\n");

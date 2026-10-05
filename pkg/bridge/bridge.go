@@ -635,6 +635,7 @@ func installModels(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdat
 	def.PrintInDecl = false // The default model's name is never printed
 	fd.SetDefaultModel(def)
 	if cspec == nil || cspec.EvalCurrent == "" || cspec.EvalCurrent == def.Name {
+		fd.SetModels(map[string]*pcode.ProtoModel{def.Name: def})
 		return
 	}
 	named := map[string]*pcode.ProtoModel{def.Name: def}
@@ -656,6 +657,7 @@ func installModels(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdat
 			named[rp.Name] = pcode.NewMergedModel(rp.Name, comps)
 		}
 	}
+	fd.SetModels(named)
 	if eval := named[cspec.EvalCurrent]; eval != nil {
 		fd.SetEvalCurrentModel(eval)
 	}
@@ -784,6 +786,27 @@ func buildEffectList(xr *sla.XRefs, cspec *pcode.CspecData, fd *pcode.Funcdata, 
 	}
 	add(cspec.DefaultProto.Unaffected, pcode.EffectUnaffected)
 	add(cspec.DefaultProto.KilledByCall, pcode.EffectKilledByCall)
+	// <output killedbycall="true">: each register output entry is killed by
+	// the call (sized by the entry). C++ parity: fspec.cc
+	// ParamListStandard::parsePentry (autoKilledByCall).
+	if cspec.DefaultProto.Output.KilledByCall {
+		for _, pe := range cspec.DefaultProto.Output.Pentries {
+			if pe.Register == nil {
+				continue // join / stack entries
+			}
+			si, off, sz, ok := xr.RegisterByName(pe.Register.Name)
+			if !ok {
+				continue
+			}
+			if sp, _ := registerSpaceByIndex(fd, si); sp != nil {
+				size := int32(sz)
+				if pe.MaxSize > 0 && int32(pe.MaxSize) < size {
+					size = int32(pe.MaxSize)
+				}
+				out = append(out, pcode.EffectRecord{Addr: address.Address{Space: sp, Offset: off}, Size: size, Type: pcode.EffectKilledByCall})
+			}
+		}
+	}
 	if ra := cspec.ReturnAddress; ra != nil {
 		if sp := spaceByName(ra.Space); sp != nil {
 			out = append(out, pcode.EffectRecord{Addr: address.Address{Space: sp, Offset: uint64(ra.Offset)}, Size: int32(ra.Size), Type: pcode.EffectReturnAddress})

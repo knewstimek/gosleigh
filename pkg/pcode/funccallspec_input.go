@@ -103,9 +103,6 @@ func (fp *FuncProto) ResolveModel(_ *ParamActive) {}
 //     (GetSpacebaseOffset is unknown), so the branch is only reachable when copy
 //     propagation has already replaced a register trial's Varnode with a stack
 //     one, where the localRange test below still applies.
-//   - callee_pop: FuncProto tracks no extrapop. Every x86/x86-64 model in the
-//     corpus declares a concrete extrapop (4 / 8), for which C++ also computes
-//     callee_pop == false, so the branch is dead for the ported ABIs.
 //
 // C++ parity: fspec.cc FuncCallSpecs::checkInputTrialUse.
 func (fc *FuncCallSpecs) checkInputTrialUse(data *Funcdata) {
@@ -114,6 +111,21 @@ func (fc *FuncCallSpecs) checkInputTrialUse(data *Funcdata) {
 		return
 	}
 	fp := data.GetFuncProto()
+	// A callee that pops its own stack (model extrapop unknown) with a known
+	// extrapop above 4 takes every stack trial below that extrapop as a
+	// parameter. C++ parity: fspec.cc FuncCallSpecs::checkInputTrialUse
+	// (callee_pop / expop).
+	calleePop := false
+	var expop int32
+	if fc.HasModel() {
+		calleePop = fc.GetModelExtraPop() == ExtrapopUnknown
+		if calleePop {
+			expop = fc.GetExtraPop()
+			if expop == ExtrapopUnknown || expop <= 4 {
+				calleePop = false
+			}
+		}
+	}
 	var ar ancestorRealistic
 	for i := 0; i < active.NumTrials(); i++ {
 		trial := active.Trial(i)
@@ -140,6 +152,12 @@ func (fc *FuncCallSpecs) checkInputTrialUse(data *Funcdata) {
 			case fp == nil || fp.Model() == nil ||
 				(!fp.Model().IsLocalOffset(vn.Offset()) && !fp.Model().IsParamOffset(vn.Offset())):
 				trial.MarkNoUse()
+			case calleePop:
+				if int64(trial.GetAddress().Offset+uint64(trial.GetSize()-1)) < int64(expop) {
+					trial.MarkActive()
+				} else {
+					trial.MarkNoUse()
+				}
 			case ar.execute(fc.op, slot, trial, false):
 				if data.ancestorOpUse(trimRecurseMax, vn, fc.op, trial, 0, 0) {
 					trial.MarkActive()

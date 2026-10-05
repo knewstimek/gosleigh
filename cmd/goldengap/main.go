@@ -166,7 +166,7 @@ func main() {
 // hostSymbols serves a dumped Ghidra program symbol table as the decompiler's
 // HostScope, the way DecompileCallback answers the C++ core's queries.
 type hostSymbols struct {
-	funcs map[uint64]string
+	funcs map[uint64]pcode.HostFunction
 	exts  map[uint64]string
 }
 
@@ -180,6 +180,8 @@ func loadHostSymbols(path string) (*hostSymbols, error) {
 			Entry     uint64 `json:"entry"`
 			Name      string `json:"name"`
 			Namespace string `json:"namespace"`
+			CC        string `json:"cc"`
+			ExtraPop  *int32 `json:"extrapop"`
 		} `json:"functions"`
 		Externals []struct {
 			Addr uint64 `json:"addr"`
@@ -189,7 +191,7 @@ func loadHostSymbols(path string) (*hostSymbols, error) {
 	if err := json.Unmarshal(raw, &f); err != nil {
 		return nil, fmt.Errorf("parse symbols: %w", err)
 	}
-	h := &hostSymbols{funcs: make(map[uint64]string, len(f.Functions)), exts: make(map[uint64]string, len(f.Externals))}
+	h := &hostSymbols{funcs: make(map[uint64]pcode.HostFunction, len(f.Functions)), exts: make(map[uint64]string, len(f.Externals))}
 	for _, fn := range f.Functions {
 		name := fn.Name
 		// TODO known mismatch: C++ prints the namespace only when it is not
@@ -198,7 +200,11 @@ func loadHostSymbols(path string) (*hostSymbols, error) {
 		if fn.Namespace != "" {
 			name = fn.Namespace + "::" + name
 		}
-		h.funcs[fn.Entry] = name
+		hf := pcode.HostFunction{Name: name, Model: fn.CC, ExtraPop: pcode.ExtrapopUnknown}
+		if fn.ExtraPop != nil {
+			hf.ExtraPop = *fn.ExtraPop
+		}
+		h.funcs[fn.Entry] = hf
 	}
 	for _, e := range f.Externals {
 		h.exts[e.Addr] = e.Name
@@ -206,9 +212,9 @@ func loadHostSymbols(path string) (*hostSymbols, error) {
 	return h, nil
 }
 
-func (h *hostSymbols) QueryFunction(addr address.Address) (string, bool) {
-	n, ok := h.funcs[addr.Offset]
-	return n, ok
+func (h *hostSymbols) QueryFunction(addr address.Address) (pcode.HostFunction, bool) {
+	hf, ok := h.funcs[addr.Offset]
+	return hf, ok
 }
 
 func (h *hostSymbols) QueryExternalRef(addr address.Address) (string, bool) {

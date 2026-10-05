@@ -38,6 +38,9 @@ type FuncCallSpecs struct {
 	// C++ parity: FuncCallSpecs::name / entryaddress.
 	name         string
 	entryAddress address.Address
+	// hostProto is the callee's prototype as reported by the host, standing
+	// in for the callee Funcdata C++ links via queryFunction.
+	hostProto *HostFunction
 }
 
 // HostScope is the analysis environment's symbol database, queried by the
@@ -45,12 +48,22 @@ type FuncCallSpecs struct {
 // HostScope behaves like the standalone C++ core with no program loaded.
 // C++ parity: the ScopeGhidra global scope (queryFunction, data symbols).
 type HostScope interface {
-	// QueryFunction returns the display name of the function starting at addr.
-	QueryFunction(addr address.Address) (name string, ok bool)
+	// QueryFunction describes the function starting at addr.
+	QueryFunction(addr address.Address) (HostFunction, bool)
 	// QueryExternalRef returns the name of the external function whose
 	// reference (e.g. an import address table slot) lives at addr.
 	// C++ parity: Scope::queryExternalRefFunction / ExternRefSymbol.
 	QueryExternalRef(addr address.Address) (name string, ok bool)
+}
+
+// HostFunction is what the host reports about a function: its display name
+// and the prototype facts the C++ core receives from FunctionPrototype
+// (Java grabFromFunction): calling-convention name ("" or "unknown" when not
+// known) and extrapop (purge + stackshift; ExtrapopUnknown when unknown).
+type HostFunction struct {
+	Name     string
+	Model    string
+	ExtraPop int32
 }
 
 // C++ parity: FuncCallSpecs::FuncCallSpecs + FlowInfo::queryCall/setFuncdata:
@@ -69,8 +82,9 @@ func newFuncCallSpecs(fd *Funcdata, op *PcodeOp) *FuncCallSpecs {
 		if in0 := op.Input(0); !in0.IsConstant() {
 			fc.entryAddress = in0.Addr()
 			if fd != nil && fd.hostScope != nil {
-				if name, ok := fd.hostScope.QueryFunction(fc.entryAddress); ok {
-					fc.name = name
+				if hf, ok := fd.hostScope.QueryFunction(fc.entryAddress); ok {
+					fc.name = hf.Name
+					fc.hostProto = &hf
 				}
 			}
 		}

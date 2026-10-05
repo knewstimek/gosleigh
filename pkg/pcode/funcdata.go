@@ -85,6 +85,8 @@ type Funcdata struct {
 	// when it differs from the default (possibly a merged model).
 	// C++ parity: Architecture::evalfp_current.
 	evalCurrent *ProtoModel
+	// models are the architecture's named prototype models.
+	models map[string]*ProtoModel
 
 	// jumpTables tracks all recovered JumpTable objects for this function.
 	// C++ parity: funcdata.hh Funcdata::jumpvec
@@ -201,6 +203,20 @@ func (fd *Funcdata) SetFuncProto(fp *FuncProto) { fd.funcProto = fp }
 // GetScopeLocal returns the local variable scope, or nil if not set.
 // C++ parity: Funcdata::getScopeLocal
 func (fd *Funcdata) GetScopeLocal() *ScopeLocal { return fd.scopeLocal }
+
+// SetModels installs the architecture's named prototype models.
+// C++ parity: Architecture::protoModels.
+func (fd *Funcdata) SetModels(m map[string]*ProtoModel) { fd.models = m }
+
+// ModelByName returns a named prototype model, or nil (including for
+// "unknown" and "").
+// C++ parity: Architecture::getModel.
+func (fd *Funcdata) ModelByName(name string) *ProtoModel {
+	if name == "" || name == "unknown" {
+		return nil
+	}
+	return fd.models[name]
+}
 
 // SetEvalCurrentModel sets the model that evaluates this function's own
 // prototype. C++ parity: Architecture::evalfp_current.

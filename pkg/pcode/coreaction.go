@@ -1000,6 +1000,25 @@ func (a *ActionDefaultParams) Apply(data *Funcdata) int {
 						fc.SetModel(defaultModel)
 					}
 				}
+			} else if hp := fc.hostProto; hp != nil {
+				// The host knows the callee: take its prototype (copy), then
+				// re-evaluate with the default model unless the callee's model
+				// is locked. setModel keeps the copied extrapop when the
+				// default's is unknown.
+				// C++ parity: coreaction.cc ActionDefaultParams::apply copy
+				// branch + FuncProto::copy/setModel; Java grabFromFunction sets
+				// modellock only for a named (non-"unknown") convention.
+				named := data.ModelByName(hp.Model)
+				locked := named != nil
+				if named == nil {
+					named = defaultModel // UnknownProtoModel clones the default
+				}
+				fc.SetInternal(named, sharedTypeFactory.GetVoid())
+				fc.SetExtraPop(hp.ExtraPop)
+				fc.SetModelLock(locked)
+				if !locked && !fc.HasMatchingModel(defaultModel) {
+					fc.SetModel(defaultModel)
+				}
 			} else {
 				fc.SetInternal(defaultModel, sharedTypeFactory.GetVoid())
 			}

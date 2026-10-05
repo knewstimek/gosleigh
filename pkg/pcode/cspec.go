@@ -76,6 +76,9 @@ type CspecInput struct {
 // CspecOutput holds the <output> block of a prototype.
 type CspecOutput struct {
 	Pentries []CspecPentry `xml:"pentry"`
+	// KilledByCall marks every register output entry as killed by a call.
+	// C++ parity: ParamListStandard autoKilledByCall (ATTRIB_KILLEDBYCALL).
+	KilledByCall bool `xml:"killedbycall,attr"`
 }
 
 // CspecRegList holds a list of <register> elements (for unaffected/killedbycall).
