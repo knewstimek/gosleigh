@@ -3929,11 +3929,18 @@ func (s *printCState) nullPtrCastStr(op *PcodeOp) (castStr string, constIdx int)
 		if !cstVn.IsConstant() || cstVn.Offset() != 0 {
 			continue
 		}
-		ptrDt := ptrVn.TypeReadFacing(nil)
+		// The constant takes the comparison's pointer type, which is what
+		// the other side prints as (its CAST's output type when cast).
+		// C++ parity: ActionSetCasts types the constant with the required
+		// input type; PrintC::pushConstant prints (T *)0x0 from it.
+		ptrDt := ptrVn.TypeDefFacing()
 		if _, isPtr := ptrDt.(*Pointer); !isPtr {
-			continue
+			ptrDt = ptrVn.TypeReadFacing(nil)
+			if _, isPtr := ptrDt.(*Pointer); !isPtr {
+				continue
+			}
 		}
-		return "(" + CTypeString(ptrDt) + ")0x0", cstIdx
+		return "(" + CTypeString(s.normalizeTypeForDecl(ptrDt)) + ")0x0", cstIdx
 	}
 	return "", -1
 }
