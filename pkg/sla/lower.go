@@ -283,6 +283,18 @@ func lowerVarnodeTplConcrete(vn VarnodeTplBoundary, ctx LoweringContext) (*pcode
 	if sizeValue == 0 || sizeValue > uint64(^uint32(0)) {
 		return nil, fmt.Errorf("invalid lowered varnode size %d", sizeValue)
 	}
+	// A constant is truncated to its size (a sign-extended displacement such
+	// as [eax-4] must become the 4-byte 0xfffffffc, not 0xff..fc); any other
+	// non-unique offset wraps to its space. Unique offsets get the per-
+	// instruction unique base elsewhere.
+	// C++ parity: sleigh.cc SleighBuilder::generateLocation (152-165).
+	if space != nil {
+		if space.IsConstant() {
+			offset &= calcMask(uint32(sizeValue))
+		} else if space.Kind != address.SpaceKindUnique {
+			offset = wrapSpaceOffset(space, offset)
+		}
+	}
 	return &pcode.VarnodeData{Space: space, Offset: offset, Size: uint32(sizeValue)}, nil
 }
 
