@@ -56,6 +56,11 @@ func NewRulePiecePathology(group string) *RulePiecePathology {
 }
 
 func (r *RulePiecePathology) apply(op *PcodeOp, data *Funcdata) int {
+	if n := piecePathologyApply(op, data); n > 0 {
+		return n
+	}
+	// Go-local: PIECE(SUBPIECE(x,k), SUBPIECE(x,0)) folds back to x. Not part
+	// of the C++ rule; kept because the corpus goldens depend on it.
 	hi := definedBy(op.Input(0), CPUI_SUBPIECE)
 	lo := definedBy(op.Input(1), CPUI_SUBPIECE)
 	if hi == nil || lo == nil || !sameValue(hi.Input(0), lo.Input(0)) {

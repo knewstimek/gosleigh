@@ -26,6 +26,9 @@ import (
 // C++ parity: funcdata.hh FuncProto (partial)
 type FuncProto struct {
 	model *ProtoModel
+	// returnBytesConsumed is the smallest number of low return-value bytes
+	// known to matter (0 = all). C++ parity: FuncProto::returnBytesConsumed.
+	returnBytesConsumed int32
 	// extrapop is this prototype's stack-pointer change across the call,
 	// inherited from the model (see SetModel).
 	// C++ parity: fspec.hh FuncProto::extrapop.
@@ -867,3 +870,20 @@ func ancestorOpUseReturn(vn *Varnode, retOp *PcodeOp, retSlot int, depth int, se
 		return onlyReturnUse(vn, retOp, retSlot, make(map[*Varnode]bool))
 	}
 }
+
+// SetReturnBytesConsumed records a hint that only the low val bytes of the
+// return value matter; the smallest hint wins. Reports whether it changed.
+// C++ parity: FuncProto::setReturnBytesConsumed.
+func (fp *FuncProto) SetReturnBytesConsumed(val int32) bool {
+	if val == 0 {
+		return false
+	}
+	if fp.returnBytesConsumed == 0 || val < fp.returnBytesConsumed {
+		fp.returnBytesConsumed = val
+		return true
+	}
+	return false
+}
+
+// ReturnBytesConsumed returns the hint (0 = all bytes).
+func (fp *FuncProto) ReturnBytesConsumed() int32 { return fp.returnBytesConsumed }

@@ -333,6 +333,10 @@ func gatherConsumedReturn(data *Funcdata) uint64 {
 			}
 		}
 	}
-	// FuncProto::getReturnBytesConsumed narrowing is not modeled.
+	if fp := data.GetFuncProto(); fp != nil {
+		if val := fp.ReturnBytesConsumed(); val != 0 {
+			consumeVal &= maskForSize(val)
+		}
+	}
 	return consumeVal
 }
