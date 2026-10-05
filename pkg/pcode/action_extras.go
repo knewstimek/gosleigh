@@ -546,12 +546,24 @@ func (fp *FuncProto) TrashEnd() int {
 // TODO known mismatch: forwards to the stack-only IsParamVarnode check; the
 // full register-classification path will land with ParamList.
 func (fp *FuncProto) PossibleInputParam(addr address.Address, sz int32) bool {
-	_ = sz
 	if fp == nil || fp.model == nil {
 		return false
 	}
-	if addr.Space != nil && addr.Space.Kind == address.SpaceKindStack {
-		return fp.model.IsParamOffset(addr.Offset)
+	// The model's input storage decides; a merged model accepts what any
+	// component accepts (ParamListMerged is the union).
+	// C++ parity: FuncProto::possibleInputParam -> ParamList::possibleParam.
+	models := []*ProtoModel{fp.model}
+	if fp.model.IsMerged() {
+		models = fp.model.Merged
+	}
+	for _, m := range models {
+		if m.InputParams != nil {
+			if m.InputParams.possibleParam(addr, sz) {
+				return true
+			}
+		} else if addr.Space != nil && addr.Space.Kind == address.SpaceKindStack && m.IsParamOffset(addr.Offset) {
+			return true // cspec-less fallback: stack parameter area
+		}
 	}
 	return false
 }

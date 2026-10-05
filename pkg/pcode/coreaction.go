@@ -2091,9 +2091,12 @@ func (a *ActionDirectWrite) Apply(data *Funcdata) int {
 		vn.ClearFlags(VarnodeDirectWrite)
 		switch {
 		case vn.IsInput():
+			// C++ parity: coreaction.cc ActionDirectWrite::apply -- an input is
+			// a legal direct write when it could be a parameter of this
+			// function's model (possibleInputParam), not only once recovered.
 			if vn.IsPersist() || vn.IsSpaceBase() {
 				push(vn)
-			} else if fp != nil && fp.IsParamVarnode(vn) {
+			} else if fp != nil && fp.PossibleInputParam(vn.Addr(), vn.Size()) {
 				push(vn)
 			}
 		case vn.IsWritten():
