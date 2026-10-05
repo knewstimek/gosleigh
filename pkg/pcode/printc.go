@@ -322,6 +322,20 @@ func (s *printCState) collectSymbols() {
 				s.names[vn] = s.globalSymbolName(e.Symbol())
 				continue
 			}
+			// A register the convention preserves, read for its incoming value
+			// (an SEH funclet's EBP): unaff_<reg>, declared as a local. Only real
+			// reads count -- the prologue save and INDIRECT guards do not.
+			// C++ parity: HighVariable::hasName (unaffected input) +
+			// ScopeInternal::buildVariableName (Varnode::unaffected branch).
+			if vn.IsInput() && vn.IsUnaffected() && !vn.IsSpaceBase() && isRegisterSpace(vn) &&
+				!vn.HasFlags(VarnodeReturnAddress) && s.hasPrintedUse(vn) {
+				key := fmt.Sprintf("%d:%d:%d", vn.Space().Index, vn.Offset(), vn.Size())
+				if rn := regNameByLoc[key]; rn != "" {
+					s.names[vn] = "unaff_" + rn
+					locals = append(locals, vn)
+					continue
+				}
+			}
 			// Irregular input register: a live-on-entry argument register that was
 			// read but not recovered as a parameter (entry-point functions under the
 			// stack-based processEntry convention). Ghidra names these in_<regname>
@@ -5454,4 +5468,16 @@ func maxInt(a, b int) int {
 		return a
 	}
 	return b
+}
+
+// hasPrintedUse reports whether vn is read by an op that prints: not a
+// marker, not a prologue/epilogue register save.
+func (s *printCState) hasPrintedUse(vn *Varnode) bool {
+	for _, op := range vn.DescendIter() {
+		if op == nil || op.IsDead() || op.IsMarker() || s.prologueOps[op] {
+			continue
+		}
+		return true
+	}
+	return false
 }
