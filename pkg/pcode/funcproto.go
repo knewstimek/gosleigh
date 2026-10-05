@@ -654,10 +654,17 @@ func applyReturnRecovery(fd *Funcdata) {
 			// uVar1;). Rescue only that call-output case; a non-call clobber that
 			// happens to be return-only-consumed (e.g. a loop-carried parameter left
 			// in the return register) is still stripped to a void return.
+			//
+			// The rescue is limited to that demoted-jump call (FuncProto::
+			// isbadjumptable): an ordinary call whose unknown output merely
+			// reaches the RETURN is no evidence of a return value, and C++
+			// returns void there (ancestorOpUse CALL / indirect-creation false).
 			rescued := false
 			if def := retVn.Def(); def != nil && !def.IsDead() && def.IsCall() &&
 				onlyReturnUse(retVn, op, retSlot, make(map[*Varnode]bool)) {
-				rescued = true
+				if fc := fd.callSpecsForOp(def); fc != nil && fc.IsBadJumpTable() {
+					rescued = true
+				}
 			}
 			if !rescued {
 				fd.OpUnsetInput(op, retSlot)

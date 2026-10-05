@@ -1435,7 +1435,7 @@ func (a *ActionReturnRecovery) Apply(data *Funcdata) int {
 			if !ar.execute(op, i, trial, false) {
 				continue
 			}
-			if !ancestorOpUseReturn(vn, op, i, 5, make(map[*PcodeOp]bool)) {
+			if !data.ancestorOpUse(trimRecurseMax, vn, op, trial, 0, 0) {
 				continue
 			}
 			trial.MarkUsed()
