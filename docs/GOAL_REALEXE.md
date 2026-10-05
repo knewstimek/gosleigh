@@ -32,7 +32,6 @@ Ghidra API로 Java와 같은 값을 덤프한다.
 |---|---|---|---|
 | T | 타입 추론 차이: 반환형(int vs uint/undefined4), STORE 포인터 캐스트(`*(undefined1 *)(p + 1)`), 1바이트 상수가 char로 출력 | typeop.cc propagateType, ActionInferTypes | 사례 다수 |
 | F | fastcall/thiscall 파라미터 번호와 fill-in(앞 레지스터 슬롯), 조건 그룹 구조 순서 | fspec.cc fillinMap, blockaction.cc | P2와 연결 |
-| V | SEH 쿠키 식(`DAT_00c17200 ^ (uint)&stack0x..`)이 인자로 인라인 안 됨(10건). 계측 C++ 실측: 호출의 INDIRECT는 원인 op 위치로 취급(`CoverBlock::getUIndex`)되어 XOR 결과와 경계(1)에서만 만남. Go `getOpUIndex`는 이 규칙이 빠져 있음(주석엔 있음) -- 넣으면 Go 병합(mergeAddrTied/mergeIndirect 경로)이 연쇄로 깨져 보류 | cover.cc getUIndex, merge.cc | 병합 코드 감사 필요 |
 | R | 반환/출력 복구 경로가 C++ 구조와 다름(ActionReturnRecovery 단일 패스, post-deadcode Go-local 판정) | coreaction.cc 1909 | 반환 void/int 오판 |
 | P2 | Go는 메인루프에서 입력 프로토타입을 조기 잠금(ApplyActiveParamModel) -- C++은 ActionInputPrototype에서 | coreaction.cc 4718 | thiscall 스택 파라미터 누락 일부 |
 | E | PrettyEmitter가 식을 평면 문자열로 받아 C++ 줄바꿈 지점을 못 냄 | prettyprint.cc | 긴 FID 이름 줄바꿈 |

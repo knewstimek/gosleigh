@@ -1129,10 +1129,15 @@ func (m *Merge) snipReads(vn *Varnode, markedOps []*PcodeOp) {
 		bl = bb
 		pc = def.Addr()
 		if def.Code() == CPUI_INDIRECT {
-			// Snip must come after the op causing the indirect effect, not the indirect itself.
+			// Snip must come after the op causing the indirect effect, not the
+			// indirect itself: nothing may sit between an INDIRECT and its op.
 			// C++ parity: PcodeOp::getOpFromConst(vn->getDef()->getIn(1)->getAddr())
-			// In Go there is no getOpFromConst; fall back to using the indirect op itself.
 			afterop = def
+			if def.NumInput() > 1 {
+				if cause := def.Input(1).GetIndirectCause(); cause != nil && cause.Parent() == def.Parent() {
+					afterop = cause
+				}
+			}
 		} else {
 			afterop = def
 		}
@@ -1245,7 +1250,11 @@ func (m *Merge) eliminateIntersect(vn *Varnode, blocksort []blockVarnodeEntry) {
 				// overlaptype==1 means partial overlap. The C++ code checks partialCopyShadow
 				// here to skip SUBPIECE-derived shadows. That check is not yet ported, so we
 				// conservatively treat all partial overlaps as conflicts.
-				// C++ parity: merge.cc Merge::eliminateIntersect lines 522-527
+				// A full overlap carrying the identical value (a COPY chain) is no new
+				// value. C++ parity: merge.cc Merge::eliminateIntersect lines 522-527
+				if overlaptype == 2 && vn.CopyShadow(vn2) {
+					continue
+				}
 
 				if boundtype == 2 {
 					// Both defined at the "same" point: use pointer ordering to pick a canonical order.
@@ -1283,9 +1292,14 @@ func (m *Merge) eliminateIntersect(vn *Varnode, blocksort []blockVarnodeEntry) {
 					if indop == nil || indop.Code() != CPUI_INDIRECT {
 						continue
 					}
-					// The INDIRECT must be linked to the read op (vn causing the effect).
-					// In Go we do not have getOpFromConst, so skip this secondary check.
-					// Conservative: treat as conflict when addrForce+INDIRECT present.
+					// The INDIRECT must be linked to the read op, and its input must
+					// not merely shadow vn. C++ parity: merge.cc lines 553-561.
+					if indop.NumInput() < 2 || indop.Input(1).GetIndirectCause() != op {
+						continue
+					}
+					if overlaptype == 2 && vn.CopyShadow(indop.Input(0)) {
+						continue
+					}
 				}
 
 				insertop = true

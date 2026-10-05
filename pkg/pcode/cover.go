@@ -66,6 +66,12 @@ func getOpUIndex(op *PcodeOp) uint64 {
 		if op.Code() == CPUI_MULTIEQUAL {
 			return coverIndexBegin
 		}
+		// An INDIRECT happens at the op it is indirect for.
+		if op.Code() == CPUI_INDIRECT && op.NumInput() > 1 {
+			if cause := op.Input(1).GetIndirectCause(); cause != nil && cause.Parent() == op.Parent() {
+				return opBlockUIndex(cause)
+			}
+		}
 	}
 	return opBlockUIndex(op)
 }
