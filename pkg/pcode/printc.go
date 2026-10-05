@@ -1176,6 +1176,10 @@ func (s *printCState) renderFunctionSignature(retType Datatype) string {
 	displayName := name
 	if s.entryAnnotation != "" {
 		displayName = s.entryAnnotation + " " + name
+	} else if fp := s.fd.GetFuncProto(); fp != nil && fp.Model() != nil && fp.Model().PrintInDecl && !fp.Model().IsMerged() {
+		// A model other than the architecture default prints its name.
+		// C++ parity: printc.cc PrintC::emitFunctionDeclaration (printModelInDecl).
+		displayName = fp.Model().Name + " " + name
 	}
 
 	codeType := sharedTypeFactory.GetCode("", s.normalizeTypeForDecl(retType), allTypes, false)

@@ -167,6 +167,23 @@ func (pe *paramEntry) getSlot(addr address.Address, skip int32) int32 {
 	return res
 }
 
+// possibleParamWithSlot reports whether the storage could be a parameter and,
+// if so, its starting slot and the number of slots it covers.
+// C++ parity: fspec.cc ParamListStandard::possibleParamWithSlot.
+func (pl *ParamListStandard) possibleParamWithSlot(loc address.Address, size int32) (slot, slotsize int32, ok bool) {
+	pe := pl.findEntry(loc, size, true)
+	if pe == nil {
+		return 0, 0, false
+	}
+	slot = pe.getSlot(loc, 0)
+	if pe.isExclusion() {
+		slotsize = pe.groupSet[len(pe.groupSet)-1] - pe.groupSet[0] + 1 // getGroupSize
+	} else {
+		slotsize = (size-1)/pe.getAlign() + 1
+	}
+	return slot, slotsize, true
+}
+
 // getAddrBySlot computes the storage address for a parameter of the given size,
 // consuming slots from *slotnum. Returns an invalid (nil-space) address when the
 // size is too small or there are not enough slots. C++ parity:

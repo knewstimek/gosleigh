@@ -81,6 +81,11 @@ type Funcdata struct {
 	// globalRanges is the global scope's storage (cspec <global>).
 	globalRanges []GlobalRange
 
+	// evalCurrent is the model used to evaluate this function's own prototype
+	// when it differs from the default (possibly a merged model).
+	// C++ parity: Architecture::evalfp_current.
+	evalCurrent *ProtoModel
+
 	// jumpTables tracks all recovered JumpTable objects for this function.
 	// C++ parity: funcdata.hh Funcdata::jumpvec
 	jumpTables []*JumpTable
@@ -196,6 +201,18 @@ func (fd *Funcdata) SetFuncProto(fp *FuncProto) { fd.funcProto = fp }
 // GetScopeLocal returns the local variable scope, or nil if not set.
 // C++ parity: Funcdata::getScopeLocal
 func (fd *Funcdata) GetScopeLocal() *ScopeLocal { return fd.scopeLocal }
+
+// SetEvalCurrentModel sets the model that evaluates this function's own
+// prototype. C++ parity: Architecture::evalfp_current.
+func (fd *Funcdata) SetEvalCurrentModel(m *ProtoModel) { fd.evalCurrent = m }
+
+// EvalCurrentModel returns evalfp_current, falling back to the default model.
+func (fd *Funcdata) EvalCurrentModel() *ProtoModel {
+	if fd.evalCurrent != nil {
+		return fd.evalCurrent
+	}
+	return fd.defaultModel
+}
 
 // SetHostScope attaches the environment's symbol database. Call sites built
 // afterwards resolve their callee names through it.

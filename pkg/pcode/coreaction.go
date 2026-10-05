@@ -839,7 +839,7 @@ func (a *ActionPrototypeTypes) Apply(data *Funcdata) int {
 	// default model. The hand-ordered decompile driver attaches its own FuncProto
 	// via ApplyCallingConvention before this would run, so fp is non-nil there.
 	// C++ parity: coreaction.cc ActionPrototypeTypes::apply (4626-4630).
-	evalfp := data.DefaultModel()
+	evalfp := data.EvalCurrentModel()
 	fp := data.GetFuncProto()
 	if fp == nil {
 		if evalfp == nil {
@@ -1050,6 +1050,12 @@ func (a *ActionInputPrototype) Apply(data *Funcdata) int {
 	}
 	fp.ClearUnlockedInput()
 	if !fp.IsInputLocked() {
+		// A merged evaluation model is specialized to the component the
+		// parameter trials select. C++ parity: FuncProto::resolveModel
+		// (coreaction.cc:4742, fspec.cc:3767).
+		if m := fp.Model(); m.IsMerged() {
+			fp.SetModel(resolveFuncModel(data, m))
+		}
 		model := fp.Model()
 		if model != nil {
 			scope := data.GetScopeLocal()
@@ -1065,6 +1071,14 @@ func (a *ActionInputPrototype) Apply(data *Funcdata) int {
 			fp.SetInputLocked(true)
 		}
 		return 0
+	}
+	// Gosleigh locks the input prototype in the main loop (ApplyActiveParamModel)
+	// before stack inputs are visible; C++ resolves the merged model here, with
+	// every input as a trial. Re-resolve so a stack parameter can still turn a
+	// provisional __fastcall into __thiscall.
+	// C++ parity: coreaction.cc ActionInputPrototype::apply -> resolveModel.
+	if ev := data.EvalCurrentModel(); ev.IsMerged() && !fp.IsModelLocked() {
+		fp.SetModel(resolveFuncModel(data, ev))
 	}
 	recoverMissingStackParams(data, fp)
 	return 0

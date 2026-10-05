@@ -160,6 +160,15 @@ type ProtoModel struct {
 	// return_address storage). C++ parity: ProtoModel::effectlist.
 	Effects []EffectRecord
 
+	// Merged lists the component models of a merged (resolve) model.
+	// C++ parity: ProtoModelMerged::modellist.
+	Merged []*ProtoModel
+
+	// PrintInDecl is false only for the architecture default model, whose name
+	// is not printed in declarations. C++ parity: ProtoModel::isPrinted /
+	// Architecture::setDefaultModel.
+	PrintInDecl bool
+
 	// StackParamRanges are the stack offset ranges [first,last] of the input
 	// pentries; empty means the default parameter range.
 	// C++ parity: ProtoModel::paramrange from input->getRangeList(stackspc).

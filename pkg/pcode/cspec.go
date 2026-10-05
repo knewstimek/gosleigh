@@ -164,6 +164,24 @@ type CspecVarnodeRef struct {
 	Size   int    `xml:"size,attr"`
 }
 
+// xmlNamedRef is an element carrying only a name attribute.
+type xmlNamedRef struct {
+	Name string `xml:"name,attr"`
+}
+
+// xmlResolveProto mirrors <resolveprototype name><model name/>...</>.
+type xmlResolveProto struct {
+	Name   string        `xml:"name,attr"`
+	Models []xmlNamedRef `xml:"model"`
+}
+
+// CspecResolvePrototype is a merged model: the named models it chooses among.
+// C++ parity: ProtoModelMerged::decode.
+type CspecResolvePrototype struct {
+	Name   string
+	Models []string
+}
+
 // xmlGlobal mirrors <global>: the storage covered by the global scope.
 type xmlGlobal struct {
 	Ranges    []CspecGlobalRange `xml:"range"`
@@ -215,6 +233,12 @@ type CspecData struct {
 	// C++ parity: Architecture::decodeGlobal (symboltab->addRange(globalscope)).
 	GlobalRanges    []CspecGlobalRange
 	GlobalRegisters []string
+	// ResolvePrototypes / EvalCurrent / EvalCalled name the merged models and
+	// the evaluation models for the current function and for called functions.
+	// C++ parity: Architecture::decodeProtoEval / ProtoModelMerged.
+	ResolvePrototypes []CspecResolvePrototype
+	EvalCurrent       string
+	EvalCalled        string
 	// PointerSizeVal is the pointer size in bytes from <data_organization><pointer_size/>.
 	// 0 means unset (use default 4).
 	PointerSizeVal int
@@ -230,6 +254,9 @@ type CspecData struct {
 type xmlCompilerSpec struct {
 	XMLName      xml.Name           `xml:"compiler_spec"`
 	Global       xmlGlobal          `xml:"global"`
+	Resolve      []xmlResolveProto  `xml:"resolveprototype"`
+	EvalCurrent  *xmlNamedRef       `xml:"eval_current_prototype"`
+	EvalCalled   *xmlNamedRef       `xml:"eval_called_prototype"`
 	StackPointer CspecStackPointer  `xml:"stackpointer"`
 	ReturnAddr   CspecReturnAddress `xml:"returnaddress"`
 	DefaultProto CspecDefaultProto  `xml:"default_proto"`
@@ -271,6 +298,19 @@ func ParseCspecBytes(data []byte) (*CspecData, error) {
 		cs.LongSizeVal = raw.DataOrg.LongSize.Value
 	}
 
+	for _, rp := range raw.Resolve {
+		r := CspecResolvePrototype{Name: rp.Name}
+		for _, m := range rp.Models {
+			r.Models = append(r.Models, m.Name)
+		}
+		cs.ResolvePrototypes = append(cs.ResolvePrototypes, r)
+	}
+	if raw.EvalCurrent != nil {
+		cs.EvalCurrent = raw.EvalCurrent.Name
+	}
+	if raw.EvalCalled != nil {
+		cs.EvalCalled = raw.EvalCalled.Name
+	}
 	cs.GlobalRanges = raw.Global.Ranges
 	for _, r := range raw.Global.Registers {
 		cs.GlobalRegisters = append(cs.GlobalRegisters, r.Name)

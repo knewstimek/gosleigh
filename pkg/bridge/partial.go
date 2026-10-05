@@ -196,7 +196,7 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 	// spacebase space (buildFaithfulStackSpace) that ActionSpacebase +
 	// RuleLoadVarnode/RuleStoreVarnode in the "jumptable" group's stackptrflow /
 	// stackvars phases consume to resolve the stack-routed switch selector.
-	fd.SetDefaultModel(buildDefaultModel(engine, cspecData, fd, cfg.EntryPoint))
+	installModels(engine, cspecData, fd, cfg.EntryPoint)
 
 	branchInds := make([]*pcode.PcodeOp, 0, 1)
 	for _, op := range fd.GetPcodeOpBank().AllOps() {

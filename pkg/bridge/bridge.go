@@ -478,7 +478,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// with: its faithful stack spacebase space (set below when a cspec is supplied)
 	// is consumed by ActionSpacebase + RuleLoadVarnode/RuleStoreVarnode during the
 	// run. Callers must supply a cspec for stack-frame recovery (see Decompile).
-	fd.SetDefaultModel(buildDefaultModel(engine, result.CspecData, fd, cfg.EntryPoint))
+	installModels(engine, result.CspecData, fd, cfg.EntryPoint)
 
 	// Attach an opt-in locked prototype supplied by the analysis environment.
 	// Must run after SetDefaultModel so the locked FuncProto reuses the cspec
@@ -621,6 +621,50 @@ func applyInjectedPrototype(engine *sla.Engine, fd *pcode.Funcdata, spec *Inject
 //
 // C++ parity: Architecture::defaultfp / PrototypeModel construction from cspec.
 func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdata, entryPoint bool) *pcode.ProtoModel {
+	return buildModel(engine, cspec, fd, entryPoint, nil)
+}
+
+// installModels attaches the architecture's prototype models to fd: the
+// default model (Architecture::defaultfp) and, when the cspec names one, the
+// evaluation model for the current function (evalfp_current), which may be a
+// merged model over named models. All models share one stack space.
+// C++ parity: Architecture::decodeProtoEval / setDefaultModel /
+// ProtoModelMerged::decode.
+func installModels(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdata, entryPoint bool) {
+	def := buildModel(engine, cspec, fd, entryPoint, nil)
+	def.PrintInDecl = false // The default model's name is never printed
+	fd.SetDefaultModel(def)
+	if cspec == nil || cspec.EvalCurrent == "" || cspec.EvalCurrent == def.Name {
+		return
+	}
+	named := map[string]*pcode.ProtoModel{def.Name: def}
+	for _, p := range cspec.ExtraProtos {
+		c := *cspec
+		c.DefaultProto = p
+		m := buildModel(engine, &c, fd, entryPoint, def.StackSpace)
+		m.PrintInDecl = true
+		named[p.Name] = m
+	}
+	for _, rp := range cspec.ResolvePrototypes {
+		var comps []*pcode.ProtoModel
+		for _, n := range rp.Models {
+			if m := named[n]; m != nil {
+				comps = append(comps, m)
+			}
+		}
+		if len(comps) == len(rp.Models) && len(comps) > 0 {
+			named[rp.Name] = pcode.NewMergedModel(rp.Name, comps)
+		}
+	}
+	if eval := named[cspec.EvalCurrent]; eval != nil {
+		fd.SetEvalCurrentModel(eval)
+	}
+}
+
+// buildModel builds one prototype model from cspec.DefaultProto. A non-nil
+// stack reuses an existing stack space so every model of the function agrees
+// on it.
+func buildModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdata, entryPoint bool, stack *address.Space) *pcode.ProtoModel {
 	xr := engine.XRefs()
 	// regLookup resolves register names to their register-space byte offset so
 	// NewProtoModelFromCspec can populate RegParamOffsets from the cspec's
@@ -639,7 +683,9 @@ func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Fun
 	// bespoke ActionStackPtrFlow is no longer on the production path (it survives
 	// only in legacy test harnesses pending Step 3 retirement).
 	if cspec != nil {
-		if ss := buildFaithfulStackSpace(xr, cspec, fd); ss != nil {
+		if stack != nil {
+			model.StackSpace = stack
+		} else if ss := buildFaithfulStackSpace(xr, cspec, fd); ss != nil {
 			model.StackSpace = ss
 		}
 		// Build the faithful input parameter-storage model (ParamListStandard)

@@ -759,6 +759,11 @@ func ApplyActiveParamModel(fd *Funcdata) bool {
 		return false
 	}
 	model := fp.Model()
+	if model.IsMerged() {
+		// Decide parameters with the component the current trials select; the
+		// final choice is committed in ActionInputPrototype (resolveModel).
+		model = resolveFuncModel(fd, model)
+	}
 	active := NewParamActive(false)
 
 	all := fd.GetVarnodeBank().AllVarnodes()
@@ -813,6 +818,9 @@ func ApplyActiveParamModel(fd *Funcdata) bool {
 	}
 
 	fp.SetInputLocked(true)
+	if fp.Model().IsMerged() {
+		fp.SetModel(model) // Provisional; ActionInputPrototype re-resolves with stack inputs
+	}
 	sl := NewScopeLocal(model)
 	fd.SetScopeLocal(sl)
 	sl.BuildFromVarnodes(filtered, fp)
