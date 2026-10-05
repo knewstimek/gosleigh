@@ -278,9 +278,9 @@ func TestPrintCDeclarationRendererAPI(t *testing.T) {
 		{name: "decl pointer to array", got: CDeclString(ptrArray, "value"), want: "int (*value)[4]"},
 		{name: "var decl pointer to array", got: CVarDeclString(ptrArrayVar, "value"), want: "int (*value)[4]"},
 		{name: "decl array of pointers", got: CDeclString(sharedTypeFactory.GetArray(3, sharedTypeFactory.GetPointer(8, intType, 8)), "items"), want: "int *items[3]"},
-		{name: "function signature", got: CFuncSignatureString("handler", funcType, []string{"ctx", "count"}), want: "int handler(struct pair_t *ctx, int count, ...)"},
-		{name: "function pointer", got: CDeclString(funcPtr, "cb"), want: "int (*cb)(struct pair_t *, int, ...)"},
-		{name: "type string", got: CTypeString(sharedTypeFactory.GetPointer(8, pairType, 8)), want: "struct pair_t *"},
+		{name: "function signature", got: CFuncSignatureString("handler", funcType, []string{"ctx", "count"}), want: "int handler(pair_t *ctx, int count, ...)"},
+		{name: "function pointer", got: CDeclString(funcPtr, "cb"), want: "int (*cb)(pair_t *, int, ...)"},
+		{name: "type string", got: CTypeString(sharedTypeFactory.GetPointer(8, pairType, 8)), want: "pair_t *"},
 		{name: "type definition", got: CTypeDefinitionString(pairType), want: "struct pair_t { int left; }"},
 	}
 

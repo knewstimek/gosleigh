@@ -250,7 +250,7 @@ func (r *CDeclRenderer) structSpecifier(dt *Struct) string {
 		return "struct"
 	}
 	if dt.Name() != "" {
-		return "struct " + dt.Name()
+		return dt.Name() // C++ PrintC::pushType: a named structure prints by name
 	}
 	return "struct { " + r.fieldList(dt.Fields()) + " }"
 }
@@ -260,7 +260,7 @@ func (r *CDeclRenderer) unionSpecifier(dt *Union) string {
 		return "union"
 	}
 	if dt.Name() != "" {
-		return "union " + dt.Name()
+		return dt.Name() // named unions print by name too
 	}
 	return "union { " + r.fieldList(dt.Fields()) + " }"
 }

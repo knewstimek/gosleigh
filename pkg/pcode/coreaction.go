@@ -1019,6 +1019,7 @@ func (a *ActionDefaultParams) Apply(data *Funcdata) int {
 				if !locked && !fc.HasMatchingModel(defaultModel) {
 					fc.SetModel(defaultModel)
 				}
+				fc.applyHostLocks(data, hp)
 			} else {
 				fc.SetInternal(defaultModel, sharedTypeFactory.GetVoid())
 			}
@@ -2211,14 +2212,9 @@ func funcLinkInput(fc *FuncCallSpecs, data *Funcdata) {
 	if !inputLocked || varargs {
 		fc.InitActiveInput()
 	}
-	if inputLocked {
-		numparam := fc.NumParams()
-		for i := 0; i < numparam; i++ {
-			if fc.GetParam(i) == nil {
-				continue
-			}
-			// TODO known mismatch: ParamActive::registerTrial +
-			// markActive + setFixedPosition for the locked param.
+	if inputLocked && len(fc.lockedIn) > 0 {
+		if !fc.linkLockedInputs(data, varargs) {
+			spacebase = nil // a locked stack parameter is the placeholder
 		}
 	}
 	if spacebase != nil {
@@ -2252,10 +2248,7 @@ func funcLinkOutput(fc *FuncCallSpecs, data *Funcdata) {
 		data.OpUnsetOutput(callop)
 	}
 	if fc.IsOutputLocked() {
-		// TODO known mismatch: ProtoParameter extraction + address/space
-		// dispatch (stack vs register) is not yet ported. The locked-output
-		// branch currently leaves the op without an output; the pipeline
-		// recovers the value later through ActionReturnRecovery.
+		fc.linkLockedOutput(data)
 	} else {
 		fc.InitActiveOutput()
 	}

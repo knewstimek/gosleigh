@@ -67,6 +67,16 @@ func parseUint(s string) uint64 {
 // function (DecompileCallback.getMappedSymbols), sorted by address.
 type captureData struct {
 	syms []pcode.HostData
+	// protos are the callee prototypes the core received, by entry offset.
+	protos map[uint64]captureProto
+}
+
+// captureProto is the locked part of a host function prototype.
+type captureProto struct {
+	noReturn               bool
+	inputLocked, outLocked bool
+	params                 []pcode.HostParam
+	output                 *pcode.HostParam
 }
 
 // loadCaptureData reads the <db> scopes of a savefile written by
@@ -153,14 +163,103 @@ func loadCaptureData(path string, ram *address.Space) (*captureData, error) {
 				}
 			case "labelsym":
 				hd.Label = true
+			case "function":
+				if cd.protos == nil {
+					cd.protos = map[uint64]captureProto{}
+				}
+				cd.protos[hd.Addr.Offset] = parseCaptureProto(sym, types)
+				continue
 			default:
-				continue // functions come from the symbol table; externrefs too
+				continue // externrefs come from the symbol table
 			}
 			cd.syms = append(cd.syms, hd)
 		}
 	}
 	sort.Slice(cd.syms, func(i, j int) bool { return cd.syms[i].Addr.Offset < cd.syms[j].Addr.Offset })
 	return cd, nil
+}
+
+// parseCaptureProto reads a <function> element's prototype: its locked
+// parameters (localdb symbols of category 0, by index) and locked return.
+// C++ parity: FuncProto::decode + ProtoStoreSymbol (isInputLocked is a void
+// lock or a type-locked first parameter).
+func parseCaptureProto(fn *xnode, types map[string]*xnode) captureProto {
+	cp := captureProto{noReturn: fn.attr("noreturn") == "true"}
+	slot := func(sym, at *xnode) pcode.HostParam {
+		p := pcode.HostParam{Space: at.attr("space"), Offset: parseUint(at.attr("offset")),
+			Size: int32(parseUint(at.attr("size"))), Name: sym.attr("name"), ThisPtr: sym.attr("thisptr") == "true"}
+		for i := range sym.Kids {
+			if t := typeDesc(&sym.Kids[i], types, 0); t != nil {
+				p.Type = pcode.ResolveHostType(t)
+				break
+			}
+		}
+		return p
+	}
+	type indexed struct {
+		idx    uint64
+		locked bool
+		p      pcode.HostParam
+	}
+	var ins []indexed
+	if ldb := fn.child("localdb"); ldb != nil {
+		if sc := ldb.child("scope"); sc != nil {
+			if list := sc.child("symbollist"); list != nil {
+				for i := range list.Kids {
+					ms := &list.Kids[i]
+					if ms.XMLName.Local != "mapsym" || len(ms.Kids) < 2 {
+						continue
+					}
+					sym, at := &ms.Kids[0], ms.child("addr")
+					if at == nil || sym.attr("cat") != "0" {
+						continue
+					}
+					ins = append(ins, indexed{parseUint(sym.attr("index")), sym.attr("typelock") == "true", slot(sym, at)})
+				}
+			}
+		}
+	}
+	sort.Slice(ins, func(i, j int) bool { return ins[i].idx < ins[j].idx })
+	proto := fn.child("prototype")
+	if proto == nil {
+		return cp
+	}
+	cp.inputLocked = proto.attr("voidlock") == "true" || (len(ins) > 0 && ins[0].locked)
+	if cp.inputLocked {
+		for _, in := range ins {
+			cp.params = append(cp.params, in.p)
+		}
+	}
+	if ret := proto.child("returnsym"); ret != nil && ret.attr("typelock") == "true" {
+		cp.outLocked = true
+		out := pcode.HostParam{}
+		if at := ret.child("addr"); at != nil {
+			out.Space, out.Offset, out.Size = at.attr("space"), parseUint(at.attr("offset")), int32(parseUint(at.attr("size")))
+		}
+		for i := range ret.Kids {
+			if t := typeDesc(&ret.Kids[i], types, 0); t != nil {
+				out.Type = pcode.ResolveHostType(t)
+				break
+			}
+		}
+		cp.output = &out
+	}
+	return cp
+}
+
+// QueryFunction adds the captured locked prototype to the symbol table's
+// answer for a callee the core asked about.
+func (h hostWithData) QueryFunction(addr address.Address) (pcode.HostFunction, bool) {
+	hf, ok := h.HostScope.QueryFunction(addr)
+	if !ok || h.captureData == nil {
+		return hf, ok
+	}
+	if cp, found := h.captureData.protos[addr.Offset]; found {
+		hf.NoReturn = hf.NoReturn || cp.noReturn
+		hf.InputLocked, hf.OutputLocked = cp.inputLocked, cp.outLocked
+		hf.Params, hf.Output = cp.params, cp.output
+	}
+	return hf, ok
 }
 
 // typeDesc converts a <type>/<typeref> element into a host type description,
@@ -190,6 +289,16 @@ func typeDesc(n *xnode, types map[string]*xnode, depth int) *pcode.HostTypeDesc 
 	}
 	if len(n.Kids) > 0 && (d.Meta == "ptr" || d.Meta == "array") {
 		d.Elem = typeDesc(&n.Kids[0], types, depth+1)
+	}
+	if d.Meta == "struct" {
+		for i := range n.Kids {
+			f := &n.Kids[i]
+			if f.XMLName.Local != "field" || len(f.Kids) == 0 {
+				continue
+			}
+			d.Fields = append(d.Fields, pcode.HostFieldDesc{Name: f.attr("name"),
+				Offset: int32(parseUint(f.attr("offset"))), Type: typeDesc(&f.Kids[0], types, depth+1)})
+		}
 	}
 	return d
 }

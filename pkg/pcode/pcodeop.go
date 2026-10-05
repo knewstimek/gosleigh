@@ -285,6 +285,9 @@ type PcodeOp struct {
 	output    *Varnode
 	inputs    []*Varnode
 	parent    *BlockBasic
+	// callSpec is the call site's prototype (C++ encodes it in the CALL's
+	// fspec-space input 0, FuncCallSpecs::getFspecFromConst).
+	callSpec *FuncCallSpecs
 }
 
 // NewPcodeOp creates a PcodeOp with the given number of input slots.

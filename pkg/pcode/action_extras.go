@@ -168,9 +168,9 @@ func (fc *FuncCallSpecs) ResolveSpacebaseRelative(data *Funcdata, phvn *Varnode)
 		fc.AbortSpacebaseRelative(data)
 		return
 	}
-	// C++ derives the offset from a locked stack parameter here. Call-site
-	// prototypes are never input-locked in Gosleigh (no callee prototypes are
-	// injected), so this path is unreachable; C++ throws when it fails.
+	if fc.resolveLockedStackOffset(phvn, spacebase) {
+		return
+	}
 	data.warningHeader("Unresolved stack placeholder")
 }
 

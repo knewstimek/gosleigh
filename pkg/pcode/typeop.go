@@ -363,7 +363,7 @@ func RegisterTypeOps() []TypeOp {
 	inst[CPUI_BRANCH] = &typeOpBase{CPUI_BRANCH, PcodeOpSpecial | PcodeOpBranch | PcodeOpCodeRef | PcodeOpNoCollapse, "BRANCH"}
 	inst[CPUI_CBRANCH] = &typeOpBase{CPUI_CBRANCH, PcodeOpSpecial | PcodeOpBranch | PcodeOpCodeRef | PcodeOpNoCollapse, "CBRANCH"}
 	inst[CPUI_BRANCHIND] = &typeOpBase{CPUI_BRANCHIND, PcodeOpSpecial | PcodeOpBranch | PcodeOpNoCollapse, "BRANCHIND"}
-	inst[CPUI_CALL] = &typeOpBase{CPUI_CALL, PcodeOpSpecial | PcodeOpCall | PcodeOpHasCallSpec | PcodeOpCodeRef | PcodeOpNoCollapse, "CALL"}
+	inst[CPUI_CALL] = &typeOpCall{typeOpBase{CPUI_CALL, PcodeOpSpecial | PcodeOpCall | PcodeOpHasCallSpec | PcodeOpCodeRef | PcodeOpNoCollapse, "CALL"}}
 	inst[CPUI_CALLIND] = &typeOpCallind{typeOpBase{CPUI_CALLIND, PcodeOpSpecial | PcodeOpCall | PcodeOpHasCallSpec | PcodeOpNoCollapse, "CALLIND"}}
 	inst[CPUI_CALLOTHER] = &typeOpBase{CPUI_CALLOTHER, PcodeOpSpecial | PcodeOpCall | PcodeOpNoCollapse, "CALLOTHER"}
 	inst[CPUI_RETURN] = &typeOpBase{CPUI_RETURN, PcodeOpSpecial | PcodeOpReturns | PcodeOpNoCollapse | PcodeOpReturnCopy, "RETURN"}

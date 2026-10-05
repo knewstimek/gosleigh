@@ -41,6 +41,11 @@ type FuncCallSpecs struct {
 	// hostProto is the callee's prototype as reported by the host, standing
 	// in for the callee Funcdata C++ links via queryFunction.
 	hostProto *HostFunction
+	// lockedIn / lockedOut are the callee's locked prototype slots (host
+	// prototype with typelocked parameters / return), resolved to storage.
+	// C++ parity: the ProtoParameters of a locked FuncProto (ProtoStoreSymbol).
+	lockedIn  []ProtoSlot
+	lockedOut *ProtoSlot
 }
 
 // HostScope is the analysis environment's symbol database, queried by the
@@ -66,6 +71,23 @@ type HostFunction struct {
 	ExtraPop int32
 	// NoReturn: the function never returns (FuncProto::isNoReturn).
 	NoReturn bool
+	// InputLocked: Params is the complete, typed parameter list.
+	// OutputLocked: Output is the typed return (Output.Type void = void).
+	// C++ parity: FuncProto::isInputLocked / isOutputLocked.
+	InputLocked, OutputLocked bool
+	Params                    []HostParam
+	Output                    *HostParam
+}
+
+// HostParam is one storage slot of a host prototype: a register or a stack
+// offset relative to the callee's stack pointer at entry, named by space.
+type HostParam struct {
+	Space   string
+	Offset  uint64
+	Size    int32
+	Type    Datatype
+	Name    string
+	ThisPtr bool
 }
 
 // C++ parity: FuncCallSpecs::FuncCallSpecs + FlowInfo::queryCall/setFuncdata:
@@ -80,6 +102,7 @@ func newFuncCallSpecs(fd *Funcdata, op *PcodeOp) *FuncCallSpecs {
 		stackoffset:          spacebaseOffsetUnknown,
 		stackPlaceholderSlot: -1,
 	}
+	op.callSpec = fc
 	if op.Code() == CPUI_CALL && op.NumInput() > 0 && op.Input(0) != nil {
 		if in0 := op.Input(0); !in0.IsConstant() {
 			fc.entryAddress = in0.Addr()

@@ -72,6 +72,20 @@ func (f *TypeFactory) GetChar(name string) *Base {
 	return f.internBase("char:"+name, value)
 }
 
+// GetStructSized returns a named structure of an explicit size (a host
+// type: its size is authoritative even with no or partial fields).
+// C++ parity: TypeStruct decoded from the host's <type metatype="struct">.
+func (f *TypeFactory) GetStructSized(name string, size int32, fields []TypeField) *Struct {
+	canonicalFields := f.internFields(fields)
+	value := NewStruct(name, canonicalFields)
+	if size > value.size {
+		value.size = size
+		value.alignSize = calcAlignSize(size, value.alignment)
+	}
+	key := fmt.Sprintf("struct:%s:%d:%s", name, size, fieldsKey(canonicalFields))
+	return f.internStruct(key, value)
+}
+
 func (f *TypeFactory) GetVoid() *Void {
 	value := NewVoid()
 	return f.internVoid("void", value)

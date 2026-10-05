@@ -37,6 +37,15 @@ type HostTypeDesc struct {
 	Elem  *HostTypeDesc
 	// Char marks a character type (Ghidra char="true").
 	Char bool
+	// Fields are a structure's members.
+	Fields []HostFieldDesc
+}
+
+// HostFieldDesc is one member of a host structure.
+type HostFieldDesc struct {
+	Name   string
+	Offset int32
+	Type   *HostTypeDesc
 }
 
 var hostMetatypes = map[string]metatype{
@@ -44,9 +53,9 @@ var hostMetatypes = map[string]metatype{
 	"bool": TYPE_BOOL, "code": TYPE_CODE, "float": TYPE_FLOAT,
 }
 
-// ResolveHostType builds the Datatype a host description names. Structured
-// types the host defines elsewhere resolve to an undefined blob of their size
-// (known mismatch: host struct/union/enum layouts are not imported yet).
+// ResolveHostType builds the Datatype a host description names.
+// TODO known mismatch: host unions and enums resolve to an undefined blob of
+// their size.
 func ResolveHostType(d *HostTypeDesc) Datatype {
 	if d == nil {
 		return nil
@@ -67,6 +76,14 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 		return tf.GetArray(d.Count, elem)
 	case "void":
 		return tf.GetVoid()
+	case "struct":
+		var fields []TypeField
+		for i, fd := range d.Fields {
+			if ft := ResolveHostType(fd.Type); ft != nil {
+				fields = append(fields, TypeField{Ident: int32(i), Offset: fd.Offset, Name: fd.Name, Type: ft})
+			}
+		}
+		return tf.GetStructSized(d.Name, d.Size, fields)
 	}
 	if d.Char && d.Size == 1 {
 		return tf.GetChar(d.Name)

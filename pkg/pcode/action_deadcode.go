@@ -156,13 +156,20 @@ func (a *ActionDeadCode) consumePass(data *Funcdata) int {
 			if out == nil {
 				continue
 			}
-			if opHasSideEffects(op.Code()) && !deadIndirectCreationCandidate(op) {
+			isCall := op.Code() == CPUI_CALL || op.Code() == CPUI_CALLIND
+			if opHasSideEffects(op.Code()) && !deadIndirectCreationCandidate(op) && !isCall {
 				continue
 			}
 			if ca.vacuous[out] {
 				continue // reached by a consume push -> keep
 			}
-			data.OpDestroy(op)
+			// A call stays; only its unused result goes.
+			// C++ parity: ActionDeadCode::apply (op->isCall() -> opUnsetOutput).
+			if isCall {
+				data.OpUnsetOutput(op)
+			} else {
+				data.OpDestroy(op)
+			}
 			count++
 		}
 		total += count
