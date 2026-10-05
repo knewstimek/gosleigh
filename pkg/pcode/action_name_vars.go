@@ -155,27 +155,12 @@ func compareNameRep(vn1, vn2 *Varnode) bool {
 // on its type metatype. Mirrors Datatype::printNameBase() in C++.
 // C++ parity: database.cc ScopeInternal::buildVariableName (the local-var branch)
 func hvTypePrefix(hv *HighVariable) string {
-	if hv == nil {
+	if hv == nil || hv.Type() == nil {
 		return "uVar"
 	}
-	dt := hv.Type()
-	if dt == nil {
-		return "uVar"
-	}
-	switch dt.Metatype() {
-	case TYPE_INT:
-		if dt.Size() >= 8 {
-			return "lVar"
-		}
-		return "iVar"
-	case TYPE_FLOAT:
-		return "fVar"
-	case TYPE_BOOL:
-		return "bVar"
-	default:
-		// TYPE_UINT, TYPE_UNKNOWN, and others -> uVar (matches undefined* prefix)
-		return "uVar"
-	}
+	// C++ parity: ScopeInternal::buildVariableName -- ct->printNameBase(s)
+	// followed by "Var" (puVar for undefined4 *, lVar for longlong, ...).
+	return datatypeNameBase(hv.Type()) + "Var"
 }
 
 // regParamSlotOfHigh returns the calling-convention argument slot index of the
@@ -403,7 +388,10 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 	})
 
 	// Assign sequential names per type prefix, starting from 1.
-	// C++ parity: base=1, incremented per name in ScopeInternal::buildVariableName.
+	// TODO known mismatch: C++ threads ONE counter through every prefix
+	// (ScopeInternal::buildVariableName "Var" << index++), but toName still
+	// holds HighVariables that never print (C++ names only scope symbols), so a
+	// shared counter would skip numbers; per-prefix counting hides that.
 	prefixIdx := make(map[string]int)
 	for _, e := range toName {
 		if _, ok := prefixIdx[e.prefix]; !ok {
