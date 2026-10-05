@@ -66,6 +66,11 @@ type goldenEntry struct {
 		Offset int64  `json:"offset"`
 		Name   string `json:"name"`
 	} `json:"locals"`
+	// FlowOverrides are the host's instruction flow overrides in the body.
+	FlowOverrides []struct {
+		Addr uint64 `json:"addr"`
+		Type string `json:"type"`
+	} `json:"flowoverrides"`
 }
 
 type goldenFile struct {
@@ -291,7 +296,7 @@ func decompileOne(fn goldenEntry, b *loader.EngineBuilder, cspecPath string, max
 	result, err := bridge.Build(engine, bridge.BuildConfig{
 		Name: fn.Name, Entry: base, MaxInstructions: maxInstr,
 		CspecPath: cspecPath, SymbolName: displayName(fn), HostScope: host,
-		HostLocals: hostLocals(fn),
+		HostLocals: hostLocals(fn), FlowOverrides: flowOverrides(fn),
 	})
 	if err != nil {
 		res.Error = fmt.Sprintf("BRIDGE-ERR: %v", err)
@@ -312,4 +317,15 @@ func displayName(fn goldenEntry) string {
 		return fn.Display
 	}
 	return fn.Name
+}
+
+func flowOverrides(fn goldenEntry) map[uint64]string {
+	if len(fn.FlowOverrides) == 0 {
+		return nil
+	}
+	m := make(map[uint64]string, len(fn.FlowOverrides))
+	for _, f := range fn.FlowOverrides {
+		m[f.Addr] = f.Type
+	}
+	return m
 }

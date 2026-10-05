@@ -92,6 +92,7 @@ public class GenSample extends GhidraScript {
 			sb.append("      \"size\": ").append(span(f)).append(",\n");
 			sb.append("      \"proto\": ").append(protoJson(f)).append(",\n");
 			sb.append("      \"locals\": ").append(localsJson(f)).append(",\n");
+			sb.append("      \"flowoverrides\": ").append(flowOverridesJson(f)).append(",\n");
 			sb.append("      \"bytes\": ").append(jsonStr(bodyHex(f))).append(",\n");
 			sb.append("      \"c\": ").append(jsonStr(decompile(iface, f))).append("\n");
 			sb.append("    }");
@@ -211,6 +212,27 @@ public class GenSample extends GhidraScript {
 			b.append(varJson(ps[i].getName(), ps[i].getDataType().getName(), ps[i].getVariableStorage().toString()));
 		}
 		return b.append("]}").toString();
+	}
+
+	// Instruction flow overrides in the function body (e.g. a tail JMP marked
+	// CALL_RETURN), which DecompileCallback sends as <flowoverridelist>.
+	private String flowOverridesJson(Function f) {
+		StringBuilder b = new StringBuilder("[");
+		boolean first = true;
+		for (ghidra.program.model.listing.Instruction ins :
+				currentProgram.getListing().getInstructions(f.getBody(), true)) {
+			ghidra.program.model.listing.FlowOverride fo = ins.getFlowOverride();
+			if (fo == ghidra.program.model.listing.FlowOverride.NONE) {
+				continue;
+			}
+			if (!first) {
+				b.append(", ");
+			}
+			first = false;
+			b.append("{\"addr\": ").append(ins.getAddress().getOffset())
+				.append(", \"type\": ").append(jsonStr(fo.name())).append("}");
+		}
+		return b.append("]").toString();
 	}
 
 	// The function's own stack-frame locals, which DecompileCallback hands the

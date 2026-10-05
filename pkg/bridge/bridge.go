@@ -55,6 +55,11 @@ type BuildConfig struct {
 	// console with no program symbols.
 	HostScope pcode.HostScope
 
+	// FlowOverrides are the host's instruction flow overrides (address ->
+	// "BRANCH", "CALL", "CALL_RETURN" or "RETURN"), e.g. a tail JMP the
+	// analysis marked CALL_RETURN.
+	FlowOverrides map[uint64]string
+
 	// HostLocals are the host's name-locked stack symbols of this function
 	// (stack offset -> name), as Java sends them in the function's localdb.
 	HostLocals map[int64]string
@@ -242,6 +247,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	}
 
 	summary := summarizeSpaces(records, cfg.Entry.Space)
+	fixFlowOverrideReturns(records, summary.constSpace)
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, summary.uniqueBase, summary.constSpace)
 	if err := attachEnvironment(fd, cfg); err != nil {
 		return nil, err
@@ -1107,6 +1113,9 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 				}
 				return nil, nil, fmt.Errorf("build bridge: translate instruction at %v: %w", cur, err)
 			}
+			if t, ok := cfg.FlowOverrides[cur.Offset]; ok {
+				translation = applyFlowOverride(translation, t)
+			}
 			// An instruction may legitimately emit no p-code (NOP, multi-byte
 			// NOP alignment padding). It is kept for flow; references to its
 			// address resolve to the next instruction (zeroOpRedirect).
@@ -1283,6 +1292,79 @@ func discoverBlockStarts(records []instructionRecord) map[address.Address]bool {
 	}
 
 	return starts
+}
+
+// applyFlowOverride rewrites the instruction's primary branch op as the host
+// override says, before flow is followed: CALL / CALL_RETURN turn a branch
+// into a call (CALL_RETURN also appends a RETURN), BRANCH turns a call or
+// return into a branch, RETURN turns an indirect branch or call into a return.
+// The appended RETURN's constant input takes the function's constant space
+// later (fixFlowOverrideReturns).
+// C++ parity: funcdata_op.cc Funcdata::overrideFlow (findPrimaryBranch: the
+// last branching op of the instruction).
+func applyFlowOverride(tr sla.InstructionTranslation, kind string) sla.InstructionTranslation {
+	idx := -1
+	for i := len(tr.Ops) - 1; i >= 0; i-- {
+		switch tr.Ops[i].OpCode {
+		case pcode.CPUI_BRANCH, pcode.CPUI_BRANCHIND, pcode.CPUI_CBRANCH, pcode.CPUI_CALL, pcode.CPUI_CALLIND, pcode.CPUI_RETURN:
+			idx = i
+		}
+		if idx >= 0 {
+			break
+		}
+	}
+	if idx < 0 {
+		return tr
+	}
+	ops := append([]pcode.RawOp(nil), tr.Ops...)
+	op := &ops[idx]
+	switch kind {
+	case "BRANCH":
+		switch op.OpCode {
+		case pcode.CPUI_CALL:
+			op.OpCode = pcode.CPUI_BRANCH
+		case pcode.CPUI_CALLIND, pcode.CPUI_RETURN:
+			op.OpCode = pcode.CPUI_BRANCHIND
+		}
+	case "CALL", "CALL_RETURN":
+		switch op.OpCode {
+		case pcode.CPUI_BRANCH:
+			op.OpCode = pcode.CPUI_CALL
+		case pcode.CPUI_BRANCHIND, pcode.CPUI_RETURN:
+			op.OpCode = pcode.CPUI_CALLIND
+		case pcode.CPUI_CBRANCH:
+			return tr // C++: "Do not currently support CBRANCH overrides"
+		}
+		if kind == "CALL_RETURN" {
+			ret := pcode.RawOp{
+				SeqNum: op.SeqNum,
+				OpCode: pcode.CPUI_RETURN,
+				Inputs: []pcode.VarnodeData{{Space: nil, Offset: 0, Size: 1}},
+			}
+			ret.SeqNum.Order = ops[len(ops)-1].SeqNum.Order + 1
+			ret.SeqNum.Time = ops[len(ops)-1].SeqNum.Time + 1
+			ops = append(ops, ret)
+		}
+	case "RETURN":
+		if op.OpCode == pcode.CPUI_BRANCHIND || op.OpCode == pcode.CPUI_CALLIND {
+			op.OpCode = pcode.CPUI_RETURN
+		}
+	}
+	tr.Ops = ops
+	return tr
+}
+
+// fixFlowOverrideReturns gives each RETURN op appended by applyFlowOverride
+// the function's constant space for its zero input.
+func fixFlowOverrideReturns(records []instructionRecord, constSpace *address.Space) {
+	for i := range records {
+		ops := records[i].translation.Ops
+		for j := range ops {
+			if ops[j].OpCode == pcode.CPUI_RETURN && len(ops[j].Inputs) == 1 && ops[j].Inputs[0].Space == nil {
+				ops[j].Inputs[0].Space = constSpace
+			}
+		}
+	}
 }
 
 // zeroOpRedirect maps each instruction that emitted no p-code to the first
