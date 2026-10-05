@@ -164,6 +164,20 @@ type CspecVarnodeRef struct {
 	Size   int    `xml:"size,attr"`
 }
 
+// xmlGlobal mirrors <global>: the storage covered by the global scope.
+type xmlGlobal struct {
+	Ranges    []CspecGlobalRange `xml:"range"`
+	Registers []CspecRegister    `xml:"register"`
+}
+
+// CspecGlobalRange is one <range space=.. first=.. last=..> of <global>; with
+// no first/last it covers the whole space.
+type CspecGlobalRange struct {
+	Space string  `xml:"space,attr"`
+	First *uint64 `xml:"first,attr"`
+	Last  *uint64 `xml:"last,attr"`
+}
+
 // xmlDataOrg mirrors the <data_organization> XML element.
 type xmlDataOrg struct {
 	PointerSize xmlPointerSize `xml:"pointer_size"`
@@ -197,6 +211,10 @@ type CspecData struct {
 	// return_address effect of every model.
 	// C++ parity: Architecture::defaultReturnAddr.
 	ReturnAddress *CspecVarnodeRef
+	// GlobalRanges / GlobalRegisters are the <global> scope storage.
+	// C++ parity: Architecture::decodeGlobal (symboltab->addRange(globalscope)).
+	GlobalRanges    []CspecGlobalRange
+	GlobalRegisters []string
 	// PointerSizeVal is the pointer size in bytes from <data_organization><pointer_size/>.
 	// 0 means unset (use default 4).
 	PointerSizeVal int
@@ -211,6 +229,7 @@ type CspecData struct {
 // xmlCompilerSpec mirrors the top-level <compiler_spec> XML element.
 type xmlCompilerSpec struct {
 	XMLName      xml.Name           `xml:"compiler_spec"`
+	Global       xmlGlobal          `xml:"global"`
 	StackPointer CspecStackPointer  `xml:"stackpointer"`
 	ReturnAddr   CspecReturnAddress `xml:"returnaddress"`
 	DefaultProto CspecDefaultProto  `xml:"default_proto"`
@@ -250,6 +269,11 @@ func ParseCspecBytes(data []byte) (*CspecData, error) {
 	}
 	if raw.DataOrg != nil && raw.DataOrg.LongSize.Value > 0 {
 		cs.LongSizeVal = raw.DataOrg.LongSize.Value
+	}
+
+	cs.GlobalRanges = raw.Global.Ranges
+	for _, r := range raw.Global.Registers {
+		cs.GlobalRegisters = append(cs.GlobalRegisters, r.Name)
 	}
 
 	proto := raw.DefaultProto.Prototype

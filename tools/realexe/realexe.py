@@ -206,6 +206,9 @@ def do_run(work, timeout_s, mem_mb, fresh):
 				done[rec["index"]] = rec
 	args = ["-goldens", goldens, "-pe", meta["exe"], "-sla", sla, "-pspec", pspec,
 		"-cspec", cspec, "-max-instructions", "20000", "-mem-limit-mb", str(mem_mb)]
+	symbols = os.path.join(work, "symbols.json")
+	if os.path.isfile(symbols):
+		args += ["-symbols", symbols] # the host symbol table (HostScope)
 	with open(jsonl, "a", encoding="utf-8") as f:
 		for i, fn in enumerate(fns):
 			if i in done:

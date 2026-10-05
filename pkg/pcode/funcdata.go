@@ -73,6 +73,14 @@ type Funcdata struct {
 	// C++ parity: Architecture::defaultfp / evalfp_current.
 	defaultModel *ProtoModel
 
+	// hostScope is the analysis environment's symbol database (nil when the
+	// function is decompiled standalone). C++ parity: Architecture::symboltab
+	// global scope (ScopeGhidra).
+	hostScope HostScope
+
+	// globalRanges is the global scope's storage (cspec <global>).
+	globalRanges []GlobalRange
+
 	// jumpTables tracks all recovered JumpTable objects for this function.
 	// C++ parity: funcdata.hh Funcdata::jumpvec
 	jumpTables []*JumpTable
@@ -188,6 +196,13 @@ func (fd *Funcdata) SetFuncProto(fp *FuncProto) { fd.funcProto = fp }
 // GetScopeLocal returns the local variable scope, or nil if not set.
 // C++ parity: Funcdata::getScopeLocal
 func (fd *Funcdata) GetScopeLocal() *ScopeLocal { return fd.scopeLocal }
+
+// SetHostScope attaches the environment's symbol database. Call sites built
+// afterwards resolve their callee names through it.
+func (fd *Funcdata) SetHostScope(h HostScope) { fd.hostScope = h }
+
+// HostScope returns the attached environment symbol database, or nil.
+func (fd *Funcdata) HostScope() HostScope { return fd.hostScope }
 
 // DefaultModel returns the architecture evaluation prototype model, or nil.
 // C++ parity: Architecture::defaultfp (read via data.getArch()->defaultfp).
@@ -884,15 +899,47 @@ func (fd *Funcdata) setVarnodeProperties(vn *Varnode) {
 	if vn == nil || vn.IsMapped() || vn.Space() == nil {
 		return
 	}
-	sl := fd.scopeLocal
-	if sl == nil {
-		return
+	if sl := fd.scopeLocal; sl != nil {
+		if entry := sl.FindOverlap(vn.Addr(), vn.Size()); entry != nil {
+			vn.SetFlags(entry.AllFlags() &^ VarnodeTypeLock)
+			return
+		}
 	}
-	entry := sl.FindOverlap(vn.Addr(), vn.Size())
-	if entry == nil {
-		return
+	// Storage inside the global scope is a global variable: mapped, address
+	// tied and persistent even without a symbol. An external-reference symbol
+	// (an import slot) adds externref.
+	// C++ parity: database.cc Scope::queryProperties (global finalscope
+	// branch) + ExternRefSymbol flags (database.cc:783).
+	if fd.inGlobalScope(vn.Addr(), vn.Size()) {
+		fl := VarnodeMapped | VarnodeAddrTied | VarnodePersist
+		if fd.hostScope != nil {
+			if _, ok := fd.hostScope.QueryExternalRef(vn.Addr()); ok {
+				fl |= VarnodeExternRef
+			}
+		}
+		vn.SetFlags(fl)
 	}
-	vn.SetFlags(entry.AllFlags() &^ VarnodeTypeLock)
+}
+
+// GlobalRange is one storage range of the global scope.
+type GlobalRange struct {
+	Space       *address.Space
+	First, Last uint64
+}
+
+// SetGlobalRanges installs the global scope's storage ranges (cspec <global>).
+// C++ parity: Architecture::addToGlobalScope.
+func (fd *Funcdata) SetGlobalRanges(r []GlobalRange) { fd.globalRanges = r }
+
+// inGlobalScope reports whether [addr, addr+size) lies inside a global range.
+func (fd *Funcdata) inGlobalScope(addr address.Address, size int32) bool {
+	last := addr.Offset + uint64(size) - 1
+	for _, r := range fd.globalRanges {
+		if r.Space == addr.Space && addr.Offset >= r.First && last <= r.Last && last >= addr.Offset {
+			return true
+		}
+	}
+	return false
 }
 
 // NewVarnode creates a free Varnode.

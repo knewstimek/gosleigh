@@ -94,6 +94,64 @@ public class GenSample extends GhidraScript {
 			w.write(sb.toString());
 		}
 		println("GenSample: wrote " + picked.size() + " functions to " + outPath);
+		writeSymbols(new java.io.File(new java.io.File(outPath).getAbsoluteFile().getParentFile(), "symbols.json"));
+	}
+
+	// The host symbol table the decompiler core queries through the Java
+	// layer (ScopeGhidra): every function entry with its name. Gosleigh's
+	// harness serves it back as the HostScope.
+	// Names pass through the decompiler's own NameTransformer (the default
+	// DecompileOptions one, as DecompInterface installs it), and namespaces are
+	// the transformed parent path below the global namespace -- exactly what
+	// DecompileCallback hands the core.
+	private void writeSymbols(java.io.File path) throws Exception {
+		ghidra.program.model.symbol.NameTransformer nt =
+			new ghidra.program.model.symbol.IllegalCharCppTransformer();
+		StringBuilder sb = new StringBuilder("{\n  \"functions\": [\n");
+		boolean first = true;
+		for (Function f : currentProgram.getFunctionManager().getFunctions(true)) {
+			if (!first) {
+				sb.append(",\n");
+			}
+			first = false;
+			sb.append("    {\"entry\": ").append(f.getEntryPoint().getOffset())
+				.append(", \"name\": ").append(jsonStr(nt.simplify(f.getName())))
+				.append(", \"namespace\": ").append(jsonStr(nsPath(f.getParentNamespace(), nt)))
+				.append(", \"thunk\": ").append(f.isThunk()).append("}");
+		}
+		sb.append("\n  ],\n  \"externals\": [\n");
+		first = true;
+		ghidra.program.model.symbol.ReferenceIterator it =
+			currentProgram.getReferenceManager().getExternalReferences();
+		while (it.hasNext()) {
+			ghidra.program.model.symbol.Reference r = it.next();
+			if (!(r instanceof ghidra.program.model.symbol.ExternalReference)) {
+				continue;
+			}
+			ghidra.program.model.symbol.ExternalLocation loc =
+				((ghidra.program.model.symbol.ExternalReference) r).getExternalLocation();
+			if (!first) {
+				sb.append(",\n");
+			}
+			first = false;
+			sb.append("    {\"addr\": ").append(r.getFromAddress().getOffset())
+				.append(", \"name\": ").append(jsonStr(nt.simplify(loc.getLabel()))).append("}");
+		}
+		sb.append("\n  ]\n}\n");
+		try (FileWriter w = new FileWriter(path)) {
+			w.write(sb.toString());
+		}
+		println("GenSample: wrote symbols to " + path);
+	}
+
+	private static String nsPath(ghidra.program.model.symbol.Namespace ns,
+			ghidra.program.model.symbol.NameTransformer nt) {
+		if (ns == null || ns.isGlobal()) {
+			return "";
+		}
+		String parent = nsPath(ns.getParentNamespace(), nt);
+		String name = nt.simplify(ns.getName());
+		return parent.isEmpty() ? name : parent + "::" + name;
 	}
 
 	private static String arg(String[] a, int i, String def) {

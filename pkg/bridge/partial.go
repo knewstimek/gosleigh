@@ -71,6 +71,9 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 
 	summary := summarizeSpaces(records, cfg.Entry.Space)
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, summary.uniqueBase, summary.constSpace)
+	if err := attachEnvironment(fd, cfg); err != nil {
+		return nil, err
+	}
 
 	// Same load-image read hook as Build so JumpBasic address emulation can read
 	// the section-mapped table entries at their virtual addresses.

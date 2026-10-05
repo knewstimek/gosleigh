@@ -49,6 +49,11 @@ type BuildConfig struct {
 	// a locked FuncProto decoded via FuncProto::decode/setPieces, consumed by
 	// ActionPrototypeTypes (coreaction.cc:4620-4715).
 	InjectedPrototype *InjectedPrototype
+
+	// HostScope is the analysis environment's symbol database (function and
+	// external-reference names). nil decompiles standalone, like the C++
+	// console with no program symbols.
+	HostScope pcode.HostScope
 }
 
 // InjectedProtoParam describes one register storage slot (a parameter or the
@@ -234,6 +239,9 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 
 	summary := summarizeSpaces(records, cfg.Entry.Space)
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, summary.uniqueBase, summary.constSpace)
+	if err := attachEnvironment(fd, cfg); err != nil {
+		return nil, err
+	}
 
 	// Install the load-image read hook so downstream jump-table address
 	// emulation (pcode.EmulateFunction.getLoadImageValue) can read section-mapped
@@ -469,6 +477,45 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	}
 
 	return result, nil
+}
+
+// attachEnvironment installs what the analysis environment knows before any
+// Varnode is created, so Varnode properties are set at creation as in C++: the
+// host symbol database and the cspec <global> scope ranges. Only <global>
+// ranges in the code space are resolved here (the register space is not known
+// until the function is translated); a register entry such as x86 MXCSR is a
+// known mismatch.
+// C++ parity: Architecture::addToGlobalScope (the global scope exists before
+// any function is decompiled).
+func attachEnvironment(fd *pcode.Funcdata, cfg BuildConfig) error {
+	fd.SetHostScope(cfg.HostScope)
+	if cfg.CspecPath == "" {
+		return nil
+	}
+	cs, err := pcode.ParseCspec(cfg.CspecPath)
+	if err != nil {
+		return fmt.Errorf("cspec parse %q: %w", cfg.CspecPath, err)
+	}
+	ram := cfg.Entry.Space
+	if ram == nil {
+		return nil
+	}
+	var ranges []pcode.GlobalRange
+	for _, r := range cs.GlobalRanges {
+		if r.Space != ram.Name {
+			continue
+		}
+		first, last := uint64(0), spaceHighest(ram)
+		if r.First != nil {
+			first = *r.First
+		}
+		if r.Last != nil {
+			last = *r.Last
+		}
+		ranges = append(ranges, pcode.GlobalRange{Space: ram, First: first, Last: last})
+	}
+	fd.SetGlobalRanges(ranges)
+	return nil
 }
 
 // applyInjectedPrototype attaches a locked FuncProto built from the injected
@@ -1546,4 +1593,13 @@ func hasHardTerminator(translation sla.InstructionTranslation) bool {
 		}
 	}
 	return false
+}
+
+// spaceHighest is the largest byte offset in the space.
+// C++ parity: AddrSpace::getHighest.
+func spaceHighest(spc *address.Space) uint64 {
+	if spc.AddrSize == 0 || spc.AddrSize >= 8 {
+		return ^uint64(0)
+	}
+	return (uint64(1) << (8 * uint(spc.AddrSize))) - 1
 }

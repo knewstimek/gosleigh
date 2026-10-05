@@ -42,8 +42,10 @@ import (
 	"runtime"
 	"time"
 
+	"gosleigh/pkg/address"
 	"gosleigh/pkg/bridge"
 	"gosleigh/pkg/loader"
+	"gosleigh/pkg/pcode"
 )
 
 // goldenEntry mirrors one function in a GenGoldens.java-produced golden JSON:
@@ -83,6 +85,7 @@ func main() {
 	outPath := flag.String("out", "", "output JSON path (default: stdout)")
 	maxInstr := flag.Int("max-instructions", 200, "max instructions per function")
 	pePath := flag.String("pe", "", "map this PE's sections at their linked VMAs and decompile each golden at its absolute entry (golden bytes are ignored)")
+	symbolsPath := flag.String("symbols", "", "host symbol table JSON (functions/externals, tools/realexe/GenSample.java) served as the HostScope")
 	index := flag.Int("index", -1, "decompile only the golden at this index (-1 = all); lets a driver isolate each function in its own process")
 	memLimitMB := flag.Uint64("mem-limit-mb", 0, "exit with status 3 once the Go heap exceeds this many MB (0 = no limit)")
 	flag.Parse()
@@ -124,13 +127,23 @@ func main() {
 		fns = fns[*index : *index+1]
 	}
 
+	var host pcode.HostScope
+	if *symbolsPath != "" {
+		h, err := loadHostSymbols(*symbolsPath)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "goldengap: %v\n", err)
+			os.Exit(1)
+		}
+		host = h
+	}
+
 	out := resultFile{Functions: make([]funcResult, 0, len(fns))}
 	for _, fn := range fns {
 		b := &loader.EngineBuilder{SLAPath: *slaPath, PspecPath: *pspecPath}
 		if sections != nil {
 			b.BaseAddr, b.Sections = uint64(fn.Entry), sections
 		}
-		out.Functions = append(out.Functions, decompileOne(fn, b, *cspecPath, *maxInstr))
+		out.Functions = append(out.Functions, decompileOne(fn, b, *cspecPath, *maxInstr, host))
 	}
 
 	enc, err := json.MarshalIndent(out, "", "  ")
@@ -147,6 +160,59 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, "goldengap: wrote %d functions to %s\n", len(out.Functions), *outPath)
+}
+
+// hostSymbols serves a dumped Ghidra program symbol table as the decompiler's
+// HostScope, the way DecompileCallback answers the C++ core's queries.
+type hostSymbols struct {
+	funcs map[uint64]string
+	exts  map[uint64]string
+}
+
+func loadHostSymbols(path string) (*hostSymbols, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read symbols: %w", err)
+	}
+	var f struct {
+		Functions []struct {
+			Entry     uint64 `json:"entry"`
+			Name      string `json:"name"`
+			Namespace string `json:"namespace"`
+		} `json:"functions"`
+		Externals []struct {
+			Addr uint64 `json:"addr"`
+			Name string `json:"name"`
+		} `json:"externals"`
+	}
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return nil, fmt.Errorf("parse symbols: %w", err)
+	}
+	h := &hostSymbols{funcs: make(map[uint64]string, len(f.Functions)), exts: make(map[uint64]string, len(f.Externals))}
+	for _, fn := range f.Functions {
+		name := fn.Name
+		// TODO known mismatch: C++ prints the namespace only when it is not
+		// the calling function's own (PrintC::pushSymbolScope, minimal
+		// strategy); this always qualifies.
+		if fn.Namespace != "" {
+			name = fn.Namespace + "::" + name
+		}
+		h.funcs[fn.Entry] = name
+	}
+	for _, e := range f.Externals {
+		h.exts[e.Addr] = e.Name
+	}
+	return h, nil
+}
+
+func (h *hostSymbols) QueryFunction(addr address.Address) (string, bool) {
+	n, ok := h.funcs[addr.Offset]
+	return n, ok
+}
+
+func (h *hostSymbols) QueryExternalRef(addr address.Address) (string, bool) {
+	n, ok := h.exts[addr.Offset]
+	return n, ok
 }
 
 // memWatchdog kills the process once the Go heap passes limit bytes. Real
@@ -169,7 +235,7 @@ func memWatchdog(limit uint64) {
 // golden function. The deferred recover matches that test's per-function
 // panic guard so one bad function does not abort the whole batch. When b has
 // no Sections, the golden body bytes are mapped at base 0 (isolated harness).
-func decompileOne(fn goldenEntry, b *loader.EngineBuilder, cspecPath string, maxInstr int) (res funcResult) {
+func decompileOne(fn goldenEntry, b *loader.EngineBuilder, cspecPath string, maxInstr int, host pcode.HostScope) (res funcResult) {
 	res.Name = fn.Name
 	defer func() {
 		if r := recover(); r != nil {
@@ -194,7 +260,7 @@ func decompileOne(fn goldenEntry, b *loader.EngineBuilder, cspecPath string, max
 
 	result, err := bridge.Build(engine, bridge.BuildConfig{
 		Name: fn.Name, Entry: base, MaxInstructions: maxInstr,
-		CspecPath: cspecPath, SymbolName: fn.Name,
+		CspecPath: cspecPath, SymbolName: fn.Name, HostScope: host,
 	})
 	if err != nil {
 		res.Error = fmt.Sprintf("BRIDGE-ERR: %v", err)

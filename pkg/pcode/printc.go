@@ -4068,7 +4068,7 @@ func (s *printCState) renderCall(op *PcodeOp, indirect bool) (ExprFragment, erro
 	if op.NumInput() == 0 {
 		return s.lang.CallExpr(s.lang.Atom("func")), nil
 	}
-	callee, err := s.renderCallTarget(op.Input(0), indirect)
+	callee, err := s.renderCallTarget(op, indirect)
 	if err != nil {
 		return ExprFragment{}, err
 	}
@@ -4083,9 +4083,32 @@ func (s *printCState) renderCall(op *PcodeOp, indirect bool) (ExprFragment, erro
 	return s.lang.CallExpr(callee, args...), nil
 }
 
-func (s *printCState) renderCallTarget(vn *Varnode, indirect bool) (ExprFragment, error) {
+// genericFunctionName names a callee the environment does not know: "func_"
+// plus the raw address, zero-padded to the space's address width.
+// C++ parity: printc.cc PrintC::genericFunctionName + AddrSpace::printRaw.
+func genericFunctionName(addr address.Address) string {
+	width := 2 * int(addr.Space.AddrSize)
+	if width <= 0 {
+		width = 8
+	}
+	return fmt.Sprintf("func_0x%0*x", width, addr.Offset)
+}
+
+func (s *printCState) renderCallTarget(op *PcodeOp, indirect bool) (ExprFragment, error) {
+	vn := op.Input(0)
 	if vn == nil {
 		return s.lang.Atom("func"), nil
+	}
+	// A direct call prints its callee's display name, or the generic name of
+	// its entry address when the environment knows no function there.
+	// C++ parity: printc.cc PrintC::opCall (fspec branch) + genericFunctionName.
+	if !indirect && s.fd != nil {
+		if fc := s.fd.callSpecsForOp(op); fc != nil && fc.GetEntryAddress().Space != nil {
+			if name := fc.GetName(); name != "" {
+				return s.lang.Atom(name), nil
+			}
+			return s.lang.Atom(genericFunctionName(fc.GetEntryAddress())), nil
+		}
 	}
 	if !indirect && vn.IsConstant() {
 		return s.lang.Atom(fmt.Sprintf("func_%x", vn.Offset())), nil

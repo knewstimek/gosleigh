@@ -14,6 +14,8 @@
 
 package pcode
 
+import "gosleigh/pkg/address"
+
 // FuncCallSpecs holds per-call prototype state.
 // C++ parity: fspec.hh FuncCallSpecs (partial)
 type FuncCallSpecs struct {
@@ -32,11 +34,30 @@ type FuncCallSpecs struct {
 	// stackPlaceholderSlot is the CALL input slot holding the stack-pointer
 	// placeholder LOAD, or -1. C++ parity: FuncCallSpecs::stackPlaceholderSlot.
 	stackPlaceholderSlot int
+	// name/entryAddress identify the callee of a direct call.
+	// C++ parity: FuncCallSpecs::name / entryaddress.
+	name         string
+	entryAddress address.Address
 }
 
-// C++ parity: Funcdata::getCallSpecs / FuncCallSpecs::FuncCallSpecs
+// HostScope is the analysis environment's symbol database, queried by the
+// decompiler core for facts it cannot derive from the function body. A nil
+// HostScope behaves like the standalone C++ core with no program loaded.
+// C++ parity: the ScopeGhidra global scope (queryFunction, data symbols).
+type HostScope interface {
+	// QueryFunction returns the display name of the function starting at addr.
+	QueryFunction(addr address.Address) (name string, ok bool)
+	// QueryExternalRef returns the name of the external function whose
+	// reference (e.g. an import address table slot) lives at addr.
+	// C++ parity: Scope::queryExternalRefFunction / ExternRefSymbol.
+	QueryExternalRef(addr address.Address) (name string, ok bool)
+}
+
+// C++ parity: FuncCallSpecs::FuncCallSpecs + FlowInfo::queryCall/setFuncdata:
+// a direct CALL records its entry address and takes the callee's display name
+// from the global scope.
 func newFuncCallSpecs(fd *Funcdata, op *PcodeOp) *FuncCallSpecs {
-	return &FuncCallSpecs{
+	fc := &FuncCallSpecs{
 		FuncProto:            *NewFuncProto(nil),
 		op:                   op,
 		fd:                   fd,
@@ -44,7 +65,26 @@ func newFuncCallSpecs(fd *Funcdata, op *PcodeOp) *FuncCallSpecs {
 		stackoffset:          spacebaseOffsetUnknown,
 		stackPlaceholderSlot: -1,
 	}
+	if op.Code() == CPUI_CALL && op.NumInput() > 0 && op.Input(0) != nil {
+		if in0 := op.Input(0); !in0.IsConstant() {
+			fc.entryAddress = in0.Addr()
+			if fd != nil && fd.hostScope != nil {
+				if name, ok := fd.hostScope.QueryFunction(fc.entryAddress); ok {
+					fc.name = name
+				}
+			}
+		}
+	}
+	return fc
 }
+
+// GetName returns the callee's display name ("" when unknown).
+// C++ parity: FuncCallSpecs::getName.
+func (fc *FuncCallSpecs) GetName() string { return fc.name }
+
+// GetEntryAddress returns the callee entry address of a direct call.
+// C++ parity: FuncCallSpecs::getEntryAddress.
+func (fc *FuncCallSpecs) GetEntryAddress() address.Address { return fc.entryAddress }
 
 // GetOp returns the CALL/CALLIND op this spec describes.
 // C++ parity: FuncCallSpecs::getOp.

@@ -1959,6 +1959,14 @@ func (a *ActionDeindirect) Apply(data *Funcdata) int {
 		}
 		// External reference branch.
 		if vn.IsPersist() && vn.HasFlags(VarnodeExternRef) {
+			// The host answers queryExternalRefFunction for the reference slot.
+			if h := data.HostScope(); h != nil {
+				if name, ok := h.QueryExternalRef(vn.Addr()); ok {
+					fc.deindirectExternal(data, name, vn.Addr())
+					a.count++
+					continue
+				}
+			}
 			if scope != nil {
 				if newfd := scope.QueryExternalRefFunction(vn.Addr()); newfd != nil {
 					fc.Deindirect(data, newfd)

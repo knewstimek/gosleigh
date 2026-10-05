@@ -189,6 +189,25 @@ func (fc *FuncCallSpecs) AbortSpacebaseRelative(data *Funcdata) {
 	}
 }
 
+// deindirectExternal turns a CALLIND through an external-reference slot into a
+// direct CALL of the named external function.
+// C++ parity: FuncCallSpecs::deindirect with the external Funcdata shell
+// returned by queryExternalRefFunction (entryaddress/name taken from it).
+// TODO known mismatch: the callee's prototype is not transferred (the host
+// supplies names only), so its parameters are still recovered from trials.
+func (fc *FuncCallSpecs) deindirectExternal(data *Funcdata, name string, ref address.Address) {
+	op := fc.op
+	if op == nil || op.Code() != CPUI_CALLIND {
+		return
+	}
+	fc.name = name
+	fc.entryAddress = ref
+	data.OpSetOpcode(op, CPUI_CALL)
+	if in0 := op.Input(0); in0 != nil {
+		data.OpSetInput(op, data.NewConstant(in0.Size(), 0), 0)
+	}
+}
+
 // Deindirect converts a CALLIND op into a direct CALL whose target is newfd.
 // C++ parity: FuncCallSpecs::deindirect
 // TODO known mismatch: the full C++ routine rewires data flow, updates the
