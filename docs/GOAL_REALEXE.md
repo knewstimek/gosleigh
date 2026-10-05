@@ -10,6 +10,9 @@
 | `320acb4` | 호스트 심볼(callee 이름) + merged 모델(thiscall/fastcall) | 14 | 0.485 |
 | `f98453d` | callee 프로토타입(extrapop/callee_pop), 반환 판정 | 14 | 0.506 |
 | `873ee2e` | 플래그 그룹 버그(incidental_copy), 미사용 call 출력 제거 | 17 | 0.522 |
+| `1aa498b` | 호스트 이름/로컬, flow override(꼬리 호출 CALL_RETURN) | 100 | 0.840 |
+| `e9cbade` | ram heritage + 전역 심볼(호스트 savefile), RestrictLocal, mergeIndirect | 103 | 0.846 |
+| `c87b817` | 헤더 주석(FID), C++ 이름 번호, noreturn halt, 문자열 리터럴, 크래시/행 수정 | 110 | 0.881 |
 
 ## 도구 (`tools/realexe/`)
 - `realexe.py analyze|sample|measure|capture`, `gaps.py`(불일치 유형 집계), `difffn.py`(인덱스별 diff).
@@ -26,10 +29,10 @@ Ghidra API로 Java와 같은 값을 덤프한다.
 
 | # | 갭 | 근거 | 비고 |
 |---|---|---|---|
-| H3 | 전역 데이터 심볼(DAT_, vftable, TEB ExceptionList) + ActionConstantPtr isPointer + 호스트 타입 | ScopeGhidra queryContainer, coreaction.cc isPointer | tracked 레지스터(`ActionConstbase` 스텁, FS_OFFSET)와 묶임 |
+| H4 | callee 잠긴 프로토타입(파라미터 저장소/타입, this, 반환형) 미반영 | coreaction.cc ActionFuncLink::funcLinkInput/Output, fspec.cc ProtoStoreSymbol | 캡처 `<function>` mapsym에 있음 |
+| C | callfixup 인젝션(security_check_cookie, EH_prolog) | flow.cc injectlist, pcodeinject | 호스트가 컴파일한 payload가 캡처 `<injectdebug>`에 있음 |
 | R | 반환/출력 복구 경로가 C++ 구조와 다름(ActionReturnRecovery 단일 패스, post-deadcode Go-local 판정) | coreaction.cc 1909 | 반환 void/int 오판 |
 | P2 | Go는 메인루프에서 입력 프로토타입을 조기 잠금(ApplyActiveParamModel) -- C++은 ActionInputPrototype에서 | coreaction.cc 4718 | thiscall 스택 파라미터 누락 일부 |
 | E | PrettyEmitter가 식을 평면 문자열로 받아 C++ 줄바꿈 지점을 못 냄 | prettyprint.cc | 긴 FID 이름 줄바꿈 |
-| L | 라이브러리 함수 주석(FID plate comment), 네임스페이스 최소 출력 규칙 | printc.cc pushSymbolScope | 호스트 주석 공급 필요 |
-| X | panic 2건(IsLoopIn, renameRecurse 블록 인덱스) | - | 미조사 |
-| - | known mismatch: markNotMapped, guardCallOverlappingInput, LoadGuard(ValueSet), heritage 전체 구조 | heritage.cc, varmap.cc | |
+| L | 네임스페이스 최소 출력 규칙(공통 접두 생략) | printc.cc pushSymbolScope | |
+| - | known mismatch: guardCallOverlappingInput, LoadGuard(ValueSet), RestrictLocal 호출 파라미터 부분, clearDeadVarnodes 스택/destroy, 공유 이름 카운터의 미출력 HV | heritage.cc, varmap.cc, coreaction.cc | |
