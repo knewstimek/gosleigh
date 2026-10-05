@@ -1351,6 +1351,9 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			// Collect so the INDIRECT output varnodes appear as written SSA definitions.
 			// C++ parity: heritage.cc Heritage::heritage -> guard -> guardCalls
 			h.guardCalls(info.Space, task.Addr.Offset, task.Size)
+			if task.NewAddresses() && h.fd.isPersistStorage(task.Addr, task.Size) {
+				h.guardReturnsPersist(task.Addr, task.Size)
+			}
 			reads, writes, inputs = h.Collect(task.Addr, task.Size)
 			if len(reads) == 0 && len(writes) == 0 && len(inputs) == 0 {
 				continue
@@ -1589,6 +1592,39 @@ func (h *Heritage) guardReturns(fl uint32, addr address.Address, size int32) {
 	// C++ persist branch omitted (see doc comment). fl is accepted to keep the
 	// signature aligned with Heritage::guardReturns.
 	_ = fl
+}
+
+// guardReturnsPersist keeps a persistent (global) range's value alive past the
+// end of the function: before every RETURN a COPY of the range into itself is
+// inserted, its output address-forced (so dead-code never removes the writes
+// reaching it) and the op marked return-copy. Renaming then connects the
+// COPY's input to the last write before the return.
+// C++ parity: heritage.cc Heritage::guardReturns, the Varnode::persist branch
+// (lines 1676-1691).
+func (h *Heritage) guardReturnsPersist(addr address.Address, size int32) {
+	if h.guarded == nil {
+		h.guarded = make(map[callGuardKey]bool)
+	}
+	for _, op := range h.fd.GetPcodeOpBank().AllOps() {
+		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN {
+			continue
+		}
+		key := callGuardKey{callOp: op, offset: addr.Offset, size: size, space: addr.Space}
+		if h.guarded[key] {
+			continue
+		}
+		h.guarded[key] = true
+		copyop := h.fd.NewOp(1, op.Addr())
+		vn := h.fd.NewVarnodeOut(size, addr, copyop)
+		vn.SetFlags(VarnodeAddrForce)
+		vn.SetActiveHeritage()
+		h.fd.OpSetOpcode(copyop, CPUI_COPY)
+		copyop.SetFlag(PcodeOpReturnCopy)
+		invn := h.fd.NewVarnode(size, addr)
+		invn.SetActiveHeritage()
+		h.fd.OpSetInput(copyop, invn, 0)
+		h.fd.OpInsertBefore(copyop, op)
+	}
 }
 
 // guardReturnsOverlapping handles the case where the heritaged range properly

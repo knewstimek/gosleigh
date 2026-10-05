@@ -93,6 +93,7 @@ public class GenSample extends GhidraScript {
 			sb.append("      \"proto\": ").append(protoJson(f)).append(",\n");
 			sb.append("      \"locals\": ").append(localsJson(f)).append(",\n");
 			sb.append("      \"flowoverrides\": ").append(flowOverridesJson(f)).append(",\n");
+			sb.append("      \"tracked\": ").append(trackedJson(f)).append(",\n");
 			sb.append("      \"bytes\": ").append(jsonStr(bodyHex(f))).append(",\n");
 			sb.append("      \"c\": ").append(jsonStr(decompile(iface, f))).append("\n");
 			sb.append("    }");
@@ -212,6 +213,30 @@ public class GenSample extends GhidraScript {
 			b.append(varJson(ps[i].getName(), ps[i].getDataType().getName(), ps[i].getVariableStorage().toString()));
 		}
 		return b.append("]}").toString();
+	}
+
+	// Tracked register values at the entry, exactly as DecompileCallback
+	// encodeTrackedPointSet sends them (non-context registers with a value).
+	private String trackedJson(Function f) {
+		ghidra.program.model.listing.ProgramContext ctx = currentProgram.getProgramContext();
+		StringBuilder b = new StringBuilder("[");
+		boolean first = true;
+		for (ghidra.program.model.lang.Register reg : ctx.getRegisters()) {
+			if (reg.isProcessorContext()) {
+				continue;
+			}
+			java.math.BigInteger val = ctx.getValue(reg, f.getEntryPoint(), false);
+			if (val == null) {
+				continue;
+			}
+			if (!first) {
+				b.append(", ");
+			}
+			first = false;
+			b.append("{\"reg\": ").append(jsonStr(reg.getName()))
+				.append(", \"val\": ").append(val.longValue()).append("}");
+		}
+		return b.append("]").toString();
 	}
 
 	// Instruction flow overrides in the function body (e.g. a tail JMP marked

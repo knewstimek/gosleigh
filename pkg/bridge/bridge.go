@@ -60,6 +60,11 @@ type BuildConfig struct {
 	// analysis marked CALL_RETURN.
 	FlowOverrides map[uint64]string
 
+	// TrackedRegs are register values known at the function entry (register
+	// name -> value): the pspec <tracked_set> and the host program context.
+	// C++ parity: ContextDatabase::getTrackedSet, consumed by ActionConstbase.
+	TrackedRegs map[string]uint64
+
 	// HostLocals are the host's name-locked stack symbols of this function
 	// (stack offset -> name), as Java sends them in the function's localdb.
 	HostLocals map[int64]string
@@ -489,6 +494,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// is consumed by ActionSpacebase + RuleLoadVarnode/RuleStoreVarnode during the
 	// run. Callers must supply a cspec for stack-frame recovery (see Decompile).
 	installModels(engine, result.CspecData, fd, cfg.EntryPoint)
+	installTrackedSet(engine, fd, cfg.TrackedRegs)
 
 	// Attach an opt-in locked prototype supplied by the analysis environment.
 	// Must run after SetDefaultModel so the locked FuncProto reuses the cspec
@@ -642,6 +648,37 @@ func applyInjectedPrototype(engine *sla.Engine, fd *pcode.Funcdata, spec *Inject
 // C++ parity: Architecture::defaultfp / PrototypeModel construction from cspec.
 func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdata, entryPoint bool) *pcode.ProtoModel {
 	return buildModel(engine, cspec, fd, entryPoint, nil)
+}
+
+// installTrackedSet resolves the tracked register values (name -> value) to
+// register storage, in register-name order for determinism.
+func installTrackedSet(engine *sla.Engine, fd *pcode.Funcdata, regs map[string]uint64) {
+	if len(regs) == 0 {
+		return
+	}
+	names := make([]string, 0, len(regs))
+	for n := range regs {
+		names = append(names, n)
+	}
+	sort.Strings(names)
+	xr := engine.XRefs()
+	var set []pcode.TrackedContext
+	for _, n := range names {
+		si, off, sz, ok := xr.RegisterByName(n)
+		if !ok {
+			continue
+		}
+		sp, _ := registerSpaceByIndex(fd, si)
+		if sp == nil {
+			continue
+		}
+		mask := uint64(^uint64(0))
+		if sz < 8 {
+			mask = (uint64(1) << (8 * uint(sz))) - 1
+		}
+		set = append(set, pcode.TrackedReg(pcode.VarnodeData{Space: sp, Offset: off, Size: uint32(sz)}, regs[n]&mask))
+	}
+	fd.SetTrackedSet(set)
 }
 
 // installModels attaches the architecture's prototype models to fd: the
@@ -1407,6 +1444,12 @@ func addInstructionOps(fd *pcode.Funcdata, block *pcode.BlockBasic, translation 
 		appendAliveOp(fd, block, op)
 
 		for slot, input := range raw.Inputs {
+			if slot == 0 && op.IsCodeRef() {
+				// C++ parity: PcodeEmitFd::dump -- a branch / call destination
+				// is a code reference annotation, not a read of memory.
+				fd.OpSetInput(op, fd.NewCodeRef(input.Address()), 0)
+				continue
+			}
 			vn := resolveInput(fd, input, defs)
 			if shouldMaterializeConstant(raw.OpCode, slot, vn) {
 				vn = materializeConstantInput(fd, block, raw.SeqNum.Address, vn)

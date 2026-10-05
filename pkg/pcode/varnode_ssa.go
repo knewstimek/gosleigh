@@ -278,7 +278,10 @@ func (vn *Varnode) IsDirectWrite() bool   { return vn.flags&VarnodeDirectWrite !
 func (vn *Varnode) IsIndirectOnly() bool  { return vn.flags&VarnodeIndirectOnly != 0 }
 func (vn *Varnode) IsUnaffected() bool     { return vn.flags&VarnodeUnaffected != 0 }
 func (vn *Varnode) IsIncidentalCopy() bool { return vn.flags&VarnodeIncidentalCopy != 0 }
-func (vn *Varnode) IsAutoLive() bool      { return vn.flags&VarnodeAutoLiveHold != 0 }
+// IsAutoLive: exempt from dead-code removal. C++ parity: Varnode::isAutoLive.
+func (vn *Varnode) IsAutoLive() bool {
+	return vn.flags&(VarnodeAddrForce|VarnodeAutoLiveHold) != 0
+}
 func (vn *Varnode) IsMapped() bool        { return vn.flags&VarnodeMapped != 0 }
 func (vn *Varnode) IsProtoPartial() bool  { return vn.flags&VarnodeProtoPartial != 0 }
 func (vn *Varnode) HasNoDescend() bool    { return len(vn.descend) == 0 }

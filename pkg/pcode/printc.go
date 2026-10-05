@@ -897,13 +897,10 @@ func (s *printCState) shouldInline(op *PcodeOp) bool {
 	switch op.Code() {
 	case CPUI_BRANCH, CPUI_CBRANCH, CPUI_BRANCHIND, CPUI_STORE, CPUI_RETURN, CPUI_MULTIEQUAL, CPUI_INDIRECT:
 		return false
-	case CPUI_CALL, CPUI_CALLIND, CPUI_CALLOTHER, CPUI_NEW:
-		// A call output is always explicit (ActionMarkExplicit::baseExplicit returns
-		// -1 for def->isCall(), coreaction.cc:3017), so its result is materialized as
-		// a named statement (uVar1 = call(...); ... return uVar1;) rather than inlined
-		// into the single consumer. C++ parity: baseExplicit isCall branch.
-		return false
 	default:
+		// A call output is explicit (ActionMarkExplicit::baseExplicit, isCall
+		// branch) except the implied unique ActionSetCasts::castOutput moves it
+		// to, which folds into its CAST: "puVar1 = (T *)FUN_x(...)".
 		return true
 	}
 }

@@ -1889,17 +1889,24 @@ func (a *ActionConstbase) Apply(data *Funcdata) int {
 		_ = startBlock
 	}
 
-	// Iterate the tracked-context set and emit one COPY per entry.
+	// Each tracked register value becomes a COPY of the constant at the very
+	// start of the entry block, so data-flow sees the register as known.
 	// C++ parity: coreaction.cc ActionConstbase::apply lines 693-705.
-	// TODO known mismatch: the op-insertion requires a *BlockBasic cast and
-	// BlockBasic::getStart() -- both present in C++ but not yet exposed by
-	// Gosleigh's BlockGraph. Until that lands the loop walks the (empty)
-	// tracked set without materialising ops.
-	for range constbaseTrackedSet(data) {
-		// Placeholder body: the real implementation would emit a newOp(1) +
-		// newVarnodeOut + COPY into the start BlockBasic. See C++ reference
-		// for the exact shape.
-		a.count++
+	bb := asBasic(startBlock)
+	if bb == nil {
+		return 0
+	}
+	start := data.BaseAddr()
+	if first := bb.FirstOp(); first != nil {
+		start = first.Addr()
+	}
+	for _, ctx := range constbaseTrackedSet(data) {
+		addr := address.Address{Space: ctx.Loc.Space, Offset: ctx.Loc.Offset}
+		op := data.NewOp(1, start)
+		data.NewVarnodeOut(int32(ctx.Loc.Size), addr, op)
+		data.OpSetOpcode(op, CPUI_COPY)
+		data.OpSetInput(op, data.NewConstant(int32(ctx.Loc.Size), ctx.Val), 0)
+		data.OpInsertBegin(op, bb)
 	}
 	return 0
 }
@@ -1915,6 +1922,9 @@ func constbaseInjectUponEntryID(_ *Funcdata) int {
 // function entry block. One is produced per TrackedContext in the arch
 // context set.
 // C++ parity: context.hh TrackedContext
+// TrackedContext is one register value known at the function entry.
+type TrackedContext = constbaseTrackedContext
+
 type constbaseTrackedContext struct {
 	Loc VarnodeData
 	Val uint64
@@ -1925,8 +1935,17 @@ type constbaseTrackedContext struct {
 // C++ parity: Architecture::context->getTrackedSet(data.getAddress())
 // TODO known mismatch: the context-tracking subsystem is not yet ported;
 // returns an empty slice so the outer loop iterates zero times.
-func constbaseTrackedSet(_ *Funcdata) []constbaseTrackedContext {
-	return nil
+func constbaseTrackedSet(data *Funcdata) []constbaseTrackedContext {
+	return data.trackedSet
+}
+
+// SetTrackedSet installs the register values known at the function entry.
+// C++ parity: ContextDatabase::getTrackedSet(fd address).
+func (fd *Funcdata) SetTrackedSet(set []constbaseTrackedContext) { fd.trackedSet = set }
+
+// TrackedReg builds one tracked-set entry.
+func TrackedReg(loc VarnodeData, val uint64) constbaseTrackedContext {
+	return constbaseTrackedContext{Loc: loc, Val: val}
 }
 
 // ActionDeindirect resolves CALLIND targets whose function pointer is a known

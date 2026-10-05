@@ -152,11 +152,17 @@ func (c *cloneBlockOps) patchInputs(inedge int) {
 	}
 }
 
-// NewCodeRef creates an annotation Varnode encoding a code address, used to
-// duplicate an annotation input during op cloning.
+// NewCodeRef creates an annotation Varnode encoding a code address: the
+// destination of a branch or call. It holds no value in the data-flow, so it
+// gets none of the storage properties a value at that address would (a
+// global's persist / mapped).
 // C++ parity: Funcdata::newCodeRef (funcdata_varnode.cc:222).
 func (fd *Funcdata) NewCodeRef(m address.Address) *Varnode {
-	vn := fd.NewVarnode(1, m)
+	vn := fd.vbank.Create(1, m)
 	vn.SetFlags(VarnodeAnnotation)
 	return vn
 }
+
+// IsCodeRef reports whether input 0 is a code reference (branch / call
+// destination). C++ parity: PcodeOp::isCodeRef.
+func (op *PcodeOp) IsCodeRef() bool { return op.flags&PcodeOpCodeRef != 0 }

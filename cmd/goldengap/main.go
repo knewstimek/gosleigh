@@ -66,6 +66,11 @@ type goldenEntry struct {
 		Offset int64  `json:"offset"`
 		Name   string `json:"name"`
 	} `json:"locals"`
+	// Tracked are the host's register values at the entry.
+	Tracked []struct {
+		Reg string `json:"reg"`
+		Val int64  `json:"val"`
+	} `json:"tracked"`
 	// FlowOverrides are the host's instruction flow overrides in the body.
 	FlowOverrides []struct {
 		Addr uint64 `json:"addr"`
@@ -101,6 +106,7 @@ func main() {
 	maxInstr := flag.Int("max-instructions", 200, "max instructions per function")
 	pePath := flag.String("pe", "", "map this PE's sections at their linked VMAs and decompile each golden at its absolute entry (golden bytes are ignored)")
 	symbolsPath := flag.String("symbols", "", "host symbol table JSON (functions/externals, tools/realexe/GenSample.java) served as the HostScope")
+	flag.StringVar(&captureDir, "host-captures", "", "directory of per-function decompiler savefiles (<entry %08x>.xml, tools/realexe capture): their global data symbols extend the HostScope")
 	index := flag.Int("index", -1, "decompile only the golden at this index (-1 = all); lets a driver isolate each function in its own process")
 	memLimitMB := flag.Uint64("mem-limit-mb", 0, "exit with status 3 once the Go heap exceeds this many MB (0 = no limit)")
 	flag.Parse()
@@ -295,8 +301,8 @@ func decompileOne(fn goldenEntry, b *loader.EngineBuilder, cspecPath string, max
 
 	result, err := bridge.Build(engine, bridge.BuildConfig{
 		Name: fn.Name, Entry: base, MaxInstructions: maxInstr,
-		CspecPath: cspecPath, SymbolName: displayName(fn), HostScope: host,
-		HostLocals: hostLocals(fn), FlowOverrides: flowOverrides(fn),
+		CspecPath: cspecPath, SymbolName: displayName(fn), HostScope: withCapture(host, fn, base.Space),
+		HostLocals: hostLocals(fn), FlowOverrides: flowOverrides(fn), TrackedRegs: trackedRegs(fn),
 	})
 	if err != nil {
 		res.Error = fmt.Sprintf("BRIDGE-ERR: %v", err)
@@ -326,6 +332,17 @@ func flowOverrides(fn goldenEntry) map[uint64]string {
 	m := make(map[uint64]string, len(fn.FlowOverrides))
 	for _, f := range fn.FlowOverrides {
 		m[f.Addr] = f.Type
+	}
+	return m
+}
+
+func trackedRegs(fn goldenEntry) map[string]uint64 {
+	if len(fn.Tracked) == 0 {
+		return nil
+	}
+	m := make(map[string]uint64, len(fn.Tracked))
+	for _, t := range fn.Tracked {
+		m[t.Reg] = uint64(t.Val)
 	}
 	return m
 }

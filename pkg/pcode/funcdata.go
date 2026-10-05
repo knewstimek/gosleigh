@@ -89,6 +89,8 @@ type Funcdata struct {
 	models map[string]*ProtoModel
 	// hostLocals are the host's name-locked stack symbol names by offset.
 	hostLocals map[uint64]string
+	// trackedSet are the register values known at entry (ActionConstbase).
+	trackedSet []constbaseTrackedContext
 
 	// jumpTables tracks all recovered JumpTable objects for this function.
 	// C++ parity: funcdata.hh Funcdata::jumpvec
@@ -970,6 +972,18 @@ func (fd *Funcdata) setVarnodeProperties(vn *Varnode) {
 		}
 		vn.SetFlags(fl)
 	}
+}
+
+// isPersistStorage reports whether the range carries the persist property:
+// global-scope storage not claimed by the local scope.
+// C++ parity: ScopeLocal::queryProperties as used by Heritage::guard.
+func (fd *Funcdata) isPersistStorage(addr address.Address, size int32) bool {
+	if sl := fd.scopeLocal; sl != nil {
+		if entry := sl.FindOverlap(addr, size); entry != nil {
+			return entry.AllFlags()&VarnodePersist != 0
+		}
+	}
+	return fd.inGlobalScope(addr, size)
 }
 
 // GlobalRange is one storage range of the global scope.

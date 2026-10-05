@@ -159,6 +159,13 @@ def do_sample(work, n, seed, max_bytes):
 	], os.path.join(work, "sample.log"), timeout=3 * 3600)
 	ok = rc == 0 and os.path.isfile(out)
 	print("sample: %s -- %s" % ("OK" if ok else "FAILED", out))
+	if ok:
+		# The host input of every sampled function as the C++ core receives it
+		# (symbols, types, prototypes, tracked registers, flow overrides):
+		# goldengap -host-captures serves it as the host scope.
+		with open(out, encoding="utf-8") as f:
+			entries = ["0x%x" % fn["entry"] for fn in json.load(f)["functions"]]
+		ok = do_capture(work, entries)
 	return ok
 
 
@@ -172,7 +179,7 @@ def do_capture(work, entries):
 		"-process", meta["program"], "-noanalysis", "-readOnly",
 		"-scriptPath", HERE,
 		"-postScript", "GenCapture.java", out] + entries,
-		os.path.join(work, "capture.log"), timeout=1800)
+		os.path.join(work, "capture.log"), timeout=3 * 3600)
 	print("capture: returncode %d -> %s" % (rc, out))
 	return rc == 0
 
@@ -224,6 +231,9 @@ def do_run(work, timeout_s, mem_mb, fresh):
 	symbols = os.path.join(work, "symbols.json")
 	if os.path.isfile(symbols):
 		args += ["-symbols", symbols] # the host symbol table (HostScope)
+	captures = os.path.join(work, "captures")
+	if os.path.isdir(captures):
+		args += ["-host-captures", captures] # per-function host data symbols
 	with open(jsonl, "a", encoding="utf-8") as f:
 		for i, fn in enumerate(fns):
 			if i in done:
