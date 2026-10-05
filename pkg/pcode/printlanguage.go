@@ -79,6 +79,9 @@ var associativeBinaryOps = map[string]bool{"*": true, "+": true, "&": true, "^":
 // PrintLanguage owns shared token and expression helpers used by concrete printers.
 type PrintLanguage struct {
 	emitter TokenEmitter
+	// noCommaSpace prints call arguments as "a,b" (Ghidra format).
+	// C++ parity: printc.cc PrintC::comma has spacing 0.
+	noCommaSpace bool
 }
 
 func NewPrintLanguage(emitter TokenEmitter) *PrintLanguage {
@@ -384,13 +387,20 @@ func (pl *PrintLanguage) PostfixExpr(expr ExprFragment, suffix string) ExprFragm
 	}
 }
 
+func (pl *PrintLanguage) argSep() string {
+	if pl.noCommaSpace {
+		return ","
+	}
+	return ", "
+}
+
 func (pl *PrintLanguage) CallExpr(callee ExprFragment, args ...ExprFragment) ExprFragment {
 	parts := make([]string, len(args))
 	for i, arg := range args {
 		parts[i] = arg.Text
 	}
 	return ExprFragment{
-		Text:       pl.ExprString(callee, ExprPrecPostfix, ExprPosLeft, ExprAssocLeft) + "(" + strings.Join(parts, ", ") + ")",
+		Text:       pl.ExprString(callee, ExprPrecPostfix, ExprPosLeft, ExprAssocLeft) + "(" + strings.Join(parts, pl.argSep()) + ")",
 		Precedence: ExprPrecPostfix,
 	}
 }

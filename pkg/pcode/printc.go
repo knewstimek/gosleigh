@@ -155,14 +155,16 @@ func newPrintCState(printer *PrintC, fd *Funcdata) *printCState {
 	// TextEmitter path (its sink). C++ parity: EmitPrettyPrint (prettyprint.cc).
 	emitter := NewPrettyEmitter(indentStep, ppMaxLineSizeDefault)
 	decls := NewCDeclRenderer()
+	lang := NewPrintLanguage(emitter)
 	if printer.ghidraFormat {
 		decls.noCommaSpace = true
+		lang.noCommaSpace = true
 	}
 	return &printCState{
 		printer:             printer,
 		fd:                  fd,
 		emitter:             emitter,
-		lang:                NewPrintLanguage(emitter),
+		lang:                lang,
 		decls:               decls,
 		names:               make(map[*Varnode]string),
 		inline:              make(map[*PcodeOp]bool),
