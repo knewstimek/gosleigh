@@ -358,8 +358,13 @@ func (op *PcodeOp) IsCommutative() bool      { return op.flags&PcodeOpCommutativ
 func (op *PcodeOp) IsIndirectCreation() bool { return op.flags&PcodeOpIndirectCreation != 0 }
 func (op *PcodeOp) IsIndirectSource() bool   { return op.flags&PcodeOpIndirectSource != 0 }
 func (op *PcodeOp) IsIndirectStore() bool    { return op.flags&PcodeOpIndirectStore != 0 }
-func (op *PcodeOp) IsIncidentalCopy() bool   { return op.flags&PcodeOpIncidentalCopy != 0 }
-func (op *PcodeOp) IsStoreUnmapped() bool    { return op.flags&PcodeOpStoreUnmapped != 0 }
+
+// IsIncidentalCopy reads the additional-flags word: PcodeOpIncidentalCopy
+// shares its bit value with the primary-flag PcodeOpNoCollapse, so testing
+// op.flags misreported every no-collapse op as an incidental copy.
+// C++ parity: op.hh PcodeOp::isIncidentalCopy (addlflags).
+func (op *PcodeOp) IsIncidentalCopy() bool { return op.addlFlags&PcodeOpIncidentalCopy != 0 }
+func (op *PcodeOp) IsStoreUnmapped() bool  { return op.addlFlags&PcodeOpStoreUnmapped != 0 }
 
 // IsFlowBreak returns true if this op breaks sequential flow
 // (branches, calls with noreturn, returns).

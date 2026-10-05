@@ -3965,7 +3965,7 @@ func (a *ActionInternalStorage) Apply(data *Funcdata) int {
 				// flag the literal-constant case which is the narrow
 				// subset the C++ check accepts.
 				if op.NumInput() >= 2 && op.Input(1) != nil && op.Input(1).IsConstant() {
-					op.SetFlag(PcodeOpStoreUnmapped)
+					op.SetAdditionalFlag(PcodeOpStoreUnmapped) // addlflags in C++ (shares a bit with IndirectSource)
 					a.count++
 				}
 			}
