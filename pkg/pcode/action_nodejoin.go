@@ -259,9 +259,12 @@ func (cj *ConditionalJoin) cutDownMultiequals(exit *BlockBasic, in1, in2 int) {
 				cj.data.OpSetOpcode(op, CPUI_COPY)
 				cj.data.OpInsertBegin(op, exit)
 			}
-		} else if op.Code() != CPUI_COPY {
-			break
 		}
+		// C++ stops at the first op that is neither MULTIEQUAL nor COPY,
+		// relying on MULTIEQUALs heading the block. RulePushMulti can leave
+		// one after a moved op, and a MULTIEQUAL skipped here keeps an input
+		// for an edge that no longer exists (later index panics), so every
+		// MULTIEQUAL of the block is cut down.
 	}
 }
 

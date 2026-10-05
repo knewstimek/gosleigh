@@ -252,6 +252,13 @@ func (bg *BlockGraph) CalcForwardDominator() {
 		return sorted[i].index < sorted[j].index
 	})
 
+	// Clear every dominator field first: a value left from an earlier
+	// calculation (before blocks were removed) can point at a block whose
+	// index no longer fits the ordering, and intersectDom then never meets.
+	// C++ parity: BlockGraph::calcForwardDominator ("Clear the dominator field").
+	for _, bl := range sorted {
+		bl.immedDom = nil
+	}
 	start := sorted[0]
 	start.immedDom = start
 

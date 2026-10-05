@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"strconv"
 	"runtime/debug"
 	"time"
 
@@ -113,6 +114,17 @@ func main() {
 
 	if *memLimitMB > 0 {
 		go memWatchdog(*memLimitMB << 20)
+	}
+	if v := os.Getenv("GOLDENGAP_STALL"); v != "" {
+		// Diagnostic: after v seconds dump every goroutine's stack and exit,
+		// to see where a non-converging decompilation spins.
+		secs, _ := strconv.Atoi(v)
+		go func() {
+			time.Sleep(time.Duration(secs) * time.Second)
+			buf := make([]byte, 1<<20)
+			os.Stderr.Write(buf[:runtime.Stack(buf, true)])
+			os.Exit(4)
+		}()
 	}
 
 	if *goldensPath == "" {
