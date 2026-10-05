@@ -1611,7 +1611,9 @@ func normalizedBaseType(base *Base, longSize int) Datatype {
 			}
 			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "longlong")
 		default:
-			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "int")
+			// Odd sizes are core types named by size: int3, int5, int16.
+			// C++ parity: the <coretypes> names (ghidra_arch / Java).
+			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, fmt.Sprintf("int%d", base.Size()))
 		}
 	case TYPE_UNKNOWN:
 		// Preserve TYPE_UNKNOWN as Ghidra's "undefined%d" type.
@@ -1642,7 +1644,7 @@ func normalizedBaseType(base *Base, longSize int) Datatype {
 			}
 			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "ulonglong")
 		default:
-			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "uint")
+			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, fmt.Sprintf("uint%d", base.Size()))
 		}
 	default:
 		return base
