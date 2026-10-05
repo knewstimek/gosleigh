@@ -330,6 +330,11 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			// No nameable representative -- skip (params, implied unique-only HVs).
 			continue
 		}
+		// A global variable is named by its global symbol (ActionMapGlobals),
+		// never from the local default-name counter.
+		if data.globalEntryOf(rep) != nil {
+			continue
+		}
 		// A HighVariable that still holds a live input Varnode sitting in a
 		// calling-convention argument register IS the formal parameter, however many
 		// re-definitions were merged into it, and takes the param_N name.

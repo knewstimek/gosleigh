@@ -737,8 +737,96 @@ func (m *Merge) MergeMarker() {
 		if !op.IsMarker() || op.IsIndirectCreation() {
 			continue
 		}
-		m.MergeOp(op)
+		if op.Code() == CPUI_INDIRECT {
+			m.mergeIndirect(op)
+		} else {
+			m.MergeOp(op)
+		}
 	}
+}
+
+// mergePair merges h2 into h1 unless their covers intersect.
+// C++ parity: Merge::merge.
+func (m *Merge) mergePair(h1, h2 *HighVariable) bool {
+	if h1 == h2 {
+		return true
+	}
+	if m.testCache.Intersection(h1, h2) {
+		return false
+	}
+	mergeHighVariables(h1, h2, m.testCache)
+	return true
+}
+
+// mergeIndirect forces the merge of an INDIRECT's input and output. An
+// address-forced output must hold the value at its address BEFORE the
+// effect op, so when the input cannot merge, a COPY of it is inserted right
+// before the INDIRECT (into the output's variable): for a global written
+// before a call this is the printed "ExceptionList = &local_10;".
+// C++ parity: merge.cc Merge::mergeIndirect.
+func (m *Merge) mergeIndirect(indop *PcodeOp) {
+	outvn := indop.Output()
+	if !outvn.IsAddrForce() {
+		m.MergeOp(indop)
+		return
+	}
+	invn0 := indop.Input(0)
+	if mergeTestRequired(outvn.High(), invn0.High()) && m.mergePair(invn0.High(), outvn.High()) {
+		return
+	}
+	if m.snipOutputInterference(indop) {
+		if mergeTestRequired(outvn.High(), invn0.High()) && m.mergePair(invn0.High(), outvn.High()) {
+			return
+		}
+	}
+	newop := m.allocateCopyTrim(invn0, indop.Addr())
+	m.fd.OpSetInput(indop, newop.Output(), 0)
+	m.fd.OpInsertBefore(newop, indop)
+	if !mergeTestRequired(outvn.High(), newop.Output().High()) || !m.mergePair(newop.Output().High(), outvn.High()) {
+		// C++ throws "Unable to merge address forced indirect"; the varnodes
+		// stay in separate variables here (known mismatch).
+		return
+	}
+}
+
+// snipOutputInterference snips reads of the INDIRECT output's variable by the
+// effect op itself (directly or through its other INDIRECTs): each is
+// redirected to a COPY made just before the reading op.
+// C++ parity: merge.cc Merge::snipOutputInterference + collectInputs.
+func (m *Merge) snipOutputInterference(indop *PcodeOp) bool {
+	op := indop.Input(1).GetIndirectCause()
+	high := indop.Output().High()
+	if op == nil || high == nil {
+		return false
+	}
+	type node struct {
+		op   *PcodeOp
+		slot int
+	}
+	var correctable []node
+	for cur := op; ; {
+		for i := 0; i < cur.NumInput(); i++ {
+			if vn := cur.Input(i); vn != nil && !vn.IsAnnotation() && vn.High() == high {
+				correctable = append(correctable, node{cur, i})
+			}
+		}
+		cur = cur.PreviousOp()
+		if cur == nil || cur.Code() != CPUI_INDIRECT {
+			break
+		}
+	}
+	if len(correctable) == 0 {
+		return false
+	}
+	// Every collected read is an instance of the one output variable, so a
+	// single COPY (placed before the first reader) serves them all.
+	first := correctable[0]
+	snip := m.allocateCopyTrim(first.op.Input(first.slot), first.op.Addr())
+	m.fd.OpInsertBefore(snip, first.op)
+	for _, c := range correctable {
+		m.fd.OpSetInput(c.op, snip.Output(), c.slot)
+	}
+	return true
 }
 
 // MergeAdjacent attempts speculative merges of op input/output pairs.

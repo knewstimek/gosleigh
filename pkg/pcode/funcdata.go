@@ -606,47 +606,70 @@ func (fd *Funcdata) CalcNZMask() {
 	}
 }
 
-// MapGlobals walks every persistent Varnode in the function and makes sure
-// each has an attached global SymbolEntry, creating one when none exists.
-//
-// We only implement the flat single-scope subset of Ghidra's mapGlobals:
-// there is no Scope tree to discoverScope() against, so every created entry
-// is dropped into the Funcdata's own ScopeLocal. This is correct for the
-// present Go callers, which exercise mapGlobals as a placeholder for future
-// globals tracking rather than full namespace resolution.
-// TODO: route newly discovered globals into a real global Scope once the
-// Scope tree / symbol table port lands (database.cc discoverScope path).
-// C++ parity: funcdata.hh Funcdata::mapGlobals
+// MapGlobals makes sure every persistent (global) storage range the function
+// touches has a symbol in the global scope: the host's symbol when it has one,
+// else a default-named one. Overlapping persistent Varnodes are grouped into
+// one range; the symbol type is the covering Varnode's high type when one
+// Varnode spans the whole range, else an undefined blob.
+// Each persistent Varnode is then linked to its entry (C++ does this later,
+// in Funcdata::linkSymbol, through the same scope query).
+// TODO known mismatch: the inconsistent-use warning and the symbols for
+// uncovered internal Varnodes (funcdata_varnode.cc:1730-1745) are not ported.
+// C++ parity: funcdata_varnode.cc Funcdata::mapGlobals.
 func (fd *Funcdata) MapGlobals() {
-	if fd == nil || fd.scopeLocal == nil {
+	if fd == nil {
 		return
 	}
-	scope := fd.scopeLocal
-	seen := make(map[address.Address]bool)
-	for _, vn := range fd.vbank.AllVarnodes() {
-		if vn == nil || vn.IsFree() {
+	all := fd.vbank.AllVarnodes()
+	for i := 0; i < len(all); {
+		vn := all[i]
+		i++
+		if vn == nil || vn.IsFree() || !vn.IsPersist() || vn.IsAnnotation() {
 			continue
 		}
-		if !vn.IsPersist() {
+		if fd.globalScope.EntryFor(vn) != nil {
 			continue
 		}
-		if scope.EntryForVarnode(vn) != nil {
-			continue
-		}
+		group := []*Varnode{vn}
+		maxvn := vn
 		addr := vn.Addr()
-		if seen[addr] {
-			continue
+		end := addr.Offset + uint64(vn.Size())
+		for i < len(all) {
+			w := all[i]
+			if w == nil || !w.IsPersist() || w.Space() != addr.Space || w.Offset() >= end {
+				break
+			}
+			if !w.IsFree() && !w.IsAnnotation() {
+				group = append(group, w)
+			}
+			if e := w.Offset() + uint64(w.Size()); e > end {
+				end = e
+			}
+			if w.Size() > maxvn.Size() {
+				maxvn = w
+			}
+			i++
 		}
-		seen[addr] = true
-		// Prefer an existing overlapping entry if one exists; otherwise
-		// manufacture a fresh default-named symbol at the Varnode address.
-		entry := scope.QueryContainer(addr, vn.Size(), address.Address{})
+		var ct Datatype
+		if maxvn.Offset() == addr.Offset && addr.Offset+uint64(maxvn.Size()) == end {
+			if hv := maxvn.High(); hv != nil && hv.Type() != nil {
+				ct = hv.Type()
+			} else {
+				ct = maxvn.Type()
+			}
+		}
+		if ct == nil || ct.Size() != int32(end-addr.Offset) {
+			ct = sharedTypeFactory.GetBase(int32(end-addr.Offset), TYPE_UNKNOWN, "")
+		}
+		entry := fd.resolveGlobal(addr)
 		if entry == nil {
-			name := localHexName(addr.Offset)
-			dt := sharedTypeFactory.GetBase(vn.Size(), TYPE_UNKNOWN, "")
-			entry = scope.AddSymbol(name, dt, addr, vn.Size())
+			entry = fd.globalScope.AddSymbol(defaultGlobalName(addr, ct), ct, addr, ct.Size(), 0)
 		}
-		scope.AttachEntryToVarnode(vn, entry)
+		for _, g := range group {
+			if e := fd.resolveGlobal(g.Addr()); e != nil {
+				fd.globalScope.Attach(g, e)
+			}
+		}
 	}
 }
 
@@ -974,16 +997,20 @@ func (fd *Funcdata) setVarnodeProperties(vn *Varnode) {
 	}
 }
 
-// isPersistStorage reports whether the range carries the persist property:
-// global-scope storage not claimed by the local scope.
-// C++ parity: ScopeLocal::queryProperties as used by Heritage::guard.
-func (fd *Funcdata) isPersistStorage(addr address.Address, size int32) bool {
+// queryPropertyFlags returns the Varnode properties of a storage range: the
+// local symbol's flags when the local scope holds one, else mapped|addrtied|
+// persist for global-scope storage, else none.
+// C++ parity: Scope::queryProperties as used by Heritage::guard.
+func (fd *Funcdata) queryPropertyFlags(addr address.Address, size int32) uint32 {
 	if sl := fd.scopeLocal; sl != nil {
 		if entry := sl.FindOverlap(addr, size); entry != nil {
-			return entry.AllFlags()&VarnodePersist != 0
+			return entry.AllFlags()
 		}
 	}
-	return fd.inGlobalScope(addr, size)
+	if fd.inGlobalScope(addr, size) {
+		return VarnodeMapped | VarnodeAddrTied | VarnodePersist
+	}
+	return 0
 }
 
 // GlobalRange is one storage range of the global scope.
@@ -1048,7 +1075,19 @@ func (fd *Funcdata) NewUnique(size int32) *Varnode {
 // SetInputVarnode promotes a free Varnode to SSA function input.
 // C++ parity: Funcdata::setInputVarnode
 func (fd *Funcdata) SetInputVarnode(vn *Varnode) *Varnode {
+	if vn.IsInput() {
+		return vn
+	}
 	fd.vbank.SetInput(vn)
+	fd.setVarnodeProperties(vn)
+	// A register the convention preserves holds the caller's value for the
+	// whole function. C++ parity: Funcdata::setInputVarnode (effect lookup).
+	switch fd.funcProto.HasEffect(vn.Addr(), vn.Size()) {
+	case EffectUnaffected:
+		vn.SetFlags(VarnodeUnaffected)
+	case EffectReturnAddress:
+		vn.SetFlags(VarnodeUnaffected | VarnodeReturnAddress)
+	}
 	return vn
 }
 

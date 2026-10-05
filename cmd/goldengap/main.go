@@ -183,8 +183,11 @@ func main() {
 	fmt.Fprintf(os.Stderr, "goldengap: wrote %d functions to %s\n", len(out.Functions), *outPath)
 }
 
+// hostLocals returns nil when the golden carries no localdb at all, and a
+// (possibly empty) map when it does: the host then names every frame slot it
+// knows, and the core names the rest.
 func hostLocals(fn goldenEntry) map[int64]string {
-	if len(fn.Locals) == 0 {
+	if fn.Locals == nil {
 		return nil
 	}
 	m := make(map[int64]string, len(fn.Locals))

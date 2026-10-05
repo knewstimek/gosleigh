@@ -1748,49 +1748,19 @@ func (a *ActionConstantPtr) Apply(data *Funcdata) int {
 		// the flag must be sticky whether or not the lookup succeeds.
 		vn.SetAddlFlags(VarnodePtrCheck)
 
-		global := data.GetGlobalScope()
-		if scope == nil && global == nil {
-			continue
-		}
-		// Look up the constant as an address in the default data space. In
-		// C++ selectInferSpace picks the space using the op context; for the
-		// partial port we search every processor-kind space the varnode's
-		// bank knows about, narrowest-match wins.
-		// C++ parity: Scope::queryContainer via ScopeLocal::getParent. The C++
-		// path queries only the parent (global) scope; the global scope here is
-		// empty unless the loader/bridge injects environment symbols, so it is
-		// tried first and the pre-existing local-scope query is kept as a
-		// fallback to preserve behavior when nothing is injected.
 		hit := false
 		for _, sp := range candidatePointerSpaces(data) {
-			probe := address.Address{Space: sp, Offset: vn.Offset()}
-			var entry *SymbolEntry
-			if global != nil {
-				entry = global.QueryContainer(probe, 1, address.Address{})
-			}
-			if entry == nil && scope != nil {
-				entry = scope.QueryContainer(probe, 1, address.Address{})
-			}
+			entry, rampoint := constPtrIsPointer(data, sp, vn, op, slot, scope)
 			if entry == nil {
 				continue
 			}
-			dt := entry.GetSizedType(probe, vn.Size())
-			if dt == nil && entry.Symbol() != nil {
-				dt = entry.Symbol().Type()
-			}
-			if dt != nil {
+			if dt := entry.GetSizedType(rampoint, vn.Size()); dt != nil {
 				SetVarnodeType(vn, dt)
-				// Rewrite the op into the PTRSUB(spacebase, ...) chain
-				// before the canonical slot-swap below. After the rewrite
-				// op.Input(slot) no longer points at vn, so the swap-input
-				// step is a structural pass-through but we keep it for
-				// C++ parity (and so the slot index stays consistent if
-				// future passes re-enter the loop).
-				// C++ parity: coreaction.cc ActionConstantPtr::apply L1211.
-				data.SpacebaseConstant(op, slot, entry.Symbol(), entry.Addr(), probe, vn.Offset(), vn.Size())
-				a.count++
-				hit = true
 			}
+			// C++ parity: coreaction.cc ActionConstantPtr::apply L1211.
+			data.SpacebaseConstant(op, slot, entry.Symbol(), entry.Addr(), rampoint, vn.Offset(), vn.Size())
+			a.count++
+			hit = true
 			break
 		}
 		// C++ parity: coreaction.cc ActionConstantPtr::apply L1212-1213 --
@@ -3613,13 +3583,32 @@ func (a *ActionRestrictLocal) Apply(data *Funcdata) int {
 		// stays here so the driver fires once those helpers exist.
 		_ = fc
 	}
-	// Sub-pass 2: saved-register storage from effect records.
-	// C++ parity: ActionRestrictLocal::apply (effect record loop).
-	if data.GetFuncProto() != nil {
-		// TODO known mismatch: FuncProto::effectBegin / effectEnd and
-		// EffectRecord::killedbycall are absent; saved-register sweep
-		// is currently a no-op (see funcproto.go).
-		_ = data.GetFuncProto()
+	// Sub-pass 2: the stack slots where saved (unaffected, reload,
+	// return-address) registers are spilled are not variables.
+	// C++ parity: ActionRestrictLocal::apply (effect record loop) +
+	// ScopeLocal::isUnaffectedStorage (the slot is in the scope's space).
+	fp := data.GetFuncProto()
+	if fp == nil || fp.Model() == nil {
+		return 0
+	}
+	for _, eff := range fp.Model().Effects {
+		if eff.Type == EffectKilledByCall {
+			continue
+		}
+		vn := data.FindVarnodeInput(eff.Size, eff.Addr)
+		if vn == nil || !vn.IsUnaffected() {
+			continue
+		}
+		for _, op := range vn.DescendIter() {
+			if op.Code() != CPUI_COPY {
+				continue
+			}
+			out := op.Output()
+			if out == nil || out.Space() != sl.SpaceID() {
+				continue
+			}
+			sl.MarkNotMapped(out.Space(), out.Offset(), out.Size(), false)
+		}
 	}
 	return 0
 }

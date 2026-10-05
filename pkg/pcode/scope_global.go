@@ -14,7 +14,12 @@
 
 package pcode
 
-import "gosleigh/pkg/address"
+import (
+	"fmt"
+	"strings"
+
+	"gosleigh/pkg/address"
+)
 
 // GlobalScope is the minimal stand-in for the parent (global) Scope that a
 // ScopeLocal defers to. Ghidra models a full Database of nested Scopes; the Go
@@ -32,6 +37,109 @@ import "gosleigh/pkg/address"
 // global-scope role).
 type GlobalScope struct {
 	entries []*SymbolEntry
+	// vnMap links mapped global Varnodes to their entry (Varnode::mapentry).
+	vnMap map[*Varnode]*SymbolEntry
+}
+
+// Attach links vn to entry. C++ parity: Varnode::setSymbolEntry.
+func (g *GlobalScope) Attach(vn *Varnode, entry *SymbolEntry) {
+	if g.vnMap == nil {
+		g.vnMap = make(map[*Varnode]*SymbolEntry)
+	}
+	g.vnMap[vn] = entry
+}
+
+// EntryFor returns the entry vn is linked to, or nil.
+func (g *GlobalScope) EntryFor(vn *Varnode) *SymbolEntry {
+	if g == nil {
+		return nil
+	}
+	return g.vnMap[vn]
+}
+
+// globalSymbolName is how a global symbol is referenced from the current
+// function: qualified by its namespace unless that is the function's own.
+// C++ parity: PrintC::pushSymbolScope (minimal namespace strategy).
+// TODO known mismatch: only the exact-namespace case is elided; C++ also
+// elides a common prefix with the function's scope.
+func (s *printCState) globalSymbolName(sym *Symbol) string {
+	ns := sym.Namespace()
+	if ns == "" {
+		return sym.Name()
+	}
+	if fn := s.fd.Name(); strings.HasPrefix(fn, ns+"::") && !strings.Contains(fn[len(ns)+2:], "::") {
+		return sym.Name()
+	}
+	return ns + "::" + sym.Name()
+}
+
+// globalEntryOf returns the global symbol entry a Varnode is linked to. A
+// persistent Varnode created after ActionMapGlobals (rule rewrites) is linked
+// on demand by address, as Funcdata::linkSymbol does in ActionNameVars.
+func (fd *Funcdata) globalEntryOf(vn *Varnode) *SymbolEntry {
+	gs := fd.globalScope
+	if e := gs.EntryFor(vn); e != nil {
+		return e
+	}
+	if gs == nil || vn.IsAnnotation() {
+		return nil
+	}
+	if !vn.IsPersist() {
+		// A temporary merged into a global's variable (a mergeIndirect COPY)
+		// is that global. C++ parity: HighVariable::getSymbol.
+		if hv := vn.High(); hv != nil {
+			for _, w := range hv.Instances() {
+				if e := gs.EntryFor(w); e != nil {
+					return e
+				}
+			}
+		}
+		return nil
+	}
+	e := gs.QueryContainer(vn.Addr(), vn.Size(), address.Address{})
+	if e != nil {
+		gs.Attach(vn, e)
+	}
+	return e
+}
+
+// defaultGlobalName names a persistent location that has no symbol.
+// C++ parity: ScopeInternal::buildVariableName, Varnode::persist branch
+// (a register name if the location is one is not needed for ram).
+func defaultGlobalName(addr address.Address, ct Datatype) string {
+	sp := addr.Space.Name
+	if sp != "" {
+		sp = strings.ToUpper(sp[:1]) + sp[1:]
+	}
+	return fmt.Sprintf("%s%s%0*x", datatypeNameBase(ct), sp, 2*addr.Space.AddrSize, addr.Offset)
+}
+
+// resolveGlobal returns the global symbol entry covering addr, asking the
+// host for it the first time (ScopeGhidra queries Java on a cache miss).
+// Code labels are not storage and never back a variable.
+func (fd *Funcdata) resolveGlobal(addr address.Address) *SymbolEntry {
+	if fd.globalScope == nil {
+		fd.globalScope = NewGlobalScope()
+	}
+	gs := fd.globalScope
+	if e := gs.QueryContainer(addr, 1, address.Address{}); e != nil {
+		return e
+	}
+	hs, ok := fd.hostScope.(HostDataScope)
+	if !ok {
+		return nil
+	}
+	hd, ok := hs.QueryData(addr)
+	if !ok || hd.Label {
+		return nil
+	}
+	dt := hd.Type
+	if dt == nil {
+		dt = sharedTypeFactory.GetBase(hd.Size, TYPE_UNKNOWN, "")
+	}
+	e := gs.AddSymbol(hd.Name, dt, hd.Addr, hd.Size, VarnodeTypeLock|VarnodeNameLock)
+	e.Symbol().namespace = hd.Namespace
+	return e
 }
 
 // NewGlobalScope constructs an empty global scope.

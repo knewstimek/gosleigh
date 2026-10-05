@@ -516,7 +516,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 // any function is decompiled).
 func attachEnvironment(fd *pcode.Funcdata, cfg BuildConfig) error {
 	fd.SetHostScope(cfg.HostScope)
-	if len(cfg.HostLocals) > 0 {
+	if cfg.HostLocals != nil {
 		// Stack offsets are stored wrapped to the stack space width (the
 		// pointer size of the entry space).
 		mask := spaceHighest(cfg.Entry.Space)
@@ -1282,7 +1282,7 @@ func (s *spaceSummary) observe(vn *pcode.VarnodeData) {
 }
 
 func (s *spaceSummary) collectHeritageSpace(space *address.Space, entrySpace *address.Space, seen map[*address.Space]struct{}) {
-	if space == nil || space == entrySpace {
+	if space == nil {
 		return
 	}
 	switch space.Kind {

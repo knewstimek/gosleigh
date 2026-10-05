@@ -303,6 +303,13 @@ func (s *printCState) collectSymbols() {
 			if vn == nil || vn.IsConstant() || vn.IsAnnotation() {
 				continue
 			}
+			// A global variable prints by its global symbol name and is never
+			// declared in the function body (only local-scope symbols are,
+			// PrintC::emitScopeVarDecls).
+			if e := s.fd.globalEntryOf(vn); e != nil {
+				s.names[vn] = s.globalSymbolName(e.Symbol())
+				continue
+			}
 			// Irregular input register: a live-on-entry argument register that was
 			// read but not recovered as a parameter (entry-point functions under the
 			// stack-based processEntry convention). Ghidra names these in_<regname>
@@ -1222,6 +1229,11 @@ func (s *printCState) emitLocalDeclarations() bool {
 		// An EXPLICIT unique (e.g. the loop-head snapshot iVar1 = COPY(param)) is a
 		// real printed variable and must be declared like any other local.
 		if vn.Space() != nil && vn.Space().IsUnique() && !vn.IsExplicit() {
+			continue
+		}
+		// Globals are never declared in the body (a representative swap can
+		// carry a global Varnode into s.locals).
+		if s.fd.globalEntryOf(vn) != nil {
 			continue
 		}
 		name := s.nameOf(vn)
@@ -4229,6 +4241,13 @@ func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode) (ExprFragm
 		}
 	}
 	if entry == nil || entry.Symbol() == nil {
+		// A location with no symbol (e.g. a saved-register slot the scope
+		// does not map) prints as its raw address: "&stack0xfffffffc".
+		// C++ parity: PrintC::opPtrsub symbol==null -> pushUnnamedLocation.
+		if sl := s.fd.GetScopeLocal(); sl != nil && sl.SpaceID() == spc {
+			raw := fmt.Sprintf("%s0x%0*x", spc.Name, 2*spc.AddrSize, off.Offset())
+			return s.lang.UnaryExpr("&", cPrecUnary, s.lang.Atom(raw)), true
+		}
 		return ExprFragment{}, false
 	}
 	sym := entry.Symbol()
@@ -4237,7 +4256,7 @@ func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode) (ExprFragm
 	if off.Offset() != entry.Addr().Offset {
 		return ExprFragment{}, false
 	}
-	name := s.lang.Atom(sym.Name())
+	name := s.lang.Atom(s.globalSymbolName(sym))
 	// Drop the '&' when the symbol is a code or array type (its name already
 	// denotes the address). C++ parity: opPtrsub sets valueon for TYPE_CODE /
 	// TYPE_ARRAY.
@@ -4517,6 +4536,10 @@ func (s *printCState) blockTerminates(bl *FlowBlock) bool {
 func (s *printCState) nameOf(vn *Varnode) string {
 	if vn == nil {
 		return "0"
+	}
+	// A global's name is its symbol's; no local naming pass may override it.
+	if e := s.fd.globalEntryOf(vn); e != nil {
+		return s.globalSymbolName(e.Symbol())
 	}
 	if name, ok := s.names[vn]; ok {
 		return name

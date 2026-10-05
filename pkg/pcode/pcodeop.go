@@ -433,13 +433,29 @@ func (op *PcodeOp) InsertInput(slot int) {
 
 func (op *PcodeOp) SetParent(p *BlockBasic) { op.parent = p }
 
-// NextOp returns the next op in the basic block.
-// Stub: requires BlockBasic iteration (WU4).
-func (op *PcodeOp) NextOp() *PcodeOp { return nil }
+// NextOp returns the next op in the op's basic block, or nil.
+// C++ parity: PcodeOp::nextOp (within the parent block).
+func (op *PcodeOp) NextOp() *PcodeOp { return op.blockNeighbor(1) }
 
-// PreviousOp returns the previous op in the basic block.
-// Stub: requires BlockBasic iteration (WU4).
-func (op *PcodeOp) PreviousOp() *PcodeOp { return nil }
+// PreviousOp returns the previous op in the op's basic block, or nil.
+// C++ parity: PcodeOp::previousOp (within the parent block).
+func (op *PcodeOp) PreviousOp() *PcodeOp { return op.blockNeighbor(-1) }
+
+func (op *PcodeOp) blockNeighbor(d int) *PcodeOp {
+	if op.parent == nil {
+		return nil
+	}
+	ops := op.parent.opSlice()
+	for i, o := range ops {
+		if o == op {
+			if j := i + d; j >= 0 && j < len(ops) {
+				return ops[j]
+			}
+			return nil
+		}
+	}
+	return nil
+}
 
 // String returns a debug representation of this op.
 func (op *PcodeOp) String() string {

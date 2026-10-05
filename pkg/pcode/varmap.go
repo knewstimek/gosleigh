@@ -310,6 +310,15 @@ func (sl *ScopeLocal) createOpenEntries(fd *Funcdata, fixedStarts []int64) {
 		return
 	}
 	hints := sl.gatherOpen(fd)
+	// A hint in a range removed by MarkNotMapped creates no symbol.
+	// C++ parity: MapState::addRange only records hints inside the scope range.
+	kept := hints[:0]
+	for _, h := range hints {
+		if !sl.isNotMapped(h.start, 1) {
+			kept = append(kept, h)
+		}
+	}
+	hints = kept
 	if len(hints) == 0 {
 		return
 	}
@@ -504,7 +513,9 @@ func datatypeNameBase(dt Datatype) string {
 	case *Array:
 		return "a" + datatypeNameBase(typed.Element())
 	}
-	name := dt.Name()
+	// Every core type has a name; an unnamed Gosleigh base type takes the
+	// name it prints with (undefined1 -> 'u').
+	name := baseTypeName(dt)
 	if name == "" {
 		return ""
 	}

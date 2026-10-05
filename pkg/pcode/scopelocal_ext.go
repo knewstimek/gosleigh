@@ -81,6 +81,9 @@ type scopeLocalExt struct {
 	stackGrows  bool                          // True if stack grows toward lower offsets
 	rangeLocked bool                          // True if the mapped address range is locked
 	hostLocals  map[uint64]string             // Host name-locked stack symbols by offset
+	// notMapped are the [first,last] stack offset ranges removed from the
+	// scope's owned range (saved registers, call parameter areas).
+	notMapped [][2]uint64
 }
 
 // scopeLocalExtMap binds ScopeLocal pointers to their extended state.
@@ -312,7 +315,9 @@ func (sl *ScopeLocal) InScope(addr address.Address, size int32, usepoint address
 	if ext.stackSpace == nil {
 		return false
 	}
-	return addr.Space == ext.stackSpace
+	// The scope owns its whole space except ranges removed by MarkNotMapped.
+	// C++ parity: Scope::inScope over the scope's rangetree.
+	return addr.Space == ext.stackSpace && !sl.isNotMapped(addr.Offset, size)
 }
 
 // IsUnmappedUnaliased reports whether a stack Varnode that no SymbolEntry
@@ -577,6 +582,11 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 		if !isStackSpace(vn, sl.model) {
 			continue
 		}
+		// A range removed from the scope (MarkNotMapped) gets no symbol.
+		// C++ parity: MapState only gathers hints inside the scope's range.
+		if sl.isNotMapped(vn.Offset(), vn.Size()) {
+			continue
+		}
 		slots[slot{vn.Addr(), vn.Size()}] = true
 	}
 	// Sort the slot list for deterministic output.
@@ -771,14 +781,18 @@ func (sl *ScopeLocal) buildVariableName(addr address.Address, pc address.Address
 	if n, ok := sl.ext().hostLocals[addr.Offset]; ok && n != "" {
 		return n
 	}
-	if ct != nil && ct.Metatype() == TYPE_ARRAY {
+	name := ""
+	if ct == nil || ct.Metatype() != TYPE_ARRAY {
+		name = sl.stackLocalName(addr.Offset)
+	}
+	if name == "" {
 		growsNegative := true
 		if e := sl.ext(); e != nil {
 			growsNegative = e.stackGrows
 		}
-		return coreStackName(addr.Space, addr.Offset, growsNegative, ct)
+		name = coreStackName(addr.Space, addr.Offset, growsNegative, ct)
 	}
-	return sl.stackLocalName(addr.Offset)
+	return name
 }
 
 // containsRange reports whether the [e.first, e.last] range wholly contains

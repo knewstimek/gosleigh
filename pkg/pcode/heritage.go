@@ -80,8 +80,7 @@ func (h *Heritage) WithProtoModel(pm *ProtoModel) *Heritage {
 //
 // C++ parity: heritage.cc Heritage::guardCalls (1443-1527). Not ported:
 // guardCallOverlappingInput / tryOutputOverlapGuard / tryOutputStackGuard
-// (ranges that properly contain a parameter or return slot), the addrtied
-// holdind flag (fl from ScopeLocal::queryProperties), isAutoKilledByCall.
+// (ranges that properly contain a parameter or return slot), isAutoKilledByCall.
 func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 	if h.proto == nil || sp == nil {
 		return
@@ -90,6 +89,7 @@ func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 		h.guarded = make(map[callGuardKey]bool)
 	}
 	addr := address.Address{Space: sp, Offset: offset}
+	holdind := h.fd.queryPropertyFlags(addr, size)&VarnodeAddrTied != 0
 	for i := 0; i < h.fd.NumCalls(); i++ {
 		fc := h.fd.GetCallSpecs(i)
 		if fc == nil || fc.op == nil || fc.op.IsDead() {
@@ -143,6 +143,11 @@ func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 		switch effecttype {
 		case EffectUnknown, EffectReturnAddress:
 			indop := h.fd.NewIndirectOp(op, sp, offset, size)
+			// holdind: an address-tied location's value at the call must be
+			// kept -- the callee may read it.
+			if holdind {
+				indop.Output().SetFlags(VarnodeAddrForce)
+			}
 			if effecttype == EffectReturnAddress {
 				indop.Output().SetFlags(VarnodeReturnAddress)
 			}
@@ -432,11 +437,14 @@ func (h *Heritage) Collect(addr address.Address, size int32) (reads, writes, inp
 		if vn.HasAddlFlags(VarnodeWriteMask) {
 			continue
 		}
+		// An annotation (code reference) is heritage-known and carries no value.
+		// C++ parity: heritage.cc Heritage::collect -- reads are the free
+		// Varnodes that are !isHeritageKnown() && !hasNoDescend().
 		if vn.IsInput() {
 			inputs = append(inputs, vn)
 		} else if vn.IsWritten() {
 			writes = append(writes, vn)
-		} else {
+		} else if !vn.IsAnnotation() {
 			reads = append(reads, vn)
 		}
 	}
@@ -709,7 +717,7 @@ func (h *Heritage) renameRecurse(bl *BlockBasic, graph *BlockGraph,
 				// it is already on varStack and does not need renaming as a use.
 				// C++ parity: isHeritageKnown() filters out insert/constant/annotation varnodes
 				// from the free set before Heritage processes them.
-				if inp.IsWritten() {
+				if inp.IsWritten() || inp.IsAnnotation() {
 					continue
 				}
 				// Clear ActiveHeritage flag to avoid double-processing if this varnode
@@ -1301,6 +1309,11 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			if !vn.IsWritten() && vn.HasNoDescend() && !vn.IsUnaffected() && !vn.IsInput() {
 				continue
 			}
+			// A code reference names an address, not storage: it opens no
+			// heritage range (the C++ core guards no call-target address).
+			if vn.IsAnnotation() {
+				continue
+			}
 			_, code := h.globalDisjoint.Add(vn.Addr(), vn.Size(), h.pass)
 			switch code {
 			case 0:
@@ -1351,7 +1364,7 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			// Collect so the INDIRECT output varnodes appear as written SSA definitions.
 			// C++ parity: heritage.cc Heritage::heritage -> guard -> guardCalls
 			h.guardCalls(info.Space, task.Addr.Offset, task.Size)
-			if task.NewAddresses() && h.fd.isPersistStorage(task.Addr, task.Size) {
+			if task.NewAddresses() && h.fd.queryPropertyFlags(task.Addr, task.Size)&VarnodePersist != 0 {
 				h.guardReturnsPersist(task.Addr, task.Size)
 			}
 			reads, writes, inputs = h.Collect(task.Addr, task.Size)

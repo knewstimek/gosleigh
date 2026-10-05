@@ -93,6 +93,13 @@ func (sl *ScopeLocal) stackLocalName(offset uint64) string {
 			return n // host name-locked symbol
 		}
 		growsNegative = e.stackGrows
+		// With the host's localdb in hand, a slot the host did not name is
+		// named by the core itself (ScopeLocal::buildVariableName), e.g.
+		// puStack_c; the Java-style local_c emulation is only for goldens
+		// that carry no localdb.
+		if e.hostLocals != nil {
+			return ""
+		}
 	}
 	return stackLocalName(offset, growsNegative)
 }

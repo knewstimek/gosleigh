@@ -50,7 +50,14 @@ type Symbol struct {
 	// wholeCount tracks how many mapEntry items cover the whole storage.
 	// C++ parity: Symbol::wholeCount.
 	wholeCount int
+
+	// namespace is the "::"-joined path of the scope owning a global symbol
+	// ("" = the global namespace). C++ parity: Symbol::scope's parent chain.
+	namespace string
 }
+
+// Namespace returns the symbol's namespace path ("" for global/local).
+func (s *Symbol) Namespace() string { return s.namespace }
 
 // NewSymbol constructs a new Symbol bound to a name and data-type.
 // C++ parity: Symbol::Symbol(Scope*,const string&,Datatype*)
