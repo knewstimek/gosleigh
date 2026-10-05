@@ -1799,3 +1799,20 @@ func isFloatOpcode(code OpCode) bool {
 	}
 	return false
 }
+
+// deadRemovalAllowed reports whether dead code in a space may be removed:
+// only once heritage has passed the space's dead-code delay. Spaces heritage
+// does not track (constants, unique) are always allowed.
+// C++ parity: Heritage::deadRemovalAllowed (pass > deadcodedelay).
+func (fd *Funcdata) deadRemovalAllowed(sp *address.Space) bool {
+	h := fd.heritage
+	if h == nil || sp.Kind == address.SpaceKindConstant || sp.Kind == address.SpaceKindUnique {
+		return true
+	}
+	for i := range h.infoList {
+		if info := &h.infoList[i]; info.Space == sp {
+			return h.pass > info.Delay
+		}
+	}
+	return true
+}

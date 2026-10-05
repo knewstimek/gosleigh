@@ -250,7 +250,15 @@ func (c *consumeAnalysis) computeConsumed(data *Funcdata) {
 		vn.SetConsumed(0)
 	}
 
-	// Pre-live registers (C++ 3960) omitted: no per-space heritage-pass tracking.
+	// Pre-live: every Varnode in a space whose heritage has not run yet is
+	// treated as consumed, so nothing written there (a global store before
+	// ram is heritaged) is lost before data-flow can see its readers.
+	// C++ parity: ActionDeadCode::apply "Set pre-live registers" loop.
+	for _, vn := range data.GetVarnodeBank().AllVarnodes() {
+		if sp := vn.Space(); sp != nil && !data.deadRemovalAllowed(sp) {
+			c.push(^uint64(0), vn)
+		}
+	}
 
 	returnConsume := gatherConsumedReturn(data)
 

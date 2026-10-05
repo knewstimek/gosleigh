@@ -163,6 +163,9 @@ func (a *ActionDeadCode) consumePass(data *Funcdata) int {
 			if ca.vacuous[out] {
 				continue // reached by a consume push -> keep
 			}
+			if out.Space() != nil && !data.deadRemovalAllowed(out.Space()) {
+				continue // C++: no elimination before the space is heritaged
+			}
 			// A call stays; only its unused result goes.
 			// C++ parity: ActionDeadCode::apply (op->isCall() -> opUnsetOutput).
 			if isCall {
