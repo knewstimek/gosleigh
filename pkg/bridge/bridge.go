@@ -440,15 +440,16 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		fd.SetGlobalScope(gs)
 	}
 
-	// Parse cspec if provided. Store in result but do not apply -- callers
-	// may apply after Heritage via pcode.ApplyCallingConvention.
+	// Parse cspec if provided. A parse failure is fatal: continuing without the
+	// cspec silently drops the stack space and every prototype model, which
+	// produced plausible-looking but wholly wrong output (x86win.cspec's
+	// extrapop="unknown" went unnoticed this way).
 	if cfg.CspecPath != "" {
 		cs, csErr := pcode.ParseCspec(cfg.CspecPath)
 		if csErr != nil {
-			result.Warnings = append(result.Warnings, fmt.Sprintf("cspec parse %q: %v", cfg.CspecPath, csErr))
-		} else {
-			result.CspecData = cs
+			return nil, fmt.Errorf("cspec parse %q: %w", cfg.CspecPath, csErr)
 		}
+		result.CspecData = cs
 	}
 
 	// Attach the default evaluation prototype model (Architecture::defaultfp

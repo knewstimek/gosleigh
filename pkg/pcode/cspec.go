@@ -18,6 +18,7 @@ import (
 	"encoding/xml"
 	"fmt"
 	"os"
+	"strconv"
 )
 
 // CspecPentry describes a single parameter entry slot in a calling convention.
@@ -85,8 +86,11 @@ type CspecRegList struct {
 // CspecPrototype is a single calling convention prototype.
 // C++ parity: compiler.hh PrototypeModel
 type CspecPrototype struct {
-	Name         string       `xml:"name,attr"`
-	ExtraPop     int          `xml:"extrapop,attr"`
+	Name     string        `xml:"name,attr"`
+	ExtraPop CspecExtraPop `xml:"extrapop,attr"`
+	// HasThis mirrors the optional hasthis attribute; a model named __thiscall
+	// has a this pointer regardless (see ProtoModelHasThis).
+	HasThis      bool         `xml:"hasthis,attr"`
 	StackShift   int          `xml:"stackshift,attr"`
 	Input        CspecInput   `xml:"input"`
 	Output       CspecOutput  `xml:"output"`
@@ -99,6 +103,39 @@ type CspecPrototype struct {
 	// frozen for this slice).
 	// C++ parity: compiler.hh ProtoModel::likelytrash
 	LikelyTrash CspecRegList `xml:"likelytrash"`
+}
+
+// ExtrapopUnknown is the reserved extrapop meaning the callee's stack-pointer
+// change is not known statically (e.g. __stdcall, where the callee pops its
+// own arguments with RET imm16).
+// C++ parity: fspec.hh ProtoModel::extrapop_unknown.
+const ExtrapopUnknown = 0x8000
+
+// CspecExtraPop is the extrapop attribute: a signed integer or the string
+// "unknown".
+// C++ parity: fspec.cc ProtoModel::decode
+// readSignedIntegerExpectString("unknown", extrapop_unknown).
+type CspecExtraPop int
+
+// UnmarshalXMLAttr implements xml.UnmarshalerAttr.
+func (e *CspecExtraPop) UnmarshalXMLAttr(attr xml.Attr) error {
+	if attr.Value == "unknown" {
+		*e = ExtrapopUnknown
+		return nil
+	}
+	v, err := strconv.ParseInt(attr.Value, 0, 32)
+	if err != nil {
+		return fmt.Errorf("extrapop %q: %w", attr.Value, err)
+	}
+	*e = CspecExtraPop(v)
+	return nil
+}
+
+// ProtoModelHasThis reports whether the prototype carries an implicit this
+// pointer. C++ parity: fspec.cc ProtoModel::decode (`if (name == "__thiscall")
+// hasThis = true`).
+func (p *CspecPrototype) ProtoModelHasThis() bool {
+	return p != nil && (p.HasThis || p.Name == "__thiscall")
 }
 
 // CspecDefaultProto wraps the <default_proto> element containing one <prototype>.

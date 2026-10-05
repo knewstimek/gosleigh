@@ -25,7 +25,13 @@ import (
 //
 // C++ parity: funcdata.hh FuncProto (partial)
 type FuncProto struct {
-	model        *ProtoModel
+	model *ProtoModel
+	// extrapop is this prototype's stack-pointer change across the call,
+	// inherited from the model (see SetModel).
+	// C++ parity: fspec.hh FuncProto::extrapop.
+	extrapop int32
+	// hasThisPtr mirrors FuncProto::has_thisptr, inherited from the model.
+	hasThisPtr   bool
 	inputLocked  bool
 	modelLocked  bool
 	outputLocked bool
@@ -83,7 +89,9 @@ type FuncProto struct {
 // NewFuncProto creates a FuncProto that uses the given ProtoModel.
 // C++ parity: FuncProto::FuncProto
 func NewFuncProto(model *ProtoModel) *FuncProto {
-	return &FuncProto{model: model}
+	fp := &FuncProto{}
+	fp.SetModel(model)
+	return fp
 }
 
 // Model returns the underlying calling convention model.
@@ -101,14 +109,35 @@ func (fp *FuncProto) HasMatchingModel(model *ProtoModel) bool {
 	return fp != nil && fp.model == model
 }
 
-// SetModel attaches a calling convention model.
-// C++ parity: FuncProto::setModel
+// SetModel attaches a calling convention model and inherits its extrapop and
+// this-pointer property. An existing model's concrete extrapop is not
+// overwritten by an unknown one.
+// C++ parity: fspec.cc FuncProto::setModel.
 func (fp *FuncProto) SetModel(model *ProtoModel) {
 	if fp == nil {
 		return
 	}
+	if model == nil {
+		fp.model = nil
+		fp.extrapop = ExtrapopUnknown
+		return
+	}
+	if expop := model.GetExtraPop(); fp.model == nil || expop != ExtrapopUnknown {
+		fp.extrapop = expop
+	}
+	if model.HasThisPointer() {
+		fp.hasThisPtr = true
+	}
 	fp.model = model
 }
+
+// GetExtraPop returns this prototype's extrapop.
+// C++ parity: FuncProto::getExtraPop.
+func (fp *FuncProto) GetExtraPop() int32 { return fp.extrapop }
+
+// SetExtraPop sets this prototype's extrapop.
+// C++ parity: FuncProto::setExtraPop.
+func (fp *FuncProto) SetExtraPop(ep int32) { fp.extrapop = ep }
 
 // Copy copies the prototype state from another FuncProto.
 // C++ parity: FuncProto::copy
@@ -117,6 +146,8 @@ func (fp *FuncProto) Copy(other *FuncProto) {
 		return
 	}
 	fp.model = other.model
+	fp.extrapop = other.extrapop
+	fp.hasThisPtr = other.hasThisPtr
 	fp.inputLocked = other.inputLocked
 	fp.modelLocked = other.modelLocked
 	fp.outputLocked = other.outputLocked
@@ -149,7 +180,10 @@ func (fp *FuncProto) SetInternal(model *ProtoModel, vt Datatype) {
 	if fp == nil {
 		return
 	}
-	fp.model = model
+	// C++ only installs the model when none is set yet.
+	if fp.model == nil {
+		fp.SetModel(model)
+	}
 	if vt == nil {
 		fp.output = nil
 		return
@@ -404,19 +438,18 @@ func (fp *FuncProto) ClearActiveOutput() {
 }
 
 // GetModelExtraPop returns the prototype model's extra-pop setting.
-// TODO known mismatch: ProtoModel extra-pop tracking is not yet ported.
 // C++ parity: FuncProto::getModelExtraPop
 func (fp *FuncProto) GetModelExtraPop() int32 {
-	_ = fp
-	return 0
+	if fp == nil || fp.model == nil {
+		return ExtrapopUnknown
+	}
+	return fp.model.GetExtraPop()
 }
 
 // HasThisPointer reports whether the prototype models an implicit this pointer.
-// TODO known mismatch: Ghidra's this-pointer flags are not yet modeled.
 // C++ parity: FuncProto::hasThisPointer
 func (fp *FuncProto) HasThisPointer() bool {
-	_ = fp
-	return false
+	return fp != nil && fp.hasThisPtr
 }
 
 // PrepareThisPointer is a placeholder for this-pointer normalization.

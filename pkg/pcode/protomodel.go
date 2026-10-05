@@ -43,6 +43,19 @@ const (
 //
 // C++ parity: compiler.hh PrototypeModel (partial)
 type ProtoModel struct {
+	// Name is the model name (e.g. "__stdcall").
+	// C++ parity: ProtoModel::name.
+	Name string
+
+	// ExtraPop is the stack-pointer change across a call beyond the pushed
+	// parameters (ExtrapopUnknown when the callee decides, as with __stdcall).
+	// C++ parity: ProtoModel::extrapop.
+	ExtraPop int32
+
+	// hasThis marks a model whose first input is an implicit this pointer.
+	// C++ parity: ProtoModel::hasThis.
+	hasThis bool
+
 	// StackSpace is the address space used for stack variables (SpaceKindStack or name=="stack").
 	StackSpace *address.Space
 
@@ -122,6 +135,14 @@ type ProtoModel struct {
 	InputParams *ParamListStandard
 }
 
+// GetExtraPop returns the model's extrapop.
+// C++ parity: ProtoModel::getExtraPop.
+func (pm *ProtoModel) GetExtraPop() int32 { return pm.ExtraPop }
+
+// HasThisPointer reports whether the model passes an implicit this pointer.
+// C++ parity: ProtoModel::hasThisPointer.
+func (pm *ProtoModel) HasThisPointer() bool { return pm != nil && pm.hasThis }
+
 // SetInputParams attaches the faithful input parameter-storage model.
 func (pm *ProtoModel) SetInputParams(pl *ParamListStandard) {
 	if pm != nil {
@@ -159,6 +180,9 @@ func NewProtoModelFromCspec(cs *CspecData, stackSpace *address.Space, regLookup 
 	pm.LongSize = cs.LongSize()
 
 	if cs.DefaultProto != nil {
+		pm.Name = cs.DefaultProto.Name
+		pm.ExtraPop = int32(cs.DefaultProto.ExtraPop)
+		pm.hasThis = cs.DefaultProto.ProtoModelHasThis()
 		for _, reg := range cs.DefaultProto.Unaffected.Registers {
 			pm.UnaffectedRegs[reg.Name] = true
 		}
