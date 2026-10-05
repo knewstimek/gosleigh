@@ -162,6 +162,21 @@ def do_sample(work, n, seed, max_bytes):
 	return ok
 
 
+def do_capture(work, entries):
+	"""Write C++ decompiler debug captures (savefile XML) for the given entry
+	addresses into <work>/captures, for tools/decomp_dbg.exe."""
+	meta = load_meta(work)
+	out = os.path.join(work, "captures")
+	rc = headless([
+		HEADLESS, os.path.join(work, "ghidra"), PROJ_NAME,
+		"-process", meta["program"], "-noanalysis", "-readOnly",
+		"-scriptPath", HERE,
+		"-postScript", "GenCapture.java", out] + entries,
+		os.path.join(work, "capture.log"), timeout=1800)
+	print("capture: returncode %d -> %s" % (rc, out))
+	return rc == 0
+
+
 def run_one(binary, base_args, idx, name, timeout_s):
 	"""Decompile golden #idx in its own process; map every failure mode to a
 	funcResult so one runaway function cannot sink the batch."""
@@ -296,6 +311,9 @@ def main():
 	pr.add_argument("--fresh", action="store_true", help="discard results.jsonl instead of resuming")
 	pp = sub.add_parser("report")
 	pp.add_argument("--work")
+	pc = sub.add_parser("capture", help="C++ decompiler debug savefiles for decomp_dbg")
+	pc.add_argument("--work")
+	pc.add_argument("entries", nargs="+", help="entry addresses (0x... or decimal)")
 	pm = sub.add_parser("measure", help="run --fresh + report (the progress metric)")
 	pm.add_argument("--work")
 	pm.add_argument("--timeout", type=int, default=30)
@@ -309,6 +327,8 @@ def main():
 		ok = do_sample(resolve_work(args), args.n, args.seed, args.max_bytes)
 	elif args.cmd == "run":
 		ok = do_run(resolve_work(args), args.timeout, args.mem_mb, args.fresh)
+	elif args.cmd == "capture":
+		ok = do_capture(resolve_work(args), args.entries)
 	elif args.cmd == "measure":
 		work = resolve_work(args)
 		ok = do_run(work, args.timeout, args.mem_mb, True) and do_report(work)

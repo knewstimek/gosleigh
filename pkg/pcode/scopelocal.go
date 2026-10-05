@@ -89,6 +89,9 @@ func stackLocalName(offset uint64, growsNegative bool) string {
 func (sl *ScopeLocal) stackLocalName(offset uint64) string {
 	growsNegative := true
 	if e := sl.ext(); e != nil {
+		if n, ok := e.hostLocals[offset]; ok && n != "" {
+			return n // host name-locked symbol
+		}
 		growsNegative = e.stackGrows
 	}
 	return stackLocalName(offset, growsNegative)

@@ -1187,7 +1187,15 @@ func (s *printCState) renderFunctionSignature(retType Datatype) string {
 	codeType := sharedTypeFactory.GetCode("", s.normalizeTypeForDecl(retType), allTypes, false)
 	// Use s.decls (which has noCommaSpace set in ghidraFormat mode) instead of the
 	// global CFuncSignatureString helper, which always uses a default CDeclRenderer.
-	return s.decls.FunctionSignature(displayName, codeType, allNames)
+	sig := s.decls.FunctionSignature(displayName, codeType, allNames)
+	// The return type is printed whole and then a space, so a pointer return
+	// reads "undefined4 * FUN_x(...)" rather than the declarator form
+	// "undefined4 *FUN_x(...)".
+	// C++ parity: printc.cc PrintC::emitPrototypeOutput + emit->spaces(1).
+	if s.printer.ghidraFormat {
+		sig = strings.Replace(sig, "*"+displayName+"(", "* "+displayName+"(", 1)
+	}
+	return sig
 }
 
 // emitLocalDeclarations emits one "type name;" statement per declared local and

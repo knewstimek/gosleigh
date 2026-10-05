@@ -80,6 +80,7 @@ type scopeLocalExt struct {
 	stackSpace  *address.Space                // Space managed by this scope
 	stackGrows  bool                          // True if stack grows toward lower offsets
 	rangeLocked bool                          // True if the mapped address range is locked
+	hostLocals  map[uint64]string             // Host name-locked stack symbols by offset
 }
 
 // scopeLocalExtMap binds ScopeLocal pointers to their extended state.
@@ -764,6 +765,11 @@ func (sl *ScopeLocal) markUnaliased(alias []uint64) {
 func (sl *ScopeLocal) buildVariableName(addr address.Address, pc address.Address, ct Datatype) string {
 	if sl == nil {
 		return ""
+	}
+	// A host symbol at this offset is name-locked: its name wins over both
+	// spellings below.
+	if n, ok := sl.ext().hostLocals[addr.Offset]; ok && n != "" {
+		return n
 	}
 	if ct != nil && ct.Metatype() == TYPE_ARRAY {
 		growsNegative := true

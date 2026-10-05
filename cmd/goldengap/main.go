@@ -53,10 +53,19 @@ import (
 // name, entry offset, body bytes (hex), and Ghidra's decompiled C. Same
 // schema as x64CorpusEntry in pkg/loader/x64_corpus_diag_test.go.
 type goldenEntry struct {
-	Name  string `json:"name"`
-	Entry int64  `json:"entry"`
-	Bytes string `json:"bytes"`
-	C     string `json:"c"`
+	Name string `json:"name"`
+	// Display is the name the host gives the core for this function
+	// (transformed / namespace-qualified); empty falls back to Name.
+	Display string `json:"display"`
+	Entry   int64  `json:"entry"`
+	Bytes   string `json:"bytes"`
+	C       string `json:"c"`
+	// Locals are the host's stack-frame locals (realexe GenSample), served
+	// as the function's name-locked local symbols.
+	Locals []struct {
+		Offset int64  `json:"offset"`
+		Name   string `json:"name"`
+	} `json:"locals"`
 }
 
 type goldenFile struct {
@@ -161,6 +170,17 @@ func main() {
 		os.Exit(1)
 	}
 	fmt.Fprintf(os.Stderr, "goldengap: wrote %d functions to %s\n", len(out.Functions), *outPath)
+}
+
+func hostLocals(fn goldenEntry) map[int64]string {
+	if len(fn.Locals) == 0 {
+		return nil
+	}
+	m := make(map[int64]string, len(fn.Locals))
+	for _, l := range fn.Locals {
+		m[l.Offset] = l.Name
+	}
+	return m
 }
 
 // hostSymbols serves a dumped Ghidra program symbol table as the decompiler's
@@ -270,7 +290,8 @@ func decompileOne(fn goldenEntry, b *loader.EngineBuilder, cspecPath string, max
 
 	result, err := bridge.Build(engine, bridge.BuildConfig{
 		Name: fn.Name, Entry: base, MaxInstructions: maxInstr,
-		CspecPath: cspecPath, SymbolName: fn.Name, HostScope: host,
+		CspecPath: cspecPath, SymbolName: displayName(fn), HostScope: host,
+		HostLocals: hostLocals(fn),
 	})
 	if err != nil {
 		res.Error = fmt.Sprintf("BRIDGE-ERR: %v", err)
@@ -284,4 +305,11 @@ func decompileOne(fn goldenEntry, b *loader.EngineBuilder, cspecPath string, max
 	}
 	res.Output = out
 	return
+}
+
+func displayName(fn goldenEntry) string {
+	if fn.Display != "" {
+		return fn.Display
+	}
+	return fn.Name
 }

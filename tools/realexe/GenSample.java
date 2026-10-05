@@ -32,6 +32,9 @@ import java.util.Random;
 
 public class GenSample extends GhidraScript {
 
+	private static final ghidra.program.model.symbol.NameTransformer DISPLAY_NT =
+		new ghidra.program.model.symbol.IllegalCharCppTransformer();
+
 	@Override
 	public void run() throws Exception {
 		String[] args = getScriptArgs();
@@ -80,9 +83,15 @@ public class GenSample extends GhidraScript {
 			}
 			sb.append("    {\n");
 			sb.append("      \"name\": ").append(jsonStr(f.getName())).append(",\n");
+			// The name the core prints for the function itself: transformed
+			// like every symbol name DecompileCallback sends, namespace-qualified.
+			String ns = nsPath(f.getParentNamespace(), DISPLAY_NT);
+			String disp = DISPLAY_NT.simplify(f.getName());
+			sb.append("      \"display\": ").append(jsonStr(ns.isEmpty() ? disp : ns + "::" + disp)).append(",\n");
 			sb.append("      \"entry\": ").append(f.getEntryPoint().getOffset()).append(",\n");
 			sb.append("      \"size\": ").append(span(f)).append(",\n");
 			sb.append("      \"proto\": ").append(protoJson(f)).append(",\n");
+			sb.append("      \"locals\": ").append(localsJson(f)).append(",\n");
 			sb.append("      \"bytes\": ").append(jsonStr(bodyHex(f))).append(",\n");
 			sb.append("      \"c\": ").append(jsonStr(decompile(iface, f))).append("\n");
 			sb.append("    }");
@@ -202,6 +211,22 @@ public class GenSample extends GhidraScript {
 			b.append(varJson(ps[i].getName(), ps[i].getDataType().getName(), ps[i].getVariableStorage().toString()));
 		}
 		return b.append("]}").toString();
+	}
+
+	// The function's own stack-frame locals, which DecompileCallback hands the
+	// core as the name-locked symbols of its local scope (localdb).
+	private static String localsJson(Function f) {
+		StringBuilder b = new StringBuilder("[");
+		ghidra.program.model.listing.Variable[] vars = f.getStackFrame().getLocals();
+		for (int i = 0; i < vars.length; i++) {
+			if (i > 0) {
+				b.append(", ");
+			}
+			b.append("{\"offset\": ").append(vars[i].getStackOffset())
+				.append(", \"name\": ").append(jsonStr(vars[i].getName()))
+				.append(", \"size\": ").append(vars[i].getLength()).append("}");
+		}
+		return b.append("]").toString();
 	}
 
 	private static String varJson(String name, String type, String storage) {

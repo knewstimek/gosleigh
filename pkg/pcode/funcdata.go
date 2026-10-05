@@ -87,6 +87,8 @@ type Funcdata struct {
 	evalCurrent *ProtoModel
 	// models are the architecture's named prototype models.
 	models map[string]*ProtoModel
+	// hostLocals are the host's name-locked stack symbol names by offset.
+	hostLocals map[uint64]string
 
 	// jumpTables tracks all recovered JumpTable objects for this function.
 	// C++ parity: funcdata.hh Funcdata::jumpvec
@@ -247,7 +249,23 @@ func (fd *Funcdata) DefaultModel() *ProtoModel { return fd.defaultModel }
 func (fd *Funcdata) SetDefaultModel(m *ProtoModel) { fd.defaultModel = m }
 
 // SetScopeLocal attaches a local variable scope.
-func (fd *Funcdata) SetScopeLocal(sl *ScopeLocal) { fd.scopeLocal = sl }
+func (fd *Funcdata) SetScopeLocal(sl *ScopeLocal) {
+	fd.scopeLocal = sl
+	if sl != nil && fd.hostLocals != nil {
+		sl.ext().hostLocals = fd.hostLocals
+	}
+}
+
+// SetHostLocals installs the host's name-locked stack symbols for this
+// function, keyed by stack offset (wrapped to the stack space).
+// C++ parity: the localdb symbols DecompileCallback sends with the function
+// (namelock=true), which ScopeLocal::restructure keeps by name.
+func (fd *Funcdata) SetHostLocals(m map[uint64]string) {
+	fd.hostLocals = m
+	if fd.scopeLocal != nil {
+		fd.scopeLocal.ext().hostLocals = m
+	}
+}
 
 // warning records an auto-generated warning comment in the comment database,
 // indexed by its placement address (the emitter attempts to place it before the

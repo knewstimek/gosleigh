@@ -54,6 +54,10 @@ type BuildConfig struct {
 	// external-reference names). nil decompiles standalone, like the C++
 	// console with no program symbols.
 	HostScope pcode.HostScope
+
+	// HostLocals are the host's name-locked stack symbols of this function
+	// (stack offset -> name), as Java sends them in the function's localdb.
+	HostLocals map[int64]string
 }
 
 // InjectedProtoParam describes one register storage slot (a parameter or the
@@ -500,6 +504,16 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 // any function is decompiled).
 func attachEnvironment(fd *pcode.Funcdata, cfg BuildConfig) error {
 	fd.SetHostScope(cfg.HostScope)
+	if len(cfg.HostLocals) > 0 {
+		// Stack offsets are stored wrapped to the stack space width (the
+		// pointer size of the entry space).
+		mask := spaceHighest(cfg.Entry.Space)
+		m := make(map[uint64]string, len(cfg.HostLocals))
+		for off, name := range cfg.HostLocals {
+			m[uint64(off)&mask] = name
+		}
+		fd.SetHostLocals(m)
+	}
 	if cfg.CspecPath == "" {
 		return nil
 	}
