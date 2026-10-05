@@ -1405,11 +1405,7 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	actstackstall.AddAction(NewActionMultiCse("analysis"))
 	actstackstall.AddAction(NewActionShadowVar("analysis"))
 	actstackstall.AddAction(NewActionDeindirect("deindirect"))
-	// The universal-action tree recovers the stack faithfully through
-	// ActionSpacebase (actmainloop, above) + RuleLoadVarnode/RuleStoreVarnode
-	// (actprop2, below), so the bespoke synthetic-stack ActionStackPtrFlow is not
-	// registered here. It survives only in the hand-ordered production decompile
-	// driver (bridge.Decompile), which does not run those faithful rules.
+	actstackstall.AddAction(NewActionStackPtrFlow("stackptrflow"))
 	actmainloop.AddAction(actstackstall)
 
 	actmainloop.AddAction(NewActionRedundBranch("deadcontrolflow"))

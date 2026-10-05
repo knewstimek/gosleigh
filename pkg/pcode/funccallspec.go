@@ -20,16 +20,43 @@ type FuncCallSpecs struct {
 	FuncProto
 	op *PcodeOp
 	fd *Funcdata
+
+	// effectiveExtraPop is the working extrapop for this call site: the
+	// prototype's when known, otherwise solved by ActionStackPtrFlow.
+	// C++ parity: FuncCallSpecs::effective_extrapop.
+	effectiveExtraPop int32
+	// stackoffset is the caller's stack-pointer offset at this call, relative
+	// to the incoming stack pointer (spacebaseOffsetUnknown until resolved).
+	// C++ parity: FuncCallSpecs::stackoffset.
+	stackoffset uint64
+	// stackPlaceholderSlot is the CALL input slot holding the stack-pointer
+	// placeholder LOAD, or -1. C++ parity: FuncCallSpecs::stackPlaceholderSlot.
+	stackPlaceholderSlot int
 }
 
 // C++ parity: Funcdata::getCallSpecs / FuncCallSpecs::FuncCallSpecs
 func newFuncCallSpecs(fd *Funcdata, op *PcodeOp) *FuncCallSpecs {
 	return &FuncCallSpecs{
-		FuncProto: *NewFuncProto(nil),
-		op:        op,
-		fd:        fd,
+		FuncProto:            *NewFuncProto(nil),
+		op:                   op,
+		fd:                   fd,
+		effectiveExtraPop:    ExtrapopUnknown,
+		stackoffset:          spacebaseOffsetUnknown,
+		stackPlaceholderSlot: -1,
 	}
 }
+
+// GetOp returns the CALL/CALLIND op this spec describes.
+// C++ parity: FuncCallSpecs::getOp.
+func (fc *FuncCallSpecs) GetOp() *PcodeOp { return fc.op }
+
+// SetEffectiveExtraPop sets the working extrapop of this call site.
+// C++ parity: FuncCallSpecs::setEffectiveExtraPop.
+func (fc *FuncCallSpecs) SetEffectiveExtraPop(ep int32) { fc.effectiveExtraPop = ep }
+
+// GetEffectiveExtraPop returns the working extrapop of this call site.
+// C++ parity: FuncCallSpecs::getEffectiveExtraPop.
+func (fc *FuncCallSpecs) GetEffectiveExtraPop() int32 { return fc.effectiveExtraPop }
 
 // GetFuncdata returns the associated callee Funcdata, if any.
 // TODO known mismatch: Gosleigh does not yet track callee Funcdata objects for calls.

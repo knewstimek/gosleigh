@@ -1163,10 +1163,44 @@ func (a *ActionExtraPopSetup) Clone(groups ActionGroupList) Action {
 	return NewActionExtraPopSetup(a.GetGroup())
 }
 
-// Apply is a scaffolded no-op because the call-spec pipeline is not yet ported.
-// C++ parity: coreaction.cc ActionExtraPopSetup::apply
+// Apply links the stack pointer across every call that disturbs it: a known
+// extrapop becomes `sp = sp + extrapop` right after the call, an unknown one
+// an INDIRECT before the call that ActionStackPtrFlow later solves.
+//
+// C++ takes the stack space from the Architecture at construction; Gosleigh
+// builds the stack spacebase space per function on the default model, so it
+// is read here at apply time.
+// C++ parity: coreaction.cc ActionExtraPopSetup::apply (1437-1465).
 func (a *ActionExtraPopSetup) Apply(data *Funcdata) int {
-	_ = data
+	if data == nil || data.DefaultModel() == nil || data.DefaultModel().StackSpace == nil {
+		return 0 // No stack to speak of
+	}
+	point := data.DefaultModel().StackSpace.GetSpacebase(0)
+	if point.Space == nil {
+		return 0
+	}
+	sbAddr := address.Address{Space: point.Space, Offset: point.Offset}
+	sbSize := point.Size
+	for i := 0; i < data.NumCalls(); i++ {
+		fc := data.GetCallSpecs(i)
+		if fc == nil || fc.GetExtraPop() == 0 {
+			continue // Stack pointer is undisturbed
+		}
+		op := data.NewOp(2, fc.GetOp().Addr())
+		data.NewVarnodeOut(sbSize, sbAddr, op)
+		data.OpSetInput(op, data.NewVarnode(sbSize, sbAddr), 0)
+		if ep := fc.GetExtraPop(); ep != ExtrapopUnknown {
+			// We know exactly how the stack pointer is changed.
+			fc.SetEffectiveExtraPop(ep)
+			data.OpSetOpcode(op, CPUI_INT_ADD)
+			data.OpSetInput(op, data.NewConstant(sbSize, uint64(int64(ep))), 1)
+			data.OpInsertAfter(op, fc.GetOp())
+		} else {
+			data.OpSetOpcode(op, CPUI_INDIRECT)
+			data.OpSetInput(op, data.NewVarnodeIop(fc.GetOp()), 1)
+			data.OpInsertBefore(op, fc.GetOp())
+		}
+	}
 	return 0
 }
 

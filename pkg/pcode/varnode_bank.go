@@ -419,6 +419,19 @@ func (vb *VarnodeBank) LocRange(addr address.Address, size int32) []*Varnode {
 	return result
 }
 
+// LocExact returns the varnodes with exactly this address and size, in loc
+// order (input first, then written by definition, then free).
+// C++ parity: VarnodeBank::beginLoc(size,addr) / endLoc(size,addr).
+func (vb *VarnodeBank) LocExact(addr address.Address, size int32) []*Varnode {
+	var result []*Varnode
+	for _, vn := range vb.locTree {
+		if vn.loc == addr && vn.size == size {
+			result = append(result, vn)
+		}
+	}
+	return result
+}
+
 // BySpace returns all varnodes in the given address space.
 // C++ parity: VarnodeBank space iteration
 func (vb *VarnodeBank) BySpace(spc *address.Space) []*Varnode {
