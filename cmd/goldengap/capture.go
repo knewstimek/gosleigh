@@ -265,7 +265,7 @@ func captureComments(fn goldenEntry) []bridge.HostComment {
 // QueryData returns the symbol whose storage contains addr (a label matches
 // its address only).
 func (cd *captureData) QueryData(addr address.Address) (pcode.HostData, bool) {
-	if cd == nil {
+	if cd == nil || len(cd.syms) == 0 || addr.Space != cd.syms[0].Addr.Space {
 		return pcode.HostData{}, false
 	}
 	i := sort.Search(len(cd.syms), func(i int) bool { return cd.syms[i].Addr.Offset > addr.Offset })

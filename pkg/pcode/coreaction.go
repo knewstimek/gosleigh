@@ -1785,25 +1785,13 @@ func (a *ActionConstantPtr) Apply(data *Funcdata) int {
 // and keep only the processor-kind ones (RAM / data).
 // C++ parity: Architecture::getDefaultDataSpace + selectInferSpace (subset)
 func candidatePointerSpaces(data *Funcdata) []*address.Space {
-	if data == nil || data.GetVarnodeBank() == nil {
+	// The spaces a constant may point into: the default data space (the one
+	// the function's code lives in).
+	// C++ parity: Architecture::inferPtrSpaces (default data space only).
+	if data == nil || data.baseAddr.Space == nil {
 		return nil
 	}
-	seen := map[*address.Space]bool{}
-	var out []*address.Space
-	for _, vn := range data.GetVarnodeBank().AllVarnodes() {
-		if vn == nil {
-			continue
-		}
-		sp := vn.Space()
-		if sp == nil || seen[sp] {
-			continue
-		}
-		seen[sp] = true
-		if sp.Kind == address.SpaceKindProcessor {
-			out = append(out, sp)
-		}
-	}
-	return out
+	return []*address.Space{data.baseAddr.Space}
 }
 
 // ActionConstbase injects architecture "uponentry" live-inject pcode and
