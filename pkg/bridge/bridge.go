@@ -297,7 +297,10 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	var current *pcode.BlockBasic
 	for idx, record := range records {
 		addr := record.translation.Address
-		if starts[addr] {
+		if len(record.translation.Ops) == 0 {
+			continue // Aliased to the next instruction's block below
+		}
+		if starts[addr] || current == nil {
 			current = graph.NewBlockBasicInGraph()
 			blockByAddr[addr] = current
 			if idx == 0 {
@@ -315,6 +318,14 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		instructionDefs = make(map[varKey]*pcode.Varnode)
 		if err := addInstructionOps(fd, current, record.translation, instructionDefs); err != nil {
 			return nil, err
+		}
+	}
+	for from, to := range zeroOpRedirect(records) {
+		if b := blockByAddr[to]; b != nil {
+			blockByAddr[from] = b
+		}
+		if b := instToBlock[to]; b != nil {
+			instToBlock[from] = b
 		}
 	}
 
@@ -1013,9 +1024,10 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 				}
 				return nil, nil, fmt.Errorf("build bridge: translate instruction at %v: %w", cur, err)
 			}
-			if len(translation.Ops) == 0 {
-				return nil, nil, fmt.Errorf("build bridge: instruction %v has no raw ops", cur)
-			}
+			// An instruction may legitimately emit no p-code (NOP, multi-byte
+			// NOP alignment padding). It is kept for flow; references to its
+			// address resolve to the next instruction (zeroOpRedirect).
+			// C++ parity: flow.cc FlowInfo::target falls through no-op instructions.
 			if translation.Length <= 0 && translation.Next == cur {
 				return nil, nil, fmt.Errorf("build bridge: instruction %v did not advance", cur)
 			}
@@ -1160,7 +1172,14 @@ func discoverBlockStarts(records []instructionRecord) map[address.Address]bool {
 	if len(records) == 0 {
 		return starts
 	}
-	starts[records[0].translation.Address] = true
+	redirect := zeroOpRedirect(records)
+	mark := func(a address.Address) {
+		if to, ok := redirect[a]; ok {
+			a = to
+		}
+		starts[a] = true
+	}
+	mark(records[0].translation.Address)
 
 	known := make(map[address.Address]struct{}, len(records))
 	for _, record := range records {
@@ -1170,17 +1189,47 @@ func discoverBlockStarts(records []instructionRecord) map[address.Address]bool {
 	for _, record := range records {
 		if record.flow.hasDirect {
 			if _, exists := known[record.flow.directTarget]; exists {
-				starts[record.flow.directTarget] = true
+				mark(record.flow.directTarget)
 			}
 		}
 		if record.flow.terminates {
 			if _, exists := known[record.translation.Next]; exists {
-				starts[record.translation.Next] = true
+				mark(record.translation.Next)
 			}
 		}
 	}
 
 	return starts
+}
+
+// zeroOpRedirect maps each instruction that emitted no p-code to the first
+// following instruction (by fall-through) that did; a branch to a no-op lands
+// on that instruction's first op.
+// C++ parity: flow.cc FlowInfo::target (visits fall-thru addresses of no-ops).
+func zeroOpRedirect(records []instructionRecord) map[address.Address]address.Address {
+	byAddr := make(map[address.Address]*instructionRecord, len(records))
+	for i := range records {
+		byAddr[records[i].translation.Address] = &records[i]
+	}
+	out := map[address.Address]address.Address{}
+	for _, r := range records {
+		if len(r.translation.Ops) != 0 {
+			continue
+		}
+		cur := r.translation.Next
+		for steps := 0; steps < len(records); steps++ {
+			nr, ok := byAddr[cur]
+			if !ok {
+				break
+			}
+			if len(nr.translation.Ops) != 0 {
+				out[r.translation.Address] = cur
+				break
+			}
+			cur = nr.translation.Next
+		}
+	}
+	return out
 }
 
 func addInstructionOps(fd *pcode.Funcdata, block *pcode.BlockBasic, translation sla.InstructionTranslation, defs map[varKey]*pcode.Varnode) error {

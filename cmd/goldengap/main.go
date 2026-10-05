@@ -40,6 +40,7 @@ import (
 	"fmt"
 	"os"
 	"runtime"
+	"runtime/debug"
 	"time"
 
 	"gosleigh/pkg/address"
@@ -240,6 +241,9 @@ func decompileOne(fn goldenEntry, b *loader.EngineBuilder, cspecPath string, max
 	defer func() {
 		if r := recover(); r != nil {
 			res.Error = fmt.Sprintf("PANIC: %v", r)
+			if os.Getenv("GOLDENGAP_TRACE") != "" {
+				res.Error += "\n" + string(debug.Stack())
+			}
 		}
 	}()
 

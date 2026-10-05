@@ -230,8 +230,12 @@ func new6502Engine(program []byte) (*sla.Engine, address.Address, string, error)
 }
 
 func TestBuildE2EWithRealSLA(t *testing.T) {
-	// LDA #$01 (A9 01), BNE +2 (D0 02), NOP (EA), NOP (EA)
-	program := []byte{0xA9, 0x01, 0xD0, 0x02, 0xEA, 0xEA}
+	// LDA #$01 (A9 01), BNE +2 (D0 02), LDA #$02 (A9 02), LDA #$03 (A9 03).
+	// The branch target and fall-through must emit p-code: 6502 NOP emits
+	// none, so with NOPs here the CFG has no successor blocks to split into
+	// (this test used to skip silently because Build rejected no-op
+	// instructions).
+	program := []byte{0xA9, 0x01, 0xD0, 0x02, 0xA9, 0x02, 0xA9, 0x03}
 	engine, base, path, err := new6502Engine(program)
 	if err != nil {
 		t.Skipf("failed to build 6502 engine: %v", err)
