@@ -994,6 +994,18 @@ func (fd *Funcdata) setVarnodeProperties(vn *Varnode) {
 			}
 		}
 		vn.SetFlags(fl)
+		// A type-locked host symbol forces its type onto the Varnode
+		// (ExceptionList is a void *, so is whatever copies it).
+		// C++ parity: Varnode::setSymbolProperties -> SymbolEntry::updateType.
+		if fd.hostScope != nil {
+			if e := fd.resolveGlobal(vn.Addr()); e != nil && e.Symbol() != nil &&
+				e.Symbol().Flags()&VarnodeTypeLock != 0 {
+				if ct := e.GetSizedType(vn.Addr(), vn.Size()); ct != nil && ct.Size() == vn.Size() {
+					SetVarnodeType(vn, ct)
+					vn.SetFlags(VarnodeTypeLock)
+				}
+			}
+		}
 	}
 }
 
