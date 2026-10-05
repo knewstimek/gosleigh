@@ -1322,6 +1322,18 @@ func (fd *Funcdata) NumOps() int {
 func (fd *Funcdata) OpInsertBegin(op *PcodeOp, bb *BlockBasic) {
 	fd.OpMarkAlive(op)
 	op.SetParent(bb)
+	// MULTIEQUALs stay at the head of the block: any other op goes after
+	// them. C++ parity: Funcdata::opInsertBegin.
+	if op.Code() != CPUI_MULTIEQUAL {
+		for _, o := range bb.opSlice() {
+			if o.Code() != CPUI_MULTIEQUAL {
+				bb.InsertOpBefore(op, o)
+				return
+			}
+		}
+		bb.InsertOpEnd(op)
+		return
+	}
 	bb.InsertOpBegin(op)
 }
 
@@ -1524,6 +1536,11 @@ func (fd *Funcdata) StructureReset() {
 	bg.StructureLoops()
 	// Clear the sblocks (structured hierarchy) so it rebuilds from scratch.
 	fd.SetStructureGraph(NewBlockGraph())
+	// The dominator tree heritage keeps is stale once blocks changed.
+	// C++ parity: Funcdata::structureReset -> heritage.forceRestructure().
+	if fd.heritage != nil {
+		fd.heritage.ForceRestructure()
+	}
 }
 
 // PushBranch moves a control-flow edge from one block to another. It is used to

@@ -450,7 +450,11 @@ func (b *FlowBlock) HasLoopOut() bool {
 }
 
 // IsLoopIn returns true if inEdges[i] has EdgeFlagLoop.
-func (b *FlowBlock) IsLoopIn(i int) bool { return b.inEdges[i].Label&EdgeFlagLoop != 0 }
+// An index past the in-edges (a MULTIEQUAL slot left over by an edge removal,
+// which C++ reads as undefined behavior) is not a loop edge.
+func (b *FlowBlock) IsLoopIn(i int) bool {
+	return i < len(b.inEdges) && b.inEdges[i].Label&EdgeFlagLoop != 0
+}
 
 // IsLoopOut returns true if outEdges[i] has EdgeFlagLoop.
 func (b *FlowBlock) IsLoopOut(i int) bool { return b.outEdges[i].Label&EdgeFlagLoop != 0 }
