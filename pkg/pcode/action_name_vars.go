@@ -213,6 +213,7 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		hv        *HighVariable
 		prefix    string
 		sortKey   uint64 // (offset<<16 | createIndex) for deterministic ordering
+		spaceIdx  int
 		createIdx uint32
 		offset    uint64
 	}
@@ -315,6 +316,9 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			// No nameable representative -- skip (params, implied unique-only HVs).
 			continue
 		}
+		if !highHasName(c.hv) {
+			continue
+		}
 		// A global variable is named by its global symbol (ActionMapGlobals),
 		// never from the local default-name counter.
 		if data.globalEntryOf(rep) != nil {
@@ -364,11 +368,20 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			}
 		}
 		prefix := hvTypePrefix(c.hv)
+		key := rep
+		if nr := highNameRepresentative(c.hv); nr != nil {
+			key = nr
+		}
+		spcIdx := 0
+		if key.Space() != nil {
+			spcIdx = int(key.Space().Index)
+		}
 		toName = append(toName, hvEntry{
 			hv:        c.hv,
 			prefix:    prefix,
-			offset:    rep.Offset(),
-			createIdx: uint32(rep.CreateIndex()),
+			spaceIdx:  spcIdx,
+			offset:    key.Offset(),
+			createIdx: uint32(key.CreateIndex()),
 		})
 	}
 
@@ -380,28 +393,70 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 	// then by create index for stability when two varnodes share an offset.
 	// C++ parity: ScopeInternal::assignDefaultNames iterates nametree which
 	// is sorted by Address; we approximate this with offset+createIndex.
+	// C++ parity: ActionNameVars::linkSymbols walks spaces by index, then
+	// each space's varnodes in location order, visiting a high at its name
+	// representative.
 	sort.Slice(toName, func(i, j int) bool {
+		if toName[i].spaceIdx != toName[j].spaceIdx {
+			return toName[i].spaceIdx < toName[j].spaceIdx
+		}
 		if toName[i].offset != toName[j].offset {
 			return toName[i].offset < toName[j].offset
 		}
 		return toName[i].createIdx < toName[j].createIdx
 	})
 
-	// Assign sequential names per type prefix, starting from 1.
-	// TODO known mismatch: C++ threads ONE counter through every prefix
-	// (ScopeInternal::buildVariableName "Var" << index++), but toName still
-	// holds HighVariables that never print (C++ names only scope symbols), so a
-	// shared counter would skip numbers; per-prefix counting hides that.
-	prefixIdx := make(map[string]int)
+	// One counter shared by every prefix (iVar1, puVar2, ...).
+	// C++ parity: ScopeInternal::buildVariableName "Var" << index++ with the
+	// single base assignDefaultNames threads through.
+	idx := 1
 	for _, e := range toName {
-		if _, ok := prefixIdx[e.prefix]; !ok {
-			prefixIdx[e.prefix] = 1
-		}
-		name := fmt.Sprintf("%s%d", e.prefix, prefixIdx[e.prefix])
-		prefixIdx[e.prefix]++
-		e.hv.SetName(name)
+		e.hv.SetName(fmt.Sprintf("%s%d", e.prefix, idx))
+		idx++
 		a.count++
 	}
 
 	return 0
+}
+
+// highHasName reports whether a HighVariable gets a name (a symbol) at all:
+// not an implied (inlined) value, and not a register the function merely
+// preserves (unaffected, unless it is a used, non-spacebase input).
+// C++ parity: variable.cc HighVariable::hasName.
+func highHasName(hv *HighVariable) bool {
+	indirectOnly := true
+	unaffected := false
+	used := false
+	var input *Varnode
+	for _, vn := range hv.Instances() {
+		if vn.NumDescend() > 0 || vn.IsAddrTied() {
+			used = true
+		}
+		if vn.IsImplied() {
+			return false
+		}
+		if !vn.IsIndirectOnly() {
+			indirectOnly = false
+		}
+		if vn.IsUnaffected() {
+			unaffected = true
+		}
+		if vn.IsInput() {
+			input = vn
+		}
+	}
+	// A value nothing reads is dead code in C++ and never reaches naming;
+	// Gosleigh can still hold one (bridge constant materialization).
+	if !used {
+		return false
+	}
+	if unaffected {
+		if input == nil || indirectOnly {
+			return false
+		}
+		if input.IsSpaceBase() {
+			return false
+		}
+	}
+	return true
 }

@@ -36,6 +36,9 @@ def main():
 	sym = os.path.join(work, "symbols.json")
 	if os.path.isfile(sym):
 		args += ["-symbols", sym]
+	cap = os.path.join(work, "captures")
+	if os.path.isdir(cap):
+		args += ["-host-captures", cap]
 	for i in a.idx:
 		r = subprocess.run([exe] + args + ["-index", str(i)], capture_output=True, text=True, timeout=60)
 		try:

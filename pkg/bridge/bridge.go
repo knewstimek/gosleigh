@@ -60,6 +60,11 @@ type BuildConfig struct {
 	// analysis marked CALL_RETURN.
 	FlowOverrides map[uint64]string
 
+	// HostComments are the function's comments as the host sends them
+	// (Ghidra <commentdb>): type names "user1".."user3", "header", "warning",
+	// "warningheader"; Addr is an offset in the entry space.
+	HostComments []HostComment
+
 	// TrackedRegs are register values known at the function entry (register
 	// name -> value): the pspec <tracked_set> and the host program context.
 	// C++ parity: ContextDatabase::getTrackedSet, consumed by ActionConstbase.
@@ -68,6 +73,18 @@ type BuildConfig struct {
 	// HostLocals are the host's name-locked stack symbols of this function
 	// (stack offset -> name), as Java sends them in the function's localdb.
 	HostLocals map[int64]string
+}
+
+// HostComment is one host-supplied comment. C++ parity: comment.hh Comment.
+type HostComment struct {
+	Type string
+	Addr uint64
+	Text string
+}
+
+var hostCommentTypes = map[string]uint32{
+	"user1": pcode.CommentUser1, "user2": pcode.CommentUser2, "user3": pcode.CommentUser3,
+	"header": pcode.CommentHeader, "warning": pcode.CommentWarning, "warningheader": pcode.CommentWarningHeader,
 }
 
 // InjectedProtoParam describes one register storage slot (a parameter or the
@@ -516,6 +533,11 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 // any function is decompiled).
 func attachEnvironment(fd *pcode.Funcdata, cfg BuildConfig) error {
 	fd.SetHostScope(cfg.HostScope)
+	for _, c := range cfg.HostComments {
+		if tp, ok := hostCommentTypes[c.Type]; ok && cfg.Entry.Space != nil {
+			fd.AddComment(tp, address.Address{Space: cfg.Entry.Space, Offset: c.Addr}, c.Text)
+		}
+	}
 	if cfg.HostLocals != nil {
 		// Stack offsets are stored wrapped to the stack space width (the
 		// pointer size of the entry space).

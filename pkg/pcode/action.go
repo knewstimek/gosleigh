@@ -1031,10 +1031,6 @@ func (data *Funcdata) emitActionMessage(msg string) {
 	state.mu.Unlock()
 }
 
-func (data *Funcdata) warningHeader(msg string) {
-	data.emitActionMessage(msg)
-}
-
 func (data *Funcdata) clearAnalysis() {
 	state := getFuncdataActionState(data)
 	state.mu.Lock()

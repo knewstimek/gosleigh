@@ -87,6 +87,47 @@ func (db *CommentDatabase) addCommentNoDuplicate(tp uint32, fad, ad address.Addr
 	return true
 }
 
+// headCommentType selects the comment properties printed above the function.
+// C++ parity: printlanguage.cc resetDefaultsInternal (head_comment_type =
+// Comment::header | Comment::warningheader).
+const headCommentType = CommentHeader | CommentWarningHeader
+
+// AddComment records a host-supplied comment (the function's comment
+// database as the host sends it). C++ parity: CommentDatabase::addComment.
+func (fd *Funcdata) AddComment(tp uint32, ad address.Address, txt string) {
+	if fd.commentDB == nil {
+		fd.commentDB = &CommentDatabase{}
+	}
+	fd.commentDB.addCommentNoDuplicate(tp, fd.baseAddr, ad, txt)
+}
+
+// warningHeader records a warning printed above the function.
+// C++ parity: funcdata.cc Funcdata::warningHeader.
+func (fd *Funcdata) warningHeader(txt string) {
+	msg := "WARNING: "
+	if fd.IsJumptableRecoveryOn() {
+		msg = "WARNING (jumptable): "
+	}
+	fd.emitActionMessage(txt)
+	fd.AddComment(CommentWarningHeader, fd.baseAddr, msg+txt)
+}
+
+// headerComments returns the texts printed above the function, in database
+// order. C++ parity: CommentSorter::setupHeader(header_basic) +
+// PrintC::emitCommentFuncHeader.
+func (fd *Funcdata) headerComments() []string {
+	if fd.commentDB == nil {
+		return nil
+	}
+	var out []string
+	for _, c := range fd.commentDB.comments {
+		if c.Type&headCommentType != 0 && c.Addr == fd.baseAddr {
+			out = append(out, c.Text)
+		}
+	}
+	return out
+}
+
 // PrintRawAddr renders an address the way Ghidra streams it (ostream << Address
 // -> AddrSpace::printRaw). It is used to build the warning text that embeds an
 // op address (e.g. "Could not emulate address calculation at 0x000024e0"), so

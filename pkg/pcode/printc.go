@@ -223,6 +223,18 @@ func (s *printCState) emit() (string, error) {
 		// The leading blank line before the signature is part of Ghidra's output convention.
 		// C++ parity: PrintC::emitBlockGraph writes a blank line before the function header.
 		s.lang.Newline()
+		// Header comments (host plate comments, warning headers), then a
+		// blank line. C++ parity: PrintC::docFunction ->
+		// emitCommentFuncHeader (emitLineComment(0, ...)).
+		if hc := s.fd.headerComments(); len(hc) > 0 {
+			for _, c := range hc {
+				for _, l := range formatLineComment(c, 0) {
+					s.lang.Token(l)
+					s.lang.Newline()
+				}
+			}
+			s.lang.Newline()
+		}
 		s.lang.Token(s.renderFunctionSignature(retType))
 		s.lang.Newline()
 		s.lang.Newline()

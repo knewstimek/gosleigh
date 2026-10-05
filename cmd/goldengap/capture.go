@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"gosleigh/pkg/address"
+	"gosleigh/pkg/bridge"
 	"gosleigh/pkg/pcode"
 )
 
@@ -17,6 +18,22 @@ type xnode struct {
 	XMLName xml.Name
 	Attrs   []xml.Attr `xml:",any,attr"`
 	Kids    []xnode    `xml:",any"`
+	text    string
+}
+
+// UnmarshalXML keeps the element's character data (comment text) as well.
+func (n *xnode) UnmarshalXML(d *xml.Decoder, start xml.StartElement) error {
+	type plain struct {
+		Attrs []xml.Attr `xml:",any,attr"`
+		Kids  []xnode    `xml:",any"`
+		Text  string     `xml:",chardata"`
+	}
+	var p plain
+	if err := d.DecodeElement(&p, &start); err != nil {
+		return err
+	}
+	n.XMLName, n.Attrs, n.Kids, n.text = start.Name, p.Attrs, p.Kids, p.Text
+	return nil
 }
 
 func (n *xnode) attr(name string) string {
@@ -197,6 +214,52 @@ func withCapture(host pcode.HostScope, fn goldenEntry, ram *address.Space) pcode
 		return host
 	}
 	return hostWithData{host, cd}
+}
+
+// captureComments returns fn's comment database from its capture, or nil.
+func captureComments(fn goldenEntry) []bridge.HostComment {
+	if captureDir == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(fmt.Sprintf("%s/%08x.xml", captureDir, fn.Entry))
+	if err != nil {
+		return nil
+	}
+	var root xnode
+	if xml.Unmarshal(raw, &root) != nil {
+		return nil
+	}
+	state := root.child("save_state")
+	if state == nil {
+		return nil
+	}
+	db := state.child("commentdb")
+	if db == nil {
+		return nil
+	}
+	var out []bridge.HostComment
+	for i := range db.Kids {
+		c := &db.Kids[i]
+		if c.XMLName.Local != "comment" {
+			continue
+		}
+		// <comment type=..><addr func/><addr at/><text>..</text></comment>
+		var addrs []*xnode
+		var text string
+		for j := range c.Kids {
+			switch k := &c.Kids[j]; k.XMLName.Local {
+			case "addr":
+				addrs = append(addrs, k)
+			case "text":
+				text = k.text
+			}
+		}
+		if len(addrs) < 2 {
+			continue
+		}
+		out = append(out, bridge.HostComment{Type: c.attr("type"), Addr: parseUint(addrs[1].attr("offset")), Text: text})
+	}
+	return out
 }
 
 // QueryData returns the symbol whose storage contains addr (a label matches

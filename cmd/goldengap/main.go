@@ -40,8 +40,8 @@ import (
 	"fmt"
 	"os"
 	"runtime"
-	"strconv"
 	"runtime/debug"
+	"strconv"
 	"time"
 
 	"gosleigh/pkg/address"
@@ -318,6 +318,7 @@ func decompileOne(fn goldenEntry, b *loader.EngineBuilder, cspecPath string, max
 		Name: fn.Name, Entry: base, MaxInstructions: maxInstr,
 		CspecPath: cspecPath, SymbolName: displayName(fn), HostScope: withCapture(host, fn, base.Space),
 		HostLocals: hostLocals(fn), FlowOverrides: flowOverrides(fn), TrackedRegs: trackedRegs(fn),
+		HostComments: captureComments(fn),
 	})
 	if err != nil {
 		res.Error = fmt.Sprintf("BRIDGE-ERR: %v", err)
