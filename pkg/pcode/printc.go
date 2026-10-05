@@ -1293,6 +1293,16 @@ func (s *printCState) emitLocalDeclarations() bool {
 		} else {
 			dt = s.normalizeTypeForDecl(vn.TypeDefFacing())
 		}
+		// A default name's prefix is the printNameBase of the type the
+		// variable is declared with; types can still settle after
+		// ActionNameVars ran, so re-derive it from the final declared type.
+		// C++ parity: buildVariableName names with the symbol's (final) type.
+		if renamed := defaultNameWithType(name, dt); renamed != name {
+			s.renameLocal(vn, name, renamed)
+			delete(declared, name)
+			declared[renamed] = struct{}{}
+			name = renamed
+		}
 		decl := localDeclString(dt, name)
 		rec := localDecl{text: decl}
 		if sp := vn.Space(); sp != nil && sl != nil && sp == sl.SpaceID() {
@@ -5482,4 +5492,35 @@ func (s *printCState) hasPrintedUse(vn *Varnode) bool {
 		return true
 	}
 	return false
+}
+
+// defaultNameWithType re-prefixes a default variable name (iVar3, puVar1)
+// with the printNameBase of dt, keeping the number; other names are unchanged.
+func defaultNameWithType(name string, dt Datatype) string {
+	i := strings.Index(name, "Var")
+	if i < 0 || dt == nil {
+		return name
+	}
+	num := name[i+3:]
+	if num == "" || strings.Trim(num, "0123456789") != "" || strings.Trim(name[:i], "abcdefghijklmnopqrstuvwxyz") != "" {
+		return name
+	}
+	prefix := datatypeNameBase(dt)
+	if prefix == "" {
+		return name
+	}
+	return prefix + "Var" + num
+}
+
+// renameLocal renames every Varnode printed as old (and vn's variable).
+func (s *printCState) renameLocal(vn *Varnode, old, renamed string) {
+	for v, n := range s.names {
+		if n == old {
+			s.names[v] = renamed
+		}
+	}
+	s.names[vn] = renamed
+	if hv := vn.High(); hv != nil && hv.Name() == old {
+		hv.SetName(renamed)
+	}
 }
