@@ -1037,10 +1037,66 @@ type RuleIndirectCollapse struct{ batchRule }
 
 func NewRuleIndirectCollapse(group string) *RuleIndirectCollapse {
 	r := &RuleIndirectCollapse{}
-	// RuleIndirectCollapse::applyOp -- ruleaction.cc.
-	// known mismatch: IOP-space op references, totalReplace, and guarded STORE resolution are not ported.
-	r.batchRule = newKnownMismatchBatchRule(group, "indirectcollapse", []OpCode{CPUI_INDIRECT}, func(g string) Rule { return NewRuleIndirectCollapse(g) })
+	r.batchRule = newBatchRule(group, "indirectcollapse", []OpCode{CPUI_INDIRECT}, r.apply, func(g string) Rule { return NewRuleIndirectCollapse(g) })
 	return r
+}
+
+// apply removes an INDIRECT whose indirect effect is gone or cannot reach the
+// storage: the causing op is dead, a STORE that resolved to a COPY of the
+// same storage, or the storage has no local alias.
+// C++ parity: ruleaction.cc RuleIndirectCollapse::applyOp (3177-3243). The
+// STORE LoadGuard (Funcdata::getStoreGuard) is unported, so a spacebase STORE
+// takes the C++ "no guard" branch and keeps its INDIRECT.
+func (r *RuleIndirectCollapse) apply(op *PcodeOp, data *Funcdata) int {
+	indop := op.Input(1).GetIndirectCause()
+	if indop == nil {
+		return 0 // input(1) is not an iop reference
+	}
+	if !indop.IsDead() {
+		switch {
+		case indop.Code() == CPUI_COPY: // STORE resolved to a COPY
+			vn1, vn2 := indop.Output(), op.Output()
+			if res := vn1.CharacterizeOverlap(vn2); res > 0 {
+				if res == 2 { // Same storage: INDIRECT becomes a COPY
+					data.OpUninsert(op)
+					data.OpSetInput(op, vn1, 0)
+					data.OpRemoveInput(op, 1)
+					data.OpSetOpcode(op, CPUI_COPY)
+					data.OpInsertAfter(op, indop)
+					return 1
+				}
+				if vn1.Contains(vn2) == 0 { // INDIRECT output properly inside the COPY output
+					var trunc uint64
+					if vn1.Space().BigEndian {
+						trunc = vn1.Offset() + uint64(vn1.Size()) - (vn2.Offset() + uint64(vn2.Size()))
+					} else {
+						trunc = vn2.Offset() - vn1.Offset()
+					}
+					data.OpUninsert(op)
+					data.OpSetInput(op, vn1, 0)
+					data.OpSetInput(op, data.NewConstant(4, trunc), 1)
+					data.OpSetOpcode(op, CPUI_SUBPIECE)
+					data.OpInsertAfter(op, indop)
+					return 1
+				}
+				data.Warning("Ignoring partial resolution of indirect", indop.Addr())
+				return 0
+			}
+		case op.Output().HasNoLocalAlias():
+			if op.IsIndirectCreation() || op.NoIndirectCollapse() {
+				return 0
+			}
+		case indop.UsesSpacebasePtr():
+			if indop.Code() == CPUI_STORE {
+				return 0 // Unguarded marked STORE: keep the INDIRECT until it becomes a COPY
+			}
+		default:
+			return 0
+		}
+	}
+	data.TotalReplace(op.Output(), op.Input(0))
+	data.OpDestroy(op) // Get rid of the INDIRECT
+	return 1
 }
 
 type RuleDivTermAdd struct{ batchRule }

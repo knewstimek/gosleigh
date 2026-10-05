@@ -340,9 +340,17 @@ func (op *PcodeOp) Parent() *BlockBasic { return op.parent }
 
 // --- flag queries ---
 
-func (op *PcodeOp) IsDead() bool             { return op.flags&PcodeOpDead != 0 }
-func (op *PcodeOp) IsAssignment() bool       { return op.output != nil }
-func (op *PcodeOp) IsCall() bool             { return op.flags&PcodeOpCall != 0 }
+func (op *PcodeOp) IsDead() bool       { return op.flags&PcodeOpDead != 0 }
+func (op *PcodeOp) IsAssignment() bool { return op.output != nil }
+func (op *PcodeOp) IsCall() bool       { return op.flags&PcodeOpCall != 0 }
+
+// UsesSpacebasePtr reports a LOAD/STORE whose pointer is spacebase-relative.
+// C++ parity: PcodeOp::usesSpacebasePtr.
+func (op *PcodeOp) UsesSpacebasePtr() bool { return op.flags&PcodeOpSpacebasePtr != 0 }
+
+// NoIndirectCollapse reports that this INDIRECT must not be collapsed.
+// C++ parity: PcodeOp::noIndirectCollapse.
+func (op *PcodeOp) NoIndirectCollapse() bool { return op.addlFlags&PcodeOpNoIndirectCollapse != 0 }
 func (op *PcodeOp) IsMarker() bool           { return op.flags&PcodeOpMarker != 0 }
 func (op *PcodeOp) IsBranch() bool           { return op.flags&PcodeOpBranch != 0 }
 func (op *PcodeOp) IsBoolOutput() bool       { return op.flags&PcodeOpBoolOutput != 0 }

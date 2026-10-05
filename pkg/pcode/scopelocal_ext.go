@@ -314,13 +314,18 @@ func (sl *ScopeLocal) InScope(addr address.Address, size int32, usepoint address
 	return addr.Space == ext.stackSpace
 }
 
-// IsUnmappedUnaliased reports whether a Varnode that isn't covered by a
-// SymbolEntry should nonetheless be treated as having no aliases. The C++
-// heuristic looks up the alias checker state; here we conservatively say
-// "no" until the alias gather logic lands.
-// TODO: port ScopeLocal::isUnmappedUnaliased once AliasChecker is ported.
-// C++ parity: varmap.cc ScopeLocal::isUnmappedUnaliased
-func (sl *ScopeLocal) IsUnmappedUnaliased(vn *Varnode) bool { return false }
+// IsUnmappedUnaliased reports whether a stack Varnode that no SymbolEntry
+// covers should nonetheless be treated as having no local alias.
+func (sl *ScopeLocal) IsUnmappedUnaliased(vn *Varnode) bool {
+	if sl == nil || sl.model == nil || vn.Space() != sl.model.StackSpace {
+		return false // Must be in the mapped local (stack) space
+	}
+	// minParamOffset/maxParamOffset are only narrowed by markNotMapped, which
+	// is unported, so they keep resetLocalWindow's empty (max < min) state:
+	// C++ answers true for that state.
+	// C++ parity: varmap.cc ScopeLocal::isUnmappedUnaliased (494-502).
+	return true
+}
 
 // AttachEntryToVarnode records the mapping between a Varnode and a resolved
 // SymbolEntry. syncVarnodesWithSymbols uses this to carry entry results across
@@ -635,11 +640,7 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 	sl.createOpenEntries(fd, fixedStarts)
 
 	if aliasyes {
-		// TODO: real alias marking requires the ported AliasChecker. Without
-		// it, every entry is conservatively left as "unknown-alias" which
-		// matches the Ghidra default when alias analysis is disabled.
-		// C++ parity: varmap.cc ScopeLocal::markUnaliased
-		_ = aliasyes
+		sl.markUnaliased(sl.gatherAlias(fd))
 	}
 	// Re-stamp existing stack Varnodes with their (just-built) SymbolEntry flags --
 	// chiefly addrtied. The Varnodes were created by StackPtrFlow before any symbol
@@ -661,6 +662,92 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 	// overlapProblems == false because the per-offset grouping cannot
 	// produce overlaps by construction.
 	return false
+}
+
+// gatherAlias returns the sorted stack offsets at which a pointer into the
+// frame is formed (the start of each potentially aliased region).
+// C++ parity: varmap.cc AliasChecker::gather/gatherInternal + sortAlias, as
+// used by MapState::gatherOpen; the alias boundary used by hasLocalAlias is
+// not needed here.
+func (sl *ScopeLocal) gatherAlias(fd *Funcdata) []uint64 {
+	if sl.model == nil || sl.model.StackSpace == nil {
+		return nil
+	}
+	point := sl.model.StackSpace.GetSpacebase(0)
+	if point.Space == nil {
+		return nil
+	}
+	spacebase := fd.GetVarnodeBank().FindInput(point.Size, address.Address{Space: point.Space, Offset: point.Offset})
+	if spacebase == nil {
+		return nil // No possible alias
+	}
+	var alias []uint64
+	for _, ab := range gatherAdditiveBase(spacebase) {
+		alias = append(alias, aliasGatherOffset(ab.base)) // word size 1: already byte offsets
+	}
+	sort.Slice(alias, func(i, j int) bool { return alias[i] < alias[j] })
+	return alias
+}
+
+// aliasBlockLevel is the default Architecture::alias_block_level: locked
+// structures and arrays block aliases, primitive types do not.
+const aliasBlockLevel = 2
+
+// markUnaliased marks each stack Symbol that no alias start can reach as
+// nolocalalias. An alias reaches every Symbol after it until an unmapped gap
+// in the scope's ranges, a locked aggregate, or more than 0xffff bytes.
+// C++ parity: varmap.cc ScopeLocal::markUnaliased (1332-1384). The scope's
+// range tree is the model's local+param ranges (resetLocalWindow);
+// markNotMapped is unported, so no temporary-storage holes are cut out of it.
+func (sl *ScopeLocal) markUnaliased(alias []uint64) {
+	ext := sl.ext()
+	entries := append([]*SymbolEntry(nil), ext.entries...)
+	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Addr().Offset < entries[j].Addr().Offset })
+	ranges := sl.model.StackRanges()
+	ri := 0
+	aliason := false
+	var curalias uint64
+	i := 0
+	for _, entry := range entries {
+		curoff := entry.Addr().Offset + uint64(entry.Size()) - 1
+		for i < len(alias) && alias[i] <= curoff {
+			aliason = true
+			curalias = alias[i]
+			i++
+		}
+		// Aliases shouldn't go through unmapped regions of the local variables
+		for ; ri < len(ranges); ri++ {
+			first, last := ranges[ri][0], ranges[ri][1]
+			if first > curalias && curoff >= first {
+				aliason = false
+			}
+			if last >= curoff {
+				break // Symbol is not past the end of this mapped range
+			}
+			if last > curalias {
+				aliason = false // Past the end of the range AND past the last alias offset
+			}
+		}
+		sym := entry.Symbol()
+		// Enough distance between the symbol and the last alias resets aliasing
+		// (primarily between stack parameters and stack locals).
+		if aliason && curoff-curalias > 0xffff {
+			aliason = false
+		}
+		if !aliason {
+			sym.SetFlags(VarnodeNoLocalAlias)
+		}
+		if sym.IsTypeLocked() && aliasBlockLevel != 0 {
+			switch meta := sym.Type().Metatype(); {
+			case aliasBlockLevel == 3:
+				aliason = false
+			case meta == TYPE_STRUCT:
+				aliason = false
+			case meta == TYPE_ARRAY && aliasBlockLevel > 1:
+				aliason = false
+			}
+		}
+	}
 }
 
 // buildVariableName picks a default display name for a stack slot.

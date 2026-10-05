@@ -81,6 +81,9 @@ type CspecOutput struct {
 // CspecRegList holds a list of <register> elements (for unaffected/killedbycall).
 type CspecRegList struct {
 	Registers []CspecRegister `xml:"register"`
+	// Varnodes are raw <varnode space offset size> entries (e.g. x86win's
+	// unaffected ram:0 size 4).
+	Varnodes []CspecVarnodeRef `xml:"varnode"`
 }
 
 // CspecPrototype is a single calling convention prototype.
@@ -190,6 +193,10 @@ type CspecData struct {
 	StackPointerSpace string
 	// ReturnAddressStack is the stack offset of the return address (0 for x86 cdecl).
 	ReturnAddressOffset int64
+	// ReturnAddress is the global <returnaddress> storage, the default
+	// return_address effect of every model.
+	// C++ parity: Architecture::defaultReturnAddr.
+	ReturnAddress *CspecVarnodeRef
 	// PointerSizeVal is the pointer size in bytes from <data_organization><pointer_size/>.
 	// 0 means unset (use default 4).
 	PointerSizeVal int
@@ -235,6 +242,8 @@ func ParseCspecBytes(data []byte) (*CspecData, error) {
 	}
 	if raw.ReturnAddr.Varnode != nil {
 		cs.ReturnAddressOffset = raw.ReturnAddr.Varnode.Offset
+		ra := *raw.ReturnAddr.Varnode
+		cs.ReturnAddress = &ra
 	}
 	if raw.DataOrg != nil && raw.DataOrg.PointerSize.Value > 0 {
 		cs.PointerSizeVal = raw.DataOrg.PointerSize.Value
@@ -321,6 +330,10 @@ func (cs *CspecData) allInputPentries() []CspecPentry {
 	}
 	return result
 }
+
+// InputPentries returns the default prototype's input pentries, groups
+// flattened.
+func (cs *CspecData) InputPentries() []CspecPentry { return cs.allInputPentries() }
 
 // LikelyTrashRegs returns the names of registers declared inside the
 // <likelytrash> block of the default prototype. Empty when the cspec does not

@@ -107,10 +107,7 @@ func (fc *FuncCallSpecs) InitActiveOutput() {
 // insertion through OpStackLoad and tags the result varnode with the
 // spacebase-placeholder flag so RuleLoadPlaceholderClear can delete it once
 // the value is no longer needed.
-// C++ parity: fspec.cc FuncCallSpecs::createPlaceholder ~L4849
-// TODO known mismatch: setStackPlaceholderSlot side state is not tracked --
-// the slot is recoverable as fc.op.NumInput()-1 immediately after this call,
-// which matches every current call site.
+// C++ parity: fspec.cc FuncCallSpecs::createPlaceholder (4849-4857)
 func (fc *FuncCallSpecs) CreatePlaceholder(data *Funcdata, spacebase *address.Space) {
 	if fc == nil || data == nil || fc.op == nil || spacebase == nil {
 		return
@@ -121,7 +118,75 @@ func (fc *FuncCallSpecs) CreatePlaceholder(data *Funcdata, spacebase *address.Sp
 		return
 	}
 	data.OpInsertInput(fc.op, loadval, slot)
+	fc.SetStackPlaceholderSlot(slot)
 	loadval.SetSpacebasePlaceholder()
+}
+
+// SetStackPlaceholderSlot records the CALL input slot of the stack-pointer
+// placeholder. C++ parity: FuncCallSpecs::setStackPlaceholderSlot (fspec.hh:1671).
+func (fc *FuncCallSpecs) SetStackPlaceholderSlot(slot int) {
+	fc.stackPlaceholderSlot = slot
+	if fc.IsInputActive() {
+		fc.GetActiveInput().SetPlaceholderSlot()
+	}
+}
+
+// ClearStackPlaceholderSlot releases the placeholder slot.
+// C++ parity: FuncCallSpecs::clearStackPlaceholderSlot (fspec.hh:1673).
+func (fc *FuncCallSpecs) ClearStackPlaceholderSlot() {
+	fc.stackPlaceholderSlot = -1
+	if fc.IsInputActive() {
+		fc.GetActiveInput().FreePlaceholderSlot()
+	}
+}
+
+// HasEffect returns the call effect on the given storage, from the model.
+// C++ parity: FuncProto::hasEffect (the per-prototype effectlist is unported,
+// so the model's list is always used).
+func (fp *FuncProto) HasEffect(addr address.Address, size int32) EffectKind {
+	if fp == nil || fp.model == nil {
+		return EffectUnknown
+	}
+	return fp.model.HasEffect(addr, size)
+}
+
+// GetStackPlaceholderSlot returns the placeholder slot, or -1.
+func (fc *FuncCallSpecs) GetStackPlaceholderSlot() int { return fc.stackPlaceholderSlot }
+
+// ResolveSpacebaseRelative fixes this call's stack offset from the placeholder,
+// which RuleLoadVarnode has just turned into a COPY from a stack Varnode, and
+// removes the placeholder when it served no other purpose.
+// C++ parity: fspec.cc FuncCallSpecs::resolveSpacebaseRelative (4870-4903).
+func (fc *FuncCallSpecs) ResolveSpacebaseRelative(data *Funcdata, phvn *Varnode) {
+	refvn := phvn.Def().Input(0)
+	spacebase := refvn.Space()
+	if spacebase.Kind != address.SpaceKindStack {
+		data.warningHeader("This function may have set the stack pointer")
+	}
+	fc.stackoffset = refvn.Offset()
+	if fc.stackPlaceholderSlot >= 0 && fc.op.Input(fc.stackPlaceholderSlot) == phvn {
+		fc.AbortSpacebaseRelative(data)
+		return
+	}
+	// C++ derives the offset from a locked stack parameter here. Call-site
+	// prototypes are never input-locked in Gosleigh (no callee prototypes are
+	// injected), so this path is unreachable; C++ throws when it fails.
+	data.warningHeader("Unresolved stack placeholder")
+}
+
+// AbortSpacebaseRelative removes any stack-pointer placeholder from the call.
+// C++ parity: fspec.cc FuncCallSpecs::abortSpacebaseRelative (4910-4922).
+func (fc *FuncCallSpecs) AbortSpacebaseRelative(data *Funcdata) {
+	if fc.stackPlaceholderSlot < 0 {
+		return
+	}
+	vn := fc.op.Input(fc.stackPlaceholderSlot)
+	data.OpRemoveInput(fc.op, fc.stackPlaceholderSlot)
+	fc.ClearStackPlaceholderSlot()
+	// Remove the op producing the placeholder as well
+	if vn.HasNoDescend() && vn.Space() != nil && vn.Space().Kind == address.SpaceKindUnique && vn.IsWritten() {
+		data.OpDestroy(vn.Def())
+	}
 }
 
 // Deindirect converts a CALLIND op into a direct CALL whose target is newfd.
@@ -868,7 +933,17 @@ func (fd *Funcdata) NewSpacebasePtr(id *address.Space) *Varnode {
 	if fd == nil || id == nil {
 		return nil
 	}
-	point, ok := spacebaseRegisterFor(id)
+	// C++ newSpacebasePtr reads the space's own spacebase record
+	// (funcdata_varnode.cc: id->getSpacebase(0)). The side map and the input
+	// scan are fallbacks for harness-built spaces that never registered one.
+	var point VarnodeData
+	var ok bool
+	if sb := id.GetSpacebase(0); sb.Space != nil && sb.Size > 0 {
+		point, ok = VarnodeData{Space: sb.Space, Offset: sb.Offset, Size: uint32(sb.Size)}, true
+	}
+	if !ok {
+		point, ok = spacebaseRegisterFor(id)
+	}
 	if !ok {
 		point, ok = findExistingSpacebaseInput(fd, id)
 	}

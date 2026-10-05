@@ -24,7 +24,9 @@ not read PDB, so a PDB-named golden would never match.
 """
 
 import argparse
+import difflib
 import hashlib
+import re
 import json
 import shutil
 import os
@@ -236,23 +238,41 @@ def do_report(work):
 		os.path.join(work, "GAPMAP.md"), os.path.join(work, "gapmap.json"),
 		title="real-exe gap map",
 	)
-	sizes = {f["name"]: f.get("size", 0) for f in goldengap.load_json(goldens)["functions"]}
+	gf = goldengap.load_json(goldens)["functions"]
+	got = goldengap.load_json(os.path.join(work, "gosleigh_out.json"))["functions"]
 	by_bucket = defaultdict(Counter)
-	for r in summary["functions"]:
-		b = by_bucket[size_bucket(sizes.get(r["name"], 0))]
+	sims = defaultdict(list)
+	for g, r, out in zip(gf, summary["functions"], got):
+		k = size_bucket(g.get("size", 0))
+		b = by_bucket[k]
 		b["total"] += 1
 		if r["tags"] == ["MATCH"]:
 			b["match"] += 1
 		if "ENGINE-ERR" in r["tags"]:
 			b["err"] += 1
+		sims[k].append(similarity(g["c"], out.get("output") or ""))
+	# sim = token-sequence similarity (difflib ratio, 0..1) after collapsing
+	# whitespace: a progress signal that moves before exact matches do.
 	print("")
-	print("%-8s %6s %6s %6s" % ("bytes", "total", "match", "err"))
+	print("%-8s %6s %6s %6s %6s" % ("bytes", "total", "match", "err", "sim"))
 	order = ["<=32", "<=64", "<=128", "<=256", "<=512", "<=1024", "<=2048", ">2048"]
 	for k in order:
 		if k in by_bucket:
 			c = by_bucket[k]
-			print("%-8s %6d %6d %6d" % (k, c["total"], c["match"], c["err"]))
+			print("%-8s %6d %6d %6d %6.3f" % (k, c["total"], c["match"], c["err"], sum(sims[k]) / len(sims[k])))
+	allsim = [s for v in sims.values() for s in v]
+	print("%-8s %6d %6d %6s %6.3f" % ("all", len(allsim), sum(c["match"] for c in by_bucket.values()), "", sum(allsim) / len(allsim)))
 	return True
+
+
+TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|0x[0-9a-fA-F]+|\d+|\S")
+
+
+def similarity(want, got):
+	a, b = TOKEN.findall(want), TOKEN.findall(got)
+	if not a and not b:
+		return 1.0
+	return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
 
 
 def main():

@@ -322,6 +322,10 @@ type HeritageInfo struct {
 	DeadRemoved   int32
 	LoadGuardDone bool
 	WarningIssued bool
+	// HasCallPlaceholders is true for the stack space until its unresolved
+	// call stack placeholders have been cleared.
+	// C++ parity: HeritageInfo::hasCallPlaceholders.
+	HasCallPlaceholders bool
 }
 
 // NewHeritageInfo creates HeritageInfo for a space. If spc is nil or
@@ -340,8 +344,9 @@ func NewHeritageInfo(spc *address.Space) HeritageInfo {
 		return HeritageInfo{}
 	default:
 		return HeritageInfo{
-			Space: spc,
-			Delay: spc.Delay,
+			Space:               spc,
+			Delay:               spc.Delay,
+			HasCallPlaceholders: spc.Kind == address.SpaceKindStack,
 		}
 	}
 }

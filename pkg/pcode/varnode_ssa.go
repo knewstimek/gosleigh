@@ -268,6 +268,10 @@ func (vn *Varnode) CopyShadow(op2 *Varnode) bool {
 }
 func (vn *Varnode) IsNameLock() bool      { return vn.flags&VarnodeNameLock != 0 }
 func (vn *Varnode) IsReturnAddress() bool { return vn.flags&VarnodeReturnAddress != 0 }
+
+// HasNoLocalAlias reports that no pointer into the local frame can reach this
+// storage. C++ parity: Varnode::hasNoLocalAlias.
+func (vn *Varnode) HasNoLocalAlias() bool { return vn.flags&VarnodeNoLocalAlias != 0 }
 func (vn *Varnode) IsPrecisLo() bool      { return vn.flags&VarnodePrecisLo != 0 }
 func (vn *Varnode) IsPrecisHi() bool      { return vn.flags&VarnodePrecisHi != 0 }
 func (vn *Varnode) IsDirectWrite() bool   { return vn.flags&VarnodeDirectWrite != 0 }

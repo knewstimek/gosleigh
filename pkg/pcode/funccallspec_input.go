@@ -42,19 +42,11 @@ const trimRecurseMax = 5
 const spacebaseOffsetUnknown = uint64(0xBADBEEF)
 
 // GetSpacebaseOffset returns the stack-pointer offset at this call site,
-// relative to the caller's spacebase origin.
-//
-// TODO known mismatch: Gosleigh does not run the stack-placeholder resolution
-// (FuncCallSpecs::resolveSpacebaseRelative) -- Funcdata.NewSpacebasePtr has no
-// registered spacebase register for the x64 stack space, so ActionFuncLink's
-// createPlaceholder never materializes a placeholder LOAD to read the offset
-// from. Reporting offset_unknown takes exactly the C++ branch for that state:
-// Heritage::guardCalls sets tryregister=false and registers no stack trial, so
-// a stack-passed argument stays unrecovered instead of being registered at a
-// wrong (untranslated) callee-relative address.
+// relative to the caller's spacebase origin, as resolved from the stack
+// placeholder (spacebaseOffsetUnknown until then).
 // C++ parity: FuncCallSpecs::getSpacebaseOffset (fspec.hh:1689).
 func (fc *FuncCallSpecs) GetSpacebaseOffset() uint64 {
-	return spacebaseOffsetUnknown
+	return fc.stackoffset
 }
 
 // ClearActiveInput turns off input-parameter recovery for this call.

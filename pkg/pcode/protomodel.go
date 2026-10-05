@@ -15,6 +15,8 @@
 package pcode
 
 import (
+	"sort"
+
 	"gosleigh/pkg/address"
 )
 
@@ -35,7 +37,105 @@ const (
 	// Heritage inserts nothing; the pre-call SSA version flows through.
 	// C++ parity: EffectRecord::unaffected
 	EffectUnaffected
+	// EffectReturnAddress: the storage holds the call's return address.
+	// C++ parity: EffectRecord::return_address
+	EffectReturnAddress
 )
+
+// EffectRecord is one storage range whose call effect a model declares.
+// C++ parity: fspec.hh EffectRecord.
+type EffectRecord struct {
+	Addr address.Address
+	Size int32
+	Type EffectKind
+}
+
+// effectLess orders records by space index, then offset.
+// C++ parity: EffectRecord::compareByAddress.
+func effectLess(a, b address.Address) bool {
+	if a.Space != b.Space {
+		return a.Space.Index < b.Space.Index
+	}
+	return a.Offset < b.Offset
+}
+
+// SetEffects installs the model's effect list, sorted for lookupEffect.
+func (pm *ProtoModel) SetEffects(effects []EffectRecord) {
+	sort.SliceStable(effects, func(i, j int) bool { return effectLess(effects[i].Addr, effects[j].Addr) })
+	pm.Effects = effects
+}
+
+// LookupEffect classifies how a call affects [addr,addr+size): the effect of
+// the last record at or below addr when it fully contains the range, else
+// unknown. Internal (unique) storage is always unaffected.
+// C++ parity: fspec.cc ProtoModel::lookupEffect (2472-2495).
+func LookupEffect(efflist []EffectRecord, addr address.Address, size int32) EffectKind {
+	if addr.Space != nil && addr.Space.Kind == address.SpaceKindUnique {
+		return EffectUnaffected
+	}
+	// upper_bound: first record strictly greater than addr.
+	i := sort.Search(len(efflist), func(i int) bool { return effectLess(addr, efflist[i].Addr) })
+	if i == 0 {
+		return EffectUnknown
+	}
+	hit := efflist[i-1]
+	if hit.Size == 0 && hit.Addr.Space == addr.Space {
+		return EffectUnaffected // A size of zero means the whole space is unaffected
+	}
+	if hit.Addr.Space != addr.Space || addr.Space.Kind == address.SpaceKindConstant {
+		return EffectUnknown
+	}
+	// Address::overlap(0,hit,sz): distance of addr into hit, wrapped to the space.
+	dist := wrapSpaceOffset(addr.Space, addr.Offset-hit.Addr.Offset)
+	if dist >= uint64(hit.Size) || dist+uint64(size) > uint64(hit.Size) {
+		return EffectUnknown
+	}
+	return hit.Type
+}
+
+// wrapSpaceOffset reduces an offset to the space's address width.
+// C++ parity: AddrSpace::wrapOffset.
+func wrapSpaceOffset(spc *address.Space, off uint64) uint64 {
+	if spc == nil || spc.AddrSize == 0 || spc.AddrSize >= 8 {
+		return off
+	}
+	return off & ((uint64(1) << (8 * uint(spc.AddrSize))) - 1)
+}
+
+// StackRanges returns the model's local and parameter ranges in the stack
+// space, sorted by first offset, applying the C++ defaults when the cspec
+// gives none.
+// C++ parity: ProtoModel::defaultLocalRange / defaultParamRange (negative
+// stack growth) merged as ScopeLocal::resetLocalWindow does.
+func (pm *ProtoModel) StackRanges() [][2]uint64 {
+	if pm == nil || pm.StackSpace == nil {
+		return nil
+	}
+	highest := wrapSpaceOffset(pm.StackSpace, ^uint64(0))
+	sz := pm.StackSpace.AddrSize
+	var localSpan, paramLast uint64 = 99, 15
+	if sz >= 4 {
+		localSpan, paramLast = 999999, 511
+	} else if sz >= 2 {
+		localSpan, paramLast = 9999, 255
+	}
+	ranges := append([][2]uint64(nil), pm.StackParamRanges...)
+	if len(ranges) == 0 {
+		ranges = append(ranges, [2]uint64{0, paramLast})
+	}
+	ranges = append(ranges, [2]uint64{highest - localSpan, highest})
+	sort.Slice(ranges, func(i, j int) bool { return ranges[i][0] < ranges[j][0] })
+	return ranges
+}
+
+// HasEffect returns the model's effect on the given storage.
+// C++ parity: ProtoModel::hasEffect.
+func (pm *ProtoModel) HasEffect(addr address.Address, size int32) EffectKind {
+	if pm == nil {
+		return EffectUnknown
+	}
+	return LookupEffect(pm.Effects, addr, size)
+}
 
 // ProtoModel is a lightweight representation of a calling convention prototype
 // sufficient for ABI-aware variable naming. It does not replicate the full
@@ -55,6 +155,15 @@ type ProtoModel struct {
 	// hasThis marks a model whose first input is an implicit this pointer.
 	// C++ parity: ProtoModel::hasThis.
 	hasThis bool
+
+	// Effects is the sorted effect list (unaffected / killedbycall /
+	// return_address storage). C++ parity: ProtoModel::effectlist.
+	Effects []EffectRecord
+
+	// StackParamRanges are the stack offset ranges [first,last] of the input
+	// pentries; empty means the default parameter range.
+	// C++ parity: ProtoModel::paramrange from input->getRangeList(stackspc).
+	StackParamRanges [][2]uint64
 
 	// StackSpace is the address space used for stack variables (SpaceKindStack or name=="stack").
 	StackSpace *address.Space

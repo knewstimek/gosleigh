@@ -153,8 +153,16 @@ func rewriteLoadToCopy(op *PcodeOp, data *Funcdata, spc *address.Space, off uint
 	data.OpSetInput(op, newvn, 0)
 	data.OpRemoveInput(op, 1)
 	data.OpSetOpcode(op, CPUI_COPY)
-	if op.Output().IsSpacebasePlaceholder() {
-		op.Output().ClearSpacebasePlaceholder()
+	if refvn := op.Output(); refvn.IsSpacebasePlaceholder() {
+		refvn.ClearSpacebasePlaceholder() // Clear the trigger
+		// The placeholder now names the caller's stack location at the call:
+		// that offset is the call's stackoffset.
+		// C++ parity: ruleaction.cc RuleLoadVarnode::applyOp (4314-4322).
+		if placeOp := refvn.LoneDescend(); placeOp != nil {
+			if fc := data.callSpecsForOp(placeOp); fc != nil {
+				fc.ResolveSpacebaseRelative(data, refvn)
+			}
+		}
 	}
 	return 1
 }

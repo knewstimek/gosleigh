@@ -35,6 +35,7 @@ type Heritage struct {
 // callGuardKey uniquely identifies a guarded (callOp, register-offset, size) triple.
 type callGuardKey struct {
 	callOp *PcodeOp
+	space  *address.Space
 	offset uint64
 	size   int32
 }
@@ -66,114 +67,87 @@ func (h *Heritage) WithProtoModel(pm *ProtoModel) *Heritage {
 	return h
 }
 
-// guardCalls inserts INDIRECT (or INDIRECT_CREATION) ops immediately before
-// each CALL/CALLIND op to model the call-site side-effect on the register
-// range (sp, offset, size).  Only register-space ranges are guarded; stack
-// and other spaces are ignored (stack side effects are handled separately).
+// guardCalls decides the data-flow effect of every call on the range
+// (sp, offset, size) and, where the effect is not "unaffected", inserts an
+// INDIRECT (or INDIRECT creation) so renaming sees the call as a definition.
+// It also registers the range as a speculative input/output trial of calls
+// still recovering their prototype. A stack range is translated to the
+// callee's frame using the call's resolved stack offset; when that offset is
+// unknown the range is still guarded but never registered as a trial.
 //
-// Effect classification uses h.proto.EffectOnRegister:
-//   - EffectKilledByCall  -> newIndirectCreation  (caller-saved: EAX/ECX/EDX)
-//   - EffectUnaffected    -> no INDIRECT           (callee-saved: EBX/ESI/EDI/EBP)
-//   - EffectUnknown       -> newIndirectOp         (unknown: model conservatively)
+// h.guarded deduplicates (callOp, offset, size) across Heritage() passes: the
+// Go heritage loop revisits ranges that C++ would not re-guard.
 //
-// h.guarded deduplicates (callOp, offset, size) across multiple Heritage()
-// calls so the same INDIRECT is not inserted twice.
-//
-// C++ parity: heritage.cc Heritage::guardCalls (register-space subset of lines 1443-1527)
+// C++ parity: heritage.cc Heritage::guardCalls (1443-1527). Not ported:
+// guardCallOverlappingInput / tryOutputOverlapGuard / tryOutputStackGuard
+// (ranges that properly contain a parameter or return slot), the addrtied
+// holdind flag (fl from ScopeLocal::queryProperties), isAutoKilledByCall.
 func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
-	if h.proto == nil {
-		return
-	}
-	// Only register space is guarded here; stack side-effects handled elsewhere.
-	if sp.Kind != address.SpaceKindProcessor || sp.Name != "register" {
+	if h.proto == nil || sp == nil {
 		return
 	}
 	if h.guarded == nil {
 		h.guarded = make(map[callGuardKey]bool)
 	}
-	for _, op := range h.fd.GetPcodeOpBank().AllOps() {
-		if op == nil || op.IsDead() {
+	addr := address.Address{Space: sp, Offset: offset}
+	for i := 0; i < h.fd.NumCalls(); i++ {
+		fc := h.fd.GetCallSpecs(i)
+		if fc == nil || fc.op == nil || fc.op.IsDead() {
 			continue
 		}
-		if op.Code() != CPUI_CALL && op.Code() != CPUI_CALLIND {
+		op := fc.op
+		// Skip a range the call already assigns as its output.
+		if out := op.Output(); out != nil && out.Addr() == addr && out.Size() == size {
 			continue
 		}
-		// Skip guarding a range the call already assigns as its output: once
-		// return-value recovery (ActionActiveReturn) has moved the return register
-		// to be the CALL op's output, re-heritage must not re-guard that same range
-		// with an INDIRECT -- doing so shadows the call output and drops the
-		// RETURN's reference to it. C++ parity: heritage.cc Heritage::guardCalls
-		// (the isAssignment guard, lines 1453-1456).
-		if out := op.Output(); out != nil && out.Addr().Space == sp &&
-			out.Addr().Offset == offset && out.Size() == size {
-			continue
+		off := offset
+		tryregister := true
+		if sp.Kind == address.SpaceKindStack {
+			if so := fc.GetSpacebaseOffset(); so != spacebaseOffsetUnknown {
+				off = wrapSpaceOffset(sp, off-so)
+			} else {
+				tryregister = false // Do not register this stack location as a trial
+			}
 		}
-		// Register an output (return-value) trial when the call is recovering its
-		// output and this range fits its return storage. This runs independently of
-		// the INDIRECT dedup below (guarded by whichTrial) so the trial is picked up
-		// even on a re-heritage pass after the INDIRECT-creation already exists --
-		// ActionActiveReturn matches trials to those INDIRECT ops by cause-op, not
-		// by insertion order. C++ parity: heritage.cc Heritage::guardCalls
-		// (isOutputActive block, lines 1469-1485; contained_by overlap guard unported).
-		if fc := h.fd.callSpecsForOp(op); fc != nil && fc.IsOutputActive() {
-			active := fc.GetActiveOutput()
-			addr := address.Address{Space: sp, Offset: offset}
-			switch fc.CharacterizeAsOutput(addr, size) {
+		transAddr := address.Address{Space: sp, Offset: off} // Relative to the callee's stack
+		effecttype := fc.HasEffect(transAddr, size)
+		if fc.IsOutputActive() && tryregister {
+			switch fc.CharacterizeAsOutput(transAddr, size) {
 			case retOutNoContainment:
-				// No overlap with the return register; not an output candidate.
 			case retOutContainedBy:
-				// TODO known mismatch: tryOutputOverlapGuard (range larger than the
-				// output register) is not ported; the exact-size register-output
-				// path below covers the current call-return-carrier corpus.
-			default: // retOutOther: range fits the return storage
-				if active != nil && active.WhichTrial(addr, size) < 0 {
-					active.RegisterTrial(addr, size)
+				// TODO known mismatch: tryOutputOverlapGuard is not ported.
+			default:
+				if active := fc.GetActiveOutput(); active != nil && active.WhichTrial(transAddr, size) < 0 {
+					active.RegisterTrial(transAddr, size)
 				}
 			}
 		}
-
-		// Register an input (parameter) trial when the call is still recovering
-		// its inputs and this range fits one of the model's parameter entries.
-		// A fresh Varnode at the range is appended as an extra CALL input so the
-		// renaming pass that follows wires it to the reaching definition; the
-		// trial and the input slot stay in lockstep (trial slot N == op input N).
-		// Like the output block above, this runs independently of the INDIRECT
-		// dedup below (whichTrial is the idempotence guard) so a re-heritage pass
-		// still picks up newly heritaged parameter ranges.
-		//
-		// Note the C++ tryregister gate: for a spacebase range whose call-site
-		// stack offset is unknown, C++ registers no trial. Gosleigh reaches this
-		// point only for the register space (the early return above), which is
-		// the same outcome -- see FuncCallSpecs.GetSpacebaseOffset.
-		// C++ parity: heritage.cc Heritage::guardCalls (isInputActive block,
-		// lines 1495-1508); guardCallOverlappingInput (contained_by) unported.
-		if fc := h.fd.callSpecsForOp(op); fc != nil && fc.IsInputActive() {
-			addr := address.Address{Space: sp, Offset: offset}
-			if fc.CharacterizeAsInputParam(addr, size) == peContainsJustified {
+		if fc.IsInputActive() && tryregister {
+			if fc.CharacterizeAsInputParam(transAddr, size) == peContainsJustified {
 				active := fc.GetActiveInput()
-				if active != nil && active.WhichTrial(addr, size) < 0 {
-					active.RegisterTrial(addr, size)
+				if active != nil && active.WhichTrial(transAddr, size) < 0 {
+					active.RegisterTrial(transAddr, size)
 					vn := h.fd.NewVarnode(size, addr)
 					vn.SetActiveHeritage()
 					h.fd.OpInsertInput(op, vn, op.NumInput())
 				}
 			}
+			// TODO known mismatch: contained_by -> guardCallOverlappingInput.
 		}
-
-		key := callGuardKey{callOp: op, offset: offset, size: size}
+		key := callGuardKey{callOp: op, offset: offset, size: size, space: sp}
 		if h.guarded[key] {
 			continue
 		}
 		h.guarded[key] = true
-		switch h.proto.EffectOnRegister(offset) {
-		case EffectUnaffected:
-			// Callee-saved register: no INDIRECT needed; pre-call value flows through.
+		// The call is not guarded when the effect is "unaffected".
+		switch effecttype {
+		case EffectUnknown, EffectReturnAddress:
+			indop := h.fd.NewIndirectOp(op, sp, offset, size)
+			if effecttype == EffectReturnAddress {
+				indop.Output().SetFlags(VarnodeReturnAddress)
+			}
 		case EffectKilledByCall:
-			// Caller-saved register (e.g. EAX, ECX, EDX): call overwrites it.
 			h.fd.NewIndirectCreation(op, sp, offset, size)
-		default: // EffectUnknown
-			// Conservative: call may or may not modify; model as read-modify.
-			h.fd.NewIndirectOp(op, sp, offset, size)
 		}
 	}
 }
@@ -1297,12 +1271,16 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 	}
 
 	// For each heritaged space
-	for _, info := range h.infoList {
+	for idx := range h.infoList {
+		info := &h.infoList[idx]
 		if !info.IsHeritaged() {
 			continue
 		}
 		if h.pass < info.Delay {
 			continue
+		}
+		if info.HasCallPlaceholders {
+			h.clearStackPlaceholders(info)
 		}
 
 		// Scan all varnodes in this space
@@ -1407,6 +1385,18 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 	h.disjoint.Clear()
 	h.pass++
 	h.AnnotateFloatTypes()
+}
+
+// clearStackPlaceholders removes the placeholder LOAD of every call whose stack
+// offset was not resolved before the stack space is heritaged.
+// C++ parity: heritage.cc Heritage::clearStackPlaceholders (2047-2055).
+func (h *Heritage) clearStackPlaceholders(info *HeritageInfo) {
+	for i := 0; i < h.fd.NumCalls(); i++ {
+		if fc := h.fd.GetCallSpecs(i); fc != nil {
+			fc.AbortSpacebaseRelative(h.fd)
+		}
+	}
+	info.HasCallPlaceholders = false // Mark that clear has taken place
 }
 
 // HeritageRange performs SSA construction for a single explicit address range

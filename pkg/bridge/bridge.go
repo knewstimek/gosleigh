@@ -601,6 +601,17 @@ func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Fun
 		_, off, sz, ok := xr.RegisterByName(name)
 		return off, int32(sz), ok
 	})
+	if cspec != nil {
+		model.SetEffects(buildEffectList(xr, cspec, fd, model.StackSpace))
+		// Parameter range from the stack <pentry> extents (base .. base+maxsize-1).
+		// C++ parity: ParamListStandard::getRangeList.
+		for _, pe := range cspec.InputPentries() {
+			if pe.Addr != nil && pe.Addr.Space == "stack" && pe.MaxSize > 0 {
+				base := uint64(pe.Addr.Offset)
+				model.StackParamRanges = append(model.StackParamRanges, [2]uint64{base, base + uint64(pe.MaxSize) - 1})
+			}
+		}
+	}
 
 	// Wire the integer return register from the cspec default-proto <output> block
 	// (EAX / RAX / x0 by arch) so guardReturns can recover the return value at the
@@ -625,6 +636,56 @@ func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Fun
 		}
 	}
 	return model
+}
+
+// buildEffectList resolves the default prototype's <unaffected>/<killedbycall>
+// storage, plus the global return address, into EffectRecords.
+// C++ parity: fspec.cc ProtoModel::decode (effectlist from ELEM_UNAFFECTED,
+// ELEM_KILLEDBYCALL, and glb->defaultReturnAddr when the model has no
+// <returnaddress> of its own).
+func buildEffectList(xr *sla.XRefs, cspec *pcode.CspecData, fd *pcode.Funcdata, stack *address.Space) []pcode.EffectRecord {
+	if cspec.DefaultProto == nil {
+		return nil
+	}
+	spaceByName := func(name string) *address.Space {
+		if stack != nil && stack.Name == name {
+			return stack
+		}
+		if base := fd.BaseAddr().Space; base != nil && base.Name == name {
+			return base
+		}
+		for _, vn := range fd.GetVarnodeBank().AllVarnodes() {
+			if sp := vn.Space(); sp != nil && sp.Name == name {
+				return sp
+			}
+		}
+		return nil
+	}
+	var out []pcode.EffectRecord
+	add := func(list pcode.CspecRegList, kind pcode.EffectKind) {
+		for _, r := range list.Registers {
+			si, off, sz, ok := xr.RegisterByName(r.Name)
+			if !ok {
+				continue
+			}
+			if sp, _ := registerSpaceByIndex(fd, si); sp != nil {
+				out = append(out, pcode.EffectRecord{Addr: address.Address{Space: sp, Offset: off}, Size: int32(sz), Type: kind})
+			}
+		}
+		for _, v := range list.Varnodes {
+			if sp := spaceByName(v.Space); sp != nil {
+				out = append(out, pcode.EffectRecord{Addr: address.Address{Space: sp, Offset: uint64(v.Offset)}, Size: int32(v.Size), Type: kind})
+			}
+		}
+	}
+	add(cspec.DefaultProto.Unaffected, pcode.EffectUnaffected)
+	add(cspec.DefaultProto.KilledByCall, pcode.EffectKilledByCall)
+	if ra := cspec.ReturnAddress; ra != nil {
+		if sp := spaceByName(ra.Space); sp != nil {
+			out = append(out, pcode.EffectRecord{Addr: address.Address{Space: sp, Offset: uint64(ra.Offset)}, Size: int32(ra.Size), Type: pcode.EffectReturnAddress})
+		}
+	}
+	return out
 }
 
 // buildFaithfulStackSpace constructs the stack spacebase space for the INC-1
