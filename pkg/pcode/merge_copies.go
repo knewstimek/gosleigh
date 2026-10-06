@@ -217,7 +217,7 @@ func (m *Merge) buildDominantCopy(high *HighVariable, copy []*PcodeOp) {
 		}
 	}
 	if count > 0 && domCopyIsNew && domVn.High() != high {
-		mergeHighVariables(high, domVn.High(), nil)
+		mergeHighVariablesSpeculative(high, domVn.High(), nil)
 	}
 }
 

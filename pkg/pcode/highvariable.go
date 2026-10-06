@@ -20,9 +20,12 @@ package pcode
 //
 // C++ parity: varnode.hh HighVariable (partial)
 type HighVariable struct {
-	name      string
-	instances []*Varnode
-	datatype  Datatype // type annotation; nil means unknown
+	// mergeClasses counts speculatively merged groups (0 means 1).
+	// C++ parity: HighVariable::numMergeClasses.
+	mergeClasses int
+	name         string
+	instances    []*Varnode
+	datatype     Datatype // type annotation; nil means unknown
 
 	// cover is the union of live ranges of all member Varnodes.
 	// nil means the cover has not been computed yet (dirty).
@@ -393,4 +396,13 @@ func (hv *HighVariable) isExtraOut() bool {
 		fl |= vn.flags & (VarnodeIndirectCreation | VarnodeAddrTied)
 	}
 	return fl == VarnodeIndirectCreation
+}
+
+// numMergeClasses is the number of speculatively merged groups.
+// C++ parity: HighVariable::getNumMergeClasses.
+func (hv *HighVariable) numMergeClasses() int {
+	if hv.mergeClasses == 0 {
+		return 1
+	}
+	return hv.mergeClasses
 }

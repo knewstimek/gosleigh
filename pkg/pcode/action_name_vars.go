@@ -397,7 +397,8 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		}
 		// A variable passed to a locked callee parameter inherits its name.
 		// C++ parity: ActionNameVars::lookForFuncParamNames.
-		if nm, ok := recmap[c.hv]; ok && !highHasInput(c.hv) {
+		// No inherited name for a speculatively merged variable.
+		if nm, ok := recmap[c.hv]; ok && !highHasInput(c.hv) && c.hv.numMergeClasses() == 1 {
 			c.hv.SetName(makeNameUnique(nm, used))
 			a.count++
 			continue

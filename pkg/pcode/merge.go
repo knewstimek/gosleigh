@@ -448,6 +448,18 @@ func NewMerge(fd *Funcdata) *Merge {
 // Varnode back-pointers, then clears src.  dst inherits name/datatype from src
 // when dst does not already have them.
 // C++ parity: HighVariable::mergeInternal (non-speculative path, simplified)
+// mergeHighVariablesSpeculative is a speculative merge: the merge classes of
+// both variables are kept apart (getNumMergeClasses counts them).
+// C++ parity: HighVariable::merge (isspeculative = true).
+func mergeHighVariablesSpeculative(dst, src *HighVariable, cache *HighIntersectTest) {
+	if dst == src {
+		return
+	}
+	classes := dst.numMergeClasses() + src.numMergeClasses()
+	mergeHighVariables(dst, src, cache)
+	dst.mergeClasses = classes
+}
+
 func mergeHighVariables(dst, src *HighVariable, cache *HighIntersectTest) {
 	if dst == src {
 		return
@@ -1075,7 +1087,7 @@ func (m *Merge) mergeLinear(highvec []*HighVariable) {
 			if m.testCache.Intersection(dst, high) {
 				continue
 			}
-			mergeHighVariables(dst, high, m.testCache)
+			mergeHighVariablesSpeculative(dst, high, m.testCache)
 			placed = true
 			break
 		}
@@ -1139,7 +1151,7 @@ func (m *Merge) mergeAdjacentCopies() {
 			if m.testCache.Intersection(highIn, highOut) {
 				continue
 			}
-			mergeHighVariables(highOut, highIn, m.testCache)
+			mergeHighVariablesSpeculative(highOut, highIn, m.testCache)
 		}
 	}
 }
