@@ -1568,9 +1568,6 @@ func addInstructionOps(fd *pcode.Funcdata, block *pcode.BlockBasic, translation 
 				continue
 			}
 			vn := resolveInput(fd, input, defs)
-			if shouldMaterializeConstant(raw.OpCode, slot, vn) {
-				vn = materializeConstantInput(fd, block, raw.SeqNum.Address, vn)
-			}
 			fd.OpSetInput(op, vn, slot)
 		}
 		if raw.Output != nil {
@@ -1613,29 +1610,6 @@ func resolveInput(fd *pcode.Funcdata, input pcode.VarnodeData, defs map[varKey]*
 	// pre-Heritage raw varnode.
 	// C++ parity: Ghidra's SLEIGH builder creates a fresh varnode per read.
 	return vn
-}
-
-func shouldMaterializeConstant(opcode pcode.OpCode, slot int, vn *pcode.Varnode) bool {
-	if vn == nil || !vn.IsConstant() {
-		return false
-	}
-	value := truncateConstantForSize(vn.Offset(), vn.Size())
-	switch opcode {
-	case pcode.CPUI_INT_SUB:
-		return slot == 1 && value != 0 && value != 1
-	case pcode.CPUI_INT_ADD:
-		return value != allOnesForSize(vn.Size()) && value&signBitForSize(vn.Size()) != 0
-	default:
-		return false
-	}
-}
-
-func materializeConstantInput(fd *pcode.Funcdata, block *pcode.BlockBasic, addr address.Address, constant *pcode.Varnode) *pcode.Varnode {
-	copyOp := fd.NewOp(1, addr)
-	fd.OpSetOpcode(copyOp, pcode.CPUI_COPY)
-	appendAliveOp(fd, block, copyOp)
-	fd.OpSetInput(copyOp, constant, 0)
-	return fd.NewUniqueOut(constant.Size(), copyOp)
 }
 
 func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode.BlockBasic, instToBlock map[address.Address]*pcode.BlockBasic, lastInBlock map[*pcode.BlockBasic]instructionRecord, recoveredTables map[uint64]*pcode.JumpTable, splitTail map[*pcode.BlockBasic]*pcode.BlockBasic) {
