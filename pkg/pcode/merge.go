@@ -871,7 +871,15 @@ func (m *Merge) processCopyTrims() {
 // C++ parity: merge.cc Merge::markInternalCopies (lines 1444-1542)
 func (m *Merge) markInternalCopies() {
 	for _, op := range m.fd.GetPcodeOpBank().AliveOps() {
-		if op == nil || op.Code() != CPUI_COPY {
+		if op == nil {
+			continue
+		}
+		switch op.Code() {
+		case CPUI_SUBPIECE, CPUI_PIECE:
+			m.markInternalPiece(op)
+			continue
+		case CPUI_COPY:
+		default:
 			continue
 		}
 		v1 := op.Output()
@@ -891,6 +899,80 @@ func (m *Merge) markInternalCopies() {
 			op.SetFlag(PcodeOpNonPrinting)
 		}
 	}
+}
+
+// markInternalPiece hides a SUBPIECE or PIECE that only moves bytes between
+// pieces of one variable at matching offsets.
+// C++ parity: Merge::markInternalCopies (PIECE / SUBPIECE cases).
+// TODO known mismatch: C++ tests the VariablePiece groups of the highs;
+// VariableGroup is not modelled, so the symbol entry holding the storage
+// stands in for the group.
+func (m *Merge) markInternalPiece(op *PcodeOp) {
+	v1 := op.Output()
+	e1, p1 := m.fd.pieceEntry(v1)
+	if e1 == nil {
+		return
+	}
+	be := v1.Space().BigEndian
+	if op.Code() == CPUI_SUBPIECE {
+		v2 := op.Input(0)
+		e2, p2 := m.fd.pieceEntry(v2)
+		if e2 != e1 {
+			return
+		}
+		val := int64(op.Input(1).Offset())
+		if be {
+			if p2+int64(v2.Size()-v1.Size())-val != p1 {
+				return
+			}
+		} else if p2+val != p1 {
+			return
+		}
+		op.SetFlag(PcodeOpNonPrinting)
+		if v2.IsImplied() {
+			v2.ClearFlags(VarnodeImplied)
+			v2.SetFlags(VarnodeExplicit)
+		}
+		return
+	}
+	v2, v3 := op.Input(0), op.Input(1)
+	e2, p2 := m.fd.pieceEntry(v2)
+	e3, p3 := m.fd.pieceEntry(v3)
+	if e2 != e1 || e3 != e1 {
+		return
+	}
+	if be {
+		if p2 != p1 || p3 != p1+int64(v2.Size()) {
+			return
+		}
+	} else if p3 != p1 || p2 != p1+int64(v3.Size()) {
+		return
+	}
+	op.SetFlag(PcodeOpNonPrinting)
+	for _, v := range []*Varnode{v2, v3} {
+		if v.IsImplied() {
+			v.ClearFlags(VarnodeImplied)
+			v.SetFlags(VarnodeExplicit)
+		}
+	}
+}
+
+// pieceEntry is the symbol entry holding an address-tied varnode's storage
+// and the varnode's offset within it.
+func (fd *Funcdata) pieceEntry(vn *Varnode) (*SymbolEntry, int64) {
+	if vn == nil || !vn.IsAddrTied() || vn.Space() == nil {
+		return nil, 0
+	}
+	var e *SymbolEntry
+	if sl := fd.GetScopeLocal(); sl != nil && vn.Space() == sl.SpaceID() {
+		e = sl.QueryContainer(vn.Addr(), vn.Size(), address.Address{})
+	} else {
+		e = fd.globalEntryOf(vn)
+	}
+	if e == nil || e.Addr().Space != vn.Space() || vn.Offset() < e.Addr().Offset {
+		return nil, 0
+	}
+	return e, int64(vn.Offset() - e.Addr().Offset)
 }
 
 // mergeMultiEntry merges Varnodes with multiple SymbolEntrys.

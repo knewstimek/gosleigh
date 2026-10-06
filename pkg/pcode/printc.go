@@ -329,7 +329,7 @@ func (s *printCState) collectSymbols() {
 			// declared in the function body (only local-scope symbols are,
 			// PrintC::emitScopeVarDecls).
 			if e := s.fd.globalEntryOf(vn); e != nil {
-				s.names[vn] = s.globalVarnodeName(vn, e)
+				s.names[vn], _ = s.globalVarnodeName(vn, e, nil)
 				// An implied global piece (ActionMarkExplicit lets an addrtied
 				// value through to a containing ZEXT/PIECE) folds into its reader.
 				if vn.Def() != nil && s.shouldInline(vn.Def()) {
@@ -1352,7 +1352,9 @@ func (s *printCState) stackSymbolType(vn *Varnode) Datatype {
 		return nil
 	}
 	if st.Metatype() == TYPE_UNKNOWN {
-		return sharedTypeFactory.GetBase(int32(vn.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", vn.Size()))
+		// The declaration is the symbol's, whatever piece of it vn is.
+		// C++ parity: PrintC::emitVarDecl prints sym->getType().
+		return sharedTypeFactory.GetBase(st.Size(), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", st.Size()))
 	}
 	return s.normalizeTypeForDecl(st)
 }
@@ -3259,7 +3261,7 @@ func (s *printCState) renderVarnodeExpr(vn *Varnode) (ExprFragment, error) {
 		defer delete(s.activeExpr, op)
 		return s.renderOpExprFrag(op)
 	}
-	return s.lang.Atom(s.printName(vn)), nil
+	return s.readExpr(vn), nil
 }
 
 func (s *printCState) renderConstant(vn *Varnode) string {
@@ -4510,7 +4512,8 @@ func (s *printCState) nameOf(vn *Varnode) string {
 	}
 	// A global's name is its symbol's; no local naming pass may override it.
 	if e := s.fd.globalEntryOf(vn); e != nil {
-		return s.globalVarnodeName(vn, e)
+		name, _ := s.globalVarnodeName(vn, e, nil)
+		return name
 	}
 	if name, ok := s.names[vn]; ok {
 		return name
@@ -4535,16 +4538,38 @@ func (s *printCState) nameOf(vn *Varnode) string {
 // printName is how a variable prints in an expression: its name, through
 // its symbol's type when it is only part of a local symbol.
 func (s *printCState) printName(vn *Varnode) string {
-	return s.localPieceName(vn, s.nameOf(vn))
+	name, _ := s.localPieceName(vn, s.nameOf(vn), nil)
+	return name
+}
+
+// readExpr is a variable read: like printName, but a truncating piece of a
+// symbol prints as a cast of the symbol to the variable's type.
+// C++ parity: PrintC::pushVnExplicit -> pushSymbolDetail(vn,op,true).
+func (s *printCState) readExpr(vn *Varnode) ExprFragment {
+	var castTo Datatype
+	if hv := vn.High(); hv != nil {
+		castTo = hv.Type()
+	}
+	var name string
+	var cast Datatype
+	if e := s.fd.globalEntryOf(vn); e != nil {
+		name, cast = s.globalVarnodeName(vn, e, castTo)
+	} else {
+		name, cast = s.localPieceName(vn, s.nameOf(vn), castTo)
+	}
+	if cast != nil {
+		return s.lang.CastExpr(CTypeString(s.normalizeTypeForDecl(cast)), s.lang.Atom(name))
+	}
+	return s.lang.Atom(name)
 }
 
 // localPieceName prints a stack varnode that is only part of its local
 // symbol (an element of a local array) through the symbol's type.
 // C++ parity: PrintC::pushSymbolDetail (pushPartialSymbol).
-func (s *printCState) localPieceName(vn *Varnode, name string) string {
+func (s *printCState) localPieceName(vn *Varnode, name string, castTo Datatype) (string, Datatype) {
 	sl := s.fd.GetScopeLocal()
 	if sl == nil || sl.SpaceID() == nil {
-		return name
+		return name, nil
 	}
 	// A varnode merged into the local from other storage sits where the
 	// high's stack member sits (C++ high->getSymbolOffset).
@@ -4560,14 +4585,14 @@ func (s *printCState) localPieceName(vn *Varnode, name string) string {
 			}
 		}
 		if at == nil {
-			return name
+			return name, nil
 		}
 	}
 	e := sl.QueryContainer(at.Addr(), vn.Size(), address.Address{})
 	if e == nil || e.Symbol() == nil || e.Symbol().Type() == nil || e.Symbol().Name() != name {
-		return name
+		return name, nil
 	}
-	return symbolPieceName(name, e.Symbol().Type(), int32(at.Offset()-e.Addr().Offset), vn.Size())
+	return symbolPieceName(name, e.Symbol().Type(), int32(at.Offset()-e.Addr().Offset), vn.Size(), castTo, sl.SpaceID().BigEndian)
 }
 
 func (s *printCState) isKnownRegisterName(name string) bool {

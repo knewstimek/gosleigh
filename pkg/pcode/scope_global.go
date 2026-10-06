@@ -79,14 +79,14 @@ func (s *printCState) globalSymbolName(sym *Symbol) string {
 // starts at the symbol but runs past its end.
 // C++ parity: PrintC::pushVnExplicit -> pushSymbol / pushPartialSymbol /
 // pushMismatchSymbol.
-// TODO known mismatch: the SUBPIECE-cast form of pushPartialSymbol
-// (allowCast) is not modeled.
-func (s *printCState) globalVarnodeName(vn *Varnode, e *SymbolEntry) string {
+// castTo is the read type when a truncating cast may stand in for the
+// last piece step (allowCast); the cast type is returned when it is used.
+func (s *printCState) globalVarnodeName(vn *Varnode, e *SymbolEntry, castTo Datatype) (string, Datatype) {
 	sym := e.Symbol()
 	name := s.globalSymbolName(sym)
 	ct := sym.Type()
 	if ct == nil {
-		return name
+		return name, nil
 	}
 	// A varnode merged into the global's variable from other storage (a
 	// register) sits where the high's global member sits.
@@ -104,28 +104,30 @@ func (s *printCState) globalVarnodeName(vn *Varnode, e *SymbolEntry) string {
 		}
 	}
 	if at == nil || at.Offset() < e.Addr().Offset {
-		return name
+		return name, nil
 	}
 	off := int32(at.Offset() - e.Addr().Offset)
-	sz := vn.Size()
-	return symbolPieceName(name, ct, off, sz)
+	return symbolPieceName(name, ct, off, vn.Size(), castTo, e.Addr().Space.BigEndian)
 }
 
 // symbolPieceName prints sz bytes at off within a symbol of type ct: the
 // name for the whole symbol, "_"+name when it overruns it from the start,
 // else a path of .field / [index] steps (._off_sz_ when nothing fits).
+// For a read (castTo != nil) a step that is a plain truncation becomes a
+// cast to castTo instead, which is returned.
 // C++ parity: PrintC::pushSymbolDetail -> pushPartialSymbol /
 // pushMismatchSymbol.
-func symbolPieceName(name string, ct Datatype, off, sz int32) string {
+func symbolPieceName(name string, ct Datatype, off, sz int32, castTo Datatype, bigEndian bool) (string, Datatype) {
 	if off == 0 && sz == ct.Size() {
-		return name
+		return name, nil
 	}
 	if off+sz > ct.Size() {
 		if off == 0 {
-			return "_" + name
+			return "_" + name, nil
 		}
-		return name
+		return name, nil
 	}
+	var finalcast Datatype
 	var sb strings.Builder
 	sb.WriteString(name)
 	for ct != nil {
@@ -156,12 +158,26 @@ func symbolPieceName(name string, ct Datatype, off, sz int32) string {
 				}
 			}
 		}
+		if !ok && castTo != nil {
+			if _, isStruct := ct.(*Struct); !isStruct {
+				if _, isArray := ct.(*Array); !isArray {
+					tmpoff := off
+					if bigEndian {
+						tmpoff = ct.Size() - 1 - off
+					}
+					if sharedCastStrategyC.IsSubpieceCast(castTo, ct, uint32(tmpoff)) {
+						finalcast = castTo
+						break
+					}
+				}
+			}
+		}
 		if !ok {
 			fmt.Fprintf(&sb, "._%d_%d_", off, sz)
 			break
 		}
 	}
-	return sb.String()
+	return sb.String(), finalcast
 }
 
 // globalEntryOf returns the global symbol entry a Varnode is linked to. A
