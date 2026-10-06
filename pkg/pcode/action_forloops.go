@@ -145,8 +145,7 @@ func tryMarkForLoop(data *Funcdata, wdo *BlockWhileDo) {
 
 	// The iterator must be a printed, explicit statement.
 	// C++ parity: BlockWhileDo::finalizePrinting -> testTerminal.
-	// TODO known mismatch: the moveRespectingCover placement test is not ported.
-	if term := forLoopTerminal(loopDef, tailSlot); term != nil {
+	if term := forLoopTerminal(data, loopDef, tailSlot); term != nil {
 		iterateOp = term
 	} else {
 		return
@@ -173,7 +172,7 @@ func tryMarkForLoop(data *Funcdata, wdo *BlockWhileDo) {
 		// The initializer must be explicit and printed too: a redundant
 		// (non-printing) COPY of an input yields no initializer.
 		// C++ parity: BlockWhileDo::finalizePrinting testTerminal(data,1-slot).
-		initOp = forLoopTerminal(loopDef, 1-tailSlot)
+		initOp = forLoopTerminal(data, loopDef, 1-tailSlot)
 	}
 	if initOp != nil {
 		initOp.SetFlag(PcodeOpNonPrinting)
@@ -184,9 +183,11 @@ func tryMarkForLoop(data *Funcdata, wdo *BlockWhileDo) {
 
 // forLoopTerminal returns the statement that produces the loop variable along
 // the given MULTIEQUAL slot, looking through a non-printed COPY, or nil when
-// that statement is not explicit and printed.
-// C++ parity: BlockWhileDo::testTerminal (minus moveRespectingCover).
-func forLoopTerminal(loopDef *PcodeOp, slot int) *PcodeOp {
+// that statement is not explicit and printed or cannot become the last
+// statement of its block. The move stays even when the loop is not printed
+// as a for-loop in the end.
+// C++ parity: BlockWhileDo::testTerminal.
+func forLoopTerminal(data *Funcdata, loopDef *PcodeOp, slot int) *PcodeOp {
 	if loopDef == nil || slot < 0 || slot >= loopDef.NumInput() {
 		return nil
 	}
@@ -207,6 +208,14 @@ func forLoopTerminal(loopDef *PcodeOp, slot int) *PcodeOp {
 		}
 	}
 	if !vn.IsExplicit() || resOp.NotPrinted() {
+		return nil
+	}
+	// finalOp must be the last op in the basic block (except for the branch)
+	lastOp := finalOp.Parent().LastOp()
+	if lastOp.IsBranch() {
+		lastOp = lastOp.PreviousOp()
+	}
+	if !data.moveRespectingCover(finalOp, lastOp) {
 		return nil
 	}
 	return resOp

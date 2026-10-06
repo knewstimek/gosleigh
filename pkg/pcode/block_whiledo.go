@@ -275,3 +275,118 @@ func (op *PcodeOp) isMoveable(point *PcodeOp) bool {
 	}
 	return true
 }
+
+// markExpression collects the HighVariables read by the expression rooted at
+// vn (stopping at explicit variables) and reports whether it contains a call
+// (bit 0) or a LOAD (bit 1).
+// C++ parity: HighVariable::markExpression.
+func markExpression(vn *Varnode, marked map[*HighVariable]bool) int {
+	marked[vn.High()] = true
+	retVal := 0
+	if !vn.IsWritten() {
+		return retVal
+	}
+	type node struct {
+		op   *PcodeOp
+		slot int
+	}
+	op := vn.Def()
+	if op.IsCall() {
+		retVal |= 1
+	}
+	if op.Code() == CPUI_LOAD {
+		retVal |= 2
+	}
+	path := []node{{op, 0}}
+	for len(path) > 0 {
+		n := &path[len(path)-1]
+		if n.op.NumInput() <= n.slot {
+			path = path[:len(path)-1]
+			continue
+		}
+		curVn := n.op.Input(n.slot)
+		n.slot++
+		if curVn.IsAnnotation() {
+			continue
+		}
+		if curVn.IsExplicit() {
+			marked[curVn.High()] = true // Truncate at explicit
+			continue
+		}
+		if !curVn.IsWritten() {
+			continue
+		}
+		op = curVn.Def()
+		if op.IsCall() {
+			retVal |= 1
+		}
+		if op.Code() == CPUI_LOAD {
+			retVal |= 2
+		}
+		path = append(path, node{op, 0})
+	}
+	return retVal
+}
+
+// moveRespectingCover moves op to just after lastOp in the same block when
+// only COPY and CAST ops lie between them and none of those writes a
+// variable op's expression reads. A non-explicit CAST moves together with
+// the op feeding it.
+// C++ parity: Funcdata::moveRespectingCover.
+func (fd *Funcdata) moveRespectingCover(op, lastOp *PcodeOp) bool {
+	if op == lastOp {
+		return true // Nothing to move past
+	}
+	if op.IsCall() {
+		return false
+	}
+	var prevOp *PcodeOp
+	if op.Code() == CPUI_CAST {
+		if vn := op.Input(0); !vn.IsExplicit() { // The CAST is part of an expression: move the previous op too
+			if !vn.IsWritten() {
+				return false
+			}
+			prevOp = vn.Def()
+			if prevOp.IsCall() || op.PreviousOp() != prevOp {
+				return false
+			}
+		}
+	}
+	rootvn := op.Output()
+	marked := make(map[*HighVariable]bool)
+	typeVal := markExpression(rootvn, marked)
+	curOp := op
+	for {
+		nextOp := curOp.NextOp()
+		if nextOp == nil {
+			break
+		}
+		if opc := nextOp.Code(); opc != CPUI_COPY && opc != CPUI_CAST {
+			break // Only cross COPY and CAST ops
+		}
+		if rootvn == nextOp.Input(0) {
+			break // Data-flow order dependence
+		}
+		copyVn := nextOp.Output()
+		if marked[copyVn.High()] {
+			break // Direct interference: the COPY writes what op reads
+		}
+		if typeVal != 0 && copyVn.IsAddrTied() {
+			break // Possible indirect interference
+		}
+		curOp = nextOp
+		if curOp == lastOp {
+			break
+		}
+	}
+	if curOp != lastOp {
+		return false
+	}
+	fd.OpUninsert(op)
+	fd.OpInsertAfter(op, lastOp)
+	if prevOp != nil { // A CAST moves together with its input op
+		fd.OpUninsert(prevOp)
+		fd.OpInsertAfter(prevOp, lastOp)
+	}
+	return true
+}
