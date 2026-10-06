@@ -545,7 +545,14 @@ func (s *printCState) collectSymbols() {
 								// scan can pick a dead instance that the bank loop above never visits
 								// (leaving it unnamed). A live rep is named by that loop
 								// (s.names[vn] = name), so no direct name binding is required here.
-								if hvNamed {
+								// The symbol (storage and use point) was fixed when
+								// ActionNameVars linked it; later casts move defs but
+								// not the symbol. C++ parity: Funcdata::linkSymbol.
+								if lr := hv.linkedRep; hvNamed && lr != nil && lr.Space() != nil && !lr.Space().IsUnique() {
+									if _, ok := liveSet[lr]; ok {
+										rep = lr
+									}
+								} else if hvNamed {
 									if nrep := highNameRepresentativeLive(hv, func(vn *Varnode) bool {
 										_, ok := liveSet[vn]
 										return ok

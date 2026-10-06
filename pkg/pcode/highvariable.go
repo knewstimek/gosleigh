@@ -46,6 +46,11 @@ type HighVariable struct {
 	// finalType, once set, is the variable's data-type regardless of its
 	// members. C++ parity: HighVariable::type with the type_finalized flag.
 	finalType Datatype
+
+	// linkedRep is the name representative when ActionNameVars linked the
+	// variable to its symbol; the symbol's storage and use point come from it.
+	// C++ parity: Funcdata::linkSymbol (addSymbol at the representative).
+	linkedRep *Varnode
 }
 
 // GetSymbol returns the Symbol this high variable maps to, or nil. It walks the

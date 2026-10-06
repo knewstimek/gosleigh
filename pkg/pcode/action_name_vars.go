@@ -633,7 +633,8 @@ func makeNameUnique(nm string, used map[string]bool) string {
 	return res
 }
 
-// finalizeLocalHighTypes fixes the data-type of each named, address-tied
+// finalizeLocalHighTypes records the representative each named variable is
+// linked to its symbol through, and fixes the data-type of each named, address-tied
 // variable mapped to a local symbol to that symbol's data-type.
 // C++ parity: ActionNameVars::linkSymbols (the finalizeDatatype arm).
 func finalizeLocalHighTypes(data *Funcdata) {
@@ -659,6 +660,7 @@ func finalizeLocalHighTypes(data *Funcdata) {
 		if rep == nil || !highHasName(high) {
 			continue
 		}
+		high.linkedRep = rep
 		var entry *SymbolEntry
 		for _, inst := range high.Instances() {
 			if e := inst.GetSymbolEntry(); e != nil {
