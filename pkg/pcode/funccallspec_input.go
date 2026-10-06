@@ -364,10 +364,20 @@ func (fd *Funcdata) checkCallDoubleUse(opmatch, op *PcodeOp, vn *Varnode, fl uin
 	if fc == nil {
 		return false
 	}
-	if op.Code() == opmatch.Code() && op.Input(0) == opmatch.Input(0) {
+	sameCallee := false
+	if op.Code() == opmatch.Code() {
+		if op.Code() == CPUI_CALL {
+			if matchfc := fd.callSpecsForOp(opmatch); matchfc != nil {
+				sameCallee = matchfc.GetEntryAddress() == fc.GetEntryAddress()
+			}
+		} else {
+			sameCallee = op.Input(0) == opmatch.Input(0)
+		}
+	}
+	if sameCallee {
 		// Same callee. Varnode addresses are unreliable here because copy
 		// propagation may have run, so compare the trial storage instead.
-		if fc.IsInputActive() {
+		if fc.GetActiveInput() != nil {
 			if curtrial := fc.GetActiveInput().TrialForInputVarnode(j); curtrial != nil {
 				if curtrial.GetAddress() == trial.GetAddress() {
 					if op.Parent() == opmatch.Parent() {
