@@ -1627,8 +1627,8 @@ func (m *Merge) inflateTest(a *Varnode, high *HighVariable) bool {
 		return false
 	}
 	for _, b := range ahigh.Instances() {
-		if b == nil || b == a {
-			continue
+		if b == nil || b.CopyShadow(a) {
+			continue // intersection with a or a shadow of a is allowed
 		}
 		// C++ parity: b->getCover() is per-varnode, not the HV aggregate.
 		// Using b.High().getCover() (aggregate) is wrong -- it merges all
