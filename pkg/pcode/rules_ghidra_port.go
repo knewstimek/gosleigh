@@ -1118,8 +1118,7 @@ type RuleDivTermAdd struct{ batchRule }
 func NewRuleDivTermAdd(group string) *RuleDivTermAdd {
 	r := &RuleDivTermAdd{}
 	// RuleDivTermAdd::applyOp -- ruleaction.cc.
-	// known mismatch: extended-constant arithmetic and findSubshift/division-form helpers are not ported.
-	r.batchRule = newKnownMismatchBatchRule(group, "divtermadd", []OpCode{CPUI_SUBPIECE, CPUI_INT_RIGHT, CPUI_INT_SRIGHT}, func(g string) Rule { return NewRuleDivTermAdd(g) })
+	r.batchRule = newBatchRule(group, "divtermadd", []OpCode{CPUI_SUBPIECE, CPUI_INT_RIGHT, CPUI_INT_SRIGHT}, r.apply, func(g string) Rule { return NewRuleDivTermAdd(g) })
 	return r
 }
 
@@ -1128,8 +1127,7 @@ type RuleDivTermAdd2 struct{ batchRule }
 func NewRuleDivTermAdd2(group string) *RuleDivTermAdd2 {
 	r := &RuleDivTermAdd2{}
 	// RuleDivTermAdd2::applyOp -- ruleaction.cc.
-	// known mismatch: extended-constant arithmetic and optimized division form matching are not ported.
-	r.batchRule = newKnownMismatchBatchRule(group, "divtermadd2", []OpCode{CPUI_INT_RIGHT}, func(g string) Rule { return NewRuleDivTermAdd2(g) })
+	r.batchRule = newBatchRule(group, "divtermadd2", []OpCode{CPUI_INT_RIGHT}, r.apply, func(g string) Rule { return NewRuleDivTermAdd2(g) })
 	return r
 }
 
@@ -1405,8 +1403,7 @@ type RulePopcountBoolXor struct{ batchRule }
 func NewRulePopcountBoolXor(group string) *RulePopcountBoolXor {
 	r := &RulePopcountBoolXor{}
 	// RulePopcountBoolXor::applyOp -- ruleaction.cc.
-	// known mismatch: getBooleanResult boolean-bit extraction is not ported.
-	r.batchRule = newKnownMismatchBatchRule(group, "popcountboolxor", []OpCode{CPUI_POPCOUNT}, func(g string) Rule { return NewRulePopcountBoolXor(g) })
+	r.batchRule = newBatchRule(group, "popcountboolxor", []OpCode{CPUI_POPCOUNT}, r.apply, func(g string) Rule { return NewRulePopcountBoolXor(g) })
 	return r
 }
 
@@ -1415,9 +1412,45 @@ type RuleExtensionPush struct{ batchRule }
 func NewRuleExtensionPush(group string) *RuleExtensionPush {
 	r := &RuleExtensionPush{}
 	// RuleExtensionPush::applyOp -- ruleaction.cc.
-	// known mismatch: duplicateNeed/RulePushPtr-driven extension duplication is not ported.
-	r.batchRule = newKnownMismatchBatchRule(group, "extensionpush", []OpCode{CPUI_INT_ZEXT, CPUI_INT_SEXT}, func(g string) Rule { return NewRuleExtensionPush(g) })
+	r.batchRule = newBatchRule(group, "extensionpush", []OpCode{CPUI_INT_ZEXT, CPUI_INT_SEXT}, r.apply, func(g string) Rule { return NewRuleExtensionPush(g) })
 	return r
+}
+
+// apply duplicates an extension feeding several pointer calculations so it
+// becomes an implied cast in each instead of an explicit variable.
+// C++ parity: ruleaction.cc RuleExtensionPush::applyOp.
+func (r *RuleExtensionPush) apply(op *PcodeOp, data *Funcdata) int {
+	inVn := op.Input(0)
+	if inVn.IsConstant() || inVn.IsAddrForce() || inVn.IsAddrTied() {
+		return 0
+	}
+	outVn := op.Output()
+	if outVn.IsTypeLock() || outVn.IsNameLock() || outVn.IsAddrForce() || outVn.IsAddrTied() {
+		return 0
+	}
+	addcount, ptrcount := 0, 0
+	for _, decOp := range outVn.DescendIter() {
+		switch decOp.Code() {
+		case CPUI_PTRADD:
+			ptrcount++
+		case CPUI_INT_ADD:
+			subOp := decOp.Output().LoneDescend()
+			if subOp == nil || subOp.Code() != CPUI_PTRADD {
+				return 0
+			}
+			addcount++
+		default:
+			return 0
+		}
+	}
+	if addcount+ptrcount <= 1 {
+		return 0
+	}
+	if addcount > 0 && op.Input(0).LoneDescend() != nil {
+		return 0
+	}
+	pushPtrDuplicateNeed(op, data)
+	return 1
 }
 
 type RulePieceStructure struct{ batchRule }
