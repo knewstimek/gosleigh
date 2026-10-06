@@ -482,7 +482,7 @@ func (t *typeOpStore) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Dat
 	if slot == 1 {
 		if pointerVn.IsWritten() && pointerVn.Def() != nil && pointerVn.Def().Code() == CPUI_CAST {
 			if pointerVn.IsImplied() && pointerVn.LoneDescend() == op {
-				newType := cs.tlst.GetPointer(pointerVn.Size(), valueType, wordSize)
+				newType := cs.tlst.GetPointer(pointerVn.Size(), pointedToType, wordSize)
 				if pointerType != Datatype(newType) {
 					return newType
 				}

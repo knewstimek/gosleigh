@@ -285,6 +285,15 @@ func (a *ActionSetCasts) Apply(data *Funcdata) int {
 		if op.Code() == CPUI_CAST {
 			continue
 		}
+		if op.Code() == CPUI_PTRADD {
+			// A PTRADD that no longer fits its pointer reverts to integer math.
+			sz := int32(op.Input(2).Offset())
+			ptr, ok := op.Input(0).TypeReadFacing(op).(*Pointer)
+			if !ok || ptr.Pointee() == nil || ptr.Pointee().AlignSize() != sz*int32(ptr.WordSize()) {
+				data.OpUndoPtradd(op, true)
+			}
+		}
+		// TODO known mismatch: the PTRSUB isPtrsubMatching re-check is not ported.
 		// Do input casts first, as the output token may depend on the inputs.
 		for i := 0; i < op.NumInput(); i++ {
 			a.castInput(op, i, data, cs)
