@@ -88,13 +88,13 @@ func recoverMissingStackParams(data *Funcdata, fp *FuncProto) {
 			pt.MarkNoUse()
 			continue
 		}
-		if sp := pt.GetAddress().Space; sp == nil || sp.Kind == address.SpaceKindStack {
-			// TODO known mismatch: an unreferenced stack hole needs a stack
-			// parameter declaration path; it is left out of the signature.
+		if pt.GetAddress().Space == nil {
 			continue
 		}
 		vn := data.SetInputVarnode(data.NewVarnode(pt.GetSize(), pt.GetAddress()))
 		vn.SetAddlFlags(VarnodeLockedInput)
+		// Nothing reads the hole, so it keeps the undefined type of its size.
+		SetVarnodeType(vn, sharedTypeFactory.GetBase(pt.GetSize(), TYPE_UNKNOWN, ""))
 		triallist = append(triallist, vn)
 		pt.SetSlot(int32(len(triallist)))
 	}
