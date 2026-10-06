@@ -673,22 +673,45 @@ func (h *Heritage) Rename(graph *BlockGraph, addr address.Address, size int32) {
 		return
 	}
 
-	varStack := make(map[addressKey][]*Varnode)
-	startBl := graph.GetBlock(0)
-	bb := toBasic(startBl)
+	h.renameRanges(graph, []renameRange{{addr, size}})
+}
+
+// renameRange is one heritaged address range of the current pass.
+type renameRange struct {
+	addr address.Address
+	size int32
+}
+
+// renameRanges renames every range of the pass in one dominator-tree walk,
+// so inputs are created in the order their first reads are reached.
+// C++ parity: Heritage::rename.
+func (h *Heritage) renameRanges(graph *BlockGraph, ranges []renameRange) {
+	if graph.GetSize() == 0 || len(ranges) == 0 {
+		return
+	}
+	bb := toBasic(graph.GetBlock(0))
 	if bb == nil {
 		return
 	}
-	h.renameRecurse(bb, graph, varStack, addr, size)
+	h.renameRecurse(bb, graph, make(map[addressKey][]*Varnode), ranges)
+}
+
+// inRenameRanges reports whether vn starts inside one of the ranges.
+func inRenameRanges(vn *Varnode, ranges []renameRange) bool {
+	sp, off := vn.Space(), vn.Offset()
+	for _, r := range ranges {
+		if sp == r.addr.Space && off >= r.addr.Offset && off < r.addr.Offset+uint64(r.size) {
+			return true
+		}
+	}
+	return false
 }
 
 // renameRecurse performs recursive SSA renaming on a single basic block
 // and its dominator children.
 // C++ parity: heritage.cc Heritage::renameRecurse
 func (h *Heritage) renameRecurse(bl *BlockBasic, graph *BlockGraph,
-	varStack map[addressKey][]*Varnode, addr address.Address, size int32) {
-
-	endOff := addr.Offset + uint64(size)
+	varStack map[addressKey][]*Varnode, ranges []renameRange) {
 
 	// Track writes made in this block for stack restoration on exit
 	type stackRecord struct {
@@ -707,13 +730,8 @@ func (h *Heritage) renameRecurse(bl *BlockBasic, graph *BlockGraph,
 				if inp == nil {
 					continue
 				}
-				// Only process inputs in our address range.
-				// Multiple HeritageRange passes run sequentially over different slots;
-				// this range check keeps each pass scoped to its own slot.
-				// C++ parity: Ghidra runs a single rename over all disjoint ranges at once;
-				// we approximate by scoping each HeritageRange pass to its own address range.
-				if inp.Space() != addr.Space ||
-					inp.Offset() < addr.Offset || inp.Offset() >= endOff {
+				// Only inputs in this pass's ranges are renamed.
+				if !inRenameRanges(inp, ranges) {
 					continue
 				}
 				// Skip varnodes that are already SSA-renamed definitions (IsWritten).
@@ -787,9 +805,7 @@ func (h *Heritage) renameRecurse(bl *BlockBasic, graph *BlockGraph,
 		if out != nil && out.IsActiveHeritage() {
 			out.ClearActiveHeritage()
 			key := makeAddressKey(out.Addr())
-			// Only track within our address range
-			if out.Space() == addr.Space &&
-				out.Offset() >= addr.Offset && out.Offset() < endOff {
+			if inRenameRanges(out, ranges) {
 				writeList = append(writeList, stackRecord{
 					key:     key,
 					prevLen: len(varStack[key]),
@@ -818,10 +834,7 @@ func (h *Heritage) renameRecurse(bl *BlockBasic, graph *BlockGraph,
 			if out == nil {
 				continue
 			}
-			if out.Space() != addr.Space {
-				continue
-			}
-			if out.Offset() < addr.Offset || out.Offset() >= endOff {
+			if !inRenameRanges(out, ranges) {
 				continue
 			}
 
@@ -852,7 +865,7 @@ func (h *Heritage) renameRecurse(bl *BlockBasic, graph *BlockGraph,
 		childBl := graph.GetBlock(int(childIdx))
 		childBB := toBasic(childBl)
 		if childBB != nil {
-			h.renameRecurse(childBB, graph, varStack, addr, size)
+			h.renameRecurse(childBB, graph, varStack, ranges)
 		}
 	}
 
@@ -1282,7 +1295,9 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 		h.BuildADT(graph)
 	}
 
-	// For each heritaged space
+	// Ranges of every space are placed first, then renamed in one walk.
+	// C++ parity: Heritage::heritage (placeMultiequals(); rename()).
+	var ranges []renameRange
 	for idx := range h.infoList {
 		info := &h.infoList[idx]
 		if !info.IsHeritaged() {
@@ -1390,17 +1405,18 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 					}
 					subR, subW = h.normalizeRange(subAddr, curSize, subR, subW)
 					h.placeMultiequals(graph, subAddr, curSize, subR, subW, subI)
-					h.Rename(graph, subAddr, curSize)
+					ranges = append(ranges, renameRange{subAddr, curSize})
 				}
 			} else {
 				// Bring sub-register reads/writes (EAX inside RAX) up to the range size
 				// so renaming does not collide them on their shared start offset.
 				reads, writes = h.normalizeRange(task.Addr, task.Size, reads, writes)
 				h.placeMultiequals(graph, task.Addr, task.Size, reads, writes, inputs)
-				h.Rename(graph, task.Addr, task.Size)
+				ranges = append(ranges, renameRange{task.Addr, task.Size})
 			}
 		}
 	}
+	h.renameRanges(graph, ranges)
 
 	h.disjoint.Clear()
 	h.pass++
