@@ -71,6 +71,18 @@ type CommentDatabase struct {
 // so that comments at the same address keep insertion order: a new comment gets
 // one past the highest existing uniq at that address.
 // C++ parity: comment.cc CommentDatabaseInternal::addCommentNoDuplicate.
+// addComment inserts a comment after any others at the same address, even
+// one with the same text. C++ parity: CommentDatabaseInternal::addComment.
+func (db *CommentDatabase) addComment(tp uint32, fad, ad address.Address, txt string) {
+	uniq := 0
+	for _, c := range db.comments {
+		if c.FuncAddr == fad && c.Addr == ad && c.Uniq >= uniq {
+			uniq = c.Uniq + 1
+		}
+	}
+	db.comments = append(db.comments, &Comment{Type: tp, Uniq: uniq, FuncAddr: fad, Addr: ad, Text: txt})
+}
+
 func (db *CommentDatabase) addCommentNoDuplicate(tp uint32, fad, ad address.Address, txt string) bool {
 	uniq := 0
 	for _, c := range db.comments {
@@ -118,7 +130,36 @@ func (fd *Funcdata) WarningHeader(txt string) { fd.warningHeader(txt) }
 // headerComments returns the texts printed above the function, in database
 // order. C++ parity: CommentSorter::setupHeader(header_basic) +
 // PrintC::emitCommentFuncHeader.
+// AddHostComment queues a comment the host database holds. The host's
+// comments are fetched when the comments are first read (at print time), so
+// they follow every warning added during analysis.
+// C++ parity: CommentDatabaseGhidra::fillCache (from beginComment).
+func (fd *Funcdata) AddHostComment(tp uint32, ad address.Address, txt string) {
+	fd.hostComments = append(fd.hostComments, pendingComment{tp, ad, txt})
+}
+
+type pendingComment struct {
+	tp  uint32
+	ad  address.Address
+	txt string
+}
+
+// fillCommentCache adds the queued host comments, once.
+func (fd *Funcdata) fillCommentCache() {
+	if fd.commentCacheFilled {
+		return
+	}
+	fd.commentCacheFilled = true
+	for _, c := range fd.hostComments {
+		if fd.commentDB == nil {
+			fd.commentDB = &CommentDatabase{}
+		}
+		fd.commentDB.addComment(c.tp, fd.baseAddr, c.ad, c.txt)
+	}
+}
+
 func (fd *Funcdata) headerComments() []string {
+	fd.fillCommentCache()
 	if fd.commentDB == nil {
 		return nil
 	}
@@ -293,6 +334,9 @@ func opIndexInBlock(op *PcodeOp) int {
 // C++ parity: comment.cc CommentSorter::setupFunctionList + PrintC comment
 // delimiters (printc.hh setCStyleComments -> "/* " ... " */").
 func buildCommentPositions(fd *Funcdata) map[int32][]positionedComment {
+	if fd != nil {
+		fd.fillCommentCache()
+	}
 	if fd == nil || fd.commentDB == nil || len(fd.commentDB.comments) == 0 {
 		return nil
 	}

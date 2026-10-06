@@ -84,6 +84,11 @@ type Funcdata struct {
 	// global scope (ScopeGhidra).
 	hostScope HostScope
 
+	// hostComments wait until the comments are first read.
+	// C++ parity: CommentDatabaseGhidra cache.
+	hostComments       []pendingComment
+	commentCacheFilled bool
+
 	// globalRanges is the global scope's storage (cspec <global>).
 	globalRanges []GlobalRange
 	// joinSpace holds storage split across pieces (EDX:EAX returns).
@@ -423,6 +428,9 @@ func (fd *Funcdata) StartProcessing() {
 // StopProcessing marks the function as leaving analysis.
 // C++ parity: funcdata.hh Funcdata::stopProcessing
 func (fd *Funcdata) StopProcessing() {
+	if !fd.IsJumptableRecoveryOn() {
+		fd.issueDatatypeWarnings()
+	}
 	fd.SetFlag(FuncProcessingComplete)
 }
 
@@ -2231,3 +2239,14 @@ func (fd *Funcdata) IndirectOverrides() map[uint64]address.Address { return fd.i
 
 // RebuildRequested reports whether a new indirect override needs a restart.
 func (fd *Funcdata) RebuildRequested() bool { return fd.rebuildRequested }
+
+// issueDatatypeWarnings adds the type warnings collected while decoding the
+// host's data-types to the function header.
+// C++ parity: Funcdata::issueDatatypeWarnings.
+func (fd *Funcdata) issueDatatypeWarnings() {
+	if h, ok := fd.hostScope.(HostTypeWarnings); ok {
+		for _, w := range h.DatatypeWarnings() {
+			fd.warningHeader(w)
+		}
+	}
+}

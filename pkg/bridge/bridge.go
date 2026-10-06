@@ -611,7 +611,7 @@ func attachEnvironment(fd *pcode.Funcdata, cfg BuildConfig) error {
 	fd.SetHostScope(cfg.HostScope)
 	for _, c := range cfg.HostComments {
 		if tp, ok := hostCommentTypes[c.Type]; ok && cfg.Entry.Space != nil {
-			fd.AddComment(tp, address.Address{Space: cfg.Entry.Space, Offset: c.Addr}, c.Text)
+			fd.AddHostComment(tp, address.Address{Space: cfg.Entry.Space, Offset: c.Addr}, c.Text)
 		}
 	}
 	if cfg.HostLocals != nil {

@@ -66,7 +66,10 @@ func parseUint(s string) uint64 {
 // exactly the <mapsym> answers the Java host gave the C++ core for that
 // function (DecompileCallback.getMappedSymbols), sorted by address.
 type captureData struct {
-	syms []pcode.HostData
+	// typeWarnings are the TypeFactory warnings of the capture's types, in
+	// the order the core decoded them (<entry>.typeorder from GenCapture).
+	typeWarnings []string
+	syms         []pcode.HostData
 	// protos are the callee prototypes the core received, by entry offset.
 	protos map[uint64]captureProto
 }
@@ -357,6 +360,13 @@ func withCapture(host pcode.HostScope, fn goldenEntry, ram *address.Space) pcode
 	if err != nil {
 		return host
 	}
+	if raw, err := os.ReadFile(fmt.Sprintf("%s/%08x.typeorder", captureDir, fn.Entry)); err == nil {
+		for _, ln := range strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n") {
+			if ln = strings.TrimSpace(ln); ln != "" {
+				cd.typeWarnings = append(cd.typeWarnings, "Enum \"" + ln + "\": Some values do not have unique names")
+			}
+		}
+	}
 	return hostWithData{host, cd}
 }
 
@@ -533,3 +543,6 @@ func (cd *captureData) QueryData(addr address.Address) (pcode.HostData, bool) {
 	}
 	return pcode.HostData{}, false
 }
+
+// DatatypeWarnings implements pcode.HostTypeWarnings.
+func (cd *captureData) DatatypeWarnings() []string { return cd.typeWarnings }

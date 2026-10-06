@@ -20,6 +20,14 @@ type HostData struct {
 
 // HostDataScope is implemented by a HostScope that also knows the program's
 // global data symbols.
+// HostTypeWarnings is a host that reports the data-type warnings the core's
+// TypeFactory collected while decoding the host's types (an enum whose values
+// do not have unique names), in decoding order.
+// C++ parity: TypeFactory::warnings (insertWarning at decode time).
+type HostTypeWarnings interface {
+	DatatypeWarnings() []string
+}
+
 type HostDataScope interface {
 	// QueryData returns the symbol whose storage contains addr.
 	QueryData(addr address.Address) (HostData, bool)
