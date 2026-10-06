@@ -229,6 +229,7 @@ func (fd *Funcdata) ApplyHostSelfPrototype(model *ProtoModel) {
 	if !hf.InputLocked {
 		return
 	}
+	fp.hostInputLocked = true
 	for _, p := range hf.Params {
 		sp := fd.spaceByName(p.Space)
 		if sp == nil {

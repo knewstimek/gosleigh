@@ -1105,6 +1105,9 @@ func (a *ActionInputPrototype) Apply(data *Funcdata) int {
 	if fp == nil {
 		return 0
 	}
+	if sl := data.GetScopeLocal(); sl != nil {
+		sl.clearCategory(SymbolFakeInput)
+	}
 	fp.ClearUnlockedInput()
 	if !fp.IsInputLocked() {
 		// A merged evaluation model is specialized to the component the
@@ -1128,6 +1131,7 @@ func (a *ActionInputPrototype) Apply(data *Funcdata) int {
 			fp.SetInputLocked(true)
 		}
 		data.ClearDeadVarnodes()
+		addStackParamSymbols(data)
 		return 0
 	}
 	// Gosleigh locks the input prototype in the main loop (ApplyActiveParamModel)
@@ -1144,7 +1148,37 @@ func (a *ActionInputPrototype) Apply(data *Funcdata) int {
 	// C++ parity: coreaction.cc ActionInputPrototype::apply (unlocked branch).
 	recoverMissingStackParams(data, fp)
 	data.ClearDeadVarnodes()
+	addStackParamSymbols(data)
 	return 0
+}
+
+// addStackParamSymbols gives every recovered stack parameter a
+// function_parameter Symbol, so a reference to its storage (&param_2)
+// resolves to it once the fake-input symbols are gone.
+// C++ parity: FuncProto::updateInputTypes -> ProtoStoreSymbol::setInput.
+func addStackParamSymbols(data *Funcdata) {
+	sl := data.GetScopeLocal()
+	if sl == nil {
+		return
+	}
+	for _, vn := range data.GetVarnodeBank().AllVarnodes() {
+		if !vn.IsInput() || vn.Space() != sl.SpaceID() || !isAlreadyNamedParam(vn) {
+			continue
+		}
+		if e := sl.FindOverlap(vn.Addr(), vn.Size()); e != nil {
+			continue
+		}
+		ct := vn.Type()
+		if ct == nil {
+			ct = sharedTypeFactory.GetBase(vn.Size(), TYPE_UNKNOWN, "")
+		}
+		sym := NewSymbol("", ct)
+		sym.SetFlags(VarnodeAddrTied)
+		sym.SetCategory(SymbolFunctionParameter, -1)
+		entry := NewSymbolEntry(sym, 0, vn.Addr(), vn.Size(), 0)
+		sym.attachEntry(entry)
+		sl.ext().entries = append(sl.ext().entries, entry)
+	}
 }
 
 // ActionOutputPrototype finalizes the recovered return value.

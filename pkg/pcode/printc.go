@@ -4287,7 +4287,7 @@ func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode) (ExprFragm
 		return ExprFragment{}, false
 	}
 	name := s.lang.Atom(s.globalSymbolName(sym))
-	if sym.Category() == SymbolFakeInput {
+	if sym.Category() == SymbolFakeInput || sym.Category() == SymbolFunctionParameter {
 		// An unnamed stack-input Symbol prints as its parameter.
 		for _, vn := range s.fd.GetVarnodeBank().AllVarnodes() {
 			if vn.IsInput() && vn.Space() == spc && vn.Offset() == entry.Addr().Offset {

@@ -99,6 +99,28 @@ func recoverMissingStackParams(data *Funcdata, fp *FuncProto) {
 		pt.SetSlot(int32(len(triallist)))
 	}
 
+	// The main loop named its parameters before the stack inputs settled; an
+	// input fillinMap rejects (an active slot after a chain of inactive ones)
+	// is no parameter after all, just an irregular input.
+	// C++ parity: ActionInputPrototype::apply derives the inputs only here.
+	if !fp.hostInputLocked {
+		for i := 0; i < active.NumTrials(); i++ {
+			pt := active.Trial(i)
+			slot := int(pt.GetSlot()) - 1
+			if pt.IsUsed() || slot < 0 || slot >= len(triallist) {
+				continue
+			}
+			vn := triallist[slot]
+			if !isAlreadyNamedParam(vn) {
+				continue
+			}
+			hv := vn.High()
+			fp.removeParam(hv)
+			delete(sl.paramByVn, vn)
+			hv.SetName("")
+		}
+	}
+
 	// A parameter's index is its position among the used trials, which
 	// fillinMap left sorted in ABI order (register groups, then stack).
 	// C++ parity: FuncProto::updateInputTypes.

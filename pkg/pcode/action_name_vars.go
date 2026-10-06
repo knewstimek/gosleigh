@@ -341,8 +341,7 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			rep = c.uniqVn
 		}
 		if rep == nil && c.inVn != nil && highHasName(c.hv) && sl != nil && sl.model != nil &&
-			(sl.model.EntryPoint || !regParamHigh(c.hv, sl)) && c.inVn.Space() != nil &&
-			c.inVn.Space().Kind != address.SpaceKindStack {
+			(sl.model.EntryPoint || !regParamHigh(c.hv, sl)) && c.inVn.Space() != nil {
 			// An input that is not a formal parameter: in_<register>.
 			// C++ parity: ScopeInternal::buildVariableName (irregular input,
 			// index < 0).

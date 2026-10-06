@@ -183,6 +183,20 @@ func (sl *ScopeLocal) AddDynamicSymbol(name string, dt Datatype, caddr address.A
 	return entry
 }
 
+// clearCategory removes every Symbol of the given category.
+// C++ parity: ScopeInternal::clearCategory.
+func (sl *ScopeLocal) clearCategory(cat int) {
+	var doomed []*Symbol
+	for _, e := range sl.ext().entries {
+		if e != nil && e.symbol != nil && e.symbol.Category() == cat {
+			doomed = append(doomed, e.symbol)
+		}
+	}
+	for _, sym := range doomed {
+		sl.RemoveSymbol(sym)
+	}
+}
+
 // RemoveSymbol drops any SymbolEntry owned by the given Symbol from the scope.
 // C++ parity: ScopeInternal::removeSymbolMappings / removeSymbol
 func (sl *ScopeLocal) RemoveSymbol(sym *Symbol) {

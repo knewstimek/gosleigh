@@ -28,6 +28,10 @@ type FuncProto struct {
 	// selfLocked: the locked parameters of the function's own prototype as
 	// the host stores them (FuncProto::store with an input lock).
 	selfLocked []ProtoSlot
+	// hostInputLocked: the host locked the function's own inputs. Otherwise
+	// inputLocked is Gosleigh's provisional main-loop lock, which
+	// ActionInputPrototype still revises (C++ derives the inputs there).
+	hostInputLocked bool
 	// trashList: FuncProto::likelytrash override.
 	trashList []VarnodeData
 	model     *ProtoModel
@@ -471,6 +475,16 @@ func (fp *FuncProto) HasThisPointer() bool {
 // TODO known mismatch: Ghidra's FuncProto::updateThisPointer is not yet ported.
 // C++ parity: FuncProto::updateThisPointer
 func (fp *FuncProto) PrepareThisPointer() {}
+
+// removeParam drops a parameter HighVariable.
+func (fp *FuncProto) removeParam(hv *HighVariable) {
+	for i, p := range fp.params {
+		if p == hv {
+			fp.params = append(fp.params[:i], fp.params[i+1:]...)
+			return
+		}
+	}
+}
 
 // AddParam registers a parameter HighVariable (in ABI order).
 func (fp *FuncProto) AddParam(hv *HighVariable) {
