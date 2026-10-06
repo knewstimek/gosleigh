@@ -3,6 +3,7 @@ package pcode
 import (
 	"fmt"
 	"hash/fnv"
+	"sort"
 
 	"gosleigh/pkg/address"
 )
@@ -402,6 +403,16 @@ func (fd *Funcdata) ensureCallSpecs() {
 			fd.callSpecs = append(fd.callSpecs, newFuncCallSpecs(fd, op))
 		}
 	}
+	// Calls go in dominance order so that earlier calls get evaluated first;
+	// the order affects parameter analysis.
+	// C++ parity: Funcdata::sortCallSpecs (compareCallspecs).
+	sort.SliceStable(fd.callSpecs, func(i, j int) bool {
+		a, b := fd.callSpecs[i].op, fd.callSpecs[j].op
+		if pa, pb := a.Parent(), b.Parent(); pa != nil && pb != nil && pa.Index() != pb.Index() {
+			return pa.Index() < pb.Index()
+		}
+		return a.Seq().Order < b.Seq().Order
+	})
 }
 
 // rebuildCallSpecs drops the cached call-spec list and rebuilds it from the
