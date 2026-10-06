@@ -745,6 +745,12 @@ func (s *AddTreeState) buildDegenerate() bool {
 	if out == nil {
 		return false
 	}
+	// The pointer must propagate through the INT_ADD (a pointer difference
+	// typed as an integer stays an INT_ADD).
+	// C++ parity: AddTreeState::buildDegenerate (getTypeDefFacing() != TYPE_PTR).
+	if dt := out.TypeDefFacing(); dt == nil || dt.Metatype() != TYPE_PTR {
+		return false
+	}
 	dataSize := s.data.NewConstant(s.ptrSize, 1)
 	s.data.OpSetAllInput(s.baseOp, []*Varnode{s.ptr, s.baseOp.Input(1 - s.baseSlot), dataSize})
 	s.data.OpSetOpcode(s.baseOp, CPUI_PTRADD)
