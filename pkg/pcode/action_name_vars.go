@@ -340,8 +340,11 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			// Fall back to an explicit unique-space instance (e.g. snapshot iVar1).
 			rep = c.uniqVn
 		}
-		if rep == nil && c.inVn != nil && highHasName(c.hv) && sl != nil && sl.model != nil &&
-			(sl.model.EntryPoint || !regParamHigh(c.hv, sl)) && c.inVn.Space() != nil {
+		irregular := sl != nil && sl.model != nil && (sl.model.EntryPoint || !regParamHigh(c.hv, sl))
+		if fp := data.GetFuncProto(); fp != nil && fp.hostInputLocked && c.inVn != nil {
+			irregular = !fp.selfLockedCovers(c.inVn) // The locked list is the whole signature
+		}
+		if rep == nil && c.inVn != nil && highHasName(c.hv) && irregular && c.inVn.Space() != nil {
 			// An input that is not a formal parameter: in_<register>.
 			// C++ parity: ScopeInternal::buildVariableName (irregular input,
 			// index < 0).

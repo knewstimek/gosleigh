@@ -1132,6 +1132,7 @@ func (a *ActionInputPrototype) Apply(data *Funcdata) int {
 			fp.SetInputLocked(true)
 		}
 		data.ClearDeadVarnodes()
+		demoteUnlockedParams(data, fp)
 		addStackParamSymbols(data)
 		return 0
 	}
@@ -1149,6 +1150,7 @@ func (a *ActionInputPrototype) Apply(data *Funcdata) int {
 	// C++ parity: coreaction.cc ActionInputPrototype::apply (unlocked branch).
 	recoverMissingStackParams(data, fp)
 	data.ClearDeadVarnodes()
+	demoteUnlockedParams(data, fp)
 	addStackParamSymbols(data)
 	return 0
 }

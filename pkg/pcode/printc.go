@@ -355,6 +355,17 @@ func (s *printCState) collectSymbols() {
 					}
 				}
 			}
+			// An irregular input (named in_<reg> by ActionNameVars) is a local
+			// symbol, declared once. C++ parity: ScopeInternal::buildVariableName
+			// (input with index < 0) + PrintC::emitScopeVarDecls.
+			if hv := vn.High(); vn.IsInput() && hv != nil && strings.HasPrefix(hv.Name(), "in_") {
+				s.names[vn] = hv.Name()
+				if !seenHV[hv] {
+					seenHV[hv] = true
+					locals = append(locals, vn)
+				}
+				continue
+			}
 			// Non-entry argument register that was read but not recovered as a named
 			// parameter -- e.g. an accumulator parameter (read AND written) whose full
 			// register-width input was created by heritage sub-register normalization and
@@ -390,17 +401,6 @@ func (s *printCState) collectSymbols() {
 						continue
 					}
 				}
-			}
-			// An irregular input (named in_<reg> by ActionNameVars) is a local
-			// symbol, declared once. C++ parity: ScopeInternal::buildVariableName
-			// (input with index < 0) + PrintC::emitScopeVarDecls.
-			if hv := vn.High(); vn.IsInput() && hv != nil && strings.HasPrefix(hv.Name(), "in_") {
-				s.names[vn] = hv.Name()
-				if !seenHV[hv] {
-					seenHV[hv] = true
-					locals = append(locals, vn)
-				}
-				continue
 			}
 			// Classify via ScopeLocal/HighVariable assignment.
 			if hv := vn.High(); hv != nil {
@@ -4924,9 +4924,10 @@ func (s *printCState) renameLocal(vn *Varnode, old, renamed string) {
 // FuncProto's ProtoParameters of a locked prototype.
 func (s *printCState) applySelfLockedParams() {
 	fp := s.fd.GetFuncProto()
-	if fp == nil || len(fp.selfLocked) == 0 {
+	if fp == nil || !fp.hostInputLocked {
 		return
 	}
+	// A locked prototype is the whole signature, even when it is void.
 	var params []*Varnode
 	for _, slot := range fp.selfLocked {
 		vn := s.fd.FindVarnodeInput(slot.Size, slot.Addr)

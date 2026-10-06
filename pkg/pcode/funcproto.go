@@ -476,6 +476,18 @@ func (fp *FuncProto) HasThisPointer() bool {
 // C++ parity: FuncProto::updateThisPointer
 func (fp *FuncProto) PrepareThisPointer() {}
 
+// selfLockedCovers reports whether a locked parameter of the function's own
+// prototype holds vn's storage.
+func (fp *FuncProto) selfLockedCovers(vn *Varnode) bool {
+	for _, slot := range fp.selfLocked {
+		if slot.Addr.Space == vn.Space() && vn.Offset() >= slot.Addr.Offset &&
+			vn.Offset()+uint64(vn.Size()) <= slot.Addr.Offset+uint64(slot.Size) {
+			return true
+		}
+	}
+	return false
+}
+
 // removeParam drops a parameter HighVariable.
 func (fp *FuncProto) removeParam(hv *HighVariable) {
 	for i, p := range fp.params {

@@ -222,3 +222,25 @@ func isAlreadyNamedParam(vn *Varnode) bool {
 	}
 	return strings.HasPrefix(hv.Name(), "param_")
 }
+
+// demoteUnlockedParams unnames every provisional parameter of a prototype the
+// host locked that no locked parameter covers: the locked list is the whole
+// signature, so such an input is irregular (in_R8).
+// C++ parity: a locked FuncProto is never re-derived from the inputs.
+func demoteUnlockedParams(data *Funcdata, fp *FuncProto) {
+	if !fp.hostInputLocked {
+		return
+	}
+	sl := data.GetScopeLocal()
+	for _, vn := range inputVarnodesInAddrOrder(data) {
+		if !isAlreadyNamedParam(vn) || fp.selfLockedCovers(vn) {
+			continue
+		}
+		hv := vn.High()
+		fp.removeParam(hv)
+		if sl != nil {
+			delete(sl.paramByVn, vn)
+		}
+		hv.SetName("")
+	}
+}
