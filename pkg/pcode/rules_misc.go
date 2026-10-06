@@ -85,24 +85,138 @@ func NewRuleExpandLoad(group string) *RuleExpandLoad {
 	return r
 }
 
+// apply widens a LOAD to the size of the pointed-to data-type when its value
+// is only used in (V & C) == D comparisons, or when the narrow LOAD is a
+// natural integer truncation (the least significant bytes).
+// C++ parity: RuleExpandLoad::applyOp.
 func (r *RuleExpandLoad) apply(op *PcodeOp, data *Funcdata) int {
-	if op.NumInput() < 2 {
+	outVn := op.Output()
+	outSize := outVn.Size()
+	rootPtr := op.Input(1)
+	var addOp *PcodeOp
+	offset := int32(0)
+	var elType Datatype
+	if rootPtr.IsWritten() {
+		defOp := rootPtr.Def()
+		if defOp.Code() == CPUI_INT_ADD && defOp.Input(1).IsConstant() {
+			addOp = defOp
+			rootPtr = defOp.Input(0)
+			off := defOp.Input(1).Offset()
+			if off > 16 {
+				return 0 // the INT_ADD offset must be small
+			}
+			offset = int32(off)
+			if defOp.Output().LoneDescend() == nil {
+				return 0 // the INT_ADD must be used only once
+			}
+			elType = rootPtr.TypeReadFacing(defOp)
+		} else {
+			elType = rootPtr.TypeReadFacing(op)
+		}
+	} else {
+		elType = rootPtr.TypeReadFacing(op)
+	}
+	ptrT, ok := elType.(*Pointer)
+	if !ok || elType.Metatype() != TYPE_PTR || ptrT.Pointee() == nil {
 		return 0
 	}
-	ptr := op.Input(1)
-	if ptrsub := definedBy(ptr, CPUI_PTRSUB); ptrsub != nil && ptrsub.NumInput() >= 2 && isZeroConst(ptrsub.Input(1)) {
-		replaceInputSlot(data, op, 1, ptrsub.Input(0))
-		return 1
+	elType = ptrT.Pointee()
+	if elType.Size() <= outSize || elType.Size() < outSize+offset {
+		return 0 // the pointed-to type must be bigger than the LOAD
 	}
-	if ptradd := definedBy(ptr, CPUI_PTRADD); ptradd != nil && ptradd.NumInput() >= 2 && isZeroConst(ptradd.Input(1)) {
-		replaceInputSlot(data, op, 1, ptradd.Input(0))
-		return 1
+	meta := elType.Metatype()
+	switch meta {
+	case TYPE_UNKNOWN, TYPE_STRUCT, TYPE_ARRAY, TYPE_UNION, TYPE_PARTIALSTRUCT, TYPE_PARTIALUNION:
+		return 0
 	}
-	if cast := definedBy(ptr, CPUI_CAST); cast != nil && cast.NumInput() == 1 && cast.Input(0).Size() == ptr.Size() {
-		replaceInputSlot(data, op, 1, cast.Input(0))
-		return 1
+	addForm := expandLoadCheckAndComparison(outVn)
+	spc := op.Input(0).GetSpaceFromConst()
+	bigEndian := spc != nil && spc.BigEndian
+	lsbCut := int32(0)
+	if addForm {
+		if bigEndian {
+			lsbCut = elType.Size() - outSize - offset
+		} else {
+			lsbCut = offset
+		}
+	} else {
+		// Check for natural integer truncation of the least significant bytes.
+		if meta != TYPE_INT && meta != TYPE_UINT {
+			return 0
+		}
+		switch outVn.TypeDefFacing().Metatype() {
+		case TYPE_INT, TYPE_UINT, TYPE_UNKNOWN, TYPE_BOOL:
+		default:
+			return 0
+		}
+		if bigEndian {
+			if outSize+offset != elType.Size() {
+				return 0
+			}
+		} else if offset != 0 {
+			return 0
+		}
 	}
-	return 0
+	newOut := data.NewUnique(elType.Size())
+	SetVarnodeType(newOut, elType)
+	data.OpSetOutput(op, newOut)
+	if addOp != nil {
+		data.OpSetInput(op, rootPtr, 1)
+		data.OpDestroy(addOp)
+	}
+	if addForm {
+		if meta != TYPE_INT && meta != TYPE_UINT {
+			elType = sharedTypeFactory.GetBase(elType.Size(), TYPE_UINT, "")
+		}
+		expandLoadModifyAndComparison(data, outVn, newOut, elType, lsbCut)
+	} else {
+		subOp := data.NewOp(2, op.Addr())
+		data.OpSetOpcode(subOp, CPUI_SUBPIECE)
+		data.OpSetInput(subOp, newOut, 0)
+		data.OpSetInput(subOp, data.NewConstant(4, 0), 1)
+		data.OpSetOutput(subOp, outVn) // the original output is now the truncation
+		data.OpInsertAfter(subOp, op)
+	}
+	return 1
+}
+
+// expandLoadCheckAndComparison reports whether every use of vn has the form
+// (vn & C) == D or (vn & C) != D.
+// C++ parity: RuleExpandLoad::checkAndComparison.
+func expandLoadCheckAndComparison(vn *Varnode) bool {
+	for _, op := range vn.DescendIter() {
+		if op.Code() != CPUI_INT_AND || !op.Input(1).IsConstant() {
+			return false
+		}
+		compOp := op.Output().LoneDescend()
+		if compOp == nil {
+			return false
+		}
+		if opc := compOp.Code(); opc != CPUI_INT_EQUAL && opc != CPUI_INT_NOTEQUAL {
+			return false
+		}
+		if !compOp.Input(1).IsConstant() {
+			return false
+		}
+	}
+	return true
+}
+
+// expandLoadModifyAndComparison rewrites each (old & C) == D as
+// (new & C<<cut) == D<<cut with constants of the wider type.
+// C++ parity: RuleExpandLoad::modifyAndComparison.
+func expandLoadModifyAndComparison(data *Funcdata, oldVn, newVn *Varnode, dt Datatype, offset int32) {
+	shift := uint(8 * offset)
+	for _, andOp := range append([]*PcodeOp(nil), oldVn.DescendIter()...) {
+		compOp := andOp.Output().LoneDescend()
+		vn := data.NewConstant(dt.Size(), andOp.Input(1).Offset()<<shift)
+		vn.UpdateType(dt)
+		data.OpSetInput(andOp, newVn, 0)
+		data.OpSetInput(andOp, vn, 1)
+		vn = data.NewConstant(dt.Size(), compOp.Input(1).Offset()<<shift)
+		vn.UpdateType(dt)
+		data.OpSetInput(compOp, vn, 1)
+	}
 }
 
 type RuleNotDistribute struct{ batchRule }
