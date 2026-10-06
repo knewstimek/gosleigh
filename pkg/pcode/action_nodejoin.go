@@ -143,7 +143,7 @@ func (cj *ConditionalJoin) findDups() bool {
 	if !vn1.IsWritten() || !vn2.IsWritten() {
 		return false
 	}
-	if vn1.IsSpacebasePlaceholder() || vn2.IsSpacebasePlaceholder() {
+	if vn1.IsSpaceBase() || vn2.IsSpaceBase() {
 		return false
 	}
 	var buf1, buf2 [2]*Varnode
@@ -233,22 +233,16 @@ func (cj *ConditionalJoin) cutDownMultiequals(exit *BlockBasic, in1, in2 int) {
 			vn2 := op.Input(in2)
 			cj.data.OpRemoveInput(op, hi)
 			if vn1 != vn2 {
-				subvn := cj.mergeneed[mergePair{vn1, vn2}]
-				if subvn != nil {
-					cj.data.OpSetInput(op, subvn, lo)
-				}
+				cj.data.OpSetInput(op, cj.mergeneed[mergePair{vn1, vn2}], lo)
 			}
 			if op.NumInput() == 1 {
 				cj.data.OpUninsert(op)
 				cj.data.OpSetOpcode(op, CPUI_COPY)
 				cj.data.OpInsertBegin(op, exit)
 			}
+		} else if op.Code() != CPUI_COPY {
+			break
 		}
-		// C++ stops at the first op that is neither MULTIEQUAL nor COPY,
-		// relying on MULTIEQUALs heading the block. RulePushMulti can leave
-		// one after a moved op, and a MULTIEQUAL skipped here keeps an input
-		// for an edge that no longer exists (later index panics), so every
-		// MULTIEQUAL of the block is cut down.
 	}
 }
 

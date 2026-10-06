@@ -51,7 +51,7 @@ func (r *RuleSwitchSingle) apply(op *PcodeOp, data *Funcdata) int {
 	}
 	data.OpSetOpcode(op, CPUI_BRANCH)
 	data.OpSetInput(op, data.NewCodeRef(addr), 0)
-	data.RemoveJumpTable(jt)
+	data.removeJumpTable(jt)
 	data.SetStructureGraph(NewBlockGraph()) // drop any switch block structure
 	return 1
 }
@@ -2337,7 +2337,7 @@ func (r *RulePushMultiME) apply(op *PcodeOp, data *Funcdata) int {
 	if !in1.IsWritten() || !in2.IsWritten() {
 		return 0
 	}
-	if in1.IsSpacebasePlaceholder() || in2.IsSpacebasePlaceholder() {
+	if in1.IsSpaceBase() || in2.IsSpaceBase() {
 		return 0
 	}
 
