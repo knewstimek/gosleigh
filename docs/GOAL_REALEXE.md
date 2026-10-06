@@ -26,7 +26,8 @@
 | `ead2d24` | checkCallDoubleUse/getTrialForInputVarnode/clearActiveInput 원본화, isPossibleAlias, 쉼표 조건 토큰 구조, 조건 리프 레이블, RuleDivOpt/isCollapsible/isZeroExtended 원본화, PTRSUB 오프셋=필드 시작(hasMatchingSubType) | 189 | - |
 | `bc60903` | unique 공간 heritage+rename 자리표시자, likelytrash 연결, deadcode의 addrforce 해제/INDIRECT 삭제, testUntiedCallIntersection, 캡처 protoeval 수정 | 191 | - |
 | `d58370b` | PTRSUB 출력(opPtrsub), VariableGroup(groupWith/확장 커버/partialCopyShadow), RulePieceStructure+groupPartials, PIECE 타입 전파, 구조체 typedef | 194 | - |
-| `HEAD` | TypePartialStruct, 명령어 내부 상대 분기(findRelTarget), SplitDatatype 원본화, 큰 base=undefined1[N], TypePointerRel(ephemeral), propagateConsumed/NZMask 확장정밀도, SUBPIECE 필드 출력, 출력 그룹/for/while 줄바꿈, op time=C++ 흐름 순서, 동적 심볼 충돌 | 196 | - |
+| `fdc48ac` | TypePartialStruct, 명령어 내부 상대 분기(findRelTarget), SplitDatatype 원본화, 큰 base=undefined1[N], TypePointerRel(ephemeral), propagateConsumed/NZMask 확장정밀도, SUBPIECE 필드 출력, 출력 그룹/for/while 줄바꿈, op time=C++ 흐름 순서, 동적 심볼 충돌 | 196 | - |
+| `HEAD` | markUnaliased의 notmapped 구멍, ActionMultiCse 원본화, scopeBreak 인덱스 비교, HighVariable 인스턴스 주소 정렬 | 198 | - |
 
 ## 도구 (`tools/realexe/`)
 - `realexe.py analyze|sample|measure|capture`, `gaps.py`(불일치 유형 집계), `difffn.py`(인덱스별 diff).
@@ -49,9 +50,7 @@ Ghidra API로 Java와 같은 값을 덤프한다.
 |---|---|---|---|
 | R | Go 규칙이 C++와 다른 변환을 하는 경우가 남음. `tools/ruleaudit.py`로 상위부터 대조. 남은 상위: subcommute(부분), sless2zero, segment/transformcpool(인프라 의존) | ruleaction.cc | 규칙 하나씩 원본화 |
 | T | 타입 추론 차이: 반환형, 지역 타입(uint vs int) | typeop.cc propagateType, ActionInferTypes | 사례 다수 |
-| L | 스택 슬롯 phi 대표: C++은 스택 위치 MULTIEQUAL이 남아 local_48로 출력, Go는 레지스터 phi가 남음 | heritage.cc, merge.cc | [197] |
-| E | MSVC EH4 프레임(쿠키 슬롯, 별칭 체인으로 살아남는 spill) | varmap.cc AliasChecker, heritage.cc guardStores | [192] |
-| A | 스택 배열 병합(char local_878[2048])과 포인터 깊이 | varmap.cc RangeHint/restructure | [199] |
+| A | 스택 배열 병합(char local_878[2048]): MapState::addGuard가 쓰는 LoadGuard/StoreGuard(Heritage::guardLoads + rangeutil ValueSetSolver) 미포팅. 포인터 깊이(char***** vs ******) 별도 | heritage.cc guardLoads/analyzeNewLoadGuards, rangeutil.cc ValueSetSolver, varmap.cc addGuard | [199] |
 | O | 출력 측 ParamListStandardOut 미포팅: EDX:EAX join 반환(8바이트), fillinMapFallback, buildOutputFromTrials 2-trial | fspec.cc ParamListStandardOut::fillinMap | [196] |
 | G | 전역 겹침: normalizeWriteSize PIECE 출력이 ram 변수로 남아 `(uint)CONCAT12`가 두 문장으로 갈라짐, coverVarnodes 미포팅 | heritage.cc normalizeWriteSize | [166][184][188][189] |
 | D | 선언이 심볼이 아니라 남은 varnode 기반이라 clearDeadVarnodes 원본화 불가 | printc.cc emitScopeVarDecls | 원본화 시 decl +8 |
