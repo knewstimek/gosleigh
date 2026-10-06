@@ -522,8 +522,13 @@ func inferPropagateAcrossCompare(tf *TypeFactory, invn, outvn *Varnode, inslot, 
 	if invn.IsSpaceBase() {
 		return nil // spacebase pointer not modelled (TODO)
 	}
-	// C++ also special-cases a PointerRel into the middle of a struct here; that
-	// is out of scope for this slice (TODO).
+	if p, ok := alttype.(*Pointer); ok && p.IsPointerRel() && !outvn.IsConstant() {
+		// A pointer known to sit in the middle of a structure does not cross
+		// a comparison: the other side likely has a different type.
+		if p.Parent().Metatype() == TYPE_STRUCT && p.ByteOffset() >= 0 {
+			return tf.GetPointer(p.Size(), tf.GetBase(1, TYPE_UNKNOWN, ""), p.WordSize())
+		}
+	}
 	return alttype
 }
 
@@ -617,6 +622,7 @@ func inferPropagateAddIn2Out(data *Funcdata, tf *TypeFactory, alt *Pointer, op *
 func inferAddIn2OutPointer(tf *TypeFactory, alt *Pointer, op *PcodeOp, off int64, command int) Datatype {
 	pointer := alt
 	var parent *Pointer
+	var parentOff int64
 	if command != 3 {
 		ws := int64(1)
 		if alt.WordSize() > 0 {
@@ -625,14 +631,22 @@ func inferAddIn2OutPointer(tf *TypeFactory, alt *Pointer, op *PcodeOp, off int64
 		typeOffset := off * ws // AddrSpace::addressToByteInt
 		allowWrap := op.Code() != CPUI_PTRSUB
 		for {
-			pointer = pointerDownChain(tf, pointer, &typeOffset, &parent, allowWrap)
+			pointer = pointerDownChain(tf, pointer, &typeOffset, &parent, &parentOff, allowWrap)
 			if pointer == nil || typeOffset == 0 {
 				break
 			}
 		}
 	}
 	if parent != nil {
-		return nil
+		// Keep the innermost containing structure or array: an ephemeral
+		// relative pointer to the sub-type directly pointed at.
+		var pt Datatype
+		if pointer == nil {
+			pt = tf.GetBase(1, TYPE_UNKNOWN, "") // Offset does not point at a proper sub-type
+		} else {
+			pt = pointer.Pointee()
+		}
+		pointer = tf.GetPointerRelEphemeral(parent, pt, int32(parentOff))
 	}
 	if pointer == nil {
 		if command == 0 {
@@ -647,10 +661,27 @@ func inferAddIn2OutPointer(tf *TypeFactory, alt *Pointer, op *PcodeOp, off int64
 // *off, wrapping the offset by the pointee size when allowed; *off becomes
 // the remaining offset. Returns nil if no sub-type lies at the offset.
 // C++ parity: TypePointer::downChain.
-func pointerDownChain(tf *TypeFactory, p *Pointer, off *int64, par **Pointer, allowArrayWrap bool) *Pointer {
+func pointerDownChain(tf *TypeFactory, p *Pointer, off *int64, par **Pointer, parOff *int64, allowArrayWrap bool) *Pointer {
 	ptrto := p.Pointee()
 	if ptrto == nil {
 		return nil
+	}
+	if p.IsPointerRel() {
+		// C++ parity: TypePointerRel::downChain -- an offset outside a
+		// structured pointee is resolved relative to the parent container.
+		meta := ptrto.Metatype()
+		if !(*off >= 0 && *off < int64(ptrto.Size()) && (meta == TYPE_STRUCT || meta == TYPE_ARRAY)) {
+			relOff := (*off + int64(p.relOffset)) & int64(maskForSize(p.Size()))
+			if relOff < 0 || relOff >= int64(p.relParent.Size()) {
+				return nil // Don't let pointer shift beyond original container
+			}
+			origPointer := tf.GetPointer(p.Size(), p.relParent, p.WordSize())
+			*off = relOff
+			if relOff == 0 && p.relOffset != 0 {
+				return origPointer // Recovering the start of the parent is still down-chaining
+			}
+			return pointerDownChain(tf, origPointer, off, par, parOff, allowArrayWrap)
+		}
 	}
 	ptrtoSize := int64(ptrto.AlignSize())
 	if *off < 0 || *off >= ptrtoSize {
@@ -677,6 +708,7 @@ func pointerDownChain(tf *TypeFactory, p *Pointer, off *int64, par **Pointer, al
 	isArray := ptrto.Metatype() == TYPE_ARRAY
 	if isArray || ptrto.Metatype() == TYPE_STRUCT {
 		*par = p
+		*parOff = *off
 	}
 	pt, newoff := datatypeSubType(ptrto, *off)
 	if pt == nil {

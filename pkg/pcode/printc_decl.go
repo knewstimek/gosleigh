@@ -11,10 +11,24 @@ type CDeclRenderer struct {
 	// noCommaSpace omits the space after commas in parameter lists when true.
 	// Ghidra format uses "param_1,param_2" rather than "param_1, param_2".
 	noCommaSpace bool
+	// spacedArrays puts one space before each array subscript, as PrintC
+	// emits array_expr (spacing 1): "int aiStack_48 [18]", "(char (*) [4])".
+	spacedArrays bool
 }
 
 func NewCDeclRenderer() *CDeclRenderer {
 	return &CDeclRenderer{}
+}
+
+// printedTypeString renders a type as PrintC does inside C output (casts).
+// C++ parity: PrintC::pushTypeStart/pushTypeEnd.
+func printedTypeString(dt Datatype) string {
+	return (&CDeclRenderer{spacedArrays: true}).TypeString(dt)
+}
+
+// printedDeclString renders a declaration as PrintC::emitVarDecl does.
+func printedDeclString(dt Datatype, name string) string {
+	return (&CDeclRenderer{spacedArrays: true}).Declaration(dt, name)
 }
 
 func CTypeString(dt Datatype) string {
@@ -118,7 +132,11 @@ func (r *CDeclRenderer) renderDeclaration(dt Datatype, name string) (string, str
 		}
 		return r.renderDeclaration(typed.Pointee(), inner)
 	case *Array:
-		inner := name + fmt.Sprintf("[%d]", typed.Count())
+		sub := fmt.Sprintf("[%d]", typed.Count())
+		if r.spacedArrays {
+			sub = " " + sub
+		}
+		inner := name + sub
 		return r.renderDeclaration(typed.Element(), inner)
 	case *Code:
 		// A prototype-less code type renders by name ("code"), like a base type,

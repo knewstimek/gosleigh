@@ -149,17 +149,17 @@ func GetPtrInto(dt Datatype) (Datatype, int32) {
 	if dt == nil {
 		return nil, 0
 	}
-	switch ptr := dt.(type) {
-	case *PointerRel:
+	if ptr, ok := dt.(*Pointer); ok {
+		if !ptr.IsPointerRel() {
+			return ptr.Pointee(), 0
+		}
 		if ptr.to != nil {
 			meta := ptr.to.Metatype()
 			if meta == TYPE_STRUCT || meta == TYPE_UNION {
 				return ptr.to, 0
 			}
 		}
-		return ptr.parent, ptr.offset
-	case *Pointer:
-		return ptr.Pointee(), 0
+		return ptr.relParent, ptr.relOffset
 	}
 	return nil, 0
 }
@@ -229,6 +229,13 @@ type Pointer struct {
 	datatypeBase
 	to       Datatype
 	wordSize uint32
+
+	// Relative pointer state (C++ TypePointerRel, a TypePointer subclass):
+	// relParent is the containing data-type, relOffset the byte offset of to
+	// within it, relStripped the plain form of an ephemeral one.
+	relParent   Datatype
+	relOffset   int32
+	relStripped *Pointer
 }
 
 func NewPointer(size int32, to Datatype, wordSize uint32) *Pointer {
@@ -482,53 +489,27 @@ func (c *Code) HasPrototype() bool {
 	return c.returnType != nil || len(c.params) > 0 || c.variadic
 }
 
-// PointerRel is a pointer that points \e into a larger container at a known
-// byte offset. Downstream rules use it to recover struct-field style accesses
-// where the raw pointer value is (basePtr + offset).
-// C++ parity: class TypePointerRel in type.hh. The Go port models the minimum
-// state GetPtrInto needs today: the final pointee, the containing parent,
-// the byte offset, and the plain pointer size/word-size.
-type PointerRel struct {
-	datatypeBase
-	to       Datatype
-	parent   Datatype
-	offset   int32
-	wordSize uint32
-}
+// IsPointerRel reports whether p is a relative pointer: it points at Pointee
+// which sits at ByteOffset inside the Parent container.
+// C++ parity: Datatype::isPointerRel (TypePointerRel is a TypePointer).
+func (p *Pointer) IsPointerRel() bool { return p.relParent != nil }
 
-// NewPointerRel constructs a relative pointer with the given byte offset into
-// parent. pointee is the data-type the pointer targets through the offset.
-// C++ parity: TypePointerRel::TypePointerRel(int4,Datatype*,uint4,Datatype*,int4).
-func NewPointerRel(size int32, pointee Datatype, wordSize uint32, parent Datatype, off int32) *PointerRel {
-	base := newDatatypeBase(size, -1, TYPE_PTRREL, "")
-	base.submeta = SUB_PTRREL
-	if pointee != nil {
-		base.flags = pointee.Flags() & datatypeCoreType
-	}
-	return &PointerRel{
-		datatypeBase: base,
-		to:           pointee,
-		parent:       parent,
-		offset:       off,
-		wordSize:     wordSize,
-	}
-}
+// IsFormalPointerRel reports a relative pointer that is not ephemeral.
+// C++ parity: Datatype::isFormalPointerRel.
+func (p *Pointer) IsFormalPointerRel() bool { return p.relParent != nil && p.relStripped == nil }
 
-// Pointee returns the immediate target of the relative pointer.
-// C++ parity: TypePointer::getPtrTo via TypePointerRel.
-func (p *PointerRel) Pointee() Datatype { return p.to }
-
-// Parent returns the containing data-type the offset is measured within.
+// Parent returns the container a relative pointer points into.
 // C++ parity: TypePointerRel::getParent.
-func (p *PointerRel) Parent() Datatype { return p.parent }
+func (p *Pointer) Parent() Datatype { return p.relParent }
 
-// ByteOffset returns the byte offset into the parent container.
+// ByteOffset returns a relative pointer's byte offset within its parent.
 // C++ parity: TypePointerRel::getByteOffset.
-func (p *PointerRel) ByteOffset() int32 { return p.offset }
+func (p *Pointer) ByteOffset() int32 { return p.relOffset }
 
-// WordSize returns the word size of the relative pointer.
-// C++ parity: TypePointer::getWordSize.
-func (p *PointerRel) WordSize() uint32 { return p.wordSize }
+// Stripped returns the plain pointer an ephemeral relative pointer stands
+// for in formal declarations, nil otherwise.
+// C++ parity: TypePointerRel::getStripped.
+func (p *Pointer) Stripped() *Pointer { return p.relStripped }
 
 // TypeOrder orders two data-types for the type propagation algorithm.
 // Bigger types come earlier; more specific types come earlier.
@@ -583,7 +564,16 @@ func typeOrderLevel(a, b Datatype, level int) int {
 		if level < 0 {
 			return 0
 		}
-		return typeOrderLevel(pa.Pointee(), pb.Pointee(), level)
+		if res := typeOrderLevel(pa.Pointee(), pb.Pointee(), level); res != 0 || !pa.IsPointerRel() || !pb.IsPointerRel() {
+			return res
+		}
+		// C++ parity: TypePointerRel::compare prefers the formal version.
+		if (pa.relStripped == nil) != (pb.relStripped == nil) {
+			if pa.relStripped == nil {
+				return -1
+			}
+			return 1
+		}
 	}
 	return 0
 }

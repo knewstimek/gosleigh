@@ -320,8 +320,6 @@ func datatypeNameBase(dt Datatype) string {
 		return ""
 	case *Pointer:
 		return "p" + datatypeNameBase(typed.Pointee())
-	case *PointerRel:
-		return "p" + datatypeNameBase(typed.Pointee())
 	case *Array:
 		return "a" + datatypeNameBase(typed.Element())
 	}

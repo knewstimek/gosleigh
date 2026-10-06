@@ -323,8 +323,13 @@ func (hv *HighVariable) Type() Datatype {
 	}
 	// A variable never keeps a partial type. C++ parity:
 	// HighVariable::updateType (getStripped).
-	if p, ok := rep.Type().(*PartialStruct); ok {
-		return p.stripped
+	switch t := rep.Type().(type) {
+	case *PartialStruct:
+		return t.stripped
+	case *Pointer:
+		if t.relStripped != nil {
+			return t.relStripped
+		}
 	}
 	return rep.Type()
 }

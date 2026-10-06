@@ -1115,19 +1115,10 @@ func (s *printCState) emitLocalDeclarations() bool {
 	return len(decls) != 0
 }
 
-// localDeclString renders a local variable declaration. It differs from
-// CDeclString only in array spacing: PrintC::pushTypeStart pushes array_expr,
-// a postsurround OpToken carrying spacing 1 (printc.cc:76), so Ghidra emits
-// "int aiStack_48 [18]" with one space before the subscript. CDeclRenderer
-// (printc_decl.go) writes "[18]" flush against the declarator and also backs
-// struct/global/typedef rendering, so the spacing is applied here on the
-// declaration path rather than changed underneath those other users.
+// localDeclString renders a local variable declaration.
 // C++ parity: printc.cc PrintC::emitVarDecl -> pushTypeStart/pushTypeEnd.
 func localDeclString(dt Datatype, name string) string {
-	if arr, ok := dt.(*Array); ok {
-		return localDeclString(arr.Element(), fmt.Sprintf("%s [%d]", name, arr.Count()))
-	}
-	return CDeclString(dt, name)
+	return printedDeclString(dt, name)
 }
 
 // localDecl is one emitted local declaration, tagged with its stack offset when
@@ -3334,7 +3325,7 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 		// as a cast of its hexadecimal value. C++ parity: PrintC::pushConstant
 		// TYPE_PTR -> default printing (typecast + force_hex).
 		// TODO known mismatch: pushPtrCodeConstant (a function name) is not ported.
-		return "(" + CTypeString(s.normalizeTypeForDecl(typed)) + ")" + fmt.Sprintf("0x%x", vn.Offset())
+		return "(" + printedTypeString(s.normalizeTypeForDecl(typed)) + ")" + fmt.Sprintf("0x%x", vn.Offset())
 	}
 	// Untyped constant: choose decimal vs hex following Ghidra's heuristic.
 	// C++ parity: PrintC::push_integer (printc.cc:1395-1399) -- values <= 10
@@ -3880,7 +3871,7 @@ func (s *printCState) nullPtrCastStr(op *PcodeOp) (castStr string, constIdx int)
 				continue
 			}
 		}
-		return "(" + CTypeString(s.normalizeTypeForDecl(ptrDt)) + ")0x0", cstIdx
+		return "(" + printedTypeString(s.normalizeTypeForDecl(ptrDt)) + ")0x0", cstIdx
 	}
 	return "", -1
 }
@@ -3988,7 +3979,7 @@ func (s *printCState) renderCast(op *PcodeOp) (ExprFragment, error) {
 		// C++ parity: PrintC::opCast pushes getOut()->getHighTypeDefFacing().
 		dt = s.normalizeTypeForDecl(out.HighTypeDefFacing())
 	}
-	return s.lang.CastExpr(CTypeString(dt), inner), nil
+	return s.lang.CastExpr(printedTypeString(dt), inner), nil
 }
 
 func (s *printCState) renderLoad(op *PcodeOp) (ExprFragment, error) {
@@ -4291,6 +4282,29 @@ func (s *printCState) renderPtrSubField(base, off *Varnode, valueon bool) (ExprF
 	ptrType, ok := base.TypeReadFacing(nil).(*Pointer)
 	if !ok {
 		return ExprFragment{}, false
+	}
+	if _, isArr := ptrType.Pointee().(*Array); isArr && off.Offset() == 0 {
+		// PTRSUB(p,0) on a pointer to an array switches to a pointer to its
+		// element: the array value itself, which decays. Even without valueon
+		// it acts as a dereference. C++ parity: opPtrsub TYPE_ARRAY branch.
+		var expr ExprFragment
+		if isValueFlexible(base) { // EMIT ( )
+			baseExpr, ok := s.renderPointerValue(base)
+			if !ok {
+				return ExprFragment{}, false
+			}
+			expr = baseExpr
+		} else { // EMIT *( )
+			baseExpr, err := s.renderVarnodeExpr(base)
+			if err != nil {
+				return ExprFragment{}, false
+			}
+			expr = s.lang.UnaryExpr("*", cPrecUnary, baseExpr)
+		}
+		if valueon { // A second dereference: ( )[0]
+			expr = s.lang.PostfixExpr(expr, "[0]")
+		}
+		return expr, true
 	}
 	structType, ok := ptrType.Pointee().(*Struct)
 	if !ok {
@@ -4657,7 +4671,7 @@ func (s *printCState) readExpr(vn *Varnode) ExprFragment {
 		name, cast = s.localPieceName(vn, s.nameOf(vn), castTo)
 	}
 	if cast != nil {
-		return s.lang.CastExpr(CTypeString(s.normalizeTypeForDecl(cast)), s.lang.Atom(name))
+		return s.lang.CastExpr(printedTypeString(s.normalizeTypeForDecl(cast)), s.lang.Atom(name))
 	}
 	return s.lang.Atom(name)
 }

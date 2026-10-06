@@ -298,13 +298,8 @@ type splitDatatypePiece struct {
 	offset  int32
 }
 
-// splitPointerType is a pointer data-type a LOAD/STORE address may carry:
-// a plain or a relative pointer.
-type splitPointerType interface {
-	Datatype
-	Pointee() Datatype
-	WordSize() uint32
-}
+// splitPointerType is the pointer data-type a LOAD/STORE address carries.
+type splitPointerType = *Pointer
 
 // splitRootPointer describes the pointer feeding a LOAD or STORE and the
 // root pointer to the containing structure or array it is an offset from.
@@ -1162,14 +1157,15 @@ func (sd *SplitDatatype) splitStore(storeOp *PcodeOp, outType Datatype) bool {
 func splitValueDatatype(loadStore *PcodeOp, size int32, tlst *TypeFactory) Datatype {
 	var resType Datatype
 	var baseOffset int64
-	switch p := loadStore.Input(1).TypeReadFacing(loadStore).(type) {
-	case *PointerRel:
+	p, ok := loadStore.Input(1).TypeReadFacing(loadStore).(*Pointer)
+	if !ok {
+		return nil
+	}
+	if p.IsPointerRel() {
 		resType = p.Parent()
 		baseOffset = int64(p.ByteOffset())
-	case *Pointer:
+	} else {
 		resType = p.Pointee()
-	default:
-		return nil
 	}
 	if resType == nil {
 		return nil

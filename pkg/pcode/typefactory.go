@@ -42,12 +42,10 @@ func (f *TypeFactory) Intern(dt Datatype) Datatype {
 	case *Void:
 		return f.GetVoid()
 	case *Pointer:
-		if typed.Flags()&datatypeTypedef != 0 {
+		if typed.Flags()&datatypeTypedef != 0 || typed.IsPointerRel() {
 			return typed
 		}
 		return f.GetPointer(typed.Size(), typed.Pointee(), typed.WordSize())
-	case *PointerRel:
-		return f.GetPointerRel(typed.Size(), typed.Pointee(), typed.WordSize(), typed.Parent(), typed.ByteOffset())
 	case *Array:
 		return f.GetArray(typed.Count(), typed.Element())
 	case *PartialStruct:
@@ -320,22 +318,28 @@ func (f *TypeFactory) GetPointerTo(pointee Datatype, ptrSize int32) *Pointer {
 	return f.GetPointer(ptrSize, pointee, 1)
 }
 
-// GetPointerRel interns a relative pointer pointing into a larger container.
-// C++ parity: TypeFactory::getTypePointerRel (type.hh declared; type.cc def).
-func (f *TypeFactory) GetPointerRel(size int32, pointee Datatype, wordSize uint32, parent Datatype, offset int32) *PointerRel {
-	canonicalTo := f.Intern(pointee)
-	canonicalParent := f.Intern(parent)
-	value := NewPointerRel(size, canonicalTo, wordSize, canonicalParent, offset)
-	key := fmt.Sprintf("ptrrel:%d:%d:%d:%x:%x", size, wordSize, offset, datatypeIdentity(canonicalTo), datatypeIdentity(canonicalParent))
-	return f.internPointerRel(key, value)
-}
-
-func (f *TypeFactory) internPointerRel(key string, value *PointerRel) *PointerRel {
+// GetPointerRelEphemeral returns the ephemeral relative pointer to ptrTo at
+// byte offset off inside the container parentPtr points to. It propagates
+// like a pointer into the container but declares as a plain pointer.
+// C++ parity: TypeFactory::getTypePointerRel(TypePointer*,Datatype*,int4)
+// with TypePointerRel::markEphemeral.
+func (f *TypeFactory) GetPointerRelEphemeral(parentPtr *Pointer, ptrTo Datatype, off int32) *Pointer {
+	size, ws, parent := parentPtr.Size(), parentPtr.WordSize(), parentPtr.Pointee()
+	stripped := f.GetPointer(size, ptrTo, ws)
+	key := fmt.Sprintf("ptrrel-eph:%d:%d:%d:%x:%x", size, ws, off, datatypeIdentity(ptrTo), datatypeIdentity(parent))
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	if existing, ok := f.intern[key]; ok {
-		return existing.(*PointerRel)
+	if v, ok := f.intern[key].(*Pointer); ok {
+		return v
 	}
+	value := NewPointer(size, ptrTo, ws)
+	value.submeta = SUB_PTRREL
+	if ptrTo.Metatype() == TYPE_UNKNOWN {
+		value.submeta = SUB_PTRREL_UNK // propagates differently from a formal one
+	}
+	value.relParent = parent
+	value.relOffset = off
+	value.relStripped = stripped
 	f.intern[key] = value
 	return value
 }

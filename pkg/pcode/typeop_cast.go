@@ -340,8 +340,8 @@ func (t *typeOpPtradd) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 // spacebase pointer downChain resolves the referenced symbol
 // (TypeSpacebase::getSubType) and returns a stripped pointer to the symbol's
 // data-type; this is what lets a `&symbol` PTRSUB feed pointer arithmetic without
-// an inserted (undefined1 *) cast. The struct/array field-navigation case of
-// downChain is still not ported (kept as the base output-local fallback).
+// an inserted (undefined1 *) cast. Other pointers go down one level with
+// TypePointer::downChain.
 // C++ parity: TypeOpPtrsub::getOutputToken (typeop.cc 2351-2366).
 func (t *typeOpPtrsub) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 	if op == nil || op.NumInput() < 2 || op.Input(0) == nil || op.Input(1) == nil || op.Output() == nil {
@@ -366,8 +366,17 @@ func (t *typeOpPtrsub) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 		}
 		return cs.tlst.GetPointer(op.Output().Size(), cs.tlst.GetBase(1, TYPE_UNKNOWN, "unknown"), ptr.WordSize())
 	}
-	// Non-spacebase pointer: struct/array downChain navigation not ported.
-	return t.OutputTypeLocal(op, cs.tlst)
+	ws := int64(1)
+	if ptr.WordSize() > 1 {
+		ws = int64(ptr.WordSize())
+	}
+	off := int64(op.Input(1).Offset()) * ws // AddrSpace::addressToByte
+	var par *Pointer
+	var parOff int64
+	if rettype := pointerDownChain(cs.tlst, ptr, &off, &par, &parOff, false); off == 0 && rettype != nil {
+		return rettype
+	}
+	return cs.tlst.GetPointer(op.Output().Size(), cs.tlst.GetBase(1, TYPE_UNKNOWN, ""), ptr.WordSize())
 }
 
 // SUBPIECE output token: SUBPIECE prints as a cast to whatever its output type is,
