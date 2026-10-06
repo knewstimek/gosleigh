@@ -57,9 +57,11 @@ type divOptForm struct {
 	extopc OpCode
 }
 
+// apply converts a multiply-by-reciprocal form into INT_DIV / INT_SDIV.
+// C++ parity: RuleDivOpt::applyOp.
 func (r *RuleDivOpt) apply(op *PcodeOp, data *Funcdata) int {
 	form, ok := findDivOptForm(op)
-	if !ok || form.base == nil || form.base.IsFree() {
+	if !ok {
 		return 0
 	}
 	if checkDivOptOverlap(op) {
@@ -67,24 +69,94 @@ func (r *RuleDivOpt) apply(op *PcodeOp, data *Funcdata) int {
 	}
 	xsize := form.xsize
 	if form.extopc == CPUI_INT_SEXT {
-		xsize--
+		xsize-- // one less bit for signed, because of the sign bit
 	}
 	divisor := calcMagicDivisor(form.n, form.coeff, xsize)
 	if divisor == 0 {
 		return 0
 	}
-	size := form.base.Size()
-	if size <= 0 {
-		return 0
+	inVn := form.base
+	outSize := op.Output().Size()
+	if inVn.Size() < outSize { // extend to the final size
+		inExt := data.NewOp(1, op.Addr())
+		data.OpSetOpcode(inExt, form.extopc)
+		extOut := data.NewUniqueOut(outSize, inExt)
+		data.OpSetInput(inExt, inVn, 0)
+		inVn = extOut
+		data.OpInsertBefore(inExt, op)
+	} else if inVn.Size() > outSize { // divide at full size, then truncate
+		newop := data.NewOp(2, op.Addr())
+		data.OpSetOpcode(newop, CPUI_INT_ADD) // changed below, needed for insertion
+		resVn := data.NewUniqueOut(inVn.Size(), newop)
+		data.OpInsertBefore(newop, op)
+		rewriteOp(data, op, CPUI_SUBPIECE, resVn, data.NewConstant(4, 0))
+		op = newop
+		outSize = inVn.Size()
 	}
-	if form.extopc == CPUI_INT_SEXT {
-		divop := newAuxBinaryOp(data, op.Addr(), CPUI_INT_SDIV, size, form.base, data.NewConstant(size, divisor))
-		signop := newAuxBinaryOp(data, op.Addr(), CPUI_INT_SRIGHT, size, form.base, data.NewConstant(size, uint64(size*8-1)))
-		rewriteOp(data, op, CPUI_INT_ADD, divop.Output(), signop.Output())
+	if form.extopc == CPUI_INT_ZEXT { // unsigned division
+		data.OpSetInput(op, inVn, 0)
+		data.OpSetInput(op, data.NewConstant(outSize, divisor), 1)
+		data.OpSetOpcode(op, CPUI_INT_DIV)
 		return 1
 	}
-	rewriteOp(data, op, CPUI_INT_DIV, form.base, data.NewConstant(size, divisor))
+	// Signed division plus the sign correction.
+	moveSignBitExtraction(op.Output(), inVn, data)
+	divop := data.NewOp(2, op.Addr())
+	data.OpSetOpcode(divop, CPUI_INT_SDIV)
+	newout := data.NewUniqueOut(outSize, divop)
+	data.OpSetInput(divop, inVn, 0)
+	data.OpSetInput(divop, data.NewConstant(outSize, divisor), 1)
+	data.OpInsertBefore(divop, op)
+	sgnop := data.NewOp(2, op.Addr())
+	data.OpSetOpcode(sgnop, CPUI_INT_SRIGHT)
+	sgnvn := data.NewUniqueOut(outSize, sgnop)
+	data.OpSetInput(sgnop, inVn, 0)
+	data.OpSetInput(sgnop, data.NewConstant(outSize, uint64(outSize*8-1)), 1)
+	data.OpInsertBefore(sgnop, op)
+	data.OpSetInput(op, newout, 0)
+	data.OpSetInput(op, sgnvn, 1)
+	data.OpSetOpcode(op, CPUI_INT_ADD)
 	return 1
+}
+
+// moveSignBitExtraction redirects sign-bit extractions (V >> sa, V s>> sa
+// with sa = size*8-1, possibly through COPYs) of firstVn to replaceVn.
+// C++ parity: RuleDivOpt::moveSignBitExtraction.
+func moveSignBitExtraction(firstVn, replaceVn *Varnode, data *Funcdata) {
+	testList := []*Varnode{firstVn}
+	if firstVn.IsWritten() && firstVn.Def().Code() == CPUI_INT_SRIGHT {
+		// The same sign bit could be extracted from the previous shifted version.
+		testList = append(testList, firstVn.Def().Input(0))
+	}
+	for i := 0; i < len(testList); i++ {
+		vn := testList[i]
+		for _, op := range append([]*PcodeOp(nil), vn.DescendIter()...) {
+			switch op.Code() {
+			case CPUI_INT_RIGHT, CPUI_INT_SRIGHT:
+				constVn := op.Input(1)
+				if constVn.IsWritten() {
+					constOp := constVn.Def()
+					if constOp.Code() == CPUI_COPY {
+						constVn = constOp.Input(0)
+					} else if constOp.Code() == CPUI_INT_AND {
+						constVn = constOp.Input(0)
+						otherVn := constOp.Input(1)
+						if !otherVn.IsConstant() {
+							continue
+						}
+						if constVn.Offset() != constVn.Offset()&otherVn.Offset() {
+							continue
+						}
+					}
+				}
+				if constVn.IsConstant() && uint64(firstVn.Size()*8-1) == constVn.Offset() {
+					data.OpSetInput(op, replaceVn, 0)
+				}
+			case CPUI_COPY:
+				testList = append(testList, op.Output())
+			}
+		}
+	}
 }
 
 type RuleSignDiv2 struct{ batchRule }
@@ -564,96 +636,102 @@ func (r *RuleSignMod2nOpt2) apply(op *PcodeOp, data *Funcdata) int {
 	return 0
 }
 
+// findDivOptForm matches sub(ext(V)*c, d) >> e and its variants, returning
+// the Varnode to divide (resVn), the power n, the coefficient and the bit
+// size of V. C++ parity: RuleDivOpt::findForm.
+// TODO known mismatch: C++ isConstantExtended also accepts a 128-bit
+// coefficient built by PIECE; only a plain constant is recognized here.
 func findDivOptForm(op *PcodeOp) (*divOptForm, bool) {
-	if op == nil || op.NumInput() < 2 {
-		return nil, false
-	}
-	cur := op
-	shiftopc := cur.Code()
-	n := uint64(0)
+	curOp := op
+	shiftopc := curOp.Code()
+	var n uint64
 	switch shiftopc {
 	case CPUI_INT_RIGHT, CPUI_INT_SRIGHT:
-		shiftAmt, ok := constantValue(cur.Input(1))
-		if !ok || !cur.Input(0).IsWritten() {
+		vn := curOp.Input(0)
+		if !vn.IsWritten() {
 			return nil, false
 		}
-		n = shiftAmt
-		cur = cur.Input(0).Def()
-	case CPUI_SUBPIECE:
+		cvn := curOp.Input(1)
+		if !cvn.IsConstant() {
+			return nil, false
+		}
+		n = cvn.Offset()
+		curOp = vn.Def()
+	case CPUI_SUBPIECE: // here the SUBPIECE is not optional
 		shiftopc = CPUI_MAX
 	default:
 		return nil, false
 	}
-	if cur.Code() == CPUI_SUBPIECE {
-		off, ok := constantValue(cur.Input(1))
-		if !ok || !cur.Input(0).IsWritten() {
+	if curOp.Code() == CPUI_SUBPIECE { // optional SUBPIECE
+		c := curOp.Input(1).Offset()
+		inVn := curOp.Input(0)
+		if !inVn.IsWritten() {
 			return nil, false
 		}
-		if cur.Output().Size()+int32(off) != cur.Input(0).Size() {
-			return nil, false
+		if curOp.Output().Size()+int32(c) != inVn.Size() {
+			return nil, false // must keep the high bits
 		}
-		n += off * 8
-		cur = cur.Input(0).Def()
+		n += 8 * c
+		curOp = inVn.Def()
 	}
-	if cur == nil || cur.Code() != CPUI_INT_MULT {
+	if curOp.Code() != CPUI_INT_MULT {
+		return nil, false // there MUST be an INT_MULT
+	}
+	inVn := curOp.Input(0)
+	if !inVn.IsWritten() {
 		return nil, false
 	}
-	var inVn *Varnode
-	coeff, ok := constantValue(cur.Input(0))
-	if ok {
-		inVn = cur.Input(1)
+	var y uint64
+	if inVn.IsConstant() { // never true for a written Varnode; kept for parity
+		y = inVn.Offset()
+		inVn = curOp.Input(1)
 		if !inVn.IsWritten() {
+			return nil, false
+		}
+	} else if c := curOp.Input(1); c.IsConstant() {
+		y = c.Offset()
+	} else {
+		return nil, false // there MUST be a constant
+	}
+
+	extOp := inVn.Def()
+	extopc := extOp.Code()
+	var xsize int
+	if extopc != CPUI_INT_SEXT {
+		nzMask := inVn.NZMask()
+		if extopc == CPUI_INT_ZEXT {
+			nzMask = extOp.Input(0).NZMask()
+		}
+		xsize = bits.Len64(nzMask)
+		if xsize == 0 || xsize > 4*int(inVn.Size()) {
 			return nil, false
 		}
 	} else {
-		coeff, ok = constantValue(cur.Input(1))
-		if !ok {
-			return nil, false
-		}
-		inVn = cur.Input(0)
-		if !inVn.IsWritten() {
-			return nil, false
-		}
+		xsize = int(extOp.Input(0).Size()) * 8
 	}
-	extOp := inVn.Def()
-	extopc := CPUI_INT_ZEXT
-	base := inVn
-	xsize := 0
-	switch extOp.Code() {
-	case CPUI_INT_ZEXT:
-		base = extOp.Input(0)
-		if base.IsFree() {
+	var resVn *Varnode
+	if extopc == CPUI_INT_ZEXT || extopc == CPUI_INT_SEXT {
+		extVn := extOp.Input(0)
+		if extVn.IsFree() {
 			return nil, false
 		}
-		xsize = bits.Len64(base.NZMask())
-		if xsize == 0 || xsize > int(inVn.Size())*4 {
-			return nil, false
+		if inVn.Size() == op.Output().Size() {
+			resVn = inVn
+		} else {
+			resVn = extVn
 		}
-		extopc = CPUI_INT_ZEXT
-	case CPUI_INT_SEXT:
-		base = extOp.Input(0)
-		if base.IsFree() {
-			return nil, false
-		}
-		xsize = int(base.Size() * 8)
-		extopc = CPUI_INT_SEXT
-	default:
-		if inVn.IsFree() {
-			return nil, false
-		}
-		xsize = bits.Len64(inVn.NZMask())
-		if xsize == 0 || xsize > int(inVn.Size())*4 {
-			return nil, false
-		}
-		base = inVn
-		extopc = CPUI_INT_ZEXT
+	} else {
+		extopc = CPUI_INT_ZEXT // treat as unsigned extension
+		resVn = inVn
 	}
+	// Check for a signed mismatch.
 	if (extopc == CPUI_INT_ZEXT && shiftopc == CPUI_INT_SRIGHT) || (extopc == CPUI_INT_SEXT && shiftopc == CPUI_INT_RIGHT) {
 		if int(op.Output().Size()*8)-int(n) != xsize {
 			return nil, false
 		}
+		// op's signedness does not matter: all the extension bits are truncated.
 	}
-	return &divOptForm{base: base, n: n, coeff: coeff, xsize: xsize, extopc: extopc}, true
+	return &divOptForm{base: resVn, n: n, coeff: y, xsize: xsize, extopc: extopc}, true
 }
 
 func calcMagicDivisor(n uint64, coeff uint64, xsize int) uint64 {
@@ -711,6 +789,9 @@ func checkDivOptOverlap(op *PcodeOp) bool {
 	for _, desc := range op.Output().DescendIter() {
 		if desc.Code() != CPUI_INT_RIGHT && desc.Code() != CPUI_INT_SRIGHT {
 			continue
+		}
+		if !desc.Input(1).IsConstant() {
+			return true // might be a form whose constant has not propagated yet
 		}
 		if _, ok := findDivOptForm(desc); ok {
 			return true

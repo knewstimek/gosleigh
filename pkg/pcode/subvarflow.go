@@ -410,7 +410,7 @@ func (sf *SubvariableFlow) traceForward(rvn *subvariableFlowReplaceVarnode) bool
 			if (rvn.mask&1) == 0 || (sf.bitsize&7) != 0 {
 				return false
 			}
-			if (op.Input(0).NZMask()&^maskForSize(sf.flowsize)) != 0 || (op.Input(1).NZMask()&^maskForSize(sf.flowsize)) != 0 {
+			if !op.Input(0).IsZeroExtended(sf.flowsize) || !op.Input(1).IsZeroExtended(sf.flowsize) {
 				return false
 			}
 			rop := sf.createOpDown(op.Code(), 2, op, rvn, slot)
@@ -838,7 +838,7 @@ func (sf *SubvariableFlow) traceBackward(rvn *subvariableFlowReplaceVarnode) boo
 		if (rvn.mask&1) == 0 || (sf.bitsize&7) != 0 {
 			return false
 		}
-		if (op.Input(0).NZMask()&^maskForSize(sf.flowsize)) != 0 || (op.Input(1).NZMask()&^maskForSize(sf.flowsize)) != 0 {
+		if !op.Input(0).IsZeroExtended(sf.flowsize) || !op.Input(1).IsZeroExtended(sf.flowsize) {
 			return false
 		}
 		rop := sf.createOp(op.Code(), 2, rvn)

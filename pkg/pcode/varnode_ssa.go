@@ -157,6 +157,19 @@ func (vn *Varnode) CreateIndex() uint32   { return vn.createIndex }
 func (vn *Varnode) MergeGroup() int16     { return vn.mergeGroup }
 func (vn *Varnode) SetMergeGroup(g int16) { vn.mergeGroup = g }
 func (vn *Varnode) NZMask() uint64        { return vn.nzm }
+
+// IsZeroExtended reports whether the value fits in its baseSize least
+// significant bytes (the rest is known zero). C++ parity: Varnode::isZeroExtended.
+func (vn *Varnode) IsZeroExtended(baseSize int32) bool {
+	if baseSize >= vn.size {
+		return false
+	}
+	if vn.size > 8 {
+		def := vn.Def()
+		return def != nil && def.Code() == CPUI_INT_ZEXT && def.Input(0).Size() <= baseSize
+	}
+	return vn.nzm>>(8*uint(baseSize)) == 0
+}
 func (vn *Varnode) SetNZMask(m uint64)    { vn.nzm = m }
 func (vn *Varnode) Consumed() uint64      { return vn.consumed }
 func (vn *Varnode) SetConsumed(c uint64)  { vn.consumed = c }

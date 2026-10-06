@@ -118,12 +118,13 @@ func TestConstantFoldUnaryPopcount(t *testing.T) {
 	}
 }
 
-// TestConstantFoldChain verifies that a multi-op chain is collapsed to a
-// single constant by fixpoint iteration:
+// TestConstantFoldChain verifies that only ops whose inputs are constant
+// Varnodes fold; a COPY of a constant waits for copy propagation, as in C++
+// PcodeOp::isCollapsible:
 //
-//	andOp  = INT_AND(0xff, 0xff)   -> COPY(0xff)
-//	popOp  = POPCOUNT(andOp.out)   -> COPY(8)   (popcount(0xff)=8)
-//	eqOp   = INT_EQUAL(popOp.out, 8) -> COPY(1) (8 == 8)
+//	andOp  = INT_AND(0xff, 0xff)     -> COPY(0xff)
+//	popOp  = POPCOUNT(andOp.out)     unchanged
+//	eqOp   = INT_EQUAL(popOp.out, 8) unchanged
 func TestConstantFoldChain(t *testing.T) {
 	fd, _ := makeConstFoldFuncdata()
 
@@ -166,15 +167,15 @@ func TestConstantFoldChain(t *testing.T) {
 		t.Fatalf("Apply returned %d, want 1", res)
 	}
 
-	// All three ops must now be COPY(const).
+	if popOp.Code() != CPUI_POPCOUNT || eqOp.Code() != CPUI_INT_EQUAL {
+		t.Errorf("ops fed by a COPY folded early: %v %v", popOp.Code(), eqOp.Code())
+	}
 	for _, tc := range []struct {
 		op    *PcodeOp
 		label string
 		want  uint64
 	}{
 		{andOp, "andOp INT_AND(0xff,0xff)", 0xff},
-		{popOp, "popOp POPCOUNT(0xff)", 8},
-		{eqOp, "eqOp INT_EQUAL(8,8)", 1},
 	} {
 		if tc.op.Code() != CPUI_COPY {
 			t.Errorf("%s: code = %v, want COPY", tc.label, tc.op.Code())

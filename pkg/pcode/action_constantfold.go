@@ -241,40 +241,19 @@ func constFoldOutSize(op *PcodeOp) int32 {
 // This allows the fixpoint loop to fold chains in a single pass by resolving
 // already-folded upstream ops without waiting for another iteration.
 func foldedConstantValue(vn *Varnode) (uint64, bool) {
-	if vn == nil {
+	// Only a constant Varnode counts: a COPY of a constant is folded once copy
+	// propagation has put the constant in place, as in C++.
+	// C++ parity: PcodeOp::isCollapsible (getIn(i)->isConstant()).
+	if vn == nil || !vn.IsConstant() {
 		return 0, false
 	}
-	// Direct constant varnode.
-	if vn.IsConstant() {
-		return truncateToSize(vn.Offset(), vn.Size()), true
-	}
-	// COPY(const) forwarding: if the defining op is COPY with a constant input,
-	// treat this varnode as having that constant value.
-	def := vn.Def()
-	if def != nil && def.Code() == CPUI_COPY && def.NumInput() == 1 {
-		src := def.Input(0)
-		if src != nil && src.IsConstant() {
-			return truncateToSize(src.Offset(), src.Size()), true
-		}
-	}
-	return 0, false
+	return truncateToSize(vn.Offset(), vn.Size()), true
 }
 
-// foldedSize returns the effective input size for signed-arithmetic purposes,
-// following COPY forwarding the same way foldedConstantValue does.
+// foldedSize returns the input size used for signed arithmetic.
 func foldedSize(vn *Varnode) int32 {
 	if vn == nil {
 		return 1
-	}
-	if vn.IsConstant() {
-		return vn.Size()
-	}
-	def := vn.Def()
-	if def != nil && def.Code() == CPUI_COPY && def.NumInput() == 1 {
-		src := def.Input(0)
-		if src != nil && src.IsConstant() {
-			return src.Size()
-		}
 	}
 	return vn.Size()
 }
