@@ -71,8 +71,8 @@ func (f *TypeFactory) internSlow(dt Datatype) Datatype {
 	case *PartialStruct:
 		return typed
 	case *Struct:
-		if typed.Flags()&datatypeTypedef != 0 {
-			return typed
+		if typed.Flags()&(datatypeTypedef|datatypeHostNamed) != 0 {
+			return typed // A typedef or a host structure is its own identity
 		}
 		return f.GetStructSized(typed.Name(), typed.Size(), typed.Fields()) // keep a declared size beyond the fields (incomplete structs)
 	case *Union:
@@ -593,4 +593,38 @@ func (f *TypeFactory) exactPiece(ct Datatype, offset int64, size int32) Datatype
 		}
 	}
 	return nil
+}
+
+// HostStructStub returns the structure the host knows by id, creating it
+// empty the first time; created reports whether this call made it.
+// C++ parity: TypeFactory::decodeStruct (findAdd of a stub before the fields,
+// so a field may point back to the structure).
+func (f *TypeFactory) HostStructStub(id, name string, size int32) (st *Struct, created bool) {
+	key := "hoststruct:" + id
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if v, ok := f.intern[key].(*Struct); ok {
+		return v, false
+	}
+	st = NewStruct(name, nil)
+	st.flags |= datatypeHostNamed
+	st.size = size
+	st.alignSize = calcAlignSize(size, st.alignment)
+	f.intern[key] = st
+	f.canon[st] = struct{}{}
+	return st, true
+}
+
+// SetHostStructFields completes a stub from HostStructStub.
+// C++ parity: TypeFactory::setFields.
+func (f *TypeFactory) SetHostStructFields(st *Struct, fields []TypeField) {
+	canonical := f.internFields(fields)
+	full := NewStruct(st.name, canonical)
+	size := st.size
+	*st = *full
+	st.flags |= datatypeHostNamed
+	if size > st.size {
+		st.size = size
+	}
+	st.alignSize = calcAlignSize(st.size, st.alignment)
 }

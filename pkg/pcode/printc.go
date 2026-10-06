@@ -1335,6 +1335,9 @@ func (s *printCState) normalizeTypeForDecl(dt Datatype) Datatype {
 		}
 		return sharedTypeFactory.GetCode(typed.Name(), s.normalizeTypeForDecl(typed.ReturnType()), normalizedParams, typed.IsVariadic())
 	case *Struct:
+		if typed.Flags()&datatypeHostNamed != 0 {
+			return typed // A host structure is printed as the host defines it
+		}
 		fields := typed.Fields()
 		normalizedFields := make([]TypeField, len(fields))
 		for i, field := range fields {

@@ -51,6 +51,9 @@ type HostTypeDesc struct {
 	Typedef string
 	// Fields are a structure's members.
 	Fields []HostFieldDesc
+	// ID is the host's id of a named type: one structure per id, however
+	// often it is referenced (and from itself).
+	ID string
 }
 
 // HostFieldDesc is one member of a host structure.
@@ -107,6 +110,19 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 	case "void":
 		return tf.GetVoid()
 	case "struct":
+		if d.ID != "" {
+			st, created := tf.HostStructStub(d.ID, d.Name, d.Size)
+			if created {
+				var fields []TypeField
+				for i, fd := range d.Fields {
+					if ft := ResolveHostType(fd.Type); ft != nil {
+						fields = append(fields, TypeField{Ident: int32(i), Offset: fd.Offset, Name: fd.Name, Type: ft})
+					}
+				}
+				tf.SetHostStructFields(st, fields)
+			}
+			return st
+		}
 		var fields []TypeField
 		for i, fd := range d.Fields {
 			if ft := ResolveHostType(fd.Type); ft != nil {

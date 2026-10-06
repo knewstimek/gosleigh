@@ -7,6 +7,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"gosleigh/pkg/address"
 	"gosleigh/pkg/bridge"
@@ -107,7 +108,16 @@ func loadCaptureData(path string, ram *address.Space) (*captureData, error) {
 		}
 		for i := range n.Kids {
 			if k := &n.Kids[i]; k.XMLName.Local == "type" || k.XMLName.Local == "def" {
-				types[k.attr("name")] = k
+				// Types are found by id: one short name can stand for several
+				// template instances (ForElementType<unsigned_int>). A forward
+				// declaration never replaces a full definition.
+				// C++ parity: TypeFactory::findById.
+				for _, key := range []string{"id:" + k.attr("id"), k.attr("name")} {
+					if old := types[key]; old != nil && old.attr("incomplete") != "true" && k.attr("incomplete") == "true" {
+						continue
+					}
+					types[key] = k
+				}
 			}
 		}
 	}
@@ -284,12 +294,20 @@ func (h hostWithData) QueryFunction(addr address.Address) (pcode.HostFunction, b
 
 // typeDesc converts a <type>/<typeref> element into a host type description,
 // resolving references through the savefile's core types and type group.
+// structDescs memoizes structure descriptions by their capture element.
+var structDescs sync.Map
+
 func typeDesc(n *xnode, types map[string]*xnode, depth int) *pcode.HostTypeDesc {
 	if n == nil || depth > 16 {
 		return nil
 	}
 	switch n.XMLName.Local {
 	case "typeref":
+		if id := n.attr("id"); id != "" {
+			if t := types["id:"+id]; t != nil {
+				return typeDesc(t, types, depth+1)
+			}
+		}
 		if t := types[n.attr("name")]; t != nil {
 			return typeDesc(t, types, depth+1)
 		}
@@ -328,6 +346,15 @@ func typeDesc(n *xnode, types map[string]*xnode, depth int) *pcode.HostTypeDesc 
 		d.Elem = typeDesc(&n.Kids[0], types, depth+1)
 	}
 	if d.Meta == "struct" {
+		// One description per host structure, shared before its fields are
+		// read so a field pointing back to it closes the cycle.
+		if id := n.attr("id"); id != "" && id != "0x0" {
+			if old, ok := structDescs.Load(n); ok {
+				return old.(*pcode.HostTypeDesc)
+			}
+			d.ID = id
+			structDescs.Store(n, d)
+		}
 		for i := range n.Kids {
 			f := &n.Kids[i]
 			if f.XMLName.Local != "field" || len(f.Kids) == 0 {
@@ -363,7 +390,7 @@ func withCapture(host pcode.HostScope, fn goldenEntry, ram *address.Space) pcode
 	if raw, err := os.ReadFile(fmt.Sprintf("%s/%08x.typeorder", captureDir, fn.Entry)); err == nil {
 		for _, ln := range strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n") {
 			if ln = strings.TrimSpace(ln); ln != "" {
-				cd.typeWarnings = append(cd.typeWarnings, "Enum \"" + ln + "\": Some values do not have unique names")
+				cd.typeWarnings = append(cd.typeWarnings, "Enum \""+ln+"\": Some values do not have unique names")
 			}
 		}
 	}
