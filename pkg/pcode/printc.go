@@ -2652,6 +2652,12 @@ func (s *printCState) emitOps(bb *BlockBasic, suppressControl bool) error {
 				// as implied, and the COPY becomes an explicit statement whose output
 				// name is the HighVariable's name (param_N, iVar1, etc.).
 				consumer := out.LoneDescend()
+				if !out.IsImplied() && !out.IsExplicit() && out.NumDescend() > 0 && out.High() != nil && out.High().NumInstances() > 1 {
+					// A COPY created after ActionMarkImplied (Merge::buildDominantCopy)
+					// carries neither flag; C++ emitBlockBasic prints any non-implied
+					// output, here under its merged variable's name.
+					goto emit // skip the name-remap fallback below
+				}
 				if consumer == nil || consumer.Code() != CPUI_MULTIEQUAL ||
 					consumer.Output() == nil ||
 					s.nameOf(consumer.Output()) == "" ||
@@ -2671,6 +2677,7 @@ func (s *printCState) emitOps(bb *BlockBasic, suppressControl bool) error {
 				continue
 			}
 		}
+	emit:
 		if suppressControl && isControlOpcode(op.Code()) {
 			continue
 		}
