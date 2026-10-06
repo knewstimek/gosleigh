@@ -82,6 +82,132 @@ func (g *variableGroup) find(p *variablePiece) *variablePiece {
 	return nil
 }
 
+// intersections lists the other pieces of the group overlapping p's bytes.
+// C++ parity: VariablePiece::updateIntersections.
+func (p *variablePiece) intersections() []*variablePiece {
+	var out []*variablePiece
+	end := p.offset + p.size
+	for _, q := range p.group.pieces {
+		if q == p || end <= q.offset || p.offset >= q.offset+q.size {
+			continue
+		}
+		out = append(out, q)
+	}
+	return out
+}
+
+// PartialCopyShadow reports whether the smaller of vn and op2 is a copy of
+// the bytes of the larger at relOff (op2's offset relative to vn).
+// C++ parity: Varnode::partialCopyShadow.
+func (vn *Varnode) PartialCopyShadow(op2 *Varnode, relOff int64) bool {
+	small, whole := vn, op2
+	switch {
+	case vn.Size() < op2.Size():
+	case vn.Size() > op2.Size():
+		small, whole = op2, vn
+		relOff = -relOff
+	default:
+		return false
+	}
+	if relOff < 0 || relOff+int64(small.Size()) > int64(whole.Size()) {
+		return false // not proper containment
+	}
+	leastByte := relOff
+	if vn.Space() != nil && vn.Space().BigEndian {
+		leastByte = int64(whole.Size()-small.Size()) - relOff
+	}
+	return small.findSubpieceShadow(leastByte, whole, 0) || whole.findPieceShadow(leastByte, small)
+}
+
+func skipCopies(vn *Varnode) *Varnode {
+	for vn.IsWritten() && vn.Def().Code() == CPUI_COPY {
+		vn = vn.Def().Input(0)
+	}
+	return vn
+}
+
+// findSubpieceShadow: is vn a SUBPIECE copy of whole at leastByte?
+// C++ parity: Varnode::findSubpieceShadow.
+func (vn *Varnode) findSubpieceShadow(leastByte int64, whole *Varnode, recurse int) bool {
+	cur := skipCopies(vn)
+	if !cur.IsWritten() {
+		if cur.IsConstant() {
+			w := skipCopies(whole)
+			if !w.IsConstant() {
+				return false
+			}
+			off := (w.Offset() >> uint(leastByte*8)) & maskForSize(cur.Size())
+			return off == cur.Offset()
+		}
+		return false
+	}
+	switch cur.Def().Code() {
+	case CPUI_SUBPIECE:
+		tmp := cur.Def().Input(0)
+		if int64(cur.Def().Input(1).Offset()) != leastByte || tmp.Size() != whole.Size() {
+			return false
+		}
+		if tmp == whole {
+			return true
+		}
+		for tmp.IsWritten() && tmp.Def().Code() == CPUI_COPY {
+			tmp = tmp.Def().Input(0)
+			if tmp == whole {
+				return true
+			}
+		}
+	case CPUI_MULTIEQUAL:
+		recurse++
+		if recurse > 1 {
+			return false // truncate the recursion
+		}
+		w := skipCopies(whole)
+		if !w.IsWritten() || w.Def().Code() != CPUI_MULTIEQUAL {
+			return false
+		}
+		bigOp, smallOp := w.Def(), cur.Def()
+		if bigOp.Parent() != smallOp.Parent() {
+			return false
+		}
+		for i := 0; i < smallOp.NumInput(); i++ {
+			if !smallOp.Input(i).findSubpieceShadow(leastByte, bigOp.Input(i), recurse) {
+				return false
+			}
+		}
+		return true
+	}
+	return false
+}
+
+// findPieceShadow: does vn concatenate piece at leastByte?
+// C++ parity: Varnode::findPieceShadow.
+func (vn *Varnode) findPieceShadow(leastByte int64, piece *Varnode) bool {
+	cur := skipCopies(vn)
+	if !cur.IsWritten() || cur.Def().Code() != CPUI_PIECE {
+		return false
+	}
+	tmp := cur.Def().Input(1) // least significant part
+	if leastByte >= int64(tmp.Size()) {
+		leastByte -= int64(tmp.Size())
+		tmp = cur.Def().Input(0)
+	} else if int64(piece.Size())+leastByte > int64(tmp.Size()) {
+		return false
+	}
+	if leastByte == 0 && tmp.Size() == piece.Size() {
+		if tmp == piece {
+			return true
+		}
+		for tmp.IsWritten() && tmp.Def().Code() == CPUI_COPY {
+			tmp = tmp.Def().Input(0)
+			if tmp == piece {
+				return true
+			}
+		}
+		return false
+	}
+	return tmp.findPieceShadow(leastByte, piece)
+}
+
 // size returns the storage size of the variable.
 func (hv *HighVariable) size() int32 {
 	for _, vn := range hv.instances {

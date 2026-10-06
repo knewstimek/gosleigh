@@ -355,6 +355,26 @@ func (hv *HighVariable) getCover() *Cover {
 	if hv == nil {
 		return nil
 	}
+	internal := hv.internalCover()
+	if hv.piece == nil {
+		return internal
+	}
+	// A piece of a group answers with its extended cover: its own plus that
+	// of every piece overlapping it. C++ parity: HighVariable::getCover ->
+	// VariablePiece::updateCover (recomputed here rather than cached).
+	ext := &Cover{}
+	ext.Merge(internal)
+	for _, other := range hv.piece.intersections() {
+		if c := other.high.internalCover(); c != nil {
+			ext.Merge(c)
+		}
+	}
+	return ext
+}
+
+// internalCover is the union of the instance covers.
+// C++ parity: HighVariable::internalCover / updateInternalCover.
+func (hv *HighVariable) internalCover() *Cover {
 	if hv.cover == nil {
 		hv.rebuildCover()
 	}

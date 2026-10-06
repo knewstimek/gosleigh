@@ -209,6 +209,11 @@ func (t *HighIntersectTest) Intersection(h1, h2 *HighVariable) bool {
 		}
 	}
 	key := canonicalPair(h1, h2)
+	// A piece's extended cover follows its siblings, which this cache does
+	// not track, so tests involving pieces are always recomputed.
+	if h1.piece != nil || h2.piece != nil {
+		clean = false
+	}
 	if v, ok := t.cache[key]; ok && clean {
 		return v
 	}
@@ -255,7 +260,7 @@ func gatherBlockVarnodes(hv *HighVariable, blk int32, unionCover *Cover) []*Varn
 // blist on block blk.  A real intersection is one not explained by copy
 // shadowing.  Returns true when merging would be unsafe.
 // C++ parity: HighIntersectTest::testBlockIntersection (variable.cc:968)
-func testBlockIntersection(hv *HighVariable, blk int32, bCover *Cover, blist []*Varnode) bool {
+func testBlockIntersection(hv *HighVariable, blk int32, bCover *Cover, relOff int64, blist []*Varnode) bool {
 	for _, vn := range hv.instances {
 		if vn == nil {
 			continue
@@ -271,12 +276,10 @@ func testBlockIntersection(hv *HighVariable, blk int32, bCover *Cover, blist []*
 			vn2Cov := vnGetCover(vn2)
 			if vn2Cov.IntersectByBlock(blk, vnCov) > 1 {
 				if vn.Size() == vn2.Size() {
-					cs := vn.CopyShadow(vn2)
-					if !cs {
+					if !vn.CopyShadow(vn2) {
 						return true
 					}
-				} else {
-					// partialCopyShadow is not yet ported (known mismatch).
+				} else if !vn.PartialCopyShadow(vn2, relOff) {
 					return true
 				}
 			}
@@ -285,14 +288,47 @@ func testBlockIntersection(hv *HighVariable, blk int32, bCover *Cover, blist []*
 	return false
 }
 
-// highBlockIntersection tests if h1 and h2 have a real intersection on block blk.
-// C++ parity: HighIntersectTest::blockIntersection (variable.cc:998)
-// VariablePiece is not ported; only the base case is implemented here.
+// highBlockIntersection tests if h1 and h2 have a real intersection on block blk,
+// including the pieces overlapping either one.
+// C++ parity: HighIntersectTest::blockIntersection (variable.cc:998).
 func highBlockIntersection(h1, h2 *HighVariable, blk int32) bool {
 	c1 := h1.getCover()
 	c2 := h2.getCover()
 	blist := gatherBlockVarnodes(h2, blk, c1)
-	return testBlockIntersection(h1, blk, c2, blist)
+	if testBlockIntersection(h1, blk, c2, 0, blist) {
+		return true
+	}
+	var aInter []*variablePiece
+	if h1.piece != nil {
+		aInter = h1.piece.intersections()
+		for _, ip := range aInter {
+			if testBlockIntersection(ip.high, blk, c2, ip.offset-h1.piece.offset, blist) {
+				return true
+			}
+		}
+	}
+	if h2.piece != nil {
+		for _, bp := range h2.piece.intersections() {
+			bOff := bp.offset - h2.piece.offset
+			bl := gatherBlockVarnodes(bp.high, blk, c1)
+			if testBlockIntersection(h1, blk, c2, -bOff, bl) {
+				return true
+			}
+			for _, ip := range aInter {
+				off := (ip.offset - h1.piece.offset) - bOff
+				if off > 0 && off >= bp.size {
+					continue // the pieces do not meet
+				}
+				if off < 0 && -off >= ip.size {
+					continue
+				}
+				if testBlockIntersection(ip.high, blk, c2, off, bl) {
+					return true
+				}
+			}
+		}
+	}
+	return false
 }
 
 // computeHighIntersection implements the two-phase per-varnode intersection test.
@@ -1480,9 +1516,11 @@ func (m *Merge) eliminateIntersect(vn *Varnode, blocksort []blockVarnodeEntry) {
 					continue
 				}
 
-				// overlaptype==1 means partial overlap. The C++ code checks partialCopyShadow
-				// here to skip SUBPIECE-derived shadows. That check is not yet ported, so we
-				// conservatively treat all partial overlaps as conflicts.
+				// A partial overlap that is only a SUBPIECE/PIECE copy is no new value.
+				// C++ parity: merge.cc Merge::eliminateIntersect (partialCopyShadow).
+				if overlaptype == 1 && vn.PartialCopyShadow(vn2, int64(vn.Offset())-int64(vn2.Offset())) {
+					continue
+				}
 				// A full overlap carrying the identical value (a COPY chain) is no new
 				// value. C++ parity: merge.cc Merge::eliminateIntersect lines 522-527
 				if overlaptype == 2 && vn.CopyShadow(vn2) {
@@ -1530,7 +1568,11 @@ func (m *Merge) eliminateIntersect(vn *Varnode, blocksort []blockVarnodeEntry) {
 					if indop.NumInput() < 2 || indop.Input(1).GetIndirectCause() != op {
 						continue
 					}
-					if overlaptype == 2 && vn.CopyShadow(indop.Input(0)) {
+					if overlaptype != 1 {
+						if vn.CopyShadow(indop.Input(0)) {
+							continue
+						}
+					} else if vn.PartialCopyShadow(indop.Input(0), int64(vn.Offset())-int64(vn2.Offset())) {
 						continue
 					}
 				}
@@ -1729,7 +1771,9 @@ func (m *Merge) inflateTest(a *Varnode, high *HighVariable) bool {
 		return false
 	}
 	m.testCache.UpdateHigh(high)
-	highCover := high.getCover()
+	// Only the cover contributing to the inflation counts, not a piece's
+	// extended cover. C++ parity: Merge::inflateTest (high->internalCover).
+	highCover := high.internalCover()
 	if highCover == nil {
 		return false
 	}
@@ -1746,6 +1790,21 @@ func (m *Merge) inflateTest(a *Varnode, high *HighVariable) bool {
 		}
 		if bIndivCover.Intersect(highCover) == 2 {
 			return true
+		}
+	}
+	// The pieces overlapping a's variable may not be live across it either,
+	// unless they only hold a's own bytes.
+	if p := ahigh.piece; p != nil {
+		for _, other := range p.intersections() {
+			off := other.offset - p.offset
+			for _, b := range other.high.Instances() {
+				if b == nil || b.PartialCopyShadow(a, off) {
+					continue
+				}
+				if c := vnGetCover(b); c != nil && c.Intersect(highCover) == 2 {
+					return true
+				}
+			}
 		}
 	}
 	return false
