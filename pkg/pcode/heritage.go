@@ -1577,9 +1577,8 @@ func (h *Heritage) Guard(addr address.Address, size int32, addIndirects bool,
 // write it: a STORE into the range's own space, or (for the stack) a store
 // through a spacebase pointer into the containing space.
 // C++ parity: heritage.cc Heritage::guardStores.
-// TODO known mismatch: the stack case (a spacebase-pointer STORE into the
-// stack's containing space) is left out: Go marks spacebase pointers at a
-// different point than C++ and guarding them turns stack slots into locals.
+// TODO known mismatch: AddrSpace::getContain is not modelled; for the stack,
+// any spacebase-pointer STORE stands in for a store into its container.
 func (h *Heritage) guardStores(addr address.Address, size int32) {
 	spc := addr.Space
 	for _, op := range h.fd.GetPcodeOpBank().AliveOps() {
@@ -1590,7 +1589,7 @@ func (h *Heritage) guardStores(addr address.Address, size int32) {
 		if storeSpace == nil {
 			continue
 		}
-		if spc == storeSpace {
+		if spc == storeSpace || (spc.Kind == address.SpaceKindStack && op.UsesSpacebasePtr()) {
 			indop := h.fd.NewIndirectOp(op, spc, addr.Offset, size)
 			indop.SetFlag(PcodeOpIndirectStore)
 		}
