@@ -477,27 +477,18 @@ func (e *SymbolEntry) FirstUseAddress() address.Address {
 	return address.Address{Space: r.space, Offset: r.first}
 }
 
-// GetSizedType picks a data-type for the requested sub-slice of this storage.
-// For the partial port we defer to the symbol's data-type when the request
-// covers the entire storage, and return nil otherwise. The full C++ routine
-// walks into TypeStruct / TypeArray members to return a piece; that walk
-// depends on the TypeFactory::getSubType machinery which is not yet ported.
-// TODO: wire in TypeFactory::getExactPiece once Datatype::getSubType lands.
-// C++ parity: SymbolEntry::getSizedType (fallback path only)
+// GetSizedType is the data-type of sz bytes at addr within this storage:
+// the exact piece of the symbol's type there, or nil.
+// C++ parity: SymbolEntry::getSizedType.
 func (e *SymbolEntry) GetSizedType(addr address.Address, sz int32) Datatype {
 	if e == nil || e.symbol == nil {
 		return nil
 	}
-	if e.addr.Space != addr.Space {
-		return nil
+	off := int64(e.offset)
+	if !e.IsDynamic() {
+		off += int64(addr.Offset - e.addr.Offset)
 	}
-	if addr.Offset != e.addr.Offset {
-		return nil
-	}
-	if sz != e.size {
-		return nil
-	}
-	return e.symbol.dataType
+	return sharedTypeFactory.exactPiece(e.symbol.dataType, off, sz)
 }
 
 // UpdateType applies the data-type stored on the entry to the given Varnode.

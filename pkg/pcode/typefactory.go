@@ -426,3 +426,25 @@ func paramKey(params []Datatype) string {
 	}
 	return builder.String()
 }
+
+// exactPiece is the data-type of exactly size bytes at offset within ct, or
+// nil when no component fits.
+// C++ parity: TypeFactory::getExactPiece. TODO known mismatch: partial
+// struct/union/enum types are not modelled, so a piece inside a component
+// larger than size yields nil (C++ builds a TypePartialStruct etc.).
+func (f *TypeFactory) exactPiece(ct Datatype, offset int64, size int32) Datatype {
+	if ct == nil || offset+int64(size) > int64(ct.Size()) {
+		return nil
+	}
+	curOff := offset
+	for ct != nil {
+		if ct.Size() <= size {
+			if ct.Size() == size {
+				return ct // perfect size match
+			}
+			return nil
+		}
+		ct, curOff = datatypeSubType(ct, curOff)
+	}
+	return nil
+}

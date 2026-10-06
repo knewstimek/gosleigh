@@ -170,10 +170,17 @@ func inferBuildLocaltypes(data *Funcdata, tf *TypeFactory) {
 		if !inferProcessed(vn) {
 			continue
 		}
-		// C++ additionally consults a type-locked parent Symbol's getExactPiece
-		// here (coreaction.cc:5032-5038). Recovered stack locals are not
-		// symbol-type-locked, so that sub-case is not ported (TODO).
-		ct, needsBlock := inferGetLocalType(vn, tf)
+		var ct Datatype
+		needsBlock := false
+		// A piece of a type-locked symbol takes the matching piece of the
+		// symbol's type, unless that is unresolved or unknown.
+		if entry := vn.GetSymbolEntry(); entry != nil && !vn.IsTypeLock() && entry.Symbol().IsTypeLocked() {
+			curOff := int64(vn.Addr().Offset-entry.Addr().Offset) + int64(entry.Offset())
+			ct = tf.exactPiece(entry.Symbol().Type(), curOff, vn.Size())
+		}
+		if ct == nil || ct.Metatype() == TYPE_UNKNOWN {
+			ct, needsBlock = inferGetLocalType(vn, tf)
+		}
 		if needsBlock {
 			vn.SetAddlFlags(VarnodeStopUpPropagation)
 		}
