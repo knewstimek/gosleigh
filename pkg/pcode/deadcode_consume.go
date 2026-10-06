@@ -295,15 +295,37 @@ func (c *consumeAnalysis) computeConsumed(data *Funcdata) {
 		}
 	}
 
-	// Mark consumption of call parameters (conservative: fully consumed).
+	// Mark consumption of call parameters.
 	// C++ parity: ActionDeadCode::markConsumedParameters (coreaction.cc 3851).
-	for i := 0; i < data.NumCalls(); i++ {
-		fc := data.GetCallSpecs(i)
-		if fc == nil || fc.op == nil {
+	for _, op := range data.GetPcodeOpBank().AliveOps() {
+		if !op.IsCall() {
 			continue
 		}
-		for j := 0; j < fc.op.NumInput(); j++ {
-			c.push(^uint64(0), fc.op.Input(j))
+		fc := data.callSpecsForOp(op)
+		if fc == nil {
+			// A call without a specification consumes all of its inputs.
+			for j := 0; j < op.NumInput(); j++ {
+				c.push(^uint64(0), op.Input(j))
+			}
+			continue
+		}
+		c.push(^uint64(0), op.Input(0)) // the call target is fully consumed
+		if fc.IsInputLocked() || fc.IsInputActive() {
+			for j := 1; j < op.NumInput(); j++ {
+				c.push(^uint64(0), op.Input(j))
+			}
+			continue
+		}
+		// An open prototype consumes only the bits a parameter can hold.
+		// TODO known mismatch: FuncCallSpecs::getInputBytesConsumed hints are
+		// not recorded (always 0 = no restriction).
+		for j := 1; j < op.NumInput(); j++ {
+			vn := op.Input(j)
+			consumeVal := ^uint64(0)
+			if !vn.IsAutoLive() {
+				consumeVal = minimalMask(vn.NZMask())
+			}
+			c.push(consumeVal, vn)
 		}
 	}
 

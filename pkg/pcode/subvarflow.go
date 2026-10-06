@@ -227,13 +227,25 @@ func (sf *SubvariableFlow) createOpDown(opc OpCode, numparam int, op *PcodeOp, i
 }
 
 // SubvariableFlow::tryCallPull -- subflow.cc.
+// A call input whose prototype is still open can take the smaller logical
+// value directly.
 func (sf *SubvariableFlow) tryCallPull(op *PcodeOp, rvn *subvariableFlowReplaceVarnode, slot int) bool {
-	// TODO known mismatch: call-spec classification is not yet ported to Gosleigh,
-	// so the conservative behavior is to refuse call-site trimming rather than guess.
-	_ = op
-	_ = rvn
-	_ = slot
-	return false
+	if slot == 0 {
+		return false
+	}
+	if !sf.aggressive && (rvn.vn.Consumed()&^rvn.mask) != 0 {
+		return false // something outside the mask is consumed: don't truncate
+	}
+	fc := sf.fd.callSpecsForOp(op)
+	if fc == nil || fc.IsInputActive() {
+		return false // don't trim while parameters are still being recovered
+	}
+	if fc.IsInputLocked() && !fc.IsDotdotdot() {
+		return false
+	}
+	sf.patchlist = append(sf.patchlist, subvariableFlowPatchRecord{kind: subvariableFlowParameterPatch, patchOp: op, in1: rvn, slot: slot})
+	sf.pullcount++ // a true terminal modification
+	return true
 }
 
 // SubvariableFlow::tryReturnPull -- subflow.cc.
