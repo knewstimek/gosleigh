@@ -22,6 +22,7 @@
 | `f241da2` | 반환값 복원 수명 원본화(guardReturns/ReturnRecovery), finalTransform/isMoveable, dominant copy, AliasChecker, guardStores, 이름 번호 순서, CALLOTHER 이름 | 164 | - |
 | `5505fee` | 점프테이블 실패 경고 문구, lookForFuncParamNames, 현재 함수 잠긴 프로토타입(부분), RuleShiftSub 원본화 | 165 | - |
 | `85c1531` | 규칙 원본화 20여 종(ExpandLoad, ConditionalMove+cloneExpression, SwitchSingle 등), opInsertAfter의 MULTIEQUAL 건너뛰기, totalReplaceConstant의 marker COPY, 파라미터형=High 타입, 반환 운반자 개명 등 printc 휴리스틱 ~900줄 제거 | 175 | - |
+| `c6ab701` | 상수 공간 정렬, 선언/캐스트=High 타입, extraout_, isComplex(원본 블록), MultiCollapse 기능동등, BoolNegate/ExpandLoad 원본화, tryCallPull+호출인자 consume, 외부 간접호출 재시작(override), 포인터 typedef | 180 | - |
 
 ## 도구 (`tools/realexe/`)
 - `realexe.py analyze|sample|measure|capture`, `gaps.py`(불일치 유형 집계), `difffn.py`(인덱스별 diff).
