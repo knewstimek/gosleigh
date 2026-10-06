@@ -1383,6 +1383,9 @@ func (s *printCState) normalizeTypeForDecl(dt Datatype) Datatype {
 		if typed.Flags()&datatypeTypedef != 0 {
 			return typed // a typedef prints by its name
 		}
+		if (typed.SubMeta() == SUB_INT_UNICODE || typed.SubMeta() == SUB_UINT_UNICODE) && typed.Name() != "" {
+			return typed // a wide character type prints by its name (wchar_t)
+		}
 		return normalizedBaseType(typed, s.longSize())
 	default:
 		return dt
@@ -3359,8 +3362,20 @@ func formatIntegerLiteral(val uint64, sz int32, sign bool) string {
 // size-1 ("byte") is not char and is intentionally excluded so byte constants
 // keep printing as integers.
 func renderCharConstant(vn *Varnode, dt Datatype) (string, bool) {
-	if dt == nil || dt.Size() != 1 {
+	if dt == nil {
 		return "", false
+	}
+	if dt.Size() > 1 {
+		// A wide character carries the L prefix. C++ parity:
+		// PrintC::pushCharConstant (doEmitWideCharPrefix).
+		if !isCharPrintLike(dt) {
+			return "", false
+		}
+		val := vn.Offset() & maskForSize(dt.Size())
+		if val >= 0x80 {
+			return "", false // TODO known mismatch: non-ASCII code points
+		}
+		return "L'" + escapeCharForC(int(val)) + "'", true
 	}
 	charLike := isCharPrintLike(dt)
 	if !charLike {

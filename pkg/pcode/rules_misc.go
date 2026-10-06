@@ -1749,20 +1749,50 @@ func NewRuleConcatLeftShift(group string) *RuleConcatLeftShift {
 	return r
 }
 
+// apply rewrites concat(V, zext(W) << 8n), with W shifted to the most
+// significant boundary, as concat(concat(V, W), 0).
+// C++ parity: RuleConcatLeftShift::applyOp.
 func (r *RuleConcatLeftShift) apply(op *PcodeOp, data *Funcdata) int {
-	if !isZeroConst(op.Input(0)) {
+	vn2 := op.Input(1)
+	if !vn2.IsWritten() {
 		return 0
 	}
-	shift := definedBy(op.Input(1), CPUI_INT_LEFT)
-	if shift == nil || shift.NumInput() != 2 {
+	shiftop := vn2.Def()
+	if shiftop.Code() != CPUI_INT_LEFT || !shiftop.Input(1).IsConstant() {
 		return 0
 	}
-	amt, ok := constantValue(shift.Input(1))
-	if !ok {
+	sa := int32(shiftop.Input(1).Offset())
+	if sa&7 != 0 {
+		return 0 // not a multiple of 8
+	}
+	tmpvn := shiftop.Input(0)
+	if !tmpvn.IsWritten() {
 		return 0
 	}
-	zext := newAuxUnaryOp(data, op.Addr(), CPUI_INT_ZEXT, outputSize(op), shift.Input(0))
-	rewriteOp(data, op, CPUI_INT_LEFT, zext.Output(), data.NewConstant(outputSize(op), amt))
+	zextop := tmpvn.Def()
+	if zextop.Code() != CPUI_INT_ZEXT {
+		return 0
+	}
+	b := zextop.Input(0)
+	if b.IsFree() {
+		return 0
+	}
+	vn1 := op.Input(0)
+	if vn1.IsFree() {
+		return 0
+	}
+	sa /= 8
+	if sa+b.Size() != tmpvn.Size() {
+		return 0 // must shift to the most significant boundary
+	}
+	newop := data.NewOp(2, op.Addr())
+	data.OpSetOpcode(newop, CPUI_PIECE)
+	newout := data.NewUniqueOut(vn1.Size()+b.Size(), newop)
+	data.OpSetInput(newop, vn1, 0)
+	data.OpSetInput(newop, b, 1)
+	data.OpInsertBefore(newop, op)
+	data.OpSetInput(op, newout, 0)
+	data.OpSetInput(op, data.NewConstant(op.Output().Size()-newout.Size(), 0), 1)
 	return 1
 }
 

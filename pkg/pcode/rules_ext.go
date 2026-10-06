@@ -385,110 +385,157 @@ func NewRuleSubCommute(group string) *RuleSubCommute {
 	return r
 }
 
+// apply pushes a SUBPIECE through the operation defining its input when the
+// two commute. C++ parity: RuleSubCommute::applyOp.
 func (r *RuleSubCommute) apply(op *PcodeOp, data *Funcdata) int {
 	base := op.Input(0)
-	if base == nil || !base.IsWritten() {
+	if !base.IsWritten() {
 		return 0
 	}
-	offset, ok := constantValue(op.Input(1))
-	if !ok {
-		return 0
-	}
+	offset := op.Input(1).Offset()
 	outvn := op.Output()
-	if outvn == nil {
-		return 0
-	}
-	// Precis lo/hi varnodes are managed by PIECE reconstruction -- do not disturb.
 	if outvn.IsPrecisLo() || outvn.IsPrecisHi() {
 		return 0
 	}
+	insize := base.Size()
 	longform := base.Def()
-	if longform == nil {
-		return 0
-	}
-	// Determine whether SUBPIECE commutes through this opcode.
-	// INT_MULT and INT_ADD only commute when truncating the low part (offset==0).
-	// Bitwise ops commute regardless of offset.
-	// INT_SDIV/INT_SREM/INT_DIV/INT_REM also commute at offset==0: used to
-	// cancel the CDQ+IDIV pattern where SUBPIECE(INT_SREM(INT_SEXT(x), ...), 0, n)
-	// is pushed through to INT_SREM(SUBPIECE(INT_SEXT(x), 0, n), ...) and then
-	// RuleSubExtComm collapses SUBPIECE(INT_SEXT(x), 0, n) -> x.
-	// C++ parity: RuleSubCommute::applyOp handles INT_SDIV/INT_SREM at lines
-	// 4590-4621 in ruleaction.cc (Ghidra), pushing SUBPIECE through the op and
-	// canceling the SEXT of each input when sizes match.
+	j := -1
 	switch longform.Code() {
-	case CPUI_INT_MULT, CPUI_INT_ADD:
-		if offset != 0 {
+	case CPUI_INT_LEFT:
+		j = 1 // the shift amount is not truncated
+		if offset != 0 || !longform.Input(0).IsWritten() {
 			return 0
 		}
-		// Deconflict INT_ADD with RulePtrArith: skip if input 0 is spacebase.
-		if longform.Code() == CPUI_INT_ADD && longform.Input(0) != nil && longform.Input(0).IsSpaceBase() {
+		if opc := longform.Input(0).Def().Code(); opc != CPUI_INT_ZEXT && opc != CPUI_PIECE {
+			return 0
+		}
+	case CPUI_INT_REM, CPUI_INT_DIV, CPUI_INT_SREM, CPUI_INT_SDIV:
+		// Commutes only if the inputs are zero (or sign) extended.
+		ext := CPUI_INT_ZEXT
+		if longform.Code() == CPUI_INT_SREM || longform.Code() == CPUI_INT_SDIV {
+			ext = CPUI_INT_SEXT
+		}
+		if offset != 0 || !longform.Input(0).IsWritten() {
+			return 0
+		}
+		ext0 := longform.Input(0).Def()
+		if ext0.Code() != ext {
+			return 0
+		}
+		ext0In := ext0.Input(0)
+		if in1 := longform.Input(1); in1.IsWritten() {
+			ext1 := in1.Def()
+			if ext1.Code() != ext {
+				return 0
+			}
+			ext1In := ext1.Input(0)
+			if ext1In.Size() > outvn.Size() || ext0In.Size() > outvn.Size() {
+				// Partial commute: the extensions cancel, the SUBPIECE stays.
+				if subCommuteCancelExtensions(longform, op, ext0In, ext1In, data) {
+					return 1
+				}
+				return 0
+			}
+		} else if in1.IsConstant() && ext0In.Size() <= outvn.Size() {
+			val := in1.Offset()
+			smallval := val & maskForSize(outvn.Size())
+			if ext == CPUI_INT_SEXT {
+				smallval = uint64(signExtendToInt64(smallval, outvn.Size())) & maskForSize(insize)
+			}
+			if val != smallval {
+				return 0
+			}
+		} else {
+			return 0
+		}
+	case CPUI_INT_ADD:
+		if offset != 0 || longform.Input(0).IsSpaceBase() {
+			return 0 // low piece only; deconflict with RulePtrArith
+		}
+	case CPUI_INT_MULT:
+		if offset != 0 {
 			return 0
 		}
 	case CPUI_INT_NEGATE, CPUI_INT_XOR, CPUI_INT_AND, CPUI_INT_OR:
-		// commutes for any offset
-	case CPUI_INT_SDIV, CPUI_INT_SREM, CPUI_INT_DIV, CPUI_INT_REM:
-		if offset != 0 {
-			return 0
-		}
 	default:
 		return 0
 	}
-
-	// base must be consumed only by this SUBPIECE.
 	if base.LoneDescend() != op {
-		return 0
+		return 0 // no other piece of base may be used
 	}
-
-	// Overlap check with RuleSubZext: if the sole consumer of outvn is an INT_ZEXT
-	// that restores the original size, let RuleSubZext handle it instead.
-	if offset == 0 {
-		next := outvn.LoneDescend()
-		if next != nil && next.Code() == CPUI_INT_ZEXT && next.Output() != nil &&
-			next.Output().Size() == int32(base.Size()) {
+	if offset == 0 { // overlap with RuleSubZext
+		if next := outvn.LoneDescend(); next != nil && next.Code() == CPUI_INT_ZEXT && next.Output().Size() == insize {
 			return 0
 		}
 	}
-
-	// Push SUBPIECE through each input of longform.
-	// Track the last input varnode so we can reuse the same SUBPIECE op when
-	// both inputs are the same varnode (INT_MULT x,x corner case).
-	var lastIn *Varnode
-	var newVn *Varnode
-	outSize := outvn.Size()
+	var lastIn, newVn *Varnode
 	for i := 0; i < longform.NumInput(); i++ {
 		vn := longform.Input(i)
-		if vn == nil {
-			return 0
-		}
-		if lastIn != vn || newVn == nil {
-			newsub := data.NewOp(2, op.Seq().Address)
-			data.OpSetOpcode(newsub, CPUI_SUBPIECE)
-			newVn = data.NewUniqueOut(outSize, newsub)
-			// Set the new varnode as the ith input of longform before wiring newsub
-			// inputs, because vn may still be free (not yet in the bank).
-			data.OpSetInput(longform, newVn, i)
-			data.OpSetInput(newsub, vn, 0)
-			data.OpSetInput(newsub, data.NewConstant(4, offset), 1)
-			data.OpInsertBefore(newsub, longform)
-		} else {
-			// Same varnode -- reuse the already-created SUBPIECE output.
-			data.OpSetInput(longform, newVn, i)
+		if i != j {
+			if lastIn != vn || newVn == nil {
+				newsub := data.NewOp(2, op.Addr())
+				data.OpSetOpcode(newsub, CPUI_SUBPIECE)
+				newVn = data.NewUniqueOut(outvn.Size(), newsub)
+				data.OpSetInput(longform, newVn, i)
+				data.OpSetInput(newsub, vn, 0)
+				data.OpSetInput(newsub, data.NewConstant(4, offset), 1)
+				data.OpInsertBefore(newsub, longform)
+			} else {
+				data.OpSetInput(longform, newVn, i)
+			}
 		}
 		lastIn = vn
 	}
-	// Redirect longform's output to reuse outvn (which is the SUBPIECE output).
+	// outvn moves to longform; op must not free it when destroyed.
 	data.OpUnsetOutput(longform)
 	data.OpSetOutput(longform, outvn)
-	// Decouple op from outvn before destruction. OpDestroy calls OpUnsetOutput(op),
-	// which would call MakeFree(outvn) and clear outvn.def -- even though outvn was
-	// just assigned to longform above. Clearing op.output here prevents that.
-	// C++ parity: after opSetOutput(longform, outvn), op->output is no longer the
-	// canonical owner of outvn; destroying op must not touch outvn's bank entry.
 	op.SetOutput(nil)
-	// Destroy the now-redundant SUBPIECE.
 	data.OpDestroy(op)
 	return 1
+}
+
+// subCommuteCancelExtensions rebuilds longform on its unextended inputs at the
+// larger of their sizes, keeping the SUBPIECE. C++ parity:
+// RuleSubCommute::cancelExtensions / shortenExtension.
+func subCommuteCancelExtensions(longform, subOp *PcodeOp, ext0In, ext1In *Varnode, data *Funcdata) bool {
+	if longform.Output().LoneDescend() != subOp {
+		return false
+	}
+	shorten := func(extOp *PcodeOp, maxSize int32) *Varnode {
+		orig := extOp.Output()
+		addr := orig.Addr()
+		if addr.Space != nil && addr.Space.BigEndian {
+			addr.Offset += uint64(orig.Size() - maxSize)
+		}
+		data.OpUnsetOutput(extOp)
+		return data.NewVarnodeOut(maxSize, addr, extOp)
+	}
+	var maxSize int32
+	switch {
+	case ext0In.Size() == ext1In.Size():
+		maxSize = ext0In.Size()
+		if ext0In.IsFree() || ext1In.IsFree() {
+			return false
+		}
+	case ext0In.Size() < ext1In.Size():
+		maxSize = ext1In.Size()
+		if ext1In.IsFree() || longform.Input(0).LoneDescend() != longform {
+			return false
+		}
+		ext0In = shorten(longform.Input(0).Def(), maxSize)
+	default:
+		maxSize = ext0In.Size()
+		if ext0In.IsFree() || longform.Input(1).LoneDescend() != longform {
+			return false
+		}
+		ext1In = shorten(longform.Input(1).Def(), maxSize)
+	}
+	data.OpUnsetOutput(longform)
+	outvn := data.NewUniqueOut(maxSize, longform)
+	data.OpSetInput(longform, ext0In, 0)
+	data.OpSetInput(longform, ext1In, 1)
+	data.OpSetInput(subOp, outvn, 0)
+	return true
 }
 
 // RuleOrSextForm collapses the OR-based sign-extension form back to INT_SEXT.

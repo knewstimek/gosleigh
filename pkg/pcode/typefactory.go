@@ -35,6 +35,9 @@ func (f *TypeFactory) Intern(dt Datatype) Datatype {
 		if typed.SubMeta() == SUB_INT_CHAR && typed.Size() == 1 {
 			return f.GetChar(typed.Name())
 		}
+		if typed.SubMeta() == SUB_INT_UNICODE || typed.SubMeta() == SUB_UINT_UNICODE {
+			return f.GetUnicode(typed.Name(), typed.Size(), typed.Metatype())
+		}
 		return f.GetBase(typed.Size(), typed.Metatype(), typed.Name())
 	case *Void:
 		return f.GetVoid()
@@ -79,6 +82,17 @@ func (f *TypeFactory) GetTypedefBase(name string, base *Base) *Base {
 	value.submeta = base.SubMeta()
 	value.flags |= datatypeTypedef
 	return f.internBase("typedef:"+name, value)
+}
+
+// GetUnicode returns a wide character type (prints as L'c').
+// C++ parity: TypeUnicode (utf16/utf32 flags, SUB_*_UNICODE).
+func (f *TypeFactory) GetUnicode(name string, size int32, meta metatype) *Base {
+	value := NewBase(size, meta, name)
+	value.submeta = SUB_INT_UNICODE
+	if meta == TYPE_UINT {
+		value.submeta = SUB_UINT_UNICODE
+	}
+	return f.internBase("unicode:"+name, value)
 }
 
 // GetChar returns the 1-byte character type (prints as a character / string).

@@ -37,6 +37,8 @@ type HostTypeDesc struct {
 	Elem  *HostTypeDesc
 	// Char marks a character type (Ghidra char="true").
 	Char bool
+	// Utf marks a wide character type (Ghidra utf="true").
+	Utf bool
 	// Typedef is the name of a typedef over this type ("" = none).
 	Typedef string
 	// Fields are a structure's members.
@@ -101,6 +103,13 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 	}
 	if d.Char && d.Size == 1 {
 		return tf.GetChar(d.Name)
+	}
+	if d.Utf {
+		meta := TYPE_INT
+		if d.Meta == "uint" {
+			meta = TYPE_UINT
+		}
+		return tf.GetUnicode(d.Name, d.Size, meta)
 	}
 	if m, ok := hostMetatypes[d.Meta]; ok {
 		return tf.GetBase(d.Size, m, d.Name)
