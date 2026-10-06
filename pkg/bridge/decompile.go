@@ -38,7 +38,7 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 	// heritage spaces) and the arch-aware default ProtoModel carrying the faithful
 	// stack spacebase space (SetDefaultModel), so the tree runs self-contained:
 	// ActionHeritage/ActionSpacebase + RuleLoadVarnode/RuleStoreVarnode recover the
-	// stack frame, ActionPrototypeTypes/ActionActiveParam/ActionGuardReturns wire
+	// stack frame, ActionPrototypeTypes/ActionActiveParam/ActionReturnRecovery wire
 	// parameters and the return value, and the actprop rule pool + block structuring
 	// run in Ghidra's own order.
 	//

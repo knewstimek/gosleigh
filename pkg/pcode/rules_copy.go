@@ -179,29 +179,6 @@ func (r *RuleSubCancel) apply(op *PcodeOp, data *Funcdata) int {
 	return 1
 }
 
-// RuleSubIdentity folds a SUBPIECE that keeps its whole input, sub(V,0) of
-// V's size, into a COPY. Not a C++ rule: C++ never builds one. Gosleigh's
-// ActionGuardReturns re-renames the return register outside heritage and can
-// rewire a wider register read to a same-size definition, leaving sub(V,0)
-// behind (x64 'xor eax,eax' in x64_auto probe_sign/probe_classify).
-// TODO known mismatch: drop once guardReturns runs inside Heritage::guard.
-type RuleSubIdentity struct{ batchRule }
-
-func NewRuleSubIdentity(group string) *RuleSubIdentity {
-	r := &RuleSubIdentity{}
-	r.batchRule = newBatchRule(group, "subidentity", []OpCode{CPUI_SUBPIECE}, r.apply, func(g string) Rule { return NewRuleSubIdentity(g) })
-	return r
-}
-
-func (r *RuleSubIdentity) apply(op *PcodeOp, data *Funcdata) int {
-	if op.Input(1).Offset() != 0 || op.Output().Size() != op.Input(0).Size() {
-		return 0
-	}
-	data.OpRemoveInput(op, 1)
-	data.OpSetOpcode(op, CPUI_COPY)
-	return 1
-}
-
 type RuleSubNormal struct{ batchRule }
 
 func NewRuleSubNormal(group string) *RuleSubNormal {

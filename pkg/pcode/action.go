@@ -1285,7 +1285,6 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	actprop.AddRule(NewRuleDumptyHump("analysis"))
 	actprop.AddRule(NewRuleHumptyOr("analysis"))
 	actprop.AddRule(NewRuleNegateIdentity("analysis"))
-	actprop.AddRule(NewRuleSubIdentity("analysis")) // Go-only, see RuleSubIdentity
 	actprop.AddRule(NewRuleSubNormal("analysis"))
 	actprop.AddRule(NewRulePositiveDiv("analysis"))
 	actprop.AddRule(NewRuleDivTermAdd("analysis"))

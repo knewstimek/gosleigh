@@ -38,8 +38,6 @@ Ghidra API로 Java와 같은 값을 덤프한다.
 | # | 갭 | 근거 | 비고 |
 |---|---|---|---|
 | R | Go 규칙이 C++와 다른 변환을 하는 경우가 남음. `tools/ruleaudit.py`(Go apply 길이 vs C++ applyOp 길이)로 상위부터 대조: expandload, conditionalmove, structoffset0, andpiece, highorderand, switchsingle, andcompare 등 | ruleaction.cc | 규칙 하나씩 원본화 |
-| O | 반환값 복원이 C++ 수명과 다름: active output을 guardReturns 직후 지우고, ActionDeadCode가 Go 전용 applyReturnRecovery로 반환 입력을 떼어냄. C++는 ActionReturnRecovery가 여러 pass에 걸쳐 trial을 확정할 때까지 active output 유지. 제거만 하면 45/200으로 붕괴 -- 수명 전체를 같이 원본화해야 함 | coreaction.cc ActionReturnRecovery, Funcdata::initActiveOutput | [160] 간접호출 반환 |
-| A | ActionGuardReturns(Go 전용): 반환 레지스터만 따로 재-rename. C++는 Heritage::guard 안의 guardReturns. 넓은 읽기를 좁은 정의로 잇는 부작용을 RuleSubIdentity가 덮음 | heritage.cc guardReturns | 원본화 시 RuleSubIdentity 제거 |
 | T | 타입 추론 차이: 반환형, 지역 타입(uint vs int) | typeop.cc propagateType, ActionInferTypes | 사례 다수 |
 | N | 변수 번호(iVar1 vs iVar2) 어긋남 -- merge/이름 순서 | merge.cc, ActionNameVars | 5건 이상 |
 | G | 전역 겹침: normalizeWriteSize PIECE 출력이 ram 변수로 남아 `(uint)CONCAT12`가 두 문장으로 갈라짐, coverVarnodes 미포팅 | heritage.cc normalizeWriteSize | [166][184][188][189] |

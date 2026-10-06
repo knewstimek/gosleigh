@@ -502,28 +502,37 @@ func (h *Heritage) normalizeWriteSize(vn *Varnode, addr address.Address, size in
 		if !bigEndian {
 			pieceaddr.Offset += uint64(int32(overlap) + vn.Size())
 		}
-		newop := h.fd.NewOp(2, def.Addr())
-		mostvn = h.fd.NewVarnodeOut(mostsigsize, pieceaddr, newop)
-		big := h.fd.NewVarnode(size, addr) // new full-range read for the missing piece
-		big.SetActiveHeritage()
-		h.fd.OpSetOpcode(newop, CPUI_SUBPIECE)
-		h.fd.OpSetInput(newop, big, 0)
-		h.fd.OpSetInput(newop, h.fd.NewConstant(addrSize, uint64(int32(overlap)+vn.Size())), 1)
-		h.fd.OpInsertBefore(newop, def)
+		if def.IsCall() && h.callOpIndirectEffect(pieceaddr, mostsigsize, def) {
+			// The call may set the rest of the range: an unknown effect.
+			mostvn = h.fd.NewIndirectCreation(def, pieceaddr, mostsigsize, false).Output()
+		} else {
+			newop := h.fd.NewOp(2, def.Addr())
+			mostvn = h.fd.NewVarnodeOut(mostsigsize, pieceaddr, newop)
+			big := h.fd.NewVarnode(size, addr) // new full-range read for the missing piece
+			big.SetActiveHeritage()
+			h.fd.OpSetOpcode(newop, CPUI_SUBPIECE)
+			h.fd.OpSetInput(newop, big, 0)
+			h.fd.OpSetInput(newop, h.fd.NewConstant(addrSize, uint64(int32(overlap)+vn.Size())), 1)
+			h.fd.OpInsertBefore(newop, def)
+		}
 	}
 	if overlap != 0 {
 		pieceaddr := addr
 		if bigEndian {
 			pieceaddr.Offset += uint64(size - int32(overlap))
 		}
-		newop := h.fd.NewOp(2, def.Addr())
-		leastvn = h.fd.NewVarnodeOut(int32(overlap), pieceaddr, newop)
-		big := h.fd.NewVarnode(size, addr)
-		big.SetActiveHeritage()
-		h.fd.OpSetOpcode(newop, CPUI_SUBPIECE)
-		h.fd.OpSetInput(newop, big, 0)
-		h.fd.OpSetInput(newop, h.fd.NewConstant(addrSize, 0), 1)
-		h.fd.OpInsertBefore(newop, def)
+		if def.IsCall() && h.callOpIndirectEffect(pieceaddr, int32(overlap), def) {
+			leastvn = h.fd.NewIndirectCreation(def, pieceaddr, int32(overlap), false).Output()
+		} else {
+			newop := h.fd.NewOp(2, def.Addr())
+			leastvn = h.fd.NewVarnodeOut(int32(overlap), pieceaddr, newop)
+			big := h.fd.NewVarnode(size, addr)
+			big.SetActiveHeritage()
+			h.fd.OpSetOpcode(newop, CPUI_SUBPIECE)
+			h.fd.OpSetInput(newop, big, 0)
+			h.fd.OpSetInput(newop, h.fd.NewConstant(addrSize, 0), 1)
+			h.fd.OpInsertBefore(newop, def)
+		}
 	}
 	if overlap != 0 {
 		newop := h.fd.NewOp(2, def.Addr())
@@ -551,6 +560,20 @@ func (h *Heritage) normalizeWriteSize(vn *Varnode, addr address.Address, size in
 	}
 	vn.SetAddlFlags(VarnodeWriteMask)
 	return bigout // replace small write with full-range write
+}
+
+// callOpIndirectEffect reports whether the call may affect [addr,addr+size).
+// C++ parity: Heritage::callOpIndirectEffect.
+func (h *Heritage) callOpIndirectEffect(addr address.Address, size int32, op *PcodeOp) bool {
+	if op.Code() == CPUI_CALL || op.Code() == CPUI_CALLIND {
+		fc := h.fd.callSpecsForOp(op)
+		if fc == nil {
+			return true // assume an indirect effect
+		}
+		return fc.HasEffect(addr, size) != EffectUnaffected
+	}
+	// CALLOTHER/NEW are assumed to affect only their own output.
+	return false
 }
 
 // normalizeRange brings every sub-range read/write in [addr,addr+size) up to the
@@ -592,8 +615,7 @@ func (h *Heritage) normalizeRange(addr address.Address, size int32, reads, write
 	newWrites := make([]*Varnode, 0, len(writes))
 	for _, vn := range writes {
 		if vn.Size() < size {
-			if def := vn.Def(); def == nil || def.IsCall() {
-				// CALL-effect newIndirectCreation path is not ported; leave as-is.
+			if vn.Def() == nil {
 				newWrites = append(newWrites, vn)
 				continue
 			}
