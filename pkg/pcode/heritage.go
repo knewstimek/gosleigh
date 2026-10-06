@@ -111,14 +111,17 @@ func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 		}
 		transAddr := address.Address{Space: sp, Offset: off} // Relative to the callee's stack
 		effecttype := fc.HasEffect(transAddr, size)
+		possibleoutput := false
 		if fc.IsOutputActive() && tryregister {
-			switch fc.CharacterizeAsOutput(transAddr, size) {
-			case retOutNoContainment:
-			case retOutContainedBy:
-				// TODO known mismatch: tryOutputOverlapGuard is not ported.
-			default:
-				if active := fc.GetActiveOutput(); active != nil && active.WhichTrial(transAddr, size) < 0 {
+			if outputCharacter := fc.CharacterizeAsOutput(transAddr, size); outputCharacter != retOutNoContainment {
+				if effecttype != EffectKilledByCall && fc.IsAutoKilledByCall() {
+					effecttype = EffectKilledByCall
+				}
+				if outputCharacter == retOutContainedBy {
+					// TODO known mismatch: tryOutputOverlapGuard is not ported.
+				} else if active := fc.GetActiveOutput(); active != nil && active.WhichTrial(transAddr, size) < 0 {
 					active.RegisterTrial(transAddr, size)
+					possibleoutput = true
 				}
 			}
 		}
@@ -152,7 +155,7 @@ func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 				indop.Output().SetFlags(VarnodeReturnAddress)
 			}
 		case EffectKilledByCall:
-			h.fd.NewIndirectCreation(op, sp, offset, size)
+			h.fd.NewIndirectCreation(op, addr, size, possibleoutput).Output().SetActiveHeritage()
 		}
 	}
 }

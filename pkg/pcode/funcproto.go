@@ -253,6 +253,13 @@ func (fp *FuncProto) IsModelLocked() bool {
 
 // IsOutputLocked reports whether the return value is locked.
 // C++ parity: FuncProto::isOutputLocked
+// IsAutoKilledByCall reports whether a location in the standard return
+// storage is killed by a call: the model says so, or the output is locked.
+// C++ parity: FuncProto::isAutoKilledByCall.
+func (fp *FuncProto) IsAutoKilledByCall() bool {
+	return (fp.model != nil && fp.model.AutoKilledByCall) || fp.IsOutputLocked()
+}
+
 func (fp *FuncProto) IsOutputLocked() bool {
 	if fp == nil {
 		return false

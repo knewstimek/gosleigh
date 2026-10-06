@@ -147,6 +147,11 @@ type ProtoModel struct {
 	// C++ parity: ProtoModel::name.
 	Name string
 
+	// AutoKilledByCall: every potential output location is killed by a call
+	// (<output killedbycall="true">).
+	// C++ parity: ParamListStandard::autoKilledByCall via isAutoKilledByCall.
+	AutoKilledByCall bool
+
 	// ExtraPop is the stack-pointer change across a call beyond the pushed
 	// parameters (ExtrapopUnknown when the callee decides, as with __stdcall).
 	// C++ parity: ProtoModel::extrapop.
@@ -301,6 +306,7 @@ func NewProtoModelFromCspec(cs *CspecData, stackSpace *address.Space, regLookup 
 		pm.Name = cs.DefaultProto.Name
 		pm.ExtraPop = int32(cs.DefaultProto.ExtraPop)
 		pm.hasThis = cs.DefaultProto.ProtoModelHasThis()
+		pm.AutoKilledByCall = cs.DefaultProto.Output.KilledByCall
 		for _, reg := range cs.DefaultProto.Unaffected.Registers {
 			pm.UnaffectedRegs[reg.Name] = true
 		}

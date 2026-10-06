@@ -1527,27 +1527,24 @@ func (fd *Funcdata) NewIndirectOp(callOp *PcodeOp, sp *address.Space, off uint64
 	return op
 }
 
-// NewIndirectCreation creates an INDIRECT op inserted immediately before callOp
-// that models a caller-saved register being overwritten by the call.
-// Unlike NewIndirectOp, the output has no data-flow from the pre-call value:
-// input[0] is a zero constant, signalling that the call produces a new value
-// at this location (e.g., EAX holding the return value of the callee).
-// input[1] is an IOP annotation varnode referring back to callOp (see
-// NewVarnodeIop), same as NewIndirectOp.
-// The op and output are flagged with PcodeOpIndirectCreation / VarnodeIndirectCreation.
-//
-// C++ parity: Funcdata::newIndirectCreation (funcdata_op.cc:710)
-func (fd *Funcdata) NewIndirectCreation(callOp *PcodeOp, sp *address.Space, off uint64, size int32) *PcodeOp {
-	addr := address.Address{Space: sp, Offset: off}
-	op := fd.NewOp(2, callOp.Addr())
+// NewIndirectCreation builds an INDIRECT before indeffect whose output at
+// addr is created by indeffect, with no prior value flowing through. When the
+// output cannot be the call's return value the zero input is marked
+// indirect_creation as well (Varnode::isIndirectZero).
+// C++ parity: funcdata_op.cc Funcdata::newIndirectCreation.
+func (fd *Funcdata) NewIndirectCreation(indeffect *PcodeOp, addr address.Address, sz int32, possibleout bool) *PcodeOp {
+	newin := fd.NewConstant(sz, 0)
+	op := fd.NewOp(2, indeffect.Addr())
 	op.SetFlag(PcodeOpIndirectCreation)
-	out := fd.NewVarnodeOut(size, addr, op)
+	out := fd.NewVarnodeOut(sz, addr, op)
+	if !possibleout {
+		newin.SetFlags(VarnodeIndirectCreation)
+	}
 	out.SetFlags(VarnodeIndirectCreation)
-	out.SetActiveHeritage()
 	fd.OpSetOpcode(op, CPUI_INDIRECT)
-	fd.OpSetInput(op, fd.NewConstant(4, 0), 0)     // no pre-call value flows through
-	fd.OpSetInput(op, fd.NewVarnodeIop(callOp), 1) // cause ref (funcdata_op.cc:725)
-	fd.OpInsertBefore(op, callOp)
+	fd.OpSetInput(op, newin, 0)
+	fd.OpSetInput(op, fd.NewVarnodeIop(indeffect), 1)
+	fd.OpInsertBefore(op, indeffect)
 	return op
 }
 
