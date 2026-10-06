@@ -1721,8 +1721,12 @@ func resolveInput(fd *pcode.Funcdata, input pcode.VarnodeData, defs map[varKey]*
 		return fd.NewConstant(int32(input.Size), input.Offset)
 	}
 
+	// Only a temporary is linked to its write inside the instruction; every
+	// other read stays free for heritage, which normalizes partial reads and
+	// writes of a register (SUBPIECE/PIECE) the same way across instructions.
+	// C++ parity: PcodeEmitFd::dump creates a fresh Varnode for every input.
 	key := makeVarKey(input)
-	if vn, exists := defs[key]; exists {
+	if vn, exists := defs[key]; exists && input.Space != nil && input.Space.IsUnique() {
 		return vn
 	}
 
