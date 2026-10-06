@@ -1378,8 +1378,7 @@ func (s *spaceSummary) collectHeritageSpace(space *address.Space, entrySpace *ad
 	if space == nil {
 		return
 	}
-	switch space.Kind {
-	case address.SpaceKindConstant, address.SpaceKindUnique:
+	if space.Kind == address.SpaceKindConstant {
 		return
 	}
 	if _, exists := seen[space]; exists {

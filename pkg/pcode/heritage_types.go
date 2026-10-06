@@ -340,7 +340,7 @@ func NewHeritageInfo(spc *address.Space) HeritageInfo {
 	}
 	switch spc.Kind {
 	case address.SpaceKindConstant, address.SpaceKindIop, address.SpaceKindFspec,
-		address.SpaceKindUnique, address.SpaceKindJoin:
+		address.SpaceKindJoin:
 		return HeritageInfo{}
 	default:
 		return HeritageInfo{
