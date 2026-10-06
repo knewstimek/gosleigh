@@ -108,7 +108,11 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 		return tf.GetStructSized(d.Name, d.Size, fields)
 	}
 	if d.Char && d.Size == 1 {
-		return tf.GetChar(d.Name)
+		meta := TYPE_INT
+		if d.Meta == "uint" {
+			meta = TYPE_UINT
+		}
+		return tf.GetCharMeta(d.Name, meta)
 	}
 	if d.Utf {
 		meta := TYPE_INT

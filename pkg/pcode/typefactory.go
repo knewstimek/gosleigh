@@ -32,8 +32,8 @@ func (f *TypeFactory) Intern(dt Datatype) Datatype {
 		if typed.Flags()&datatypeTypedef != 0 {
 			return typed
 		}
-		if typed.SubMeta() == SUB_INT_CHAR && typed.Size() == 1 {
-			return f.GetChar(typed.Name())
+		if (typed.SubMeta() == SUB_INT_CHAR || typed.SubMeta() == SUB_UINT_CHAR) && typed.Size() == 1 {
+			return f.GetCharMeta(typed.Name(), typed.Metatype())
 		}
 		if typed.SubMeta() == SUB_INT_UNICODE || typed.SubMeta() == SUB_UINT_UNICODE {
 			return f.GetUnicode(typed.Name(), typed.Size(), typed.Metatype())
@@ -180,9 +180,22 @@ func (f *TypeFactory) GetUnicode(name string, size int32, meta metatype) *Base {
 // GetChar returns the 1-byte character type (prints as a character / string).
 // C++ parity: TypeChar (TypeBase(1,TYPE_INT) with submeta SUB_INT_CHAR).
 func (f *TypeFactory) GetChar(name string) *Base {
-	value := NewBase(1, TYPE_INT, name)
-	value.submeta = SUB_INT_CHAR
-	return f.internBase("char:"+name, value)
+	return f.GetCharMeta(name, TYPE_INT)
+}
+
+// GetCharMeta returns a 1-byte character type of the given signedness: an
+// unsigned host char (uchar) is TYPE_UINT with SUB_UINT_CHAR.
+// C++ parity: TypeChar::decode.
+func (f *TypeFactory) GetCharMeta(name string, meta metatype) *Base {
+	sub, key := SUB_INT_CHAR, "char:"
+	if meta == TYPE_UINT {
+		sub, key = SUB_UINT_CHAR, "uchar:"
+	} else {
+		meta = TYPE_INT
+	}
+	value := NewBase(1, meta, name)
+	value.submeta = sub
+	return f.internBase(key+name, value)
 }
 
 // GetStructSized returns a named structure of an explicit size (a host

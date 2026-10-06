@@ -1345,8 +1345,11 @@ func (s *printCState) normalizeTypeForDecl(dt Datatype) Datatype {
 		if typed.Flags()&datatypeTypedef != 0 {
 			return typed // a typedef prints by its name
 		}
-		if (typed.SubMeta() == SUB_INT_UNICODE || typed.SubMeta() == SUB_UINT_UNICODE) && typed.Name() != "" {
-			return typed // a wide character type prints by its name (wchar_t)
+		switch typed.SubMeta() {
+		case SUB_INT_UNICODE, SUB_UINT_UNICODE, SUB_UINT_CHAR:
+			if typed.Name() != "" {
+				return typed // a character type prints by its name (wchar_t, uchar)
+			}
 		}
 		return normalizedBaseType(typed, s.longSize())
 	default:
