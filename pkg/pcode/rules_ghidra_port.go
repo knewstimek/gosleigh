@@ -1057,9 +1057,7 @@ func NewRuleIndirectCollapse(group string) *RuleIndirectCollapse {
 // apply removes an INDIRECT whose indirect effect is gone or cannot reach the
 // storage: the causing op is dead, a STORE that resolved to a COPY of the
 // same storage, or the storage has no local alias.
-// C++ parity: ruleaction.cc RuleIndirectCollapse::applyOp (3177-3243). The
-// STORE LoadGuard (Funcdata::getStoreGuard) is unported, so a spacebase STORE
-// takes the C++ "no guard" branch and keeps its INDIRECT.
+// C++ parity: ruleaction.cc RuleIndirectCollapse::applyOp (3177-3243).
 func (r *RuleIndirectCollapse) apply(op *PcodeOp, data *Funcdata) int {
 	indop := op.Input(1).GetIndirectCause()
 	if indop == nil {
@@ -1101,7 +1099,15 @@ func (r *RuleIndirectCollapse) apply(op *PcodeOp, data *Funcdata) int {
 			}
 		case indop.UsesSpacebasePtr():
 			if indop.Code() == CPUI_STORE {
-				return 0 // Unguarded marked STORE: keep the INDIRECT until it becomes a COPY
+				if guard := data.getStoreGuard(indop); guard != nil {
+					if guard.IsGuarded(op.Output().Addr()) {
+						return 0
+					}
+				} else {
+					// An unguarded marked STORE should become a COPY eventually,
+					// so keep the INDIRECT until then
+					return 0
+				}
 			}
 		default:
 			return 0

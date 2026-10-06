@@ -474,6 +474,15 @@ func (h *Heritage) handleNewLoadCopies() {
 }
 
 // getStoreGuard is the guard of an indexed STORE, or nil.
+// C++ parity: Funcdata::getStoreGuard.
+func (fd *Funcdata) getStoreGuard(op *PcodeOp) *LoadGuard {
+	if fd.heritage == nil {
+		return nil
+	}
+	return fd.heritage.getStoreGuard(op)
+}
+
+// getStoreGuard is the guard of an indexed STORE, or nil.
 // C++ parity: Heritage::getStoreGuard.
 func (h *Heritage) getStoreGuard(op *PcodeOp) *LoadGuard {
 	for i := range h.storeGuards {
