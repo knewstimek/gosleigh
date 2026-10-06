@@ -198,6 +198,7 @@ func (s *printCState) emit() (string, error) {
 	if s.graph == nil || s.graph.GetSize() == 0 {
 		s.graph = s.fd.GetBasicBlocks()
 	}
+
 	// Position any auto-generated warning comments into their basic blocks so the
 	// statement loop can emit them before the mapped statement. No-op (nil map)
 	// when the decompiler recorded no warnings.
@@ -321,8 +322,7 @@ func (s *printCState) collectSymbols() {
 		seenParamHV := make(map[*HighVariable]bool)
 		// seenHV deduplicates HighVariables added to locals (named HVs only).
 		// Kept separate from seenParamHV so that non-input varnodes merged by
-		// ActionMergeCopy into a param HighVariable can still appear in locals for
-		// the G5 identity-copy / return-carrier detection in renameReturnOnlyLocals.
+		// ActionMergeCopy into a param HighVariable can still appear in locals.
 		seenHV := make(map[*HighVariable]bool)
 		for _, vn := range all {
 			if vn == nil || vn.IsConstant() || vn.IsAnnotation() {
@@ -715,10 +715,6 @@ func (s *printCState) collectSymbols() {
 		// by the return chain. This must run after shouldInline has been applied.
 		s.markReturnOnlyCopies()
 		s.markPhiReturnOnly()
-		// Rename return-only locals to Ghidra's uVar1/iVar1/lVar1 convention.
-		// C++ parity: ActionReturnSplit names the return-value variable with a
-		// prefix derived from its type (u=undefined/unsigned, i=signed, l=long).
-		s.renameReturnOnlyLocals()
 		return
 	}
 
@@ -806,11 +802,6 @@ func (s *printCState) collectSymbols() {
 	// by the return chain. This must run after shouldInline has been applied.
 	s.markReturnOnlyCopies()
 	s.markPhiReturnOnly()
-	// NOTE: renameReturnOnlyLocals is intentionally NOT called on the nil-FuncProto
-	// path. Without ABI information (calling convention, return register) the
-	// return-only detection is unreliable and non-deterministic because AllVarnodes()
-	// iteration order is map-based. Ghidra parity for uVar1/iVar1 naming is only
-	// meaningful when a proper ProtoModel is attached.
 }
 
 // locationKey identifies a unique storage location by (spaceIndex, offset, size).
@@ -5113,177 +5104,6 @@ func sanitizeIdent(name string) string {
 	return builder.String()
 }
 
-// renameReturnOnlyLocals scans the local variable set and renames any local
-// whose sole non-marker consumers are RETURN ops to Ghidra's uVar1/iVar1/lVar1
-// convention. Must be called after markReturnOnlyCopies so prologueOps and
-// s.inline are fully populated.
-//
-// C++ parity: ActionReturnSplit::apply in coreaction.cc assigns a dedicated
-// symbol name to the return-value carrier varnode. This is our equivalent
-// without actually splitting the return path.
-func (s *printCState) renameReturnOnlyLocals() {
-	// Collect location keys of locals that are return-only.
-	// Multiple SSA versions of the same register/slot share a location key;
-	// we rename the whole group together.
-	type retOnlyEntry struct {
-		key    locationKey
-		prefix string
-	}
-	var retOnlyKeys []retOnlyEntry
-	seenLoc := make(map[locationKey]bool)
-
-	for _, vn := range s.locals {
-		if vn.Space() != nil && vn.Space().IsUnique() {
-			continue
-		}
-		if s.prologueVarnodes[vn] {
-			continue
-		}
-		// Only check non-unique varnodes that are return-only.
-		if !s.isReturnOnlyVarnode(vn) {
-			continue
-		}
-		key := varnodeLocKey(vn)
-		if seenLoc[key] {
-			continue
-		}
-		seenLoc[key] = true
-		prefix := ghidraVarPrefix(vn)
-		retOnlyKeys = append(retOnlyKeys, retOnlyEntry{key, prefix})
-	}
-
-	if len(retOnlyKeys) == 0 {
-		return
-	}
-
-	// Ghidra assigns every default local name from a SINGLE shared counter
-	// (database.cc ScopeInternal::buildVariableName: "Var" << index++), not a
-	// per-prefix counter, and threads one base index through assignDefaultNames.
-	// The return-value carrier is created last, so it continues the counter after
-	// all other default-named locals: a function with a loop temp iVar1 numbers
-	// its carrier uVar2, not uVar1. Seed the shared counter past the highest index
-	// already used by a NON-carrier default local (iVarN/uVarN/lVarN/...).
-	// C++ parity: database.cc buildVariableName + assignDefaultNames(int4 &base).
-	carrierKeys := make(map[locationKey]bool, len(retOnlyKeys))
-	for _, e := range retOnlyKeys {
-		carrierKeys[e.key] = true
-	}
-	base := 0
-	for _, vn := range s.locals {
-		if carrierKeys[varnodeLocKey(vn)] {
-			continue
-		}
-		if idx, ok := parseDefaultVarIndex(s.nameOf(vn)); ok && idx > base {
-			base = idx
-		}
-	}
-
-	// Build a location-key -> newName map using the shared counter.
-	keyName := make(map[locationKey]string)
-	for _, e := range retOnlyKeys {
-		base++
-		keyName[e.key] = fmt.Sprintf("%s%d", e.prefix, base)
-	}
-
-	// Apply new names to every non-unique varnode at those location keys, and
-	// record the location as return-only. All SSA versions and body-op outputs
-	// that share the carrier's storage (e.g. the else-branch INT_AND result in
-	// the same register) must render under one name; scanning only s.locals would
-	// miss the body-op outputs that are not declared locals.
-	for _, vn := range s.fd.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.IsConstant() || vn.IsAnnotation() {
-			continue
-		}
-		if vn.Space() != nil && vn.Space().IsUnique() {
-			continue
-		}
-		// A function-input Varnode that merely shares storage with the return
-		// carrier (e.g. a register parameter whose register is later reused as the
-		// carrier) is a DISTINCT HighVariable and keeps its own name. Renaming by
-		// location key alone would collapse it into the carrier's uVar name; the
-		// carrier's own instances are always written (case results / MULTIEQUAL
-		// outputs), never inputs, so skipping inputs never drops a real carrier
-		// member. Without this a param (param_1 in the op_switch corpus) sharing
-		// ECX with the accumulator would misrender as the carrier name.
-		// C++ parity: names are per-HighVariable; a param's HighVariable is not the
-		// carrier's, so ActionReturnSplit never renames it.
-		if vn.IsInput() {
-			continue
-		}
-		key := varnodeLocKey(vn)
-		if newName, ok := keyName[key]; ok {
-			s.names[vn] = newName
-			s.returnOnlyLocs[key] = true
-		}
-	}
-	// Also rename MULTIEQUAL outputs at return-only locations.
-	// These are excluded from s.locals (marked as prologueVarnodes) but the
-	// RETURN op still references them by name during C rendering.
-	// C++ parity: ActionReturnSplit names the phi output directly when it is
-	// the sole carrier of the return value through the phi network.
-	for _, op := range s.fd.GetPcodeOpBank().AllOps() {
-		if op == nil || op.Code() != CPUI_MULTIEQUAL {
-			continue
-		}
-		out := op.Output()
-		if out == nil || out.Space() == nil || out.Space().IsUnique() {
-			continue
-		}
-		key := varnodeLocKey(out)
-		if newName, ok := keyName[key]; ok {
-			s.names[out] = newName
-			s.returnOnlyLocs[key] = true
-		}
-	}
-
-	// G5: Detect return-carrying MULTIEQUAL phi nodes with an identity-copy input
-	// from a named parameter. When found, store the param varnode reference for
-	// post-ghost-rename resolution in finalizeReturnCarrierRenames, and suppress
-	// the identity assignment statement immediately.
-	//
-	// We store the param VARNODE (not the name string) because renderFunctionSignature
-	// has not yet run -- param names will be ghost-offset later. finalizeReturnCarrierRenames
-	// is called after renderFunctionSignature to apply the correct final param names.
-	//
-	// C++ parity: ActionReturnSplit in coreaction.cc detects when a phi input is
-	// the identity of a parameter, making the parameter the direct return carrier.
-	paramVnSet := make(map[*Varnode]bool)
-	for _, pvn := range s.params {
-		paramVnSet[pvn] = true
-	}
-	for _, op := range s.fd.GetPcodeOpBank().AllOps() {
-		if op == nil || op.Code() != CPUI_MULTIEQUAL {
-			continue
-		}
-		out := op.Output()
-		if out == nil || out.Space() == nil || out.Space().IsUnique() {
-			continue
-		}
-		key := varnodeLocKey(out)
-		if _, isReturnCarrier := keyName[key]; !isReturnCarrier {
-			continue
-		}
-		// Look for a phi input that is an identity copy of a param varnode.
-		for i := 0; i < op.NumInput(); i++ {
-			in := op.Input(i)
-			if in == nil {
-				continue
-			}
-			paramVn := s.findParamCopyVarnode(in, paramVnSet)
-			if paramVn == nil {
-				continue
-			}
-			// Store for post-ghost-rename: finalizeReturnCarrierRenames will apply the name.
-			s.returnCarrierParams[key] = paramVn
-			// Suppress the identity COPY op: it becomes "param = param" (no-op).
-			if defOp := in.Def(); defOp != nil && defOp.Code() == CPUI_COPY {
-				s.identityOps[defOp] = true
-			}
-			break
-		}
-	}
-}
-
 // findParamCopyVarnode returns the param varnode if vn is a direct param varnode
 // or a COPY of one. paramVns is the set of known parameter varnodes.
 // Returns nil if vn is not an identity copy of a parameter.
@@ -5347,159 +5167,6 @@ func (s *printCState) isParamName(name string) bool {
 		}
 	}
 	return false
-}
-
-// parseDefaultVarIndex extracts N from a Ghidra default local name of the form
-// <letter>Var<N> (iVar1, uVar12, lVar3, ...). Returns (0,false) for any other
-// name (local_*, tmp_*, param_*, register names). Used to continue the shared
-// default-name counter past names already assigned by ActionNameVars.
-// C++ parity: the index parsed back out of buildVariableName's "<prefix>Var<N>".
-func parseDefaultVarIndex(nm string) (int, bool) {
-	// Single metatype letter, then "Var", then decimal digits.
-	if len(nm) < 5 || nm[1:4] != "Var" {
-		return 0, false
-	}
-	switch nm[0] {
-	case 'i', 'u', 'l', 'f', 'b', 'c', 'd':
-	default:
-		return 0, false
-	}
-	digits := nm[4:]
-	n := 0
-	for i := 0; i < len(digits); i++ {
-		ch := digits[i]
-		if ch < '0' || ch > '9' {
-			return 0, false
-		}
-		n = n*10 + int(ch-'0')
-	}
-	return n, true
-}
-
-// ghidraVarPrefix returns the Ghidra variable name prefix for a local based on
-// the varnode's type and size. Ghidra names are: uVar (undefined/unsigned, <=4),
-// iVar (signed int), lVar (signed long 8-byte), puVar/piVar (pointer etc.).
-// C++ parity: Ghidra uses HighVariable::getSymbol().getName() assigned by
-// ActionReturnSplit / Symbol::nameType convention.
-func ghidraVarPrefix(vn *Varnode) string {
-	if vn == nil {
-		return "uVar"
-	}
-	dt := vn.TypeDefFacing()
-	if dt == nil {
-		return "uVar"
-	}
-	switch dt.Metatype() {
-	case TYPE_INT:
-		if dt.Size() >= 8 {
-			return "lVar"
-		}
-		return "iVar"
-	case TYPE_FLOAT:
-		return "fVar"
-	default:
-		// TYPE_UINT, TYPE_UNKNOWN, TYPE_BOOL, and all others -> uVar
-		return "uVar"
-	}
-}
-
-// isReturnOnlyVarnode reports whether vn's only non-marker, non-suppressed
-// consumers are RETURN ops. Such a varnode is the function's return value
-// carrier and should be named with Ghidra's uVar1/iVar1/lVar1 convention.
-// Must be called after s.inline and s.prologueOps are fully populated.
-func (s *printCState) isReturnOnlyVarnode(vn *Varnode) bool {
-	if vn == nil || vn.NumDescend() == 0 {
-		return false
-	}
-	// A storage location backed by a mapped ScopeLocal symbol (an addrtied stack
-	// local) is named by its symbol, never by the uVar/iVar/lVar return-carrier
-	// convention. Ghidra only re-symbols UNMAPPED register/unique return carriers;
-	// a mapped stack local keeps its symbol name even when its sole consumer is
-	// the RETURN (e.g. max3's local_18). The check is location-based (FindOverlap)
-	// rather than per-varnode (EntryForVarnode): renameReturnOnlyLocals also
-	// renames MULTIEQUAL outputs by location key, so a sibling SSA version at the
-	// same stack slot (lacking a vnMap attachment) must not seed the rename.
-	// Register/unique carriers have no stack symbol -> FindOverlap returns nil ->
-	// they still get the convention name.
-	// C++ parity: ActionReturnSplit only names carriers not already tied to a
-	// Symbol; ScopeInternal symbol names win for mapped storage.
-	if sl := s.fd.GetScopeLocal(); sl != nil {
-		if e := sl.FindOverlap(vn.Addr(), vn.Size()); e != nil && e.Symbol() != nil {
-			return false
-		}
-	}
-	hasReturn := false
-	for _, consumer := range vn.DescendIter() {
-		if consumer == nil {
-			continue
-		}
-		switch consumer.Code() {
-		case CPUI_RETURN:
-			hasReturn = true
-		case CPUI_MULTIEQUAL, CPUI_INDIRECT:
-			// Marker op: check if the marker's output exclusively reaches RETURN.
-			// If the phi output has any non-RETURN consumer, this vn is not return-only.
-			// C++ parity: ActionReturnSplit traces through phi nodes when determining
-			// whether a varnode is a pure return-value carrier.
-			if out := consumer.Output(); out != nil {
-				phiAllReturn := true
-				phiHasReturn := false
-				for _, c2 := range out.DescendIter() {
-					if c2 == nil || c2 == consumer {
-						continue // skip self-referential back-edges
-					}
-					if c2.Code() == CPUI_RETURN {
-						phiHasReturn = true
-					} else {
-						phiAllReturn = false
-						break
-					}
-				}
-				if !phiHasReturn || !phiAllReturn {
-					return false
-				}
-				hasReturn = true
-			}
-		default:
-			if s.prologueOps[consumer] {
-				// Suppressed; transparent.
-				continue
-			}
-			if s.inline[consumer] {
-				// Inline consumer: trace one level deeper to verify it exclusively
-				// reaches RETURN. If the inline op's output feeds anything other than
-				// RETURN (e.g. a COPY -> MULTIEQUAL loop phi), this varnode is not
-				// return-only.
-				// C++ parity: Ghidra's ActionReturnSplit only renames varnodes that
-				// are exclusively consumed by the return site -- loop phis break that.
-				reachesNonReturn := false
-				if consumer.Output() != nil {
-					for _, c2 := range consumer.Output().DescendIter() {
-						if c2 == nil {
-							continue
-						}
-						switch c2.Code() {
-						case CPUI_RETURN:
-							// OK
-						case CPUI_MULTIEQUAL, CPUI_INDIRECT:
-							// Marker -- this inline feeds a phi; not return-only.
-							reachesNonReturn = true
-						default:
-							if !s.prologueOps[c2] {
-								reachesNonReturn = true
-							}
-						}
-					}
-				}
-				if reachesNonReturn {
-					return false
-				}
-				continue
-			}
-			return false
-		}
-	}
-	return hasReturn
 }
 
 func maxInt(a, b int) int {
