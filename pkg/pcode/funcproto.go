@@ -25,6 +25,9 @@ import (
 //
 // C++ parity: funcdata.hh FuncProto (partial)
 type FuncProto struct {
+	// selfLocked: the locked parameters of the function's own prototype as
+	// the host stores them (FuncProto::store with an input lock).
+	selfLocked []ProtoSlot
 	// trashList: FuncProto::likelytrash override.
 	trashList []VarnodeData
 	model     *ProtoModel

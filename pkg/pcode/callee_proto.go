@@ -212,6 +212,14 @@ func (fd *Funcdata) ApplyHostSelfPrototype(model *ProtoModel) {
 		fp = NewFuncProto(model)
 		fd.SetFuncProto(fp)
 	}
+	// A locked model is the prototype's own. C++ parity: FuncProto::decode
+	// (model + modellock).
+	if hf.ModelLock {
+		if m := fd.ModelByName(hf.Model); m != nil {
+			fp.SetModel(m)
+			fp.SetModelLock(true)
+		}
+	}
 	if hf.OutputLocked && hf.Output != nil && hf.Output.Type != nil {
 		if sp := fd.spaceByName(hf.Output.Space); sp != nil {
 			fp.SetLockedReturn(address.Address{Space: sp, Offset: hf.Output.Offset}, hf.Output.Size, hf.Output.Type)
@@ -226,8 +234,13 @@ func (fd *Funcdata) ApplyHostSelfPrototype(model *ProtoModel) {
 		if sp == nil {
 			continue
 		}
+		off := p.Offset
 		if sp.Kind == address.SpaceKindStack {
-			off := wrapSpaceOffset(sp, p.Offset)
+			off = wrapSpaceOffset(sp, p.Offset)
+		}
+		fp.selfLocked = append(fp.selfLocked, ProtoSlot{Addr: address.Address{Space: sp, Offset: off},
+			Size: p.Size, Type: p.Type, Name: p.Name, ThisPtr: p.ThisPtr})
+		if sp.Kind == address.SpaceKindStack {
 			if fd.hostLocals == nil {
 				fd.hostLocals = map[uint64]string{}
 			}

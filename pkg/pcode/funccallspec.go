@@ -77,8 +77,10 @@ type HostFunction struct {
 	// OutputLocked: Output is the typed return (Output.Type void = void).
 	// C++ parity: FuncProto::isInputLocked / isOutputLocked.
 	InputLocked, OutputLocked bool
-	Params                    []HostParam
-	Output                    *HostParam
+	// ModelLock: the prototype's model is fixed (modellock).
+	ModelLock bool
+	Params    []HostParam
+	Output    *HostParam
 }
 
 // HostParam is one storage slot of a host prototype: a register or a stack

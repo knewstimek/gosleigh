@@ -77,6 +77,7 @@ type captureProto struct {
 	extraPop               int32
 	noReturn               bool
 	inputLocked, outLocked bool
+	modelLock              bool
 	params                 []pcode.HostParam
 	output                 *pcode.HostParam
 }
@@ -227,6 +228,7 @@ func parseCaptureProto(fn *xnode, types map[string]*xnode) captureProto {
 		return cp
 	}
 	cp.model = proto.attr("model")
+	cp.modelLock = proto.attr("modellock") == "true"
 	if ep := proto.attr("extrapop"); ep != "" && ep != "unknown" {
 		cp.extraPop = int32(parseUint(ep))
 	}
@@ -269,6 +271,9 @@ func (h hostWithData) QueryFunction(addr address.Address) (pcode.HostFunction, b
 		}
 		hf.NoReturn = hf.NoReturn || cp.noReturn
 		hf.InputLocked, hf.OutputLocked = cp.inputLocked, cp.outLocked
+		if cp.modelLock {
+			hf.Model, hf.ModelLock = cp.model, true
+		}
 		hf.Params, hf.Output = cp.params, cp.output
 	}
 	return hf, ok

@@ -934,6 +934,23 @@ func (a *ActionPrototypeTypes) Apply(data *Funcdata) int {
 		}
 	}
 
+	// The function's own locked parameters exist as inputs from the start,
+	// at their full storage size. C++ parity: ActionPrototypeTypes::apply
+	// (locked input: newVarnode + setInputVarnode + setLockedInput).
+	for _, slot := range fp.selfLocked {
+		if slot.Size <= 0 {
+			continue
+		}
+		vn := data.FindVarnodeInput(slot.Size, slot.Addr)
+		if vn == nil {
+			vn = data.SetInputVarnode(data.NewVarnode(slot.Size, slot.Addr))
+		}
+		vn.SetAddlFlags(VarnodeLockedInput)
+		if slot.Type != nil && slot.Type.Size() == slot.Size {
+			SetVarnodeType(vn, slot.Type)
+			vn.SetFlags(VarnodeTypeLock)
+		}
+	}
 	if fp.IsInputLocked() {
 		var topbl *BlockBasic
 		if bg := data.GetBasicBlocks(); bg != nil && bg.GetSize() > 0 {

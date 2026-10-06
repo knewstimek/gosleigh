@@ -669,6 +669,7 @@ func (s *printCState) collectSymbols() {
 		sort.Slice(locals, func(i, j int) bool { return CompareLocDef(locals[i], locals[j]) < 0 })
 		s.params = dedupVarnodes(params)
 		s.locals = dedupVarnodes(locals)
+		s.applySelfLockedParams()
 		// Assign names for any params/locals not yet named.
 		// 1-indexed to match Ghidra output (param_1, param_2, ...).
 		paramIndex := 0
@@ -5516,4 +5517,32 @@ func (s *printCState) renameLocal(vn *Varnode, old, renamed string) {
 	if hv := vn.High(); hv != nil && hv.Name() == old {
 		hv.SetName(renamed)
 	}
+}
+
+// applySelfLockedParams lists the function's locked prototype parameters, in
+// prototype order and with their own names, as the signature (the storage
+// inputs exist from ActionPrototypeTypes). Every instance of a parameter's
+// variable takes its name. C++ parity: PrintC::emitPrototypeInputs over the
+// FuncProto's ProtoParameters of a locked prototype.
+func (s *printCState) applySelfLockedParams() {
+	fp := s.fd.GetFuncProto()
+	if fp == nil || len(fp.selfLocked) == 0 {
+		return
+	}
+	var params []*Varnode
+	for _, slot := range fp.selfLocked {
+		vn := s.fd.FindVarnodeInput(slot.Size, slot.Addr)
+		if vn == nil {
+			continue
+		}
+		params = append(params, vn)
+		s.names[vn] = slot.Name
+		if hv := vn.High(); hv != nil {
+			hv.SetName(slot.Name)
+			for _, inst := range hv.Instances() {
+				s.names[inst] = slot.Name
+			}
+		}
+	}
+	s.params = params
 }

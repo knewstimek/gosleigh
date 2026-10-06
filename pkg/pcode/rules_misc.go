@@ -275,26 +275,61 @@ func NewRuleAndCompare(group string) *RuleAndCompare {
 	return r
 }
 
+// apply widens (sub(V) & c) == 0 or (zext(V) & c) == 0 into a test on V
+// itself. C++ parity: RuleAndCompare::applyOp.
 func (r *RuleAndCompare) apply(op *PcodeOp, data *Funcdata) int {
-	for slot := 0; slot < 2; slot++ {
-		andop := definedBy(op.Input(slot), CPUI_INT_AND)
-		c, cOK := constantValue(op.Input(1 - slot))
-		if andop == nil || !cOK {
-			continue
-		}
-		mask, maskOK := constantValue(andop.Input(1))
-		if !maskOK || !isSingleBitMask(mask) || c != mask {
-			continue
-		}
-		replaceInputSlot(data, op, 1-slot, data.NewConstant(op.Input(1-slot).Size(), 0))
-		if op.Code() == CPUI_INT_EQUAL {
-			data.OpSetOpcode(op, CPUI_INT_NOTEQUAL)
-		} else {
-			data.OpSetOpcode(op, CPUI_INT_EQUAL)
-		}
-		return 1
+	if !op.Input(1).IsConstant() || op.Input(1).Offset() != 0 {
+		return 0
 	}
-	return 0
+	andvn := op.Input(0)
+	if !andvn.IsWritten() {
+		return 0
+	}
+	andop := andvn.Def()
+	if andop.Code() != CPUI_INT_AND || !andop.Input(1).IsConstant() {
+		return 0
+	}
+	subvn := andop.Input(0)
+	if !subvn.IsWritten() {
+		return 0
+	}
+	subop := subvn.Def()
+	var basevn *Varnode
+	var andconst, baseconst uint64
+	switch subop.Code() {
+	case CPUI_SUBPIECE:
+		basevn = subop.Input(0)
+		if basevn.Size() > 8 {
+			return 0
+		}
+		baseconst = andop.Input(1).Offset()
+		andconst = baseconst << (subop.Input(1).Offset() * 8)
+	case CPUI_INT_ZEXT:
+		basevn = subop.Input(0)
+		baseconst = andop.Input(1).Offset()
+		andconst = baseconst & maskForSize(basevn.Size())
+	default:
+		return 0
+	}
+	if baseconst == maskForSize(andvn.Size()) {
+		return 0 // degenerate AND
+	}
+	if basevn.IsFree() {
+		return 0
+	}
+	constvn := data.NewConstant(basevn.Size(), andconst)
+	if baseconst == andconst {
+		constvn.copySymbol(andop.Input(1)) // keep any old symbol
+	}
+	newop := data.NewOp(2, andop.Addr())
+	data.OpSetOpcode(newop, CPUI_INT_AND)
+	newout := data.NewUniqueOut(basevn.Size(), newop)
+	data.OpSetInput(newop, basevn, 0)
+	data.OpSetInput(newop, constvn, 1)
+	data.OpInsertBefore(newop, andop)
+	data.OpSetInput(op, newout, 0)
+	data.OpSetInput(op, data.NewConstant(basevn.Size(), 0), 1)
+	return 1
 }
 
 type RuleDoubleSub struct{ batchRule }
