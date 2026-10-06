@@ -178,15 +178,31 @@ func NewRuleConcatZext(group string) *RuleConcatZext {
 	return r
 }
 
+// apply turns concat(zext(H), L) into zext(concat(H, L)).
+// C++ parity: RuleConcatZext::applyOp.
 func (r *RuleConcatZext) apply(op *PcodeOp, data *Funcdata) int {
-	if !isZeroConst(op.Input(0)) {
+	hi := op.Input(0)
+	if !hi.IsWritten() {
 		return 0
 	}
-	ext := definedBy(op.Input(1), CPUI_INT_ZEXT)
-	if ext == nil {
+	zextop := hi.Def()
+	if zextop.Code() != CPUI_INT_ZEXT {
 		return 0
 	}
-	rewriteOp(data, op, CPUI_INT_ZEXT, ext.Input(0))
+	hi = zextop.Input(0)
+	lo := op.Input(1)
+	if hi.IsFree() || lo.IsFree() {
+		return 0
+	}
+	newconcat := data.NewOp(2, op.Addr())
+	data.OpSetOpcode(newconcat, CPUI_PIECE)
+	newvn := data.NewUniqueOut(hi.Size()+lo.Size(), newconcat)
+	data.OpSetInput(newconcat, hi, 0)
+	data.OpSetInput(newconcat, lo, 1)
+	data.OpInsertBefore(newconcat, op)
+	data.OpRemoveInput(op, 1)
+	data.OpSetInput(op, newvn, 0)
+	data.OpSetOpcode(op, CPUI_INT_ZEXT)
 	return 1
 }
 
@@ -237,12 +253,45 @@ func NewRuleZextShiftZext(group string) *RuleZextShiftZext {
 	return r
 }
 
+// apply removes a ZEXT of a ZEXT, or turns zext(zext(V) << n) into
+// zext(V) << n when the shift loses no bits. C++ parity: RuleZextShiftZext::applyOp.
 func (r *RuleZextShiftZext) apply(op *PcodeOp, data *Funcdata) int {
-	inner := definedBy(op.Input(0), CPUI_INT_ZEXT)
-	if inner == nil {
+	invn := op.Input(0)
+	if !invn.IsWritten() {
 		return 0
 	}
-	rewriteOp(data, op, CPUI_INT_ZEXT, inner.Input(0))
+	shiftop := invn.Def()
+	if shiftop.Code() == CPUI_INT_ZEXT {
+		vn := shiftop.Input(0)
+		if vn.IsFree() || invn.LoneDescend() != op {
+			return 0
+		}
+		data.OpSetInput(op, vn, 0)
+		return 1
+	}
+	if shiftop.Code() != CPUI_INT_LEFT || !shiftop.Input(1).IsConstant() || !shiftop.Input(0).IsWritten() {
+		return 0
+	}
+	zext2op := shiftop.Input(0).Def()
+	if zext2op.Code() != CPUI_INT_ZEXT {
+		return 0
+	}
+	rootvn := zext2op.Input(0)
+	if rootvn.IsFree() {
+		return 0
+	}
+	sa := shiftop.Input(1).Offset()
+	if sa > uint64(8*(zext2op.Output().Size()-rootvn.Size())) {
+		return 0 // the shift might lose bits off the top
+	}
+	newop := data.NewOp(1, op.Addr())
+	data.OpSetOpcode(newop, CPUI_INT_ZEXT)
+	outvn := data.NewUniqueOut(op.Output().Size(), newop)
+	data.OpSetInput(newop, rootvn, 0)
+	data.OpSetOpcode(op, CPUI_INT_LEFT)
+	data.OpSetInput(op, outvn, 0)
+	data.OpInsertInput(op, data.NewConstant(4, sa), 1)
+	data.OpInsertBefore(newop, op)
 	return 1
 }
 

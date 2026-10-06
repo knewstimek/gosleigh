@@ -161,22 +161,65 @@ func NewRuleHighOrderAnd(group string) *RuleHighOrderAnd {
 	return r
 }
 
+// apply folds an alignment mask (1..10..0) into additions whose other terms
+// it leaves untouched. C++ parity: RuleHighOrderAnd::applyOp.
 func (r *RuleHighOrderAnd) apply(op *PcodeOp, data *Funcdata) int {
-	for slot := 0; slot < 2; slot++ {
-		shift := definedBy(op.Input(slot), CPUI_INT_RIGHT)
-		if shift == nil || shift.NumInput() != 2 {
+	cvn1 := op.Input(1)
+	if !cvn1.IsConstant() || !op.Input(0).IsWritten() {
+		return 0
+	}
+	addop := op.Input(0).Def()
+	if addop.Code() != CPUI_INT_ADD {
+		return 0
+	}
+	val := cvn1.Offset()
+	size := cvn1.Size()
+	if (val-1)|val != maskForSize(size) {
+		return 0 // must be of the form 11110000
+	}
+	if cvn2 := addop.Input(1); cvn2.IsConstant() {
+		xalign := addop.Input(0)
+		if xalign.IsFree() {
+			return 0
+		}
+		mask1 := xalign.NZMask()
+		if mask1&val != mask1 {
+			return 0 // the other term must be unaffected by the AND
+		}
+		data.OpSetOpcode(op, CPUI_INT_ADD)
+		data.OpSetInput(op, xalign, 0)
+		data.OpSetInput(op, data.NewConstant(size, val&cvn2.Offset()), 1)
+		return 1
+	}
+	if addop.Output().LoneDescend() != op {
+		return 0
+	}
+	for i := 0; i < 2; i++ {
+		zerovn := addop.Input(i)
+		mask2 := zerovn.NZMask()
+		if mask2&val != mask2 {
 			continue
 		}
-		amt, amtOK := constantValue(shift.Input(1))
-		mask, maskOK := constantValue(op.Input(1 - slot))
-		if !amtOK || !maskOK || amt%8 != 0 || mask != maskForSize(outputOrInputSize(op)) {
+		nonzerovn := addop.Input(1 - i)
+		if !nonzerovn.IsWritten() {
 			continue
 		}
-		byteOff := amt / 8
-		if byteOff+uint64(outputSize(op)) > uint64(shift.Input(0).Size()) {
+		addop2 := nonzerovn.Def()
+		if addop2.Code() != CPUI_INT_ADD || nonzerovn.LoneDescend() != addop {
 			continue
 		}
-		rewriteOp(data, op, CPUI_SUBPIECE, shift.Input(0), data.NewConstant(4, byteOff))
+		cvn2 := addop2.Input(1)
+		if !cvn2.IsConstant() {
+			continue
+		}
+		xalign := addop2.Input(0)
+		mask2 = xalign.NZMask()
+		if mask2&val != mask2 {
+			continue
+		}
+		data.OpSetInput(addop2, data.NewConstant(size, val&cvn2.Offset()), 1)
+		data.OpRemoveInput(op, 1) // the AND becomes a COPY
+		data.OpSetOpcode(op, CPUI_COPY)
 		return 1
 	}
 	return 0
@@ -492,23 +535,52 @@ type RuleConcatShift struct{ batchRule }
 
 func NewRuleConcatShift(group string) *RuleConcatShift {
 	r := &RuleConcatShift{}
-	r.batchRule = newBatchRule(group, "concatshift", []OpCode{CPUI_INT_LEFT, CPUI_INT_RIGHT}, r.apply, func(g string) Rule { return NewRuleConcatShift(g) })
+	r.batchRule = newBatchRule(group, "concatshift", []OpCode{CPUI_INT_RIGHT, CPUI_INT_SRIGHT}, r.apply, func(g string) Rule { return NewRuleConcatShift(g) })
 	return r
 }
 
+// apply cancels a right shift against the low half of a PIECE, leaving an
+// extension of the high half. C++ parity: RuleConcatShift::applyOp.
 func (r *RuleConcatShift) apply(op *PcodeOp, data *Funcdata) int {
-	if op.Code() != CPUI_INT_RIGHT {
+	if !op.Input(1).IsConstant() {
 		return 0
 	}
-	piece := definedBy(op.Input(0), CPUI_PIECE)
-	if piece == nil {
+	shiftin := op.Input(0)
+	if !shiftin.IsWritten() {
 		return 0
 	}
-	amt, ok := constantValue(op.Input(1))
-	if !ok || amt != uint64(piece.Input(1).Size()*8) || outputSize(op) != piece.Input(0).Size() {
+	concat := shiftin.Def()
+	if concat.Code() != CPUI_PIECE {
 		return 0
 	}
-	return rewriteToCopy(data, op, piece.Input(0))
+	sa := int64(op.Input(1).Offset())
+	leastsize := int64(concat.Input(1).Size()) * 8
+	if sa < leastsize {
+		return 0 // the shift must throw away the least significant part
+	}
+	mainin := concat.Input(0)
+	if mainin.IsFree() {
+		return 0
+	}
+	sa -= leastsize
+	extcode := CPUI_INT_SEXT
+	if op.Code() == CPUI_INT_RIGHT {
+		extcode = CPUI_INT_ZEXT
+	}
+	if sa == 0 {
+		data.OpRemoveInput(op, 1)
+		data.OpSetOpcode(op, extcode)
+		data.OpSetInput(op, mainin, 0)
+		return 1
+	}
+	extop := data.NewOp(1, op.Addr())
+	data.OpSetOpcode(extop, extcode)
+	newvn := data.NewUniqueOut(shiftin.Size(), extop)
+	data.OpSetInput(extop, mainin, 0)
+	data.OpSetInput(op, newvn, 0)
+	data.OpSetInput(op, data.NewConstant(op.Input(1).Size(), uint64(sa)), 1)
+	data.OpInsertBefore(extop, op)
+	return 1
 }
 
 type RuleLeftRight struct{ batchRule }

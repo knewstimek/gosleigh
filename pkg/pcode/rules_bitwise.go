@@ -362,23 +362,69 @@ func NewRuleAndPiece(group string) *RuleAndPiece {
 	return r
 }
 
+// apply simplifies a PIECE under an AND whose mask clears one half: the high
+// half cleared gives ZEXT(lo), the low half cleared gives PIECE(hi, 0).
+// C++ parity: RuleAndPiece::applyOp.
 func (r *RuleAndPiece) apply(op *PcodeOp, data *Funcdata) int {
-	for slot := 0; slot < 2; slot++ {
-		piece := definedBy(op.Input(slot), CPUI_PIECE)
-		if piece == nil {
+	size := op.Output().Size()
+	var highvn, lowvn *Varnode
+	opc := CPUI_PIECE
+	i := 0
+	for ; i < 2; i++ {
+		piecevn := op.Input(i)
+		if !piecevn.IsWritten() {
 			continue
 		}
-		maskVal, ok := constantValue(op.Input(1 - slot))
-		if !ok {
+		pieceop := piecevn.Def()
+		if pieceop.Code() != CPUI_PIECE {
 			continue
 		}
-		lo := piece.Input(1)
-		if maskVal == maskForSize(lo.Size()) {
-			rewriteOp(data, op, CPUI_INT_ZEXT, lo)
-			return 1
+		othermask := op.Input(1 - i).NZMask()
+		if othermask == maskForSize(size) || othermask == 0 {
+			continue // all bits kept, or handled by andmask
+		}
+		highvn = pieceop.Input(0)
+		if !highvn.IsHeritageKnown() {
+			continue
+		}
+		lowvn = pieceop.Input(1)
+		if !lowvn.IsHeritageKnown() {
+			continue
+		}
+		maskhigh := highvn.NZMask()
+		masklow := lowvn.NZMask()
+		if maskhigh&(othermask>>(uint(lowvn.Size())*8)) == 0 {
+			if maskhigh == 0 && highvn.IsConstant() {
+				continue // handled by piece2zext
+			}
+			opc = CPUI_INT_ZEXT
+			break
+		} else if masklow&othermask == 0 {
+			if lowvn.IsConstant() {
+				continue
+			}
+			opc = CPUI_PIECE
+			break
 		}
 	}
-	return 0
+	if i == 2 {
+		return 0
+	}
+	var newop *PcodeOp
+	if opc == CPUI_INT_ZEXT {
+		newop = data.NewOp(1, op.Addr())
+		data.OpSetOpcode(newop, opc)
+		data.OpSetInput(newop, lowvn, 0)
+	} else {
+		newop = data.NewOp(2, op.Addr())
+		data.OpSetOpcode(newop, opc)
+		data.OpSetInput(newop, highvn, 0)
+		data.OpSetInput(newop, data.NewConstant(lowvn.Size(), 0), 1)
+	}
+	newvn := data.NewUniqueOut(size, newop)
+	data.OpInsertBefore(newop, op)
+	data.OpSetInput(op, newvn, i)
+	return 1
 }
 
 type RuleAndZext struct{ batchRule }
