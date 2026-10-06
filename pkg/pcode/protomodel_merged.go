@@ -50,6 +50,7 @@ func NewMergedModel(name string, models []*ProtoModel) *ProtoModel {
 		}
 		if mod != first {
 			m.Effects = intersectEffects(m.Effects, mod.Effects)
+			m.LikelyTrash = intersectLikelyTrash(m.LikelyTrash, mod.LikelyTrash)
 			m.StackParamRanges = append(m.StackParamRanges, mod.StackParamRanges...)
 		}
 	}
@@ -59,6 +60,26 @@ func NewMergedModel(name string, models []*ProtoModel) *ProtoModel {
 // IsMerged reports a model that must be resolved against parameter trials.
 // C++ parity: ProtoModel::isMerged.
 func (pm *ProtoModel) IsMerged() bool { return pm != nil && len(pm.Merged) > 0 }
+
+// intersectLikelyTrash keeps the registers present in both sorted lists.
+// C++ parity: ProtoModelMerged::intersectLikelyTrash.
+func intersectLikelyTrash(a, b []VarnodeData) []VarnodeData {
+	var out []VarnodeData
+	i, j := 0, 0
+	for i < len(a) && j < len(b) {
+		switch {
+		case VarnodeDataLess(a[i], b[j]):
+			i++
+		case VarnodeDataLess(b[j], a[i]):
+			j++
+		default:
+			out = append(out, a[i])
+			i++
+			j++
+		}
+	}
+	return out
+}
 
 // intersectEffects keeps the records present (same address, size and type) in
 // both sorted lists. C++ parity: ProtoModelMerged::intersectEffects.

@@ -13,6 +13,26 @@ type VarnodeData struct {
 	Size   uint32
 }
 
+// VarnodeDataLess orders by space index, then offset, then larger size first.
+// C++ parity: VarnodeData::operator<.
+func VarnodeDataLess(a, b VarnodeData) bool {
+	ai, bi := spaceIndexOf(a.Space), spaceIndexOf(b.Space)
+	if ai != bi {
+		return ai < bi
+	}
+	if a.Offset != b.Offset {
+		return a.Offset < b.Offset
+	}
+	return a.Size > b.Size
+}
+
+func spaceIndexOf(sp *address.Space) int {
+	if sp == nil {
+		return -1
+	}
+	return int(sp.Index)
+}
+
 func (v VarnodeData) Validate() error {
 	if v.Space == nil {
 		return fmt.Errorf("varnode space is nil")

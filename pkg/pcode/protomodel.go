@@ -222,6 +222,11 @@ type ProtoModel struct {
 	// C++ parity: ProtoModelMerged::modellist.
 	Merged []*ProtoModel
 
+	// LikelyTrash lists the registers whose input value is likely garbage
+	// (<likelytrash>), sorted by VarnodeData order.
+	// C++ parity: ProtoModel::likelytrash.
+	LikelyTrash []VarnodeData
+
 	// PrintInDecl is false only for the architecture default model, whose name
 	// is not printed in declarations. C++ parity: ProtoModel::isPrinted /
 	// Architecture::setDefaultModel.

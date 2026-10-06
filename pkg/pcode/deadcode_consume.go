@@ -246,8 +246,12 @@ func (c *consumeAnalysis) propagate() {
 func (c *consumeAnalysis) computeConsumed(data *Funcdata) {
 	// Clear consume on all Varnodes (C++ 3949-3957). The vacuous/list bookkeeping
 	// lives in this analysis (Go maps) rather than on the Varnode.
+	// addrforce survives only on direct writes. C++ parity: ActionDeadCode::apply.
 	for _, vn := range data.GetVarnodeBank().AllVarnodes() {
 		vn.SetConsumed(0)
+		if vn.IsAddrForce() && !vn.IsDirectWrite() {
+			vn.ClearFlags(VarnodeAddrForce)
+		}
 	}
 
 	// Pre-live: every Varnode in a space whose heritage has not run yet is

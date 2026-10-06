@@ -431,21 +431,18 @@ func parenText(text string, paren bool) string {
 }
 
 // scopedNameExpr splits a namespace-qualified name at its top-level "::"
-// into left-nested scope operators (template arguments stay whole).
+// into left-nested scope operators (template and call-operator brackets stay
+// whole, e.g. A<T>::operator()<U>).
 // C++ parity: PrintC::pushSymbolScope with PrintC::scope (spacing 0).
 func scopedNameExpr(name string) ExprFragment {
 	depth := 0
 	cut := -1
 	for i := 0; i+1 < len(name); i++ {
 		switch name[i] {
-		case '<':
+		case '<', '(':
 			depth++
-		case '>':
+		case '>', ')':
 			depth--
-		case '(', ' ':
-			if depth == 0 {
-				return ExprFragment{Text: name, Precedence: ExprPrecPrimary}
-			}
 		case ':':
 			if depth == 0 && name[i+1] == ':' {
 				cut = i

@@ -857,6 +857,7 @@ func buildModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdata, 
 	})
 	if cspec != nil {
 		model.SetEffects(buildEffectList(xr, cspec, fd, model.StackSpace))
+		model.LikelyTrash = buildLikelyTrash(xr, cspec, fd)
 		// Parameter range from the stack <pentry> extents (base .. base+maxsize-1).
 		// C++ parity: ParamListStandard::getRangeList.
 		for _, pe := range cspec.InputPentries() {
@@ -897,6 +898,26 @@ func buildModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdata, 
 // C++ parity: fspec.cc ProtoModel::decode (effectlist from ELEM_UNAFFECTED,
 // ELEM_KILLEDBYCALL, and glb->defaultReturnAddr when the model has no
 // <returnaddress> of its own).
+// buildLikelyTrash resolves the model's <likelytrash> registers.
+// C++ parity: ProtoModel::decode (likelytrash), sorted as VarnodeData.
+func buildLikelyTrash(xr *sla.XRefs, cspec *pcode.CspecData, fd *pcode.Funcdata) []pcode.VarnodeData {
+	if cspec.DefaultProto == nil {
+		return nil
+	}
+	var out []pcode.VarnodeData
+	for _, r := range cspec.DefaultProto.LikelyTrash.Registers {
+		si, off, sz, ok := xr.RegisterByName(r.Name)
+		if !ok {
+			continue
+		}
+		if sp, _ := registerSpaceByIndex(fd, si); sp != nil {
+			out = append(out, pcode.VarnodeData{Space: sp, Offset: off, Size: uint32(sz)})
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return pcode.VarnodeDataLess(out[i], out[j]) })
+	return out
+}
+
 func buildEffectList(xr *sla.XRefs, cspec *pcode.CspecData, fd *pcode.Funcdata, stack *address.Space) []pcode.EffectRecord {
 	if cspec.DefaultProto == nil {
 		return nil

@@ -202,8 +202,7 @@ func opHasSideEffects(code OpCode) bool {
 	case CPUI_STORE,
 		CPUI_CALL, CPUI_CALLIND, CPUI_CALLOTHER,
 		CPUI_BRANCH, CPUI_CBRANCH, CPUI_BRANCHIND,
-		CPUI_RETURN,
-		CPUI_INDIRECT: // models call clobber; conservative, keep it
+		CPUI_RETURN:
 		return true
 	}
 	return false

@@ -519,6 +519,9 @@ func (fp *FuncProto) TrashBegin() []VarnodeData {
 	if fp == nil {
 		return nil
 	}
+	if len(fp.trashList) == 0 && fp.model != nil {
+		return fp.model.LikelyTrash
+	}
 	return fp.trashList
 }
 
