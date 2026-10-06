@@ -585,10 +585,12 @@ func (fd *Funcdata) CalcNZMask() {
 			if !vn.IsWritten() {
 				if vn.IsConstant() {
 					vn.SetNZMask(vn.Offset())
+				} else if vn.IsTypeLock() && vn.Type() != nil && vn.Type().Metatype() == TYPE_BOOL {
+					vn.SetNZMask(1)
+				} else if vn.IsSpaceBase() {
+					// A spacebase input is treated as aligned.
+					vn.SetNZMask(maskForSize(vn.Size()) &^ 0xff)
 				} else {
-					// Leaf: full size mask (conservative). C++ additionally narrows
-					// bool-type-locked inputs to 1 and aligns spacebase inputs; both
-					// omitted here (a wider mask is always sound).
 					vn.SetNZMask(maskForSize(vn.Size()))
 				}
 			} else if def := vn.Def(); def != nil && !def.HasFlag(PcodeOpMark) {
