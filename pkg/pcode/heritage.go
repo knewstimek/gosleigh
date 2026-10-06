@@ -1386,6 +1386,12 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			if task.NewAddresses() && h.fd.queryPropertyFlags(task.Addr, task.Size)&VarnodePersist != 0 {
 				h.guardReturnsPersist(task.Addr, task.Size)
 			}
+			// No nohighptr ranges are configured, so a pointer may reach any
+			// non-internal location. C++ parity: Heritage::guard
+			// (highPtrPossible -> guardStores).
+			if task.NewAddresses() && !task.Addr.Space.IsUnique() {
+				h.guardStores(task.Addr, task.Size)
+			}
 			reads, writes, inputs = h.Collect(task.Addr, task.Size)
 			if len(reads) == 0 && len(writes) == 0 && len(inputs) == 0 {
 				continue
@@ -1539,6 +1545,30 @@ func (h *Heritage) Guard(addr address.Address, size int32, addIndirects bool,
 	// register ranges (the register return value is never persistent).
 	h.guardCalls(addr.Space, addr.Offset, size)
 	h.guardReturns(0, addr, size)
+}
+
+// guardStores puts an INDIRECT for [addr,addr+size) on every STORE that may
+// write it: a STORE into the range's own space, or (for the stack) a store
+// through a spacebase pointer into the containing space.
+// C++ parity: heritage.cc Heritage::guardStores.
+// TODO known mismatch: the stack case (a spacebase-pointer STORE into the
+// stack's containing space) is left out: Go marks spacebase pointers at a
+// different point than C++ and guarding them turns stack slots into locals.
+func (h *Heritage) guardStores(addr address.Address, size int32) {
+	spc := addr.Space
+	for _, op := range h.fd.GetPcodeOpBank().AliveOps() {
+		if op.Code() != CPUI_STORE || op.IsDead() {
+			continue
+		}
+		storeSpace := loadStoreSpace(op)
+		if storeSpace == nil {
+			continue
+		}
+		if spc == storeSpace {
+			indop := h.fd.NewIndirectOp(op, spc, addr.Offset, size)
+			indop.SetFlag(PcodeOpIndirectStore)
+		}
+	}
 }
 
 // Return-output containment classes for guardReturns, the register-space subset
