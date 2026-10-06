@@ -856,15 +856,55 @@ func (r *RulePtrsubCharConstant) apply(op *PcodeOp, data *Funcdata) int {
 			if !data.isReadOnlyGlobal(at) {
 				return 0
 			}
-			if _, ok := data.stringData(at); !ok {
+			if _, _, ok := data.stringDataSized(at, int(outPtr.Pointee().Size())); !ok {
 				return 0
 			}
 		}
 	}
-	constant := data.NewConstant(op.Input(0).Size(), truncateToSize(base+off, op.Input(0).Size()))
-	BindSpaceConstant(constant, op.Input(0).GetSpaceFromConst())
+	val := truncateToSize(base+off, op.Input(0).Size())
+	spc := op.Input(0).GetSpaceFromConst()
+	// Give each descendant a chance to absorb the constant (a PTRADD of a
+	// constant index); the PTRSUB goes away when all of them do.
+	outvn := op.Output()
+	removeCopy := false
+	if !outvn.IsAddrForce() {
+		removeCopy = true
+		for _, subop := range outvn.DescendIter() {
+			if !ptrsubCharPushFurther(data, outPtr, spc, subop, subop.GetSlot(outvn), val) {
+				removeCopy = false
+			}
+		}
+	}
+	if removeCopy {
+		data.OpDestroy(op)
+		return 1
+	}
+	constant := data.NewConstant(op.Input(0).Size(), val)
+	BindSpaceConstant(constant, spc)
 	SetVarnodeType(constant, outPtr)
 	return rewriteToCopy(data, op, constant)
+}
+
+// ptrsubCharPushFurther folds a PTRADD of a constant index on the string
+// pointer into a constant pointer of its own.
+// C++ parity: RulePtrsubCharConstant::pushConstFurther.
+func ptrsubCharPushFurther(data *Funcdata, outtype *Pointer, spc *address.Space, op *PcodeOp, slot int, val uint64) bool {
+	if op.Code() != CPUI_PTRADD || slot != 0 {
+		return false
+	}
+	vn := op.Input(1)
+	if !vn.IsConstant() {
+		return false // Must be adding a constant
+	}
+	val += vn.Offset() * op.Input(2).Offset()
+	newconst := data.NewConstant(vn.Size(), truncateToSize(val, vn.Size()))
+	BindSpaceConstant(newconst, spc)
+	SetVarnodeType(newconst, outtype) // The pointer data-type goes on the new constant
+	data.OpRemoveInput(op, 2)
+	data.OpRemoveInput(op, 1)
+	data.OpSetOpcode(op, CPUI_COPY)
+	data.OpSetInput(op, newconst, 0)
+	return true
 }
 
 func (r *RulePtraddZero) apply(op *PcodeOp, data *Funcdata) int {
