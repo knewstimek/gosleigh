@@ -216,6 +216,7 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		spaceIdx  int
 		createIdx uint32
 		offset    uint64
+		key       *Varnode
 	}
 
 	// Collect candidate HVs: unnamed HVs that have at least one non-unique,
@@ -382,6 +383,7 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			spaceIdx:  spcIdx,
 			offset:    key.Offset(),
 			createIdx: uint32(key.CreateIndex()),
+			key:       key,
 		})
 	}
 
@@ -396,14 +398,8 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 	// C++ parity: ActionNameVars::linkSymbols walks spaces by index, then
 	// each space's varnodes in location order, visiting a high at its name
 	// representative.
-	sort.Slice(toName, func(i, j int) bool {
-		if toName[i].spaceIdx != toName[j].spaceIdx {
-			return toName[i].spaceIdx < toName[j].spaceIdx
-		}
-		if toName[i].offset != toName[j].offset {
-			return toName[i].offset < toName[j].offset
-		}
-		return toName[i].createIdx < toName[j].createIdx
+	sort.SliceStable(toName, func(i, j int) bool {
+		return CompareLocDef(toName[i].key, toName[j].key) < 0
 	})
 
 	// One counter shared by every prefix (iVar1, puVar2, ...).
