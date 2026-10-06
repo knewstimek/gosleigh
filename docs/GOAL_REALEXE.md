@@ -20,6 +20,7 @@
 | `37a144b` | 캐스트가 HighVariable 타입 사용, arithmeticOutputStandard, getExactPiece, baseExplicit 원본화, PIECE 토큰, 프로토타입 출력형 | 147 | - |
 | `07bedd0` | TraceDAG 원본화, 액션 변경 신호=count, cover의 implied 추적, heritage 단일 rename, mergeByDatatype, CMOV 블록 분할, 루프 조건 우회로 제거 | 160 | - |
 | `f241da2` | 반환값 복원 수명 원본화(guardReturns/ReturnRecovery), finalTransform/isMoveable, dominant copy, AliasChecker, guardStores, 이름 번호 순서, CALLOTHER 이름 | 164 | - |
+| `5505fee` | 점프테이블 실패 경고 문구, lookForFuncParamNames, 현재 함수 잠긴 프로토타입(부분), RuleShiftSub 원본화 | 165 | - |
 
 ## 도구 (`tools/realexe/`)
 - `realexe.py analyze|sample|measure|capture`, `gaps.py`(불일치 유형 집계), `difffn.py`(인덱스별 diff).
