@@ -298,11 +298,29 @@ func (sf *SubvariableFlow) tryReturnPull(op *PcodeOp, rvn *subvariableFlowReplac
 }
 
 // SubvariableFlow::tryCallReturnPush -- subflow.cc.
+// The output of a call whose return value is still unsettled can shrink to
+// the logical value: the call is patched to produce it directly.
 func (sf *SubvariableFlow) tryCallReturnPush(op *PcodeOp, rvn *subvariableFlowReplaceVarnode) bool {
-	// TODO known mismatch: call return-spec handling is not yet ported to Gosleigh.
-	_ = op
-	_ = rvn
-	return false
+	if !sf.aggressive {
+		if (rvn.vn.Consumed() &^ rvn.mask) != 0 { // Something outside the mask is consumed
+			return false // Don't truncate
+		}
+	}
+	if (rvn.mask & 1) == 0 {
+		return false // The logical value must be the least significant part
+	}
+	if sf.bitsize < 8 {
+		return false // The logical value must be at least a byte
+	}
+	fc := sf.fd.callSpecsForOp(op)
+	if fc == nil || fc.IsOutputLocked() {
+		return false
+	}
+	if fc.IsOutputActive() {
+		return false // Don't trim while the return value is being figured out
+	}
+	sf.addPush(op, rvn)
+	return true
 }
 
 // SubvariableFlow::trySwitchPull -- subflow.cc.
