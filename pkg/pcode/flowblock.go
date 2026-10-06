@@ -88,6 +88,9 @@ type FlowBlock struct {
 	// predecessor and test whether it gotos the RETURN block.
 	// C++ parity: block.hh FlowBlock::copymap / getCopyMap.
 	copymap *FlowBlock
+	// st holds the structuring state of a structure-graph block (children,
+	// goto target/type); nil until first needed.
+	st *blockStructInfo
 }
 
 // GetCopyMap returns the structure-graph clone leaf mapped to this block, or nil.

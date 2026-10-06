@@ -3,7 +3,6 @@ package pcode
 import (
 	"fmt"
 	"sort"
-	"sync"
 )
 
 type FloatingEdge struct {
@@ -48,29 +47,20 @@ type blockStructInfo struct {
 	overflowSyntax bool
 }
 
-var blockStructState = struct {
-	sync.Mutex
-	byBlock map[*FlowBlock]*blockStructInfo
-}{
-	byBlock: make(map[*FlowBlock]*blockStructInfo),
-}
-
+// getBlockStructInfo returns the structuring state of bl, creating it on
+// first use. It lives on the block so it is freed with the graph.
 func getBlockStructInfo(bl *FlowBlock) *blockStructInfo {
-	blockStructState.Lock()
-	defer blockStructState.Unlock()
-	info := blockStructState.byBlock[bl]
-	if info == nil {
-		info = &blockStructInfo{gotoEdge: -1}
-		blockStructState.byBlock[bl] = info
+	if bl.st == nil {
+		bl.st = &blockStructInfo{gotoEdge: -1}
 	}
-	return info
+	return bl.st
 }
 
 func (b *FlowBlock) StructuredChildren() []*FlowBlock {
-	info := getBlockStructInfo(b)
-	res := make([]*FlowBlock, len(info.children))
-	copy(res, info.children)
-	return res
+	if b.st == nil {
+		return nil
+	}
+	return append([]*FlowBlock(nil), b.st.children...)
 }
 
 func (b *FlowBlock) setStructuredChildren(children []*FlowBlock) {
