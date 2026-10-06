@@ -111,12 +111,14 @@ func (b *FlowBlock) switchNextFlowAfter(bl *FlowBlock) *FlowBlock {
 	if bl.Type() != BlockGotoType {
 		return nil
 	}
-	for i := 1; i < len(children); i++ {
-		if children[i] != bl {
+	// Cases print in sorted order; flow is to the next printed case.
+	cases := getBlockStructInfo(b).cases
+	for i := range cases {
+		if cases[i].block != bl {
 			continue
 		}
-		if i+1 < len(children) {
-			return children[i+1].getFrontLeaf()
+		if i+1 < len(cases) {
+			return cases[i+1].block.getFrontLeaf()
 		}
 		if b.Parent() == nil {
 			return nil

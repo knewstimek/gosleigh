@@ -2459,28 +2459,31 @@ func (s *printCState) emitSwitchBlock(bl *FlowBlock) error {
 		s.lang.Token(s.mustRenderSwitchSelector(children[0]))
 		s.lang.Token(")")
 	})
-	cases := children[1:]
-	for i, child := range cases {
-		// PrintLanguage.Label appends the trailing ':' itself, so the label text
-		// must not already carry one (otherwise "case 0::").
-		label := fmt.Sprintf("case %d", i)
-		if selectorHasDefault(children[0], i) {
-			label = "default"
-		}
-		s.lang.Label(label)
+	cases := getBlockStructInfo(bl).cases
+	jt := bl.switchJumpTable(s.fd)
+	for i, c := range cases {
+		s.emitSwitchCaseLabels(c, jt)
 		s.lang.Indent()
-		if err := s.emitBlock(child); err != nil {
-			return err
-		}
-		// Emit an explicit break for a case that formally exits the switch (its
-		// structured block leaves via a single out-edge to the switch exit) and
-		// is not the last case, which falls out of the switch anyway.
-		// C++ parity: printc.cc PrintC::emitBlockSwitch (bl->isExit(i) &&
-		// i != numCaseBlocks-1); BlockSwitch::addCase sets isexit = sizeOut()==1.
-		if s.caseExits(child) && i != len(cases)-1 {
+		if c.gototype != 0 {
 			s.lang.Statement(func() {
-				s.lang.Token("break")
+				if c.gototype == BlockFlagBreakGoto {
+					s.lang.Token("break")
+					return
+				}
+				s.lang.Token("goto")
+				s.lang.Space()
+				s.lang.Token(s.labelForBlock(c.block))
 			})
+		} else {
+			if err := s.emitBlock(c.block); err != nil {
+				return err
+			}
+			// Blocks that formally exit the switch need an explicit break.
+			if c.isexit && i != len(cases)-1 {
+				s.lang.Statement(func() {
+					s.lang.Token("break")
+				})
+			}
 		}
 		s.lang.Dedent()
 	}
@@ -2488,40 +2491,39 @@ func (s *printCState) emitSwitchBlock(bl *FlowBlock) error {
 	return nil
 }
 
-// caseExits reports whether a switch case's structured block formally exits the
-// switch, i.e. its terminal basic block ends in an unconditional BRANCH to the
-// shared switch exit. Ghidra renders that goto-to-exit as an explicit break. A
-// case terminating in RETURN (or falling through with no terminator) does not
-// need a break. This is the emit-time equivalent of C++
-// BlockSwitch::addCase's isexit = (bl->sizeOut() == 1): the structuring pass
-// collapses the case region and zeroes the FlowBlock out-edges, so the surviving
-// terminal BRANCH op is the faithful signal for the single exit edge.
-// C++ parity: block.cc BlockSwitch::addCase (block.cc:3514) +
-// printc.cc PrintC::emitBlockSwitch.
-func (s *printCState) caseExits(bl *FlowBlock) bool {
-	if bl == nil {
-		return false
+// emitSwitchCaseLabels prints "default:" or one "case N:" per jump-table
+// entry reaching the case. C++ parity: PrintC::emitSwitchCase.
+func (s *printCState) emitSwitchCaseLabels(c switchCase, jt *JumpTable) {
+	if c.isdefault {
+		s.lang.Label("default")
+		return
 	}
-	switch bl.Type() {
-	case BlockListType:
-		children := bl.StructuredChildren()
-		if len(children) > 0 {
-			return s.caseExits(children[len(children)-1])
-		}
-	case BlockBasicType, BlockPlain:
-		bb := toBasic(bl)
-		if bb != nil && bb.NumOps() > 0 {
-			return bb.Ops()[bb.NumOps()-1].Code() == CPUI_BRANCH
-		}
+	if jt == nil {
+		return
 	}
-	return false
+	var ct Datatype
+	if op := jt.IndirectOp(); op != nil && op.NumInput() > 0 {
+		ct = op.Input(0).TypeReadFacing(op)
+	}
+	for j, n := 0, jt.NumIndicesByBlock(c.basic); j < n; j++ {
+		// PrintLanguage.Label appends the ':' itself.
+		s.lang.Label("case " + caseLabelText(jt.caseLabel(c.basic, j), ct))
+	}
 }
 
-func selectorHasDefault(selector *FlowBlock, idx int) bool {
-	if selector == nil || idx < 0 || idx >= selector.SizeOut() {
-		return false
+// caseLabelText renders a case label constant in the switch variable's type.
+// C++ parity: PrintC::pushConstant for the switch type (enum and integer
+// paths; jump-table display formats are not modelled).
+func caseLabelText(val uint64, ct Datatype) string {
+	if ct == nil {
+		return formatIntegerLiteral(val, 4, false)
 	}
-	return selector.OutEdge(idx).Label&EdgeFlagDefaultSwitch != 0
+	if e, ok := ct.(*Enum); ok {
+		if name, ok := e.Values()[val]; ok {
+			return name
+		}
+	}
+	return formatIntegerLiteral(val, ct.Size(), ct.Metatype() == TYPE_INT)
 }
 
 // emitGotoStatement renders the unstructured-branch keyword for a BlockGoto or
@@ -2567,15 +2569,12 @@ func (s *printCState) emitGotoBlock(bl *FlowBlock) error {
 	return nil
 }
 
+// emitMultiGotoBlock prints the wrapped block; its goto edges are printed
+// as cases of the enclosing switch. C++ parity: BlockMultiGoto::emit.
 func (s *printCState) emitMultiGotoBlock(bl *FlowBlock) error {
-	if basic := s.firstBasicChild(bl); basic != nil {
-		if err := s.emitOps(basic, true); err != nil {
-			return err
-		}
+	if children := bl.StructuredChildren(); len(children) > 0 {
+		return s.emitBlock(children[0])
 	}
-	s.lang.Statement(func() {
-		s.emitGotoStatement(bl)
-	})
 	return nil
 }
 

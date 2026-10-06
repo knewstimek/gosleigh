@@ -45,6 +45,11 @@ type blockStructInfo struct {
 	gotoTarget     *FlowBlock
 	gotoType       uint32
 	overflowSyntax bool
+	// gotoTargets/defaultGoto: BlockMultiGoto::gotoedges/defaultswitch.
+	gotoTargets []*FlowBlock
+	defaultGoto bool
+	// cases: BlockSwitch::caseblocks.
+	cases []switchCase
 }
 
 // getBlockStructInfo returns the structuring state of bl, creating it on
@@ -649,10 +654,27 @@ func (bg *BlockGraph) newBlockIfGoto(bl *FlowBlock) *FlowBlock {
 	return res
 }
 
+// newBlockMultiGoto moves the unstructured out-edge idx of bl into a goto
+// list, wrapping bl in a BlockMultiGoto unless it already is one.
+// C++ parity: BlockGraph::newBlockMultiGoto.
+// TODO known mismatch: the C++ forceOutputNum that preserves a collapsed
+// self edge is not ported.
 func (bg *BlockGraph) newBlockMultiGoto(bl *FlowBlock, idx int) *FlowBlock {
-	res := bg.collapseRegion([]*FlowBlock{bl}, BlockMultiGotoType)
-	res.setGotoEdgeIndex(idx)
-	res.SetFlag(BlockFlagSwitchOut)
+	target := bl.getOut(idx)
+	isDefault := bl.OutEdge(idx).Label&EdgeFlagDefaultSwitch != 0
+	res := bl
+	if bl.Type() != BlockMultiGotoType {
+		res = bg.collapseRegion([]*FlowBlock{bl}, BlockMultiGotoType)
+		res.SetFlag(BlockFlagSwitchOut)
+	}
+	info := getBlockStructInfo(res)
+	info.gotoTargets = append(info.gotoTargets, target)
+	if target != bl {
+		bg.RemoveEdge(res, target)
+	}
+	if isDefault {
+		info.defaultGoto = true
+	}
 	return res
 }
 
@@ -673,7 +695,9 @@ func (bg *BlockGraph) newBlockInfLoop(bl *FlowBlock) *FlowBlock {
 }
 
 func (bg *BlockGraph) newBlockSwitch(cases []*FlowBlock, hasExit bool) *FlowBlock {
+	caseOrder := grabSwitchCases(cases) // before the cases lose their edges
 	res := bg.collapseRegion(cases, BlockSwitchType)
+	getBlockStructInfo(res).cases = caseOrder
 	// C++ parity: BlockGraph::newBlockSwitch -- the switch is resolved, so it
 	// is not a switch out. TODO: forceOutputNum(1) when hasExit is not ported.
 	res.ClearFlag(BlockFlagSwitchOut)
@@ -681,7 +705,13 @@ func (bg *BlockGraph) newBlockSwitch(cases []*FlowBlock, hasExit bool) *FlowBloc
 	return res
 }
 
-func (bg *BlockGraph) finalizePrinting(*Funcdata) {}
+// finalizePrinting readies the structure for printing.
+// C++ parity: BlockGraph::finalizePrinting (only BlockSwitch overrides it).
+func (bg *BlockGraph) finalizePrinting(fd *Funcdata) {
+	for i := 0; i < bg.GetSize(); i++ {
+		finalizeSwitches(fd, bg.GetBlock(i))
+	}
+}
 
 // scopeBreak walks the top-level structured list, assigning a fall-through exit
 // to each block (the next sibling, or the enclosing curexit for the last one),
@@ -767,16 +797,20 @@ func (b *FlowBlock) scopeBreak(curexit, curloopexit *FlowBlock) {
 			children[0].scopeBreak(children[0], curexit)
 		}
 	case BlockSwitchType:
-		// BlockSwitch::scopeBreak (block.cc:3613): the case gototype -> break
-		// assignment is intentionally omitted; Gosleigh's emitSwitchBlock renders
-		// per-case break; from the terminal BRANCH (caseExits), independent of the
-		// gototype mechanism. Recurse so nested loops/gotos inside cases are still
-		// scoped.
+		// BlockSwitch::scopeBreak (block.cc:3613).
 		if len(children) > 0 {
 			children[0].scopeBreak(nil, curexit)
 		}
-		for i := 1; i < len(children); i++ {
-			children[i].scopeBreak(curexit, curexit)
+		cases := getBlockStructInfo(b).cases
+		for i := range cases {
+			if cases[i].gototype != 0 {
+				// A goto straight to the exit prints as an (empty) break.
+				if curexit != nil && cases[i].block.index == curexit.index {
+					cases[i].gototype = BlockFlagBreakGoto
+				}
+				continue
+			}
+			cases[i].block.scopeBreak(curexit, curexit)
 		}
 	case BlockMultiGotoType:
 		// BlockMultiGoto::scopeBreak (block.cc:2918).
@@ -808,6 +842,13 @@ func (b *FlowBlock) markUnstructured() {
 	case BlockIfType:
 		if t := b.GotoTargetBlock(); t != nil && b.GotoType() == BlockFlagGotoGoto {
 			markCopyBlock(t)
+		}
+	case BlockSwitchType:
+		// BlockSwitch::markUnstructured.
+		for _, c := range getBlockStructInfo(b).cases {
+			if c.gototype == BlockFlagGotoGoto {
+				markCopyBlock(c.block)
+			}
 		}
 	}
 }
@@ -1239,7 +1280,7 @@ func (c *CollapseStructure) ruleBlockIfElse(bl *FlowBlock) bool {
 }
 
 func (c *CollapseStructure) ruleBlockGoto(bl *FlowBlock) bool {
-	if bl.Type() == BlockGotoType || bl.Type() == BlockMultiGotoType {
+	if bl.Type() == BlockGotoType {
 		return false
 	}
 	for i := 0; i < bl.SizeOut(); i++ {
