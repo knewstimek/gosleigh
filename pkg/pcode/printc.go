@@ -1673,12 +1673,15 @@ func (s *printCState) emitIfGotoBlock(bl *FlowBlock) error {
 	if err := s.emitConditionLead(condChild); err != nil {
 		return err
 	}
-	s.lang.Statement(func() {
+	s.lang.Line(func() {
 		s.lang.Token("if")
 		s.lang.Space()
 		s.emitConditionParen(cond)
 		s.lang.Space()
-		s.emitGotoStatement(bl)
+		s.lang.StatementGroup(func() { // emitGotoStatement's beginStatement
+			s.emitGotoStatement(bl)
+			s.lang.Token(";")
+		})
 	})
 	return nil
 }

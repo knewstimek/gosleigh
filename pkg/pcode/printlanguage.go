@@ -201,6 +201,20 @@ func (pl *PrintLanguage) Statement(fn func()) {
 	})
 }
 
+// StatementGroup emits fn inside a statement delimiter group, so a line
+// break prefers the space in front of it. C++ parity: Emit::beginStatement /
+// endStatement.
+func (pl *PrintLanguage) StatementGroup(fn func()) {
+	ge, ok := pl.emitter.(GroupEmitter)
+	if !ok {
+		fn()
+		return
+	}
+	id := ge.OpenGroup()
+	fn()
+	ge.CloseGroup(id)
+}
+
 func (pl *PrintLanguage) OpenBlock() {
 	// The indent opens before the line break so the first statement's width
 	// is measured at the block's indent. C++ parity: PrintC emits
