@@ -239,6 +239,29 @@ func (bb *BlockBasic) LastOp() *PcodeOp {
 }
 
 // EmptyOp returns true if there are no ops.
+// entryAddr is the address of the block's original entry instruction: the
+// start of its cover when that is a single range, else the start of the
+// range holding the first op. C++ parity: BlockBasic::getEntryAddr.
+func (bb *BlockBasic) entryAddr() address.Address {
+	if bb.srcDelegate != nil {
+		return bb.srcDelegate.entryAddr()
+	}
+	first := bb.FirstOp()
+	if len(bb.cover) == 1 {
+		return address.Address{Space: bb.cover[0].space, Offset: bb.cover[0].first}
+	}
+	if first == nil {
+		return address.Address{}
+	}
+	a := first.Addr()
+	for _, r := range bb.cover {
+		if r.space == a.Space && a.Offset >= r.first && a.Offset <= r.last {
+			return address.Address{Space: r.space, Offset: r.first}
+		}
+	}
+	return a
+}
+
 // startAddr is the start of the block's first address range.
 // C++ parity: BlockBasic::getStart. A block built without a cover falls back
 // to its first non-MULTIEQUAL op's address.

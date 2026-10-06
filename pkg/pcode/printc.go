@@ -2510,14 +2510,15 @@ func (s *printCState) labelForBlock(bl *FlowBlock) string {
 	// C++ parity: PrintC::emitLabel (queryCodeLabel skipped on hasSpecialLabel).
 	label := fmt.Sprintf("label_%d", len(s.blockLabels))
 	if bb := toBasic(bl); bb != nil {
-		if op := bb.FirstOp(); op != nil {
+		if bb.FirstOp() != nil {
+			off := bb.entryAddr().Offset // C++ parity: BlockBasic::getEntryAddr
 			switch {
 			case bb.HasFlag(BlockFlagJoinedBlock):
-				label = fmt.Sprintf("joined_r0x%08x", op.Addr().Offset)
+				label = fmt.Sprintf("joined_r0x%08x", off)
 			case bb.HasFlag(BlockFlagDuplicateBlock):
-				label = fmt.Sprintf("dup_r0x%08x", op.Addr().Offset)
+				label = fmt.Sprintf("dup_r0x%08x", off)
 			default:
-				label = fmt.Sprintf("LAB_%08x", op.Addr().Offset)
+				label = fmt.Sprintf("LAB_%08x", off)
 			}
 		}
 	}
