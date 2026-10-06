@@ -1024,58 +1024,93 @@ func (m *Merge) mergeRequired() {
 	m.MergeMarker()
 }
 
+// mergeByDatatype speculatively merges HighVariables of identical type. Highs
+// are gathered in storage-location order and grouped by the type of each
+// group's first member. C++ parity: Merge::mergeByDatatype.
 func (m *Merge) mergeByDatatype() {
-	highByType := make(map[Datatype][]*HighVariable)
-	seen := make(map[*HighVariable]struct{})
+	var highlist []*HighVariable
+	seen := make(map[*HighVariable]bool)
 	for _, vn := range m.fd.GetVarnodeBank().AllVarnodes() {
 		if vn == nil || vn.IsFree() {
+			continue
+		}
+		high := vn.High()
+		if high == nil || seen[high] {
 			continue
 		}
 		if !mergeTestBasic(vn) {
 			continue
 		}
-		high := vn.High()
-		if high == nil {
-			continue
-		}
-		if _, ok := seen[high]; ok {
-			continue
-		}
-		seen[high] = struct{}{}
-		highByType[high.Type()] = append(highByType[high.Type()], high)
+		seen[high] = true
+		highlist = append(highlist, high)
 	}
-	for _, group := range highByType {
-		if len(group) <= 1 {
-			continue
-		}
-		sort.Slice(group, func(i, j int) bool {
-			return highKey(group[i]) < highKey(group[j])
-		})
-		var merged []*HighVariable
-		for _, high := range group {
-			placed := false
-			for _, dst := range merged {
-				// C++ mergeByDatatype defers to mergeLinear, which gates each
-				// candidate on mergeTestSpeculative (not the weaker Required test):
-				// globals, inputs, and addr-tied variables are never speculatively
-				// merged. Using Required here would let a register parameter be
-				// absorbed by a same-typed accumulator.
-				// C++ parity: merge.cc Merge::mergeLinear (line 286).
-				if !mergeTestSpeculative(dst, high) {
-					continue
-				}
-				if m.testCache.Intersection(dst, high) {
-					continue
-				}
-				mergeHighVariables(dst, high, m.testCache)
-				placed = true
-				break
-			}
-			if !placed {
-				merged = append(merged, high)
+	for len(highlist) != 0 {
+		ct := highlist[0].Type()
+		highvec := []*HighVariable{highlist[0]}
+		rest := highlist[:0:0]
+		for _, h := range highlist[1:] {
+			if h.Type() == ct {
+				highvec = append(highvec, h)
+			} else {
+				rest = append(rest, h)
 			}
 		}
+		highlist = rest
+		m.mergeLinear(highvec)
 	}
+}
+
+// mergeLinear merges each high, in block order, into the first earlier
+// survivor it can speculatively join. C++ parity: Merge::mergeLinear.
+func (m *Merge) mergeLinear(highvec []*HighVariable) {
+	if len(highvec) <= 1 {
+		return
+	}
+	for _, h := range highvec {
+		m.testCache.UpdateHigh(h)
+	}
+	sort.SliceStable(highvec, func(i, j int) bool { return compareHighByBlock(highvec[i], highvec[j]) })
+	var highstack []*HighVariable
+	for _, high := range highvec {
+		placed := false
+		for _, dst := range highstack {
+			if !mergeTestSpeculative(dst, high) {
+				continue
+			}
+			// C++ parity: Merge::merge(high1,high2,true) refuses on intersection.
+			if m.testCache.Intersection(dst, high) {
+				continue
+			}
+			mergeHighVariables(dst, high, m.testCache)
+			placed = true
+			break
+		}
+		if !placed {
+			highstack = append(highstack, high)
+		}
+	}
+}
+
+// compareHighByBlock orders highs by the first block of their cover, then by
+// the address of their first instance and its definition.
+// C++ parity: merge.cc compareHighByBlock / Cover::compareTo.
+func compareHighByBlock(a, b *HighVariable) bool {
+	ab, bb := a.getCover().firstBlock(), b.getCover().firstBlock()
+	if ab != bb {
+		return ab < bb
+	}
+	v1, v2 := a.instances[0], b.instances[0]
+	if v1.Addr() == v2.Addr() {
+		d1, d2 := v1.Def(), v2.Def()
+		if d1 == nil {
+			return d2 != nil
+		}
+		if d2 == nil {
+			return false
+		}
+		return d1.Addr().Less(d2.Addr())
+	}
+	return v1.Addr().Less(v2.Addr())
 }
 
 func (m *Merge) mergeAdjacentCopies() {

@@ -477,15 +477,16 @@ func (c *Cover) AddRefPoint(ref *PcodeOp, vn *Varnode) {
 			}
 			// MULTIEQUAL: may be adding new cover via a different branch, don't return.
 		} else {
+			// The tip test reads the stop from before the update.
+			op := cb.stop
 			startop := cb.start
 			cb.SetEnd(ref)
 			ustop := getOpUIndex(cb.stop)
 			if ustop >= getOpUIndex(startop) {
-				// Check the infinitesimal-tip case
-				origStop := cb.stop
-				_ = origStop
-				if cb.stop != nil && cb.stop != blockEndSentinel &&
-					cb.stop.Code() == CPUI_MULTIEQUAL && cb.start == nil {
+				// Only an infinitesimal tip of cover through one MULTIEQUAL
+				// branch: still traverse the branches.
+				if op != nil && op != blockEndSentinel &&
+					op.Code() == CPUI_MULTIEQUAL && startop == nil {
 					for j := 0; j < bl.SizeIn(); j++ {
 						c.addRefRecurse(bl.InEdge(j).Point)
 					}
@@ -508,6 +509,18 @@ func (c *Cover) AddRefPoint(ref *PcodeOp, vn *Varnode) {
 			c.addRefRecurse(bl.InEdge(j).Point)
 		}
 	}
+}
+
+// firstBlock is the lowest block index covered (1000000 when empty).
+// C++ parity: Cover::compareTo (first map key).
+func (c *Cover) firstBlock() int32 {
+	first := int32(1000000)
+	for blk := range c.blocks {
+		if blk < first {
+			first = blk
+		}
+	}
+	return first
 }
 
 // Rebuild rebuilds this Cover from the def-use range of a single Varnode,
