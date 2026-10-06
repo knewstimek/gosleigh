@@ -354,6 +354,38 @@ func (s *Struct) FieldAt(offset int32) (TypeField, bool) {
 	return TypeField{}, false
 }
 
+// PartialStruct is the type of a piece of a structure or array that matches
+// no component exactly (4 bytes of a char[17] string). Variables never keep
+// it: a HighVariable uses the stripped undefined type.
+// C++ parity: TypePartialStruct.
+type PartialStruct struct {
+	datatypeBase
+	container Datatype
+	offset    int64
+	stripped  Datatype
+}
+
+// Container returns the structure or array this is a piece of.
+func (p *PartialStruct) Container() Datatype { return p.container }
+
+// Offset returns the byte offset within the container.
+func (p *PartialStruct) Offset() int64 { return p.offset }
+
+// Stripped returns the undefined type used where a formal type is needed.
+func (p *PartialStruct) Stripped() Datatype { return p.stripped }
+
+// componentForPtr is the type a pointer to this piece points to: the array
+// element when the piece starts on one, else the stripped type.
+// C++ parity: TypePartialStruct::getComponentForPtr.
+func (p *PartialStruct) componentForPtr() Datatype {
+	if arr, ok := p.container.(*Array); ok {
+		if el := arr.Element(); el != nil && el.Metatype() != TYPE_UNKNOWN && el.AlignSize() > 0 && p.offset%int64(el.AlignSize()) == 0 {
+			return el
+		}
+	}
+	return p.stripped
+}
+
 // Union is a composite type with overlapping fields.
 type Union struct {
 	datatypeBase

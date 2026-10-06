@@ -50,6 +50,8 @@ func (f *TypeFactory) Intern(dt Datatype) Datatype {
 		return f.GetPointerRel(typed.Size(), typed.Pointee(), typed.WordSize(), typed.Parent(), typed.ByteOffset())
 	case *Array:
 		return f.GetArray(typed.Count(), typed.Element())
+	case *PartialStruct:
+		return typed
 	case *Struct:
 		if typed.Flags()&datatypeTypedef != 0 {
 			return typed
@@ -115,6 +117,27 @@ func (f *TypeFactory) GetTypedefStruct(name string, s *Struct) *Struct {
 	value.datatypeBase.flags |= datatypeTypedef
 	f.intern[key] = &value
 	return &value
+}
+
+// GetPartialStruct returns the piece of size bytes at offset of container.
+// C++ parity: TypeFactory::getTypePartialStruct.
+func (f *TypeFactory) GetPartialStruct(container Datatype, offset int64, size int32) *PartialStruct {
+	if p, ok := container.(*PartialStruct); ok {
+		container = p.container
+		offset += p.offset
+	}
+	stripped := f.GetBase(size, TYPE_UNKNOWN, "")
+	key := fmt.Sprintf("partialstruct:%p:%d:%d", container, offset, size)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if v, ok := f.intern[key].(*PartialStruct); ok {
+		return v
+	}
+	base := newDatatypeBase(size, 1, TYPE_PARTIALSTRUCT, stripped.Name())
+	base.submeta = SUB_PARTIALSTRUCT
+	v := &PartialStruct{datatypeBase: base, container: container, offset: offset, stripped: stripped}
+	f.intern[key] = v
+	return v
 }
 
 func (f *TypeFactory) GetTypedefBase(name string, base *Base) *Base {
@@ -490,15 +513,26 @@ func (f *TypeFactory) exactPiece(ct Datatype, offset int64, size int32) Datatype
 	if ct == nil || offset+int64(size) > int64(ct.Size()) {
 		return nil
 	}
+	var lastType Datatype
+	var lastOff int64
 	curOff := offset
 	for ct != nil {
 		if ct.Size() <= size {
 			if ct.Size() == size {
 				return ct // perfect size match
 			}
-			return nil
+			break
 		}
+		lastType, lastOff = ct, curOff
 		ct, curOff = datatypeSubType(ct, curOff)
+	}
+	// lastType is bigger than size: a piece of a structure or array.
+	// C++ parity: TypeFactory::getExactPiece (partial union/enum not modelled).
+	if lastType != nil {
+		switch lastType.Metatype() {
+		case TYPE_STRUCT, TYPE_ARRAY:
+			return f.GetPartialStruct(lastType, lastOff, size)
+		}
 	}
 	return nil
 }

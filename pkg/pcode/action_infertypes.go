@@ -694,6 +694,18 @@ func pointerDownChain(tf *TypeFactory, p *Pointer, off *int64, par **Pointer, al
 // C++ parity: Datatype/TypeArray/TypeStruct::getSubType.
 func datatypeSubType(dt Datatype, off int64) (Datatype, int64) {
 	switch t := dt.(type) {
+	case *PartialStruct:
+		// C++ parity: TypePartialStruct::getSubType.
+		sizeLeft := int64(t.Size()) - off
+		off += t.offset
+		ct := t.container
+		for {
+			ct, off = datatypeSubType(ct, off)
+			if ct == nil || int64(ct.Size())-off <= sizeLeft {
+				break
+			}
+		}
+		return ct, off
 	case *Array:
 		el := t.Element()
 		if el == nil || off >= int64(t.Size()) || el.AlignSize() == 0 {
@@ -816,8 +828,9 @@ func inferPropagateToPointer(tf *TypeFactory, dt Datatype, sz int32, wordsz uint
 	}
 	if dt.Metatype() == TYPE_PTR {
 		dt = tf.GetBase(dt.Size(), TYPE_UNKNOWN, "unknown") // Pass back unknown *
+	} else if p, ok := dt.(*PartialStruct); ok {
+		dt = p.componentForPtr()
 	}
-	// C++ also unwraps TYPE_PARTIALSTRUCT here (not modelled).
 	return tf.GetPointer(sz, dt, wordsz)
 }
 
