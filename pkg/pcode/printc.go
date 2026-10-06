@@ -1067,7 +1067,7 @@ func (s *printCState) emitLocalDeclarations() bool {
 		if st := s.stackSymbolType(vn); st != nil {
 			dt = st
 		} else {
-			dt = s.normalizeTypeForDecl(vn.TypeDefFacing())
+			dt = s.normalizeTypeForDecl(vn.HighTypeDefFacing())
 		}
 		// A default name's prefix is the printNameBase of the type the
 		// variable is declared with; types can still settle after
@@ -3937,7 +3937,8 @@ func (s *printCState) renderCast(op *PcodeOp) (ExprFragment, error) {
 	}
 	dt := Datatype(nil)
 	if out := op.Output(); out != nil {
-		dt = s.normalizeTypeForDecl(out.TypeDefFacing())
+		// C++ parity: PrintC::opCast pushes getOut()->getHighTypeDefFacing().
+		dt = s.normalizeTypeForDecl(out.HighTypeDefFacing())
 	}
 	return s.lang.CastExpr(CTypeString(dt), inner), nil
 }
