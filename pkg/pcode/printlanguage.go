@@ -329,7 +329,22 @@ func (pl *PrintLanguage) EmitAssignFragment(lhs string, rhs ExprFragment) {
 }
 
 func (pl *PrintLanguage) emitFragmentTree(ge GroupEmitter, expr ExprFragment) {
+	pl.emitFragmentTreeIn(ge, expr, true)
+}
+
+// emitFragmentTreeIn emits expr; ownGroup is false when the caller's paren
+// already is the operator's printing group. C++ parity: PrintLanguage::pushOp
+// opens either openParen or openGroup for an operator, never both.
+func (pl *PrintLanguage) emitFragmentTreeIn(ge GroupEmitter, expr ExprFragment, ownGroup bool) {
 	if n := expr.node; n != nil {
+		if n.kind == fragParen {
+			// Structural parentheses (emitBlockCondition's openParen) are the
+			// group themselves.
+			id := ge.OpenParen("(")
+			pl.emitFragmentTree(ge, n.kids[0])
+			ge.CloseParen(")", id)
+			return
+		}
 		if n.kind == fragCondJoin {
 			// A structured &&/|| between condition blocks is emitted without an
 			// operator group. C++ parity: PrintC::emitBlockCondition (emitOp on
@@ -351,20 +366,25 @@ func (pl *PrintLanguage) emitFragmentTree(ge GroupEmitter, expr ExprFragment) {
 			pl.emitFragmentOperand(ge, n.kids[1], n.parens[1])
 			return
 		}
-		pl.emitFragmentNode(ge, n)
+		pl.emitFragmentNode(ge, n, ownGroup)
 		return
 	}
 	if expr.op == "" || expr.left == nil || expr.right == nil {
 		pl.Token(expr.Text)
 		return
 	}
-	id := ge.OpenGroup()
+	id := -1
+	if ownGroup {
+		id = ge.OpenGroup()
+	}
 	pl.emitFragmentOperand(ge, *expr.left, expr.leftParen)
 	ge.Spaces(binaryOpSpacing, binaryOpBump)
 	pl.Token(expr.op)
 	ge.Spaces(binaryOpSpacing, binaryOpBump)
 	pl.emitFragmentOperand(ge, *expr.right, expr.rightParen)
-	ge.CloseGroup(id)
+	if ownGroup {
+		ge.CloseGroup(id)
+	}
 }
 
 func (pl *PrintLanguage) emitFragmentOperand(ge GroupEmitter, child ExprFragment, paren bool) {
@@ -373,14 +393,17 @@ func (pl *PrintLanguage) emitFragmentOperand(ge GroupEmitter, child ExprFragment
 		return
 	}
 	id := ge.OpenParen("(")
-	pl.emitFragmentTree(ge, child)
+	pl.emitFragmentTreeIn(ge, child, false) // the paren is the operator's group
 	ge.CloseParen(")", id)
 }
 
 // emitFragmentNode replays one operator node as Ghidra's emitOp sequence
 // inside its own printing group. C++ parity: PrintLanguage::emitOp.
-func (pl *PrintLanguage) emitFragmentNode(ge GroupEmitter, n *fragNode) {
-	id := ge.OpenGroup()
+func (pl *PrintLanguage) emitFragmentNode(ge GroupEmitter, n *fragNode, ownGroup bool) {
+	id := -1
+	if ownGroup {
+		id = ge.OpenGroup()
+	}
 	switch n.kind {
 	case fragBinary:
 		pl.emitFragmentOperand(ge, n.kids[0], n.parens[0])
@@ -419,7 +442,9 @@ func (pl *PrintLanguage) emitFragmentNode(ge GroupEmitter, n *fragNode) {
 		ge.Spaces(n.spacing, n.bump)
 		pl.emitFragmentOperand(ge, n.kids[1], n.parens[1])
 	}
-	ge.CloseGroup(id)
+	if ownGroup {
+		ge.CloseGroup(id)
+	}
 }
 
 // parenText wraps text in parentheses when paren is set.
