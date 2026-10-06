@@ -223,113 +223,161 @@ func pointerAlignSize(ptr *Pointer) int32 {
 	return ptr.Pointee().AlignSize()
 }
 
-func ptrsubMatches(ptr *Pointer, val int64, extra int64, multiplier int64) bool {
+// testForArraySlack reports whether an offset outside dt can still be
+// absorbed by an array inside it (or dt itself being an array).
+// C++ parity: TypePointer::testForArraySlack.
+func testForArraySlack(dt Datatype, off int64) bool {
+	if dt.Metatype() == TYPE_ARRAY {
+		return true
+	}
+	if off < 0 {
+		dist, _, _ := nearestArrayedComponentForward(dt, off, 128)
+		return dist >= 0
+	}
+	dist, _, _ := nearestArrayedComponentBackward(dt, off, 128)
+	return dist >= 0
+}
+
+// isPtrsubMatching reports whether a PTRSUB of offset off from a value of
+// type dt (plus extra constant offset and a biggest multiplier from the rest
+// of the additive expression) is a valid field access. A non-pointer is never
+// matching. The spacebase case resolves symbols through the scope.
+// C++ parity: Datatype/TypePointer/TypePointerRel::isPtrsubMatching.
+func isPtrsubMatching(data *Funcdata, spc *address.Space, dt Datatype, off, extra, multiplier int64) bool {
+	ptr, _ := dt.(*Pointer)
 	if ptr == nil || ptr.Pointee() == nil {
 		return false
 	}
-	totalBytes := int32((val + extra) * int64(maxWordSize(ptr.WordSize())))
-	base := ptr.Pointee()
-	switch base.Metatype() {
-	case TYPE_STRUCT:
-		if totalBytes == 0 {
-			return true
-		}
-		_, ok := hasMatchingSubType(base, int64(totalBytes), uint64(multiplier))
-		return ok
+	ws := int64(ptr.WordSize())
+	if ws <= 0 {
+		ws = 1
+	}
+	if ptr.IsFormalPointerRel() { // TypePointerRel without a stripped form
+		iOff := off*ws + int64(ptr.ByteOffset()) + extra*ws
+		return iOff >= 0 && iOff <= int64(ptr.Parent().Size())
+	}
+	ptrto := ptr.Pointee()
+	switch ptrto.Metatype() {
+	case TYPE_SPACEBASE:
+		return data.spacebasePtrsubMatching(spc, ptr, off, extra)
 	case TYPE_ARRAY:
-		arr, ok := base.(*Array)
-		if !ok || arr.Element() == nil || arr.Element().AlignSize() <= 0 {
+		if off != 0 {
 			return false
 		}
-		return totalBytes >= 0 && totalBytes < arr.Size() && totalBytes%arr.Element().AlignSize() == 0
-	default:
-		return totalBytes == 0
+		if multiplier*ws >= int64(ptrto.AlignSize()) {
+			return false
+		}
+	case TYPE_STRUCT:
+		typesize := int64(ptrto.Size())
+		if multiplier*ws >= int64(ptrto.AlignSize()) {
+			return false
+		}
+		extra *= ws
+		subType, newoff := datatypeSubType(ptrto, off*ws)
+		if subType != nil {
+			if newoff != 0 {
+				return false
+			}
+			if extra < 0 || extra >= int64(subType.Size()) {
+				if !testForArraySlack(subType, extra) {
+					return false
+				}
+			}
+		} else {
+			extra += newoff
+			if (extra < 0 || extra >= typesize) && typesize != 0 {
+				return false
+			}
+		}
+	default: // including TYPE_UNION: never resolved through a PTRSUB here
+		return false
 	}
+	return true
 }
 
+// getConstOffsetBack sums the constants of an additive expression and passes
+// back the biggest multiplicative coefficient in it.
+// C++ parity: RulePtrsubUndo::getConstOffsetBack.
 func getConstOffsetBack(vn *Varnode, maxLevel int) (int64, int64) {
-	if vn == nil {
+	if vn.IsConstant() {
+		return int64(vn.Offset()), 0
+	}
+	if !vn.IsWritten() {
 		return 0, 0
 	}
-	if vn.IsConstant() {
-		return signExtendToInt64(vn.Offset(), vn.Size()), 0
-	}
-	if !vn.IsWritten() || maxLevel <= 0 {
+	maxLevel--
+	if maxLevel < 0 {
 		return 0, 0
 	}
 	op := vn.Def()
+	var retval, multiplier int64
 	switch op.Code() {
 	case CPUI_INT_ADD:
-		a, ma := getConstOffsetBack(op.Input(0), maxLevel-1)
-		b, mb := getConstOffsetBack(op.Input(1), maxLevel-1)
-		if mb > ma {
-			ma = mb
+		for slot := 0; slot < 2; slot++ {
+			val, sub := getConstOffsetBack(op.Input(slot), maxLevel)
+			retval += val
+			if sub > multiplier {
+				multiplier = sub
+			}
 		}
-		return a + b, ma
 	case CPUI_INT_MULT:
-		constSlot := -1
-		if op.Input(0).IsConstant() {
-			constSlot = 0
-		} else if op.Input(1).IsConstant() {
-			constSlot = 1
-		}
-		if constSlot < 0 {
+		cvn := op.Input(1)
+		if !cvn.IsConstant() {
 			return 0, 0
 		}
-		mult := signExtendToInt64(op.Input(constSlot).Offset(), op.Input(constSlot).Size())
-		_, submult := getConstOffsetBack(op.Input(1-constSlot), maxLevel-1)
-		if submult != 0 {
-			mult *= submult
+		multiplier = int64(cvn.Offset())
+		if _, sub := getConstOffsetBack(op.Input(0), maxLevel); sub > 0 {
+			multiplier *= sub // Only contribute to the multiplier
 		}
-		return 0, mult
 	}
-	return 0, 0
+	return retval, multiplier
 }
 
+// ptrsubUndoDepthLimit is RulePtrsubUndo::DEPTH_LIMIT.
+const ptrsubUndoDepthLimit = 8
+
+// getExtraOffset walks the additive expression (INT_ADD, PTRADD, PTRSUB) fed
+// by a PTRSUB and returns the extra constant it adds plus the biggest
+// multiplier of any term.
+// C++ parity: RulePtrsubUndo::getExtraOffset.
 func getExtraOffset(op *PcodeOp) (int64, int64) {
-	extra := int64(0)
-	multiplier := int64(0)
-	if op == nil || op.Output() == nil {
-		return 0, 0
-	}
-	out := op.Output()
-	for desc := out.LoneDescend(); desc != nil; desc = out.LoneDescend() {
-		switch desc.Code() {
+	var extra, multiplier int64
+	outvn := op.Output()
+	cur := outvn.LoneDescend()
+loop:
+	for cur != nil {
+		switch cur.Code() {
 		case CPUI_INT_ADD:
-			slot := desc.GetSlot(out)
-			add, mult := getConstOffsetBack(desc.Input(1-slot), 8)
-			extra += add
-			if mult > multiplier {
-				multiplier = mult
+			slot := cur.GetSlot(outvn)
+			val, sub := getConstOffsetBack(cur.Input(1-slot), ptrsubUndoDepthLimit) // Constants from the other input
+			extra += val
+			if sub > multiplier {
+				multiplier = sub
 			}
 		case CPUI_PTRSUB:
-			extra += signExtendToInt64(desc.Input(1).Offset(), desc.Input(1).Size())
+			extra += int64(cur.Input(1).Offset())
 		case CPUI_PTRADD:
-			if desc.Input(0) != out {
-				return extra, multiplier
+			if cur.Input(0) != outvn {
+				break loop
 			}
-			scale := signExtendToInt64(desc.Input(2).Offset(), desc.Input(2).Size())
-			idx := desc.Input(1)
-			if idx.IsConstant() {
-				extra += scale * signExtendToInt64(idx.Offset(), idx.Size())
-			} else {
-				_, mult := getConstOffsetBack(idx, 8)
-				if mult != 0 {
-					scale *= mult
-				}
-				if scale > multiplier {
-					multiplier = scale
-				}
+			ptraddmult := int64(cur.Input(2).Offset())
+			invn := cur.Input(1)
+			if invn.IsConstant() { // Only contribute to the extra if the index is constant
+				extra += ptraddmult * int64(invn.Offset())
+			}
+			if _, sub := getConstOffsetBack(invn, ptrsubUndoDepthLimit); sub != 0 {
+				ptraddmult *= sub // otherwise just contribute to the multiplier
+			}
+			if ptraddmult > multiplier {
+				multiplier = ptraddmult
 			}
 		default:
-			return extra, multiplier
+			break loop
 		}
-		out = desc.Output()
-		if out == nil {
-			break
-		}
+		outvn = cur.Output()
+		cur = outvn.LoneDescend()
 	}
-	return extra, multiplier
+	return signExtendToInt64(uint64(extra), outvn.Size()), multiplier
 }
 
 func removeLocalAddRecurse(op *PcodeOp, slot int, maxLevel int, data *Funcdata) int64 {
@@ -627,34 +675,22 @@ func (r *RulePtraddUndo) apply(op *PcodeOp, data *Funcdata) int {
 }
 
 func (r *RulePtrsubUndo) apply(op *PcodeOp, data *Funcdata) int {
-	if !data.HasTypeRecoveryStarted() || op.NumInput() < 2 {
+	if !data.HasTypeRecoveryStarted() {
 		return 0
 	}
-	ptr, _ := op.Input(0).TypeReadFacing(op).(*Pointer)
-	if ptr == nil {
-		return 0
-	}
-	val := signExtendToInt64(op.Input(1).Offset(), op.Input(1).Size())
+	basevn := op.Input(0)
+	cvn := op.Input(1)
+	val := int64(cvn.Offset())
 	extra, multiplier := getExtraOffset(op)
-	// A spacebase pointer resolves its subtype through the symbol table rather
-	// than a structural sub-field walk, so it needs the scope-aware check.
-	// C++ parity: TypePointer::isPtrsubMatching TYPE_SPACEBASE branch.
-	if ptr.Pointee() != nil && ptr.Pointee().Metatype() == TYPE_SPACEBASE {
-		if data.spacebasePtrsubMatching(op.Input(0).GetSpaceFromConst(), ptr, val, extra) {
-			return 0
-		}
-	} else if ptrsubMatches(ptr, val, extra, multiplier) {
+	if isPtrsubMatching(data, basevn.GetSpaceFromConst(), basevn.TypeReadFacing(op), val, extra, multiplier) {
 		return 0
 	}
 	data.OpSetOpcode(op, CPUI_INT_ADD)
 	op.ClearStopTypePropagation()
-	removed := int64(0)
-	if out := op.Output(); out != nil {
-		removed = removeLocalAdds(out, data)
+	if extra = removeLocalAdds(op.Output(), data); extra != 0 {
+		val += extra // Lump extra into additive offset
+		data.OpSetInput(op, data.NewConstant(cvn.Size(), truncateToSize(uint64(val), cvn.Size())), 1)
 	}
-	total := val + removed
-	data.OpSetInput(op, data.NewConstant(op.Input(1).Size(), truncateToSize(uint64(total), op.Input(1).Size())), 1)
-	SetVarnodeType(op.Output(), op.Input(0).TypeReadFacing(op))
 	return 1
 }
 

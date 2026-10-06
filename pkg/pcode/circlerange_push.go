@@ -96,7 +96,7 @@ func (r *circleRange) containsRange(op2 *circleRange) bool {
 	if r.left == op2.left && r.right == op2.right {
 		return true
 	}
-	switch circleArrange[circleEncodeRangeOverlaps(r.left, r.right, op2.left, op2.right)] {
+	switch circleEncodeRangeOverlaps(r.left, r.right, op2.left, op2.right) {
 	case 'c':
 		return true
 	case 'b':
@@ -128,7 +128,7 @@ func (r *circleRange) minimalContainer(op2 *circleRange, maxStep int) bool {
 	bRight := op2.right - uint64(op2.step) + 1
 	r.step = 1
 	r.mask |= op2.mask
-	switch circleArrange[circleEncodeRangeOverlaps(r.left, aRight, op2.left, bRight)] {
+	switch circleEncodeRangeOverlaps(r.left, aRight, op2.left, bRight) {
 	case 'a': // order (l r op2.l op2.r)
 		vacantSize1 := r.left + (r.mask - bRight) + 1
 		vacantSize2 := op2.left - aRight

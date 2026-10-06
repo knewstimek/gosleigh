@@ -14,11 +14,16 @@ import (
 type TypeFactory struct {
 	mu     sync.Mutex
 	intern map[string]Datatype
+	// canon holds every instance Intern has returned. Interning is
+	// idempotent, so a canonical instance comes straight back instead of
+	// rebuilding the key of its whole (possibly huge) structure graph.
+	canon map[Datatype]struct{}
 }
 
 func NewTypeFactory() *TypeFactory {
 	return &TypeFactory{
 		intern: make(map[string]Datatype),
+		canon:  make(map[Datatype]struct{}),
 	}
 }
 
@@ -26,7 +31,22 @@ func (f *TypeFactory) Intern(dt Datatype) Datatype {
 	if dt == nil {
 		return nil
 	}
+	f.mu.Lock()
+	_, ok := f.canon[dt]
+	f.mu.Unlock()
+	if ok {
+		return dt
+	}
+	out := f.internSlow(dt)
+	if out != nil {
+		f.mu.Lock()
+		f.canon[out] = struct{}{}
+		f.mu.Unlock()
+	}
+	return out
+}
 
+func (f *TypeFactory) internSlow(dt Datatype) Datatype {
 	switch typed := dt.(type) {
 	case *Base:
 		if typed.Flags()&datatypeTypedef != 0 {

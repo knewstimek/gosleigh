@@ -351,28 +351,30 @@ func (vb *VarnodeBank) Replace(oldVn, newVn *Varnode) {
 	oldVn.DestroyDescend()
 }
 
+// lowerLoc returns the first locTree index whose (space, offset, size) is not
+// below the given key. C++ parity: VarnodeBank::beginLoc (loc_tree lower_bound).
+func (vb *VarnodeBank) lowerLoc(spc *address.Space, off uint64, size int32) int {
+	so := spaceOrder(spc)
+	return sort.Search(len(vb.locTree), func(i int) bool {
+		vn := vb.locTree[i]
+		if o := spaceOrder(vn.loc.Space); o != so {
+			return o > so
+		}
+		if vn.loc.Offset != off {
+			return vn.loc.Offset > off
+		}
+		return vn.size >= size
+	})
+}
+
 // FindInput finds an input varnode with the exact (size, loc) in the loc_tree.
 // Returns nil if not found.
+// C++ parity: VarnodeBank::findInput.
 func (vb *VarnodeBank) FindInput(size int32, loc address.Address) *Varnode {
-	// Build a search key: an input varnode at the given location
-	for _, vn := range vb.locTree {
-		if vn.loc.Space != loc.Space {
-			if spaceOrder(vn.loc.Space) > spaceOrder(loc.Space) {
-				break
-			}
-			continue
-		}
-		if vn.loc.Offset != loc.Offset {
-			if vn.loc.Offset > loc.Offset {
-				break
-			}
-			continue
-		}
-		if vn.size != size {
-			if vn.size > size {
-				break
-			}
-			continue
+	for i := vb.lowerLoc(loc.Space, loc.Offset, size); i < len(vb.locTree); i++ {
+		vn := vb.locTree[i]
+		if vn.loc.Space != loc.Space || vn.loc.Offset != loc.Offset || vn.size != size {
+			break
 		}
 		if vn.IsInput() {
 			return vn
@@ -412,9 +414,9 @@ func (vb *VarnodeBank) AllVarnodes() []*Varnode {
 func (vb *VarnodeBank) LocRange(addr address.Address, size int32) []*Varnode {
 	var result []*Varnode
 	endOff := addr.Offset + uint64(size)
-	for _, vn := range vb.locTree {
-		if vn.loc.Space != addr.Space {
-			continue
+	for _, vn := range vb.BySpace(addr.Space) {
+		if vn.loc.Offset >= endOff {
+			break // sorted by offset: nothing later can overlap
 		}
 		vnEnd := vn.loc.Offset + uint64(vn.size)
 		// Check overlap: vn overlaps [addr, addr+size) if
@@ -431,10 +433,12 @@ func (vb *VarnodeBank) LocRange(addr address.Address, size int32) []*Varnode {
 // C++ parity: VarnodeBank::beginLoc(size,addr) / endLoc(size,addr).
 func (vb *VarnodeBank) LocExact(addr address.Address, size int32) []*Varnode {
 	var result []*Varnode
-	for _, vn := range vb.locTree {
-		if vn.loc == addr && vn.size == size {
-			result = append(result, vn)
+	for i := vb.lowerLoc(addr.Space, addr.Offset, size); i < len(vb.locTree); i++ {
+		vn := vb.locTree[i]
+		if vn.loc != addr || vn.size != size {
+			break
 		}
+		result = append(result, vn)
 	}
 	return result
 }
@@ -443,7 +447,11 @@ func (vb *VarnodeBank) LocExact(addr address.Address, size int32) []*Varnode {
 // C++ parity: VarnodeBank space iteration
 func (vb *VarnodeBank) BySpace(spc *address.Space) []*Varnode {
 	var result []*Varnode
-	for _, vn := range vb.locTree {
+	for i := vb.lowerLoc(spc, 0, 0); i < len(vb.locTree); i++ {
+		vn := vb.locTree[i]
+		if spaceOrder(vn.loc.Space) != spaceOrder(spc) {
+			break
+		}
 		if vn.loc.Space == spc {
 			result = append(result, vn)
 		}
