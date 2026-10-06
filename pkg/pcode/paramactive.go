@@ -821,8 +821,16 @@ func ApplyActiveParamModel(fd *Funcdata) bool {
 	if fp.Model().IsMerged() {
 		fp.SetModel(model) // Provisional; ActionInputPrototype re-resolves with stack inputs
 	}
-	sl := NewScopeLocal(model)
-	fd.SetScopeLocal(sl)
+	// The function keeps one local scope for its lifetime (C++ never rebuilds
+	// it mid-analysis), so its unmapped ranges and symbols survive.
+	sl := fd.GetScopeLocal()
+	if sl == nil {
+		sl = NewScopeLocal(model)
+		fd.SetScopeLocal(sl)
+	} else {
+		sl.model = model
+		sl.ResetLocalWindow()
+	}
 	sl.BuildFromVarnodes(filtered, fp)
 	return true
 }
