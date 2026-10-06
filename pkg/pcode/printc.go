@@ -3957,8 +3957,13 @@ func (s *printCState) renderLoad(op *PcodeOp) (ExprFragment, error) {
 	// This handles the case where BatchA's RulePtrArith did not fire (pointer type
 	// was unknown at BatchA time) but we now know ptr is a pointer.
 	// C++ parity: PrintC renders PTRADD as subscript; we detect the INT_ADD pattern directly.
-	if frag, ok, err := s.tryRenderSubscript(addrVn); ok || err != nil {
-		return frag, err
+	// Only an implied pointer expression folds into the dereference; an
+	// explicit pointer variable prints as itself (*piVar1).
+	// C++ parity: PrintC::opLoad -> checkArrayDeref.
+	if addrVn.IsImplied() {
+		if frag, ok, err := s.tryRenderSubscript(addrVn); ok || err != nil {
+			return frag, err
+		}
 	}
 
 	ptr, err := s.renderVarnodeExpr(addrVn)
@@ -3979,7 +3984,7 @@ func (s *printCState) tryRenderSubscript(addrVn *Varnode) (ExprFragment, bool, e
 	// See through an implied COPY: RulePtrArith's buildTree leaves the LOAD address
 	// as COPY(PTRADD(...)) when there is no extra additive term. Follow the COPY to
 	// reach the PTRADD so the subscript renders.
-	for def != nil && def.Code() == CPUI_COPY && def.NumInput() == 1 && def.Input(0) != nil {
+	for def != nil && def.Code() == CPUI_COPY && def.NumInput() == 1 && def.Input(0) != nil && def.Input(0).IsImplied() {
 		addrVn = def.Input(0)
 		def = addrVn.Def()
 	}
