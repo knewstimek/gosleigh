@@ -4358,13 +4358,13 @@ func (s *printCState) renderPtrSubField(base, off *Varnode, valueon bool) (ExprF
 		if !ok {
 			return ExprFragment{}, false
 		}
-		expr = s.lang.PostfixExpr(baseExpr, "."+field.Name)
+		expr = s.lang.MemberExpr(baseExpr, ".", field.Name)
 	} else {
 		baseExpr, err := s.renderVarnodeExpr(base)
 		if err != nil {
 			return ExprFragment{}, false
 		}
-		expr = s.lang.PostfixExpr(baseExpr, "->"+field.Name) // EMIT ( )->name
+		expr = s.lang.MemberExpr(baseExpr, "->", field.Name) // EMIT ( )->name
 	}
 	if !valueon {
 		expr = s.lang.UnaryExpr("&", cPrecUnary, expr)
@@ -4743,7 +4743,7 @@ func (s *printCState) renderSubpieceField(op *PcodeOp) (ExprFragment, bool) {
 			if err != nil {
 				return ExprFragment{}, false
 			}
-			return s.lang.PostfixExpr(baseExpr, "."+field.Name), true
+			return s.lang.MemberExpr(baseExpr, ".", field.Name), true
 		}
 	}
 	return ExprFragment{}, false

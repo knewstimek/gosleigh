@@ -73,6 +73,9 @@ type ExprFragment struct {
 	// cast, unary prefix, scope, comma) for EmitFragment; nil for atoms and
 	// for fragments only known as flat text.
 	node *fragNode
+	// member is the member-access token ("." or "->") when the fragment
+	// is a member access.
+	member string
 }
 
 // fragKind is OpToken::tokentype for the structured fragment forms.
@@ -618,6 +621,24 @@ func (pl *PrintLanguage) PostfixExpr(expr ExprFragment, suffix string) ExprFragm
 		Text:       pl.ExprString(expr, ExprPrecPostfix, ExprPosLeft, ExprAssocLeft) + suffix,
 		Precedence: ExprPrecPostfix,
 	}
+}
+
+// MemberExpr builds base.name or base->name. The two tokens share one
+// precedence but only chain without parentheses with themselves:
+// this->a->b, s.a.b, but (this->a).b and (s.a)->b.
+// C++ parity: PrintLanguage::parentheses for the binary object_member /
+// pointer_member tokens (associative only when topToken == op2).
+func (pl *PrintLanguage) MemberExpr(base ExprFragment, op, name string) ExprFragment {
+	var paren bool
+	if base.member != "" {
+		paren = base.member != op
+	} else {
+		paren = base.Text != "" && needsExprParens(base.Precedence, ExprPrecPostfix, ExprPosLeft, ExprAssocLeft)
+	}
+	if paren {
+		return ExprFragment{Text: "(" + pl.ExprString(base, ExprPrecLowest, ExprPosNone, ExprAssocNone) + ")" + op + name, Precedence: ExprPrecPostfix, member: op}
+	}
+	return ExprFragment{Text: pl.ExprString(base, ExprPrecPostfix, ExprPosLeft, ExprAssocLeft) + op + name, Precedence: ExprPrecPostfix, member: op}
 }
 
 func (pl *PrintLanguage) argSep() string {
