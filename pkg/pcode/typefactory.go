@@ -42,6 +42,9 @@ func (f *TypeFactory) Intern(dt Datatype) Datatype {
 	case *Void:
 		return f.GetVoid()
 	case *Pointer:
+		if typed.Flags()&datatypeTypedef != 0 {
+			return typed
+		}
 		return f.GetPointer(typed.Size(), typed.Pointee(), typed.WordSize())
 	case *PointerRel:
 		return f.GetPointerRel(typed.Size(), typed.Pointee(), typed.WordSize(), typed.Parent(), typed.ByteOffset())
@@ -77,6 +80,23 @@ func (f *TypeFactory) GetBase(size int32, meta metatype, name string) *Base {
 
 // GetTypedefBase returns base under a typedef name. It prints by that name.
 // C++ parity: TypeFactory::getTypedef (base types only).
+// GetTypedefPointer returns pointer p under a typedef name (LPCWSTR); it
+// behaves as the pointer and prints by its name.
+// C++ parity: TypeFactory::getTypedef over a TypePointer.
+func (f *TypeFactory) GetTypedefPointer(name string, p *Pointer) *Pointer {
+	key := "typedefptr:" + name
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if v, ok := f.intern[key].(*Pointer); ok {
+		return v
+	}
+	value := *p
+	value.datatypeBase.name = name
+	value.datatypeBase.flags |= datatypeTypedef
+	f.intern[key] = &value
+	return &value
+}
+
 func (f *TypeFactory) GetTypedefBase(name string, base *Base) *Base {
 	value := NewBase(base.Size(), base.Metatype(), name)
 	value.submeta = base.SubMeta()

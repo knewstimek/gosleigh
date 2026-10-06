@@ -1278,6 +1278,9 @@ func (s *printCState) normalizeTypeForDecl(dt Datatype) Datatype {
 	}
 	switch typed := dt.(type) {
 	case *Pointer:
+		if typed.Flags()&datatypeTypedef != 0 {
+			return typed // a typedef prints by its name
+		}
 		return sharedTypeFactory.GetPointer(typed.Size(), s.normalizeTypeForDecl(typed.Pointee()), typed.WordSize())
 	case *Array:
 		return sharedTypeFactory.GetArray(typed.Count(), s.normalizeTypeForDecl(typed.Element()))
@@ -3287,6 +3290,12 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 		case TYPE_FLOAT:
 			return renderFloatLiteral(vn.Offset(), uint32(typed.Size()))
 		}
+	case *Pointer:
+		// A pointer constant that is not a string literal (handled above) prints
+		// as a cast of its hexadecimal value. C++ parity: PrintC::pushConstant
+		// TYPE_PTR -> default printing (typecast + force_hex).
+		// TODO known mismatch: pushPtrCodeConstant (a function name) is not ported.
+		return "(" + CTypeString(s.normalizeTypeForDecl(typed)) + ")" + fmt.Sprintf("0x%x", vn.Offset())
 	}
 	// Untyped constant: choose decimal vs hex following Ghidra's heuristic.
 	// C++ parity: PrintC::push_integer (printc.cc:1395-1399) -- values <= 10

@@ -109,6 +109,9 @@ func (r *CDeclRenderer) renderDeclaration(dt Datatype, name string) (string, str
 	}
 	switch typed := dt.(type) {
 	case *Pointer:
+		if typed.Flags()&datatypeTypedef != 0 && typed.Name() != "" {
+			return typed.Name(), name // a typedef prints by its name
+		}
 		inner := "*" + name
 		if needsWrappedDeclarator(typed.Pointee()) {
 			inner = "(" + inner + ")"

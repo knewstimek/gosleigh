@@ -72,10 +72,14 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 	if d.Typedef != "" {
 		under := *d
 		under.Typedef = ""
-		if b, ok := ResolveHostType(&under).(*Base); ok {
-			return tf.GetTypedefBase(d.Typedef, b)
+		switch t := ResolveHostType(&under).(type) {
+		case *Base:
+			return tf.GetTypedefBase(d.Typedef, t)
+		case *Pointer:
+			return tf.GetTypedefPointer(d.Typedef, t)
+		default:
+			return t
 		}
-		return ResolveHostType(&under)
 	}
 	switch d.Meta {
 	case "ptr":
