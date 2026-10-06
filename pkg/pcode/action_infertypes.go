@@ -546,8 +546,11 @@ func inferPropagateAddIn2Out(data *Funcdata, tf *TypeFactory, alt *Pointer, op *
 		return inferSpacebaseDegrade(tf, alt, op, inslot)
 	}
 	baseVn := op.Input(inslot)
-	if baseVn == nil || !baseVn.IsSpaceBase() {
-		return nil // Only spacebase pointer-forward downChain is ported (TODO)
+	if baseVn != nil && !baseVn.IsSpaceBase() {
+		return inferAddIn2OutPointer(tf, alt, op, off, command)
+	}
+	if baseVn == nil {
+		return nil
 	}
 	// downChain at the spacebase level: convert the address-unit offset to bytes
 	// and resolve the containing symbol.
@@ -568,6 +571,107 @@ func inferPropagateAddIn2Out(data *Funcdata, tf *TypeFactory, alt *Pointer, op *
 	}
 	res := tf.GetPointerStripArray(alt.Size(), symType, alt.WordSize())
 	return inferSpacebaseDegrade(tf, res, op, inslot)
+}
+
+// inferAddIn2OutPointer walks an ordinary (non-spacebase) pointer down to the
+// sub-type the added offset lands on.
+// C++ parity: TypeOpIntAdd::propagateAddIn2Out downChain loop.
+// TODO known mismatch: when the offset lands inside a struct or array C++
+// builds a TypePointerRel to the container; that case propagates nothing here.
+func inferAddIn2OutPointer(tf *TypeFactory, alt *Pointer, op *PcodeOp, off int64, command int) Datatype {
+	pointer := alt
+	var parent *Pointer
+	if command != 3 {
+		ws := int64(1)
+		if alt.WordSize() > 0 {
+			ws = int64(alt.WordSize())
+		}
+		typeOffset := off * ws // AddrSpace::addressToByteInt
+		allowWrap := op.Code() != CPUI_PTRSUB
+		for {
+			pointer = pointerDownChain(tf, pointer, &typeOffset, &parent, allowWrap)
+			if pointer == nil || typeOffset == 0 {
+				break
+			}
+		}
+	}
+	if parent != nil {
+		return nil
+	}
+	if pointer == nil {
+		if command == 0 {
+			return alt
+		}
+		return nil
+	}
+	return pointer
+}
+
+// pointerDownChain moves a pointer one level into its pointee at byte offset
+// *off, wrapping the offset by the pointee size when allowed; *off becomes
+// the remaining offset. Returns nil if no sub-type lies at the offset.
+// C++ parity: TypePointer::downChain.
+func pointerDownChain(tf *TypeFactory, p *Pointer, off *int64, par **Pointer, allowArrayWrap bool) *Pointer {
+	ptrto := p.Pointee()
+	if ptrto == nil {
+		return nil
+	}
+	ptrtoSize := int64(ptrto.AlignSize())
+	if *off < 0 || *off >= ptrtoSize {
+		if ptrtoSize != 0 {
+			if !allowArrayWrap {
+				return nil
+			}
+			bits := uint(p.Size()) * 8
+			signOff := int64(uint64(*off)<<(64-bits)) >> (64 - bits) // sign_extend
+			signOff %= ptrtoSize
+			if signOff < 0 {
+				signOff += ptrtoSize
+			}
+			*off = signOff
+			if *off == 0 {
+				return p // wrapped onto an element boundary
+			}
+		}
+	}
+	if ptrto.IsEnumType() {
+		*off = 0
+		return tf.GetPointer(p.Size(), tf.GetBase(1, TYPE_UINT, ""), p.WordSize())
+	}
+	isArray := ptrto.Metatype() == TYPE_ARRAY
+	if isArray || ptrto.Metatype() == TYPE_STRUCT {
+		*par = p
+	}
+	pt, newoff := datatypeSubType(ptrto, *off)
+	if pt == nil {
+		return nil
+	}
+	*off = newoff
+	if !isArray {
+		return tf.GetPointerStripArray(p.Size(), pt, p.WordSize())
+	}
+	return tf.GetPointer(p.Size(), pt, p.WordSize())
+}
+
+// datatypeSubType is the data-type one level down at byte offset off and the
+// offset remaining within it, or nil.
+// C++ parity: Datatype/TypeArray/TypeStruct::getSubType.
+func datatypeSubType(dt Datatype, off int64) (Datatype, int64) {
+	switch t := dt.(type) {
+	case *Array:
+		el := t.Element()
+		if el == nil || off >= int64(t.Size()) || el.AlignSize() == 0 {
+			return nil, off
+		}
+		return el, off % int64(el.AlignSize())
+	case *Struct:
+		for _, f := range t.Fields() {
+			if f.Type != nil && int64(f.Offset) <= off && off < int64(f.Offset)+int64(f.Type.Size()) {
+				return f.Type, off - int64(f.Offset)
+			}
+		}
+	}
+	return nil, off
 }
 
 // inferSpacebaseDegrade is the tail of propagateAddIn2Out (typeop.cc:1250-1253):
