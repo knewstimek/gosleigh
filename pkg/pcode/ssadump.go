@@ -83,6 +83,17 @@ func DumpSSA(fd *Funcdata, regNames map[string]string) string {
 	return out
 }
 
+// FormatOpSSA renders one op in the SSA dump form (diagnostics).
+func FormatOpSSA(fd *Funcdata, op *PcodeOp) (res string) {
+	defer func() {
+		if recover() != nil {
+			res = "<dead op>"
+		}
+	}()
+	ctx := &ssaDumpContext{defaultSize: ssaDefaultSize(fd)}
+	return ctx.opPrefix(op) + ctx.opBody(op)
+}
+
 // ssaDumpTree appends the structured block tree (SSA_DUMP_TREE=1).
 var ssaDumpTree = os.Getenv("SSA_DUMP_TREE") != ""
 

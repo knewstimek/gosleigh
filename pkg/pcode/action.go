@@ -20,6 +20,9 @@ var ssaDumpAfterActions = os.Getenv("SSA_DUMP_AFTER")
 // ruleTrace prints every rule application to stderr (diagnostic RULE_TRACE=1).
 var ruleTrace = os.Getenv("RULE_TRACE") != ""
 
+// ruleTraceOps also prints the op before and after (RULE_TRACE=2).
+var ruleTraceOps = os.Getenv("RULE_TRACE") == "2"
+
 // maybeDumpSSAAfter prints the SSA after `act` ran, if its name matches an
 // SSA_DUMP_AFTER substring. Called only when ssaDumpAfterActions != "".
 func maybeDumpSSAAfter(act Action, data *Funcdata) {
@@ -756,10 +759,17 @@ func (p *ActionPool) processOp(data *Funcdata) int {
 		}
 		base := rule.ruleBase()
 		base.countTests++
+		var before string
+		if ruleTraceOps {
+			before = FormatOpSSA(data, op)
+		}
 		res := rule.ApplyOp(op, data)
 		if res > 0 {
 			if ruleTrace {
 				fmt.Fprintf(os.Stderr, "RULE %s @%x:%x\n", rule.GetName(), op.Addr().Offset, op.Seq().Time)
+			}
+			if ruleTraceOps {
+				fmt.Fprintf(os.Stderr, "  %s\n  => %s\n", before, FormatOpSSA(data, op))
 			}
 			base.countApply++
 			p.count += res

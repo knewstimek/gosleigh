@@ -110,16 +110,19 @@ func (c *consumeAnalysis) propagate() {
 		return
 	}
 
+	all := func(x uint64) uint64 { // (x == 0) ? 0 : ~0
+		if x == 0 {
+			return 0
+		}
+		return ^uint64(0)
+	}
+	var a, b uint64
 	switch op.Code() {
 	case CPUI_INT_MULT:
-		b := coveringMask(outc)
-		var a uint64
+		b = coveringMask(outc)
 		if op.Input(1).IsConstant() {
-			leastSet := leastSigBitSet(op.Input(1).Offset())
-			if leastSet >= 0 {
+			if leastSet := leastSigBitSet(op.Input(1).Offset()); leastSet >= 0 {
 				a = (maskForSize(vn.Size()) >> uint(leastSet)) & b
-			} else {
-				a = 0
 			}
 		} else {
 			a = b
@@ -127,33 +130,50 @@ func (c *consumeAnalysis) propagate() {
 		c.push(a, op.Input(0))
 		c.push(b, op.Input(1))
 	case CPUI_INT_ADD, CPUI_INT_SUB:
-		a := coveringMask(outc)
+		a = coveringMask(outc) // Make sure value is filled out as a contiguous mask
 		c.push(a, op.Input(0))
 		c.push(a, op.Input(1))
 	case CPUI_SUBPIECE:
 		sz := int(op.Input(1).Offset())
-		var a uint64
-		if sz >= 8 {
-			a = 0
-		} else {
+		if sz < 8 { // Truncating beyond the consume field tells nothing
 			a = outc << uint(sz*8)
 		}
-		var b uint64
-		if outc != 0 {
-			b = ^uint64(0)
+		if a == 0 && outc != 0 && op.Input(0).Size() > 8 {
+			// Upper bits beyond the consume field are consumed: set the
+			// highest bit possible to indicate some consumption.
+			a = ^uint64(0)
+			a ^= a >> 1
 		}
 		c.push(a, op.Input(0))
-		c.push(b, op.Input(1))
+		c.push(all(outc), op.Input(1))
 	case CPUI_PIECE:
 		sz := int(op.Input(1).Size())
-		a := outc >> uint(sz*8)
-		b := outc ^ (a << uint(sz*8))
+		if vn.Size() > 8 { // Concatenation beyond the consume precision
+			if sz >= 8 {
+				a = ^uint64(0) // Bits not in the consume field are assumed consumed
+				b = outc
+			} else {
+				a = (outc >> uint(sz*8)) ^ (^uint64(0) << uint(8*(8-sz)))
+				b = outc ^ (a << uint(sz*8))
+			}
+		} else {
+			a = outc >> uint(sz*8)
+			b = outc ^ (a << uint(sz*8))
+		}
 		c.push(a, op.Input(0))
 		c.push(b, op.Input(1))
 	case CPUI_INDIRECT:
-		// The iop-source COPY marking (RuleIndirectCollapse interplay) is omitted;
-		// it only affects INDIRECT collapse, not consume preservation.
 		c.push(outc, op.Input(0))
+		if indop := op.Input(1).GetIndirectCause(); indop != nil && !indop.IsDead() {
+			if indop.Code() == CPUI_COPY {
+				if indop.Output().CharacterizeOverlap(op.Output()) > 0 {
+					c.push(^uint64(0), indop.Output()) // Mark the copy as consumed
+					indop.SetFlag(PcodeOpIndirectSource)
+				}
+			} else {
+				indop.SetFlag(PcodeOpIndirectSource)
+			}
+		}
 	case CPUI_COPY, CPUI_INT_NEGATE:
 		c.push(outc, op.Input(0))
 	case CPUI_INT_XOR, CPUI_INT_OR:
@@ -161,13 +181,11 @@ func (c *consumeAnalysis) propagate() {
 		c.push(outc, op.Input(1))
 	case CPUI_INT_AND:
 		if op.Input(1).IsConstant() {
-			val := op.Input(1).Offset()
-			c.push(outc&val, op.Input(0))
-			c.push(outc, op.Input(1))
+			c.push(outc&op.Input(1).Offset(), op.Input(0))
 		} else {
 			c.push(outc, op.Input(0))
-			c.push(outc, op.Input(1))
 		}
+		c.push(outc, op.Input(1))
 	case CPUI_MULTIEQUAL:
 		for i := 0; i < op.NumInput(); i++ {
 			c.push(outc, op.Input(i))
@@ -175,65 +193,82 @@ func (c *consumeAnalysis) propagate() {
 	case CPUI_INT_ZEXT:
 		c.push(outc, op.Input(0))
 	case CPUI_INT_SEXT:
-		b := maskForSize(op.Input(0).Size())
-		a := outc & b
+		b = maskForSize(op.Input(0).Size())
+		a = outc & b
 		if outc > b {
-			a |= b ^ (b >> 1) // mark sign bit used
+			a |= b ^ (b >> 1) // Make sure signbit is marked used
 		}
 		c.push(a, op.Input(0))
 	case CPUI_INT_LEFT:
 		if op.Input(1).IsConstant() {
+			sz := int(vn.Size())
 			sa := int(op.Input(1).Offset())
-			a := outc >> uint(sa) // <= 8-byte Varnode path
-			var b uint64
-			if outc != 0 {
-				b = ^uint64(0)
+			if sz > 8 { // Bits exist beyond the precision of the consume field
+				switch {
+				case sa >= 64:
+					a = ^uint64(0) // Assume one bits where unrepresented bits shift in
+				case sa == 0:
+					a = outc
+				default:
+					a = (outc >> uint(sa)) ^ (^uint64(0) << uint(64-sa))
+				}
+				if rem := 8*sz - sa; rem < 64 {
+					a &^= ^uint64(0) << uint(rem) // High bits shifted out are not consumed
+				}
+			} else if sa < 64 {
+				a = outc >> uint(sa)
 			}
 			c.push(a, op.Input(0))
-			c.push(b, op.Input(1))
+			c.push(all(outc), op.Input(1))
 		} else {
-			var a uint64
-			if outc != 0 {
-				a = ^uint64(0)
-			}
+			a = all(outc)
 			c.push(a, op.Input(0))
 			c.push(a, op.Input(1))
 		}
 	case CPUI_INT_RIGHT:
 		if op.Input(1).IsConstant() {
-			sa := int(op.Input(1).Offset())
-			var a uint64
-			if sa < 64 {
+			if sa := op.Input(1).Offset(); sa < 64 { // Beyond the consume field: nothing known
 				a = outc << uint(sa)
 			}
-			var b uint64
-			if outc != 0 {
-				b = ^uint64(0)
-			}
 			c.push(a, op.Input(0))
-			c.push(b, op.Input(1))
+			c.push(all(outc), op.Input(1))
 		} else {
-			var a uint64
-			if outc != 0 {
-				a = ^uint64(0)
-			}
+			a = all(outc)
 			c.push(a, op.Input(0))
 			c.push(a, op.Input(1))
 		}
 	case CPUI_INT_LESS, CPUI_INT_LESSEQUAL, CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL:
-		var a uint64
-		if outc != 0 {
+		if outc != 0 { // Anywhere known to be zero is not consumed
 			a = op.Input(0).NZMask() | op.Input(1).NZMask()
 		}
 		c.push(a, op.Input(0))
 		c.push(a, op.Input(1))
+	case CPUI_INSERT:
+		a = (uint64(1) << uint(op.Input(3).Offset())) - 1 // Insert mask
+		c.push(a, op.Input(1))
+		a <<= uint(op.Input(2).Offset())
+		c.push(outc&^a, op.Input(0))
+		c.push(all(outc), op.Input(2))
+		c.push(all(outc), op.Input(3))
+	case CPUI_ZPULL, CPUI_SPULL:
+		a = (uint64(1) << uint(op.Input(2).Offset())) - 1 // Pull mask
+		a &= outc                                        // Consumed bits of mask
+		a <<= uint(op.Input(1).Offset())
+		c.push(a, op.Input(0))
+		c.push(all(outc), op.Input(1))
+		c.push(all(outc), op.Input(2))
+	case CPUI_POPCOUNT, CPUI_LZCOUNT:
+		a = uint64(16*op.Input(0).Size()-1) & outc // Consumed bits among those that could be set
+		c.push(all(a), op.Input(0))
 	case CPUI_CALL, CPUI_CALLIND:
-		// Call output does not indicate consumption of inputs.
-	default:
-		var a uint64
+		// Call output doesn't indicate consumption of inputs
+	case CPUI_FLOAT_INT2FLOAT:
 		if outc != 0 {
-			a = ^uint64(0)
+			a = coveringMask(op.Input(0).NZMask())
 		}
+		c.push(a, op.Input(0))
+	default:
+		a = all(outc) // all or nothing
 		for i := 0; i < op.NumInput(); i++ {
 			c.push(a, op.Input(i))
 		}
