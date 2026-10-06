@@ -100,6 +100,25 @@ func (c *cloneBlockOps) cloneBlock(b, bprime *BlockBasic, inedge int) {
 	c.patchInputs(inedge)
 }
 
+// cloneExpression clones ops (in order) right before followOp and returns the
+// output of the last clone.
+// C++ parity: CloneBlockOps::cloneExpression (funcdata_block.cc:1024).
+func (c *cloneBlockOps) cloneExpression(ops []*PcodeOp, followOp *PcodeOp) *Varnode {
+	for _, origOp := range ops {
+		cloneOp := c.buildOpClone(origOp)
+		if cloneOp == nil {
+			continue
+		}
+		c.buildVarnodeOutput(origOp, cloneOp)
+		c.data.OpInsertBefore(cloneOp, followOp)
+	}
+	if len(c.cloneList) == 0 {
+		panic("No expression to clone")
+	}
+	c.patchInputs(0)
+	return c.cloneList[len(c.cloneList)-1].cloneOp.Output()
+}
+
 // patchInputs maps input Varnodes of the original ops onto the cloned ops.
 // MULTIEQUAL ops are special-cased: the clone keeps only the moved in-edge value
 // (reduced to a COPY) and the original drops that in-edge; a resulting 1-input

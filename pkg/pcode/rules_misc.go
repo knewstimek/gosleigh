@@ -1,6 +1,7 @@
 package pcode
 
 import (
+	"sort"
 	"math/bits"
 
 	"gosleigh/pkg/address"
@@ -1438,20 +1439,14 @@ func condMoveCheckBoolean(vn *Varnode) *Varnode {
 	return nil
 }
 
-// apply ports the both-constant branch of RuleConditionalMove::applyOp
-// (ruleaction.cc:9498-9524). A 2-input MULTIEQUAL whose inputs are both boolean
-// constants is a conditional move (`if (c) x=1; else x=0;`) that collapses to a
-// COPY / INT_ZEXT / BOOL_NEGATE of the controlling CBRANCH condition. The
-// non-constant and single-constant branches (9449-9492, 9526-9549) require
-// CloneBlockOps (gatherExpression/constructBool) which is not yet ported; those
-// cases bail (return 0).
-//
-// The prior Go stub here only collapsed all-identical inputs to a COPY, which is
-// redundant with the faithful RuleMultiCollapse (ruleaction.cc:3246, registered
-// in action.go) that absorbs identical/functional-equal phis; the same-offset
-// case below preserves that collapse for boolean constants.
+// apply simplifies a 2-input MULTIEQUAL of booleans fed by a diamond (or
+// triangle) under a CBRANCH: two constants become the (possibly negated,
+// extended) branch condition, one constant gives condition &&/|| other, and
+// two non-constant booleans where one equals the condition give an AND/OR of
+// both. Expressions formed inside a branch block are cloned after the merge.
+// C++ parity: RuleConditionalMove::applyOp.
 func (r *RuleConditionalMove) apply(op *PcodeOp, data *Funcdata) int {
-	if op.NumInput() != 2 { // MULTIEQUAL must have exactly 2 inputs
+	if op.NumInput() != 2 {
 		return 0
 	}
 	bool0 := condMoveCheckBoolean(op.Input(0))
@@ -1462,41 +1457,29 @@ func (r *RuleConditionalMove) apply(op *PcodeOp, data *Funcdata) int {
 	if bool1 == nil {
 		return 0
 	}
-	// Only the both-constant case is ported; the other branches need CloneBlockOps.
-	if !bool0.IsConstant() || !bool1.IsConstant() {
-		return 0
-	}
 
-	// Discover the diamond: rootblock -> {inblock0, inblock1} -> bb.
-	// Either inblock may be empty (a single-edge fall-through), in which case its
-	// rootblock is its own predecessor. C++ parity: ruleaction.cc:9414-9429.
+	// rootblock -> {inblock0, inblock1} -> bb, where either inblock may be
+	// the root itself (a missing side of the diamond).
 	bb := op.Parent()
 	inblock0 := bb.InEdge(0).Point
-	var rootblock0 *FlowBlock
+	rootblock0 := inblock0
 	if inblock0.SizeOut() == 1 {
 		if inblock0.SizeIn() != 1 {
 			return 0
 		}
 		rootblock0 = inblock0.InEdge(0).Point
-	} else {
-		rootblock0 = inblock0
 	}
 	inblock1 := bb.InEdge(1).Point
-	var rootblock1 *FlowBlock
+	rootblock1 := inblock1
 	if inblock1.SizeOut() == 1 {
 		if inblock1.SizeIn() != 1 {
 			return 0
 		}
 		rootblock1 = inblock1.InEdge(0).Point
-	} else {
-		rootblock1 = inblock1
 	}
 	if rootblock0 != rootblock1 {
 		return 0
 	}
-
-	// rootblock must end in CBRANCH; its condition drives the conditional move.
-	// C++ parity: ruleaction.cc:9432-9434.
 	rootBasic := asBasic(rootblock0)
 	if rootBasic == nil {
 		return 0
@@ -1506,10 +1489,14 @@ func (r *RuleConditionalMove) apply(op *PcodeOp, data *Funcdata) int {
 		return 0
 	}
 
-	// gatherExpression is trivially true for constants (empty op list), so the
-	// C++ calls at 9437-9439 are elided here.
+	var opList0, opList1 []*PcodeOp
+	if !condMoveGatherExpression(bool0, &opList0, rootblock0, inblock0) {
+		return 0
+	}
+	if !condMoveGatherExpression(bool1, &opList1, rootblock0, inblock1) {
+		return 0
+	}
 
-	// C++ parity: ruleaction.cc:9441-9447.
 	var path0istrue bool
 	if rootblock0 != inblock0 {
 		path0istrue = rootblock0.TrueOut() == inblock0
@@ -1520,19 +1507,59 @@ func (r *RuleConditionalMove) apply(op *PcodeOp, data *Funcdata) int {
 		path0istrue = !path0istrue
 	}
 
-	// From here a change is committed. C++ parity: ruleaction.cc:9496-9524.
-	data.OpUninsert(op)
-	sz := op.Output().Size()
-	if bool0.Offset() == bool1.Offset() {
-		data.OpRemoveInput(op, 1)
-		data.OpSetOpcode(op, CPUI_COPY)
-		data.OpSetInput(op, data.NewConstant(sz, bool0.Offset()), 0)
-		data.OpInsertBegin(op, bb)
-	} else {
-		data.OpRemoveInput(op, 1)
+	if !bool0.IsConstant() && !bool1.IsConstant() {
+		// One side must be the branch condition itself (or its negation).
+		var condSlot int
+		var condOps, otherOps []*PcodeOp
+		var condBool, otherBool *Varnode
+		var andorselect bool
+		switch {
+		case inblock0 == rootblock0:
+			condSlot, andorselect = 0, path0istrue
+			condBool, otherBool, condOps, otherOps = bool0, bool1, opList0, opList1
+		case inblock1 == rootblock0:
+			condSlot, andorselect = 1, !path0istrue
+			condBool, otherBool, condOps, otherOps = bool1, bool0, opList1, opList0
+		default:
+			return 0
+		}
 		boolvn := cbranch.Input(1)
-		// needcomplement is true when the boolean sense of the condition is the
-		// opposite of what selecting the '1' constant requires.
+		if boolvn != op.Input(condSlot) {
+			if !boolvn.IsWritten() {
+				return 0
+			}
+			negop := boolvn.Def()
+			if negop.Code() != CPUI_BOOL_NEGATE || negop.Input(0) != op.Input(condSlot) {
+				return 0
+			}
+			andorselect = !andorselect
+		}
+		opc := CPUI_BOOL_AND
+		if andorselect {
+			opc = CPUI_BOOL_OR
+		}
+		data.OpUninsert(op)
+		data.OpSetOpcode(op, opc)
+		data.OpInsertBegin(op, bb)
+		firstvn := condMoveConstructBool(condBool, op, condOps, data)
+		secondvn := condMoveConstructBool(otherBool, op, otherOps, data)
+		data.OpSetInput(op, firstvn, 0)
+		data.OpSetInput(op, secondvn, 1)
+		return 1
+	}
+
+	data.OpUninsert(op) // changing from MULTIEQUAL; reinserted below
+	sz := op.Output().Size()
+	switch {
+	case bool0.IsConstant() && bool1.IsConstant():
+		data.OpRemoveInput(op, 1)
+		if bool0.Offset() == bool1.Offset() {
+			data.OpSetOpcode(op, CPUI_COPY)
+			data.OpSetInput(op, data.NewConstant(sz, bool0.Offset()), 0)
+			data.OpInsertBegin(op, bb)
+			break
+		}
+		boolvn := cbranch.Input(1)
 		needcomplement := (bool0.Offset() == 0) == path0istrue
 		if sz == 1 {
 			if needcomplement {
@@ -1550,8 +1577,89 @@ func (r *RuleConditionalMove) apply(op *PcodeOp, data *Funcdata) int {
 			}
 			data.OpSetInput(op, boolvn, 0)
 		}
+	case bool0.IsConstant():
+		needcomplement := path0istrue != (bool0.Offset() != 0)
+		opc := CPUI_BOOL_AND
+		if bool0.Offset() != 0 {
+			opc = CPUI_BOOL_OR
+		}
+		data.OpSetOpcode(op, opc)
+		data.OpInsertBegin(op, bb)
+		boolvn := cbranch.Input(1)
+		if needcomplement {
+			boolvn = data.OpBoolNegate(boolvn, op, false)
+		}
+		body1 := condMoveConstructBool(bool1, op, opList1, data)
+		data.OpSetInput(op, boolvn, 0)
+		data.OpSetInput(op, body1, 1)
+	default: // bool1 is constant
+		needcomplement := path0istrue == (bool1.Offset() != 0)
+		opc := CPUI_BOOL_AND
+		if bool1.Offset() != 0 {
+			opc = CPUI_BOOL_OR
+		}
+		data.OpSetOpcode(op, opc)
+		data.OpInsertBegin(op, bb)
+		boolvn := cbranch.Input(1)
+		if needcomplement {
+			boolvn = data.OpBoolNegate(boolvn, op, false)
+		}
+		body0 := condMoveConstructBool(bool0, op, opList0, data)
+		data.OpSetInput(op, boolvn, 0)
+		data.OpSetInput(op, body0, 1)
 	}
 	return 1
+}
+
+// condMoveGatherExpression reports whether the expression rooted at vn can be
+// moved out of the conditional branch block; ops formed inside the branch
+// (at most 4, each used once) are collected for cloning.
+// C++ parity: RuleConditionalMove::gatherExpression.
+func condMoveGatherExpression(vn *Varnode, ops *[]*PcodeOp, root, branch *FlowBlock) bool {
+	if vn.IsConstant() {
+		return true
+	}
+	if vn.IsFree() || vn.IsAddrTied() {
+		return false
+	}
+	if root == branch || !vn.IsWritten() {
+		return true
+	}
+	op := vn.Def()
+	if &op.Parent().FlowBlock != branch {
+		return true // formed before the branch
+	}
+	*ops = append(*ops, op)
+	for pos := 0; pos < len(*ops); pos++ {
+		op = (*ops)[pos]
+		if op.EvalType() == PcodeOpSpecial {
+			return false
+		}
+		for i := 0; i < op.NumInput(); i++ {
+			in0 := op.Input(i)
+			if in0.IsFree() && !in0.IsConstant() {
+				return false
+			}
+			if in0.IsWritten() && &in0.Def().Parent().FlowBlock == branch {
+				if in0.IsAddrTied() || in0.LoneDescend() != op || len(*ops) >= 4 {
+					return false
+				}
+				*ops = append(*ops, in0.Def())
+			}
+		}
+	}
+	return true
+}
+
+// condMoveConstructBool returns vn, or a clone of its expression inserted
+// before insertop when it was formed inside a branch block.
+// C++ parity: RuleConditionalMove::constructBool.
+func condMoveConstructBool(vn *Varnode, insertop *PcodeOp, ops []*PcodeOp, data *Funcdata) *Varnode {
+	if len(ops) == 0 {
+		return vn
+	}
+	sort.SliceStable(ops, func(i, j int) bool { return ops[i].Seq().Order < ops[j].Seq().Order })
+	return newCloneBlockOps(data).cloneExpression(ops, insertop)
 }
 
 type RuleFuncPtrEncoding struct{ batchRule }
