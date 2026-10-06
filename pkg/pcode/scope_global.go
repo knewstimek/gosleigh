@@ -121,11 +121,8 @@ func (s *printCState) globalVarnodeName(vn *Varnode, e *SymbolEntry) string {
 			if el := t.Element(); el != nil && el.Size() > 0 {
 				idx, rem := off/el.Size(), off%el.Size()
 				if rem+sz <= el.Size() {
-					if mostNaturalBase(uint64(idx)) == 10 {
-						fmt.Fprintf(&sb, "[%d]", idx)
-					} else {
-						fmt.Fprintf(&sb, "[0x%x]", idx)
-					}
+					// C++ parity: PrintC::push_integer (<= 10 decimal).
+					sb.WriteString("[" + formatIntegerLiteral(uint64(idx), 4, false) + "]")
 					off = rem
 					ct = el
 					ok = true
