@@ -380,6 +380,32 @@ func (op *PcodeOp) EvalType() uint32 {
 	return op.flags & (PcodeOpUnary | PcodeOpBinary | PcodeOpSpecial | PcodeOpTernary)
 }
 
+// IsCseMatch reports whether other computes the same value as op: same
+// unary/binary opcode and output size over identical inputs.
+// C++ parity: op.cc PcodeOp::isCseMatch.
+func (op *PcodeOp) IsCseMatch(other *PcodeOp) bool {
+	if op.EvalType()&(PcodeOpUnary|PcodeOpBinary) == 0 || other.EvalType()&(PcodeOpUnary|PcodeOpBinary) == 0 {
+		return false
+	}
+	if op.Output().Size() != other.Output().Size() || op.Code() != other.Code() || op.Code() == CPUI_COPY {
+		return false
+	}
+	if op.NumInput() != other.NumInput() {
+		return false
+	}
+	for i := 0; i < op.NumInput(); i++ {
+		vn1, vn2 := op.Input(i), other.Input(i)
+		if vn1 == vn2 {
+			continue
+		}
+		if vn1.IsConstant() && vn2.IsConstant() && vn1.Offset() == vn2.Offset() {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
 // HaltType returns the halt-class flags.
 func (op *PcodeOp) HaltType() uint32 {
 	return op.flags & (PcodeOpHalt | PcodeOpBadInstruction | PcodeOpUnimplemented | PcodeOpNoReturn | PcodeOpMissing)

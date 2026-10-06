@@ -211,8 +211,15 @@ func NewRuleTrivialArith(group string) *RuleTrivialArith {
 }
 
 func (r *RuleTrivialArith) apply(op *PcodeOp, data *Funcdata) int {
-	if op.NumInput() != 2 || !sameValue(op.Input(0), op.Input(1)) {
+	if op.NumInput() != 2 {
 		return 0
+	}
+	// Inputs must be identical or constructed identically.
+	// C++ parity: ruleaction.cc RuleTrivialArith::applyOp.
+	if in0, in1 := op.Input(0), op.Input(1); in0 != in1 {
+		if !in0.IsWritten() || !in1.IsWritten() || !in0.Def().IsCseMatch(in1.Def()) {
+			return 0
+		}
 	}
 	switch op.Code() {
 	case CPUI_INT_NOTEQUAL, CPUI_INT_SLESS, CPUI_INT_LESS, CPUI_BOOL_XOR, CPUI_FLOAT_NOTEQUAL, CPUI_FLOAT_LESS:
