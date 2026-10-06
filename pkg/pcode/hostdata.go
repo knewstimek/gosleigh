@@ -31,6 +31,14 @@ type HostTypeWarnings interface {
 	DatatypeWarnings() []string
 }
 
+// HostNameUsed is a host that answers name-collision queries along the
+// current function's namespace path: whether name is used by a namespace at
+// depth >= depth of that path (0 = outermost namespace below global).
+// C++ parity: ScopeGhidraNamespace::isNameUsed (DecompileCallback.isNameUsed).
+type HostNameUsed interface {
+	IsNameUsed(name string, depth int) bool
+}
+
 type HostDataScope interface {
 	// QueryData returns the symbol whose storage contains addr.
 	QueryData(addr address.Address) (HostData, bool)

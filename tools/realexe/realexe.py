@@ -181,9 +181,27 @@ def do_capture(work, entries):
 		HEADLESS, os.path.join(work, "ghidra"), PROJ_NAME,
 		"-process", meta["program"], "-noanalysis", "-readOnly",
 		"-scriptPath", HERE,
-		"-postScript", "GenCapture.java", out] + entries,
+		"-postScript", "GenCapture.java", out] + entries +
+		["-postScript", "GenNames.java", out] + entries,
 		os.path.join(work, "capture.log"), timeout=3 * 3600)
 	print("capture: returncode %d -> %s" % (rc, out))
+	return rc == 0
+
+
+def do_names(work, entries):
+	"""Write only the name-collision tables (<entry>.names) beside existing
+	captures; with no entries, for every capture in <work>/captures."""
+	meta = load_meta(work)
+	out = os.path.join(work, "captures")
+	if not entries:
+		entries = ["0x" + f[:-4] for f in sorted(os.listdir(out)) if f.endswith(".xml")]
+	rc = headless([
+		HEADLESS, os.path.join(work, "ghidra"), PROJ_NAME,
+		"-process", meta["program"], "-noanalysis", "-readOnly",
+		"-scriptPath", HERE,
+		"-postScript", "GenNames.java", out] + entries,
+		os.path.join(work, "names.log"), timeout=3600)
+	print("names: returncode %d -> %s" % (rc, out))
 	return rc == 0
 
 
@@ -370,6 +388,9 @@ def main():
 	pc = sub.add_parser("capture", help="C++ decompiler debug savefiles for decomp_dbg")
 	pc.add_argument("--work")
 	pc.add_argument("entries", nargs="+", help="entry addresses (0x... or decimal)")
+	pn = sub.add_parser("names", help="name-collision tables beside existing captures")
+	pn.add_argument("--work")
+	pn.add_argument("entries", nargs="*", help="entry addresses (default: every capture)")
 	pm = sub.add_parser("measure", help="run --fresh + report (the progress metric)")
 	pm.add_argument("--work")
 	pm.add_argument("--timeout", type=int, default=10)
@@ -385,6 +406,8 @@ def main():
 		ok = do_run(resolve_work(args), args.timeout, args.mem_mb, args.fresh)
 	elif args.cmd == "capture":
 		ok = do_capture(resolve_work(args), args.entries)
+	elif args.cmd == "names":
+		ok = do_names(resolve_work(args), args.entries)
 	elif args.cmd == "measure":
 		work = resolve_work(args)
 		ok = do_run(work, args.timeout, args.mem_mb, True) and do_report(work)

@@ -70,6 +70,10 @@ type captureData struct {
 	// typeWarnings are the TypeFactory warnings of the capture's types, in
 	// the order the core decoded them (<entry>.typeorder from GenCapture).
 	typeWarnings []string
+	// namesUsed maps a symbol name to the depths of the function's namespace
+	// path that use it (-1: more symbols carry it than the host checks),
+	// from <entry>.names (GenNames).
+	namesUsed map[string][]int
 	syms         []pcode.HostData
 	// protos are the callee prototypes the core received, by entry offset.
 	protos map[uint64]captureProto
@@ -433,6 +437,22 @@ func withCapture(host pcode.HostScope, fn goldenEntry, ram *address.Space) pcode
 			}
 		}
 	}
+	if raw, err := os.ReadFile(fmt.Sprintf("%s/%08x.names", captureDir, fn.Entry)); err == nil {
+		cd.namesUsed = map[string][]int{}
+		for _, ln := range strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n") {
+			nm, d, ok := strings.Cut(ln, "\t")
+			if !ok {
+				continue
+			}
+			depth := -1
+			if d != "*" {
+				if depth, err = strconv.Atoi(d); err != nil {
+					continue
+				}
+			}
+			cd.namesUsed[nm] = append(cd.namesUsed[nm], depth)
+		}
+	}
 	return hostWithData{host, cd}
 }
 
@@ -608,6 +628,17 @@ func (cd *captureData) QueryData(addr address.Address) (pcode.HostData, bool) {
 		}
 	}
 	return pcode.HostData{}, false
+}
+
+// IsNameUsed implements pcode.HostNameUsed.
+// Java parity: DecompileCallback.isNameUsed.
+func (cd *captureData) IsNameUsed(name string, depth int) bool {
+	for _, d := range cd.namesUsed[name] {
+		if d < 0 || d >= depth {
+			return true
+		}
+	}
+	return false
 }
 
 // DatatypeWarnings implements pcode.HostTypeWarnings.

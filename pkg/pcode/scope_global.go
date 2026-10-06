@@ -64,11 +64,11 @@ func (s *printCState) globalSymbolName(sym *Symbol) string {
 	// The symbol name is a variable/function token (cleaned by the Java
 	// PrettyPrinter); the scope is syntax and stays raw.
 	name := cppDisplayName(sym.Name())
-	ns := sym.Namespace()
-	if ns == "" {
-		return name
+	q := sym.Name()
+	if ns := sym.Namespace(); ns != "" {
+		q = ns + "::" + q
 	}
-	q := s.minimalScopedName(ns + "::" + sym.Name())
+	q = s.minimalScopedName(q)
 	if i := strings.LastIndex(q, "::"); i >= 0 && strings.HasSuffix(q, "::"+sym.Name()) {
 		return q[:i+2] + name
 	}
@@ -78,7 +78,7 @@ func (s *printCState) globalSymbolName(sym *Symbol) string {
 // globalSymbolExpr is globalSymbolName as an expression whose scope names
 // are separate tokens. C++ parity: PrintC::pushSymbolScope.
 func (s *printCState) globalSymbolExpr(sym *Symbol) ExprFragment {
-	if len(sym.nsPath) > 0 {
+	if len(sym.nsPath) > 0 || sym.Namespace() == "" {
 		var useScope []string
 		fn := s.fd.DisplayName()
 		if fn == "" {
@@ -88,7 +88,7 @@ func (s *printCState) globalSymbolExpr(sym *Symbol) ExprFragment {
 			useScope = up[:len(up)-1]
 		}
 		base := cppDisplayName(sym.Name())
-		depth := resolutionDepth(sym.nsPath, useScope)
+		depth := resolutionDepth(sym.nsPath, useScope, sym.Name(), s.isNameUsed)
 		if depth == 0 {
 			return s.lang.Atom(base)
 		}
@@ -100,6 +100,9 @@ func (s *printCState) globalSymbolExpr(sym *Symbol) ExprFragment {
 				kind: fragBinary, print1: "::", kids: []ExprFragment{l, r}, parens: []bool{false, false}}}
 		}
 		scopes := sym.nsPath[len(sym.nsPath)-min(depth, len(sym.nsPath)):]
+		if depth > len(sym.nsPath) { // Up to the global scope, whose display name is empty
+			scopes = append([]string{""}, scopes...)
+		}
 		expr := ExprFragment{Text: scopes[0], Precedence: ExprPrecPrimary}
 		for _, sc := range scopes[1:] {
 			expr = scopeOp(expr, ExprFragment{Text: sc, Precedence: ExprPrecPrimary})

@@ -557,7 +557,7 @@ func scopedNameExpr(name string) ExprFragment {
 	}
 	// Only the base name is a function-name token; the scope names are syntax
 	// and stay raw. Java parity: PrettyPrinter cleans ClangFuncNameToken.
-	if cut <= 0 || cut+2 >= len(name) {
+	if cut < 0 || cut+2 >= len(name) { // cut 0: the global scope, whose display name is empty
 		return ExprFragment{Text: cppDisplayName(name), Precedence: ExprPrecPrimary}
 	}
 	left := scopedNameExprScope(name[:cut])
@@ -584,7 +584,7 @@ func scopedNameExprScope(name string) ExprFragment {
 			}
 		}
 	}
-	if cut <= 0 || cut+2 >= len(name) {
+	if cut < 0 || cut+2 >= len(name) { // cut 0: the global scope, whose display name is empty
 		return ExprFragment{Text: name, Precedence: ExprPrecPrimary}
 	}
 	left := scopedNameExprScope(name[:cut])
@@ -884,8 +884,6 @@ func splitScopePath(name string) []string {
 // scope is the root of both.
 // C++ parity: PrintC::pushSymbolScope (MINIMAL_NAMESPACES) ->
 // Symbol::getResolutionDepth + Scope::findDistinguishingScope.
-// TODO known mismatch: Scope::isNameUsed needs every name the host knows in
-// the intermediate scopes; it is taken as false.
 func (s *printCState) minimalScopedName(qualified string) string {
 	parts := splitScopePath(qualified)
 	symScope := parts[:len(parts)-1] // Path of the symbol's scope (global excluded)
@@ -899,7 +897,7 @@ func (s *printCState) minimalScopedName(qualified string) string {
 			useScope = up[:len(up)-1]
 		}
 	}
-	depth := resolutionDepth(symScope, useScope)
+	depth := resolutionDepth(symScope, useScope, parts[len(parts)-1], s.isNameUsed)
 	if depth == 0 {
 		return parts[len(parts)-1]
 	}
@@ -909,10 +907,42 @@ func (s *printCState) minimalScopedName(qualified string) string {
 	return strings.Join(parts[len(parts)-1-depth:], "::")
 }
 
-// resolutionDepth is the number of scope names needed to reach a symbol in
-// scope sym from scope use (paths from the global scope, global excluded).
-// C++ parity: Symbol::getResolutionDepth with isNameUsed false.
-func resolutionDepth(sym, use []string) int {
+// isNameUsed reports whether name is used by a scope between the current
+// function and its namespace at depth (0 = outermost namespace below
+// global): the host answers for the namespaces, which stop at global.
+// C++ parity: ScopeInternal::isNameUsed (the local scope) ->
+// ScopeGhidraNamespace::isNameUsed.
+// Known mismatch: the local scope's own symbol names are not consulted.
+func (s *printCState) isNameUsed(name string, use []string, depth int) bool {
+	if depth >= len(use) {
+		return false // The parent is the terminating scope, or global
+	}
+	if isDynamicSymbolName(name) {
+		return false // Assume default FUN_ and DAT_ names don't collide
+	}
+	h, ok := s.fd.HostScope().(HostNameUsed)
+	return ok && h.IsNameUsed(name, depth)
+}
+
+// isDynamicSymbolName reports a default FUN_/DAT_ name.
+// C++ parity: ArchitectureGhidra::isDynamicSymbolName.
+func isDynamicSymbolName(nm string) bool {
+	if len(nm) < 8 || nm[3] != '_' || (nm[:3] != "FUN" && nm[:3] != "DAT") {
+		return false
+	}
+	for _, c := range nm[len(nm)-4:] {
+		if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+// resolutionDepth is the number of scope names needed to reach the symbol
+// name in scope sym from scope use (paths from the global scope, global
+// excluded); a name overridden on the way needs one more.
+// C++ parity: Symbol::getResolutionDepth.
+func resolutionDepth(sym, use []string, name string, used func(string, []string, int) bool) int {
 	same := func(a, b []string) bool {
 		if len(a) != len(b) {
 			return false
@@ -944,14 +974,23 @@ func resolutionDepth(sym, use []string) int {
 		if min < len(sym) {
 			dist = min // sym's path matches use's but is longer
 		} else if min < len(use) {
-			return 0 // sym's scope is an ancestor of use
+			// sym's scope is an ancestor of use: the name itself must not
+			// be overridden between them.
+			if used != nil && used(name, use, len(sym)) {
+				return 1
+			}
+			return 0
 		} else {
 			dist = len(sym) - 1 // Identical paths: unreachable after same()
 		}
 	}
 	// Print every scope from sym's own up to and including the
-	// distinguishing scope.
-	return len(sym) - dist
+	// distinguishing scope, plus one if that scope's name is overridden.
+	depth := len(sym) - dist
+	if used != nil && used(sym[dist], use, dist) {
+		depth++
+	}
+	return depth
 }
 
 // symbolNameExpr builds a global symbol reference: its scope names as raw
