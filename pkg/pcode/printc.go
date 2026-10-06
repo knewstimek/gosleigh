@@ -1675,6 +1675,29 @@ func (s *printCState) emitConditionLead(bl *FlowBlock) error {
 	return nil
 }
 
+// conditionLeadEmpty reports whether emitConditionLead would print nothing.
+func (s *printCState) conditionLeadEmpty(bl *FlowBlock) bool {
+	if bl == nil {
+		return true
+	}
+	children := bl.StructuredChildren()
+	switch bl.Type() {
+	case BlockConditionType:
+		return len(children) == 0 || s.conditionLeadEmpty(children[0])
+	case BlockListType:
+		for i := 0; i+1 < len(children); i++ {
+			if !s.isBlockEmpty(children[i]) {
+				return false
+			}
+		}
+		return len(children) == 0 || s.conditionLeadEmpty(children[len(children)-1])
+	}
+	if basic := toBasic(bl); basic != nil {
+		return s.isBlockEmpty(&basic.FlowBlock)
+	}
+	return true
+}
+
 // emitIfBlockChain emits a BlockIf as either a leading "if" or a chained
 // "else if", allowing deeply nested else-if ladders to be flattened.
 // When isElseIf is true the "if" header is preceded by "else " inline with
@@ -1752,8 +1775,13 @@ func (s *printCState) emitIfBlockChain(bl *FlowBlock, isElseIf bool) error {
 		s.lang.CloseBlock()
 		return nil
 	}
+	// C++ merges "else" and "if" through a pending brace: a nested if whose
+	// condition block prints statements first emits the brace, giving a plain
+	// else block. C++ parity: PrintC::emitBlockIf (pending_brace).
 	if elseChild.Type() == BlockIfType {
-		return s.emitIfBlockChain(elseChild, true)
+		if grand := elseChild.StructuredChildren(); len(grand) >= 2 && s.conditionLeadEmpty(grand[0]) {
+			return s.emitIfBlockChain(elseChild, true)
+		}
 	}
 	if s.ghidraFormat {
 		// Ghidra format: "}\nelse {\n"
