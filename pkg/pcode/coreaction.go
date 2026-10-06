@@ -1370,8 +1370,13 @@ func (a *ActionActiveParam) Apply(data *Funcdata) int {
 	if data == nil {
 		return 0
 	}
+	// The checker reads the architecture's stack space, whether or not the
+	// local scope exists yet. C++ parity: aliascheck.gather(&data,
+	// data.getArch()->getStackSpace(),true).
 	var aliascheck *aliasChecker
-	if sl := data.GetScopeLocal(); sl != nil {
+	if spc := data.stackSpace(); spc != nil {
+		aliascheck = newAliasChecker(data, spc)
+	} else if sl := data.GetScopeLocal(); sl != nil {
 		aliascheck = newAliasChecker(data, sl.SpaceID())
 	}
 	for i := 0; i < data.NumCalls(); i++ {
@@ -3091,6 +3096,26 @@ func restructureProtectSwitchPaths(data *Funcdata) {
 	}
 }
 
+// hasHostStackParams reports a host stack symbol at a non-negative frame
+// offset: a parameter passed on the stack.
+func (fd *Funcdata) hasHostStackParams() bool {
+	spc := fd.stackSpace()
+	if spc == nil {
+		return false
+	}
+	for off := range fd.hostLocals {
+		if signExtendSpaceOffset(off, spc) >= 0 {
+			return true
+		}
+	}
+	for off := range fd.hostLocalTypes {
+		if signExtendSpaceOffset(off, spc) >= 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // Apply drives ScopeLocal::restructureVarnode and switch-path protection.
 // C++ parity: coreaction.cc ActionRestructureVarnode::apply
 // TODO known mismatch: ScopeLocal::restructureVarnode is partial -- the Go
@@ -3104,6 +3129,18 @@ func (a *ActionRestructureVarnode) Apply(data *Funcdata) int {
 		return 0
 	}
 	sl := data.GetScopeLocal()
+	// Every function has its local scope, however its prototype was set (a
+	// host-locked prototype included). C++ parity: Funcdata constructor
+	// (localmap = new ScopeLocal).
+	// Known mismatch: the function_parameter Symbols of a locked prototype
+	// are not modelled, so a function whose host gave stack parameters keeps
+	// running without a scope rather than mapping its parameter area.
+	if sl == nil && !data.hasHostStackParams() {
+		if fp := data.GetFuncProto(); fp != nil && fp.Model() != nil {
+			sl = NewScopeLocal(fp.Model())
+			data.SetScopeLocal(sl)
+		}
+	}
 	aliasyes := a.numpass != 0
 	if sl != nil {
 		sl.RestructureVarnode(data, aliasyes)
