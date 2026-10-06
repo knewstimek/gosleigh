@@ -82,7 +82,9 @@ func (fc *FuncCallSpecs) InitActiveInput() {
 		return
 	}
 	if fc.getActiveInputState() == nil {
-		active := NewParamActive(false)
+		// Call-site trials recover a subcall's parameters.
+		// C++ parity: FuncCallSpecs constructor (activeinput(true)).
+		active := NewParamActive(true)
 		// Defer the trial decision when any parameter entry lives in a space
 		// heritaged with a delay (the stack spacebase): those trials only become
 		// visible after several heritage passes.
@@ -102,7 +104,7 @@ func (fc *FuncCallSpecs) InitActiveOutput() {
 	if fc == nil {
 		return
 	}
-	fc.FuncProto.SetActiveOutput(NewParamActive(false))
+	fc.FuncProto.SetActiveOutput(NewParamActive(true)) // C++ activeoutput(true)
 }
 
 // CreatePlaceholder appends a stack-relative LOAD as a fresh input to the
