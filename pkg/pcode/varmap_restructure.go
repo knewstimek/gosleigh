@@ -32,6 +32,21 @@ import (
 // ported); LoadGuard hints (addGuard), locked-symbol hints (gatherSymbols) and
 // partial struct/union types are not modelled.
 
+// RangeHint flags. C++ parity: RangeHint::copy_constant / typelock.
+const (
+	rhCopyConstant uint32 = 0x1
+	rhTypeLock     uint32 = 0x8
+)
+
+// rhRangeType is RangeHint::RangeType.
+type rhRangeType int
+
+const (
+	rhFixed    rhRangeType = iota // a data-type of known size
+	rhOpen                        // an array of unknown extent
+	rhEndpoint                    // the artificial bound after the last range
+)
+
 // mapHint is one RangeHint. C++ parity: varmap.hh RangeHint.
 type mapHint struct {
 	start     uint64      // byte offset in the space

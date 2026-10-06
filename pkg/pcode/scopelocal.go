@@ -543,24 +543,6 @@ func isStackSpace(vn *Varnode, model *ProtoModel) bool {
 	return vn.Space().Name == "stack"
 }
 
-// deduplicateByOffset removes duplicate stack entries that share the same offset.
-// The first entry at each offset is kept (arbitrary but deterministic).
-func deduplicateByOffset(entries []stackEntry) []stackEntry {
-	if len(entries) == 0 {
-		return entries
-	}
-	seen := make(map[uint64]struct{}, len(entries))
-	out := entries[:0]
-	for _, e := range entries {
-		if _, exists := seen[e.offset]; exists {
-			continue
-		}
-		seen[e.offset] = struct{}{}
-		out = append(out, e)
-	}
-	return out
-}
-
 // stackEntry is a local helper type used in BuildFromVarnodes.
 type stackEntry struct {
 	vn     *Varnode
