@@ -107,6 +107,29 @@ func (t *typeOpCallind) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) D
 	return t.typeOpBase.InputTypeLocal(op, slot, tf)
 }
 
+// typeOpCbranch types the condition as bool and the target as a code pointer.
+// C++ parity: typeop.cc TypeOpCbranch::getInputLocal.
+type typeOpCbranch struct{ typeOpBase }
+
+func (t *typeOpCbranch) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) Datatype {
+	if op == nil || slot < 0 || slot >= op.NumInput() || op.Input(slot) == nil || tf == nil {
+		return nil
+	}
+	if slot == 1 {
+		return tf.GetBase(op.Input(1).Size(), TYPE_BOOL, "bool") // Second param is bool
+	}
+	ws := uint32(1)
+	if sp := op.Input(0).Space(); sp != nil && sp.WordSize > 0 {
+		ws = uint32(sp.WordSize)
+	}
+	return tf.GetPointer(op.Input(0).Size(), tf.GetCode("code", nil, nil, false), ws) // Code pointer
+}
+
+// GetInputCast dispatches to the typeOpCbranch InputTypeLocal.
+func (t *typeOpCbranch) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
+	return baseGetInputCast(t, op, slot, cs)
+}
+
 // GetInputCast must be overridden (not inherited) so baseGetInputCast receives
 // the typeOpCallind receiver and dispatches to the code-pointer InputTypeLocal
 // above; a promoted typeOpBase.GetInputCast would call the base InputTypeLocal.
@@ -368,7 +391,7 @@ func RegisterTypeOps() []TypeOp {
 
 	// Control flow
 	inst[CPUI_BRANCH] = &typeOpBase{CPUI_BRANCH, PcodeOpSpecial | PcodeOpBranch | PcodeOpCodeRef | PcodeOpNoCollapse, "BRANCH"}
-	inst[CPUI_CBRANCH] = &typeOpBase{CPUI_CBRANCH, PcodeOpSpecial | PcodeOpBranch | PcodeOpCodeRef | PcodeOpNoCollapse, "CBRANCH"}
+	inst[CPUI_CBRANCH] = &typeOpCbranch{typeOpBase{CPUI_CBRANCH, PcodeOpSpecial | PcodeOpBranch | PcodeOpCodeRef | PcodeOpNoCollapse, "CBRANCH"}}
 	inst[CPUI_BRANCHIND] = &typeOpBase{CPUI_BRANCHIND, PcodeOpSpecial | PcodeOpBranch | PcodeOpNoCollapse, "BRANCHIND"}
 	inst[CPUI_CALL] = &typeOpCall{typeOpBase{CPUI_CALL, PcodeOpSpecial | PcodeOpCall | PcodeOpHasCallSpec | PcodeOpCodeRef | PcodeOpNoCollapse, "CALL"}}
 	inst[CPUI_CALLIND] = &typeOpCallind{typeOpBase{CPUI_CALLIND, PcodeOpSpecial | PcodeOpCall | PcodeOpHasCallSpec | PcodeOpNoCollapse, "CALLIND"}}

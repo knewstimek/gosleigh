@@ -241,7 +241,7 @@ func baseGetInputCast(t TypeOp, op *PcodeOp, slot int, cs *CastStrategyC) Dataty
 		return nil
 	}
 	vn := op.Input(slot)
-	if vn == nil {
+	if vn == nil || vn.IsAnnotation() {
 		return nil
 	}
 	reqtype := t.InputTypeLocal(op, slot, cs.tlst)
