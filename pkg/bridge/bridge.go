@@ -867,6 +867,9 @@ func buildModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdata, 
 		if specs := buildInputPentrySpecs(xr, cspec, model, fd); len(specs) > 0 {
 			model.SetInputParams(pcode.NewParamListStandard(specs))
 		}
+		if specs := buildOutputPentrySpecs(xr, cspec, fd); len(specs) > 0 {
+			model.SetOutputParams(pcode.NewParamListStandard(specs))
+		}
 	}
 	// Entry-point functions use the stack-based processEntry convention: register
 	// argument slots stay known (RegParamOffsets) but are not recovered as named
@@ -1035,10 +1038,12 @@ func buildFaithfulStackSpace(xr *sla.XRefs, cspec *pcode.CspecData, fd *pcode.Fu
 	// lives in, so the stack pointer is resolved before stack slots are heritaged.
 	// C++ parity: architecture.cc Architecture::addSpacebase (line 565) passes
 	// ptrdata.space->getDelay()+1 as the SpacebaseSpace delay.
+	// The join space precedes the spacebase space (architecture.cc:634 inserts
+	// fspec, iop and join after the processor spaces).
 	stackSpace := &address.Space{
 		Name:     "stack",
 		Kind:     address.SpaceKindStack,
-		Index:    maxIdx + 1,
+		Index:    maxIdx + 2,
 		AddrSize: uint8(sz),
 		WordSize: 1,
 		Delay:    regSpace.Delay + 1,
@@ -1144,6 +1149,76 @@ func buildInputPentrySpecs(xr *sla.XRefs, cspec *pcode.CspecData, model *pcode.P
 		if addPentry(pe, group, false) {
 			group++
 		}
+	}
+	return specs
+}
+
+// joinSpaceFor installs and returns the function's join space, indexed just
+// past the processor spaces. C++ parity: Architecture::restoreFromSpec.
+func joinSpaceFor(fd *pcode.Funcdata) *address.Space {
+	if js := fd.JoinSpace(); js != nil {
+		return js
+	}
+	_, maxIdx := registerSpaceByIndex(fd, -1)
+	js := address.JoinSpaceAt(maxIdx + 1)
+	fd.SetJoinSpace(js, fd.BaseAddr().Space)
+	return js
+}
+
+// buildOutputPentrySpecs resolves the cspec default-proto <output> pentries,
+// each its own group in document order; a join pentry resolves its pieces
+// (most significant first) to a join record.
+// C++ parity: ParamListStandard::decode for the output list.
+func buildOutputPentrySpecs(xr *sla.XRefs, cspec *pcode.CspecData, fd *pcode.Funcdata) []pcode.ParamEntrySpec {
+	if cspec == nil || cspec.DefaultProto == nil {
+		return nil
+	}
+	reg := func(name string) (address.VarnodeData, bool) {
+		si, off, sz, ok := xr.RegisterByName(name)
+		if !ok {
+			return address.VarnodeData{}, false
+		}
+		sp, _ := registerSpaceByIndex(fd, si)
+		if sp == nil {
+			return address.VarnodeData{}, false
+		}
+		return address.VarnodeData{Space: sp, Offset: off, Size: int32(sz)}, true
+	}
+	var specs []pcode.ParamEntrySpec
+	var group int32
+	for _, pe := range cspec.DefaultProto.Output.Pentries {
+		spec := pcode.ParamEntrySpec{
+			MinSize: int32(pe.MinSize),
+			MaxSize: int32(pe.MaxSize),
+			Align:   int32(pe.Align),
+			IsFloat: pe.Metatype == "float" || pe.Storage == "float",
+			GroupID: group,
+		}
+		switch {
+		case pe.Register != nil:
+			v, ok := reg(pe.Register.Name)
+			if !ok {
+				continue
+			}
+			spec.Space = v.Space
+			spec.BigEndian = v.Space.BigEndian
+			spec.AddressBase = v.Offset
+		case pe.Addr != nil && pe.Addr.Space == "join" && pe.Addr.Piece1 != "" && pe.Addr.Piece2 != "":
+			hi, ok1 := reg(pe.Addr.Piece1)
+			lo, ok2 := reg(pe.Addr.Piece2)
+			if !ok1 || !ok2 {
+				continue
+			}
+			js := joinSpaceFor(fd)
+			rec := address.FindAddJoin(js, []address.VarnodeData{hi, lo}, 0)
+			spec.Space = js
+			spec.AddressBase = rec.Unified.Offset
+			spec.Join = rec
+		default:
+			continue
+		}
+		specs = append(specs, spec)
+		group++
 	}
 	return specs
 }

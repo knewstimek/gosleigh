@@ -14,7 +14,11 @@
 
 package pcode
 
-import "gosleigh/pkg/address"
+import (
+	"fmt"
+
+	"gosleigh/pkg/address"
+)
 
 // This file ports the call-site return-value ("output") recovery machinery from
 // Ghidra's FuncCallSpecs. When a CALL/CALLIND has an active output ParamActive,
@@ -51,6 +55,16 @@ func (fc *FuncCallSpecs) IsOutputActive() bool {
 // C++ parity: fspec.cc FuncProto::characterizeAsOutput (register subset).
 func (fc *FuncCallSpecs) CharacterizeAsOutput(addr address.Address, size int32) int {
 	m := fc.Model()
+	if m != nil && m.OutputParams != nil {
+		// C++ parity: FuncProto::characterizeAsOutput -> output->characterizeAsParam
+		switch m.OutputParams.characterizeAsParam(addr, size) {
+		case peNoContainment:
+			return retOutNoContainment
+		case peContainedBy:
+			return retOutContainedBy
+		}
+		return retOutOther
+	}
 	if m == nil || m.ReturnRegSpaceIndex < 0 || m.ReturnRegSize == 0 {
 		return retOutNoContainment
 	}
@@ -98,6 +112,8 @@ func (fc *FuncCallSpecs) collectOutputTrialVarnodes(data *Funcdata) []*Varnode {
 		index := active.WhichTrial(vn.Addr(), vn.Size())
 		if index >= 0 {
 			trialvn[index] = vn
+			// The exact varnode may have changed, so reset the trial
+			active.Trial(index).SetAddress(vn.Addr(), vn.Size())
 		}
 	}
 	return trialvn
@@ -133,6 +149,10 @@ func (fc *FuncCallSpecs) checkOutputTrialUse(data *Funcdata) []*Varnode {
 func (fc *FuncCallSpecs) deriveOutputMap() {
 	active := fc.GetActiveOutput()
 	if active.NumTrials() == 0 {
+		return
+	}
+	if m := fc.Model(); m != nil && m.OutputParams != nil {
+		m.OutputParams.FillinMapOut(active)
 		return
 	}
 	for i := 0; i < active.NumTrials(); i++ {
@@ -180,10 +200,40 @@ func (fc *FuncCallSpecs) buildOutputFromTrials(data *Funcdata, trialvn []*Varnod
 		}
 		deletedops = append(deletedops, finaloutvn.Def())
 		data.OpSetOutput(fc.op, finaloutvn) // move varnode to be the call output
+	} else if active.NumTrials() == 2 {
+		hivn, lovn := finalvn[1], finalvn[0]
+		if active.IsJoinReverse() {
+			hivn, lovn = finalvn[0], finalvn[1]
+		}
+		if hivn == nil || lovn == nil {
+			return
+		}
+		if data.IsDoublePrecisOn() {
+			lovn.SetPrecisLo() // Pieces of a larger precision whole
+			hivn.SetPrecisHi()
+		}
+		deletedops = append(deletedops, hivn.Def(), lovn.Def())
+		if finaloutvn := findPreexistingWhole(hivn, lovn); finaloutvn != nil {
+			deletedops = append(deletedops, finaloutvn.Def()) // Its inputs are used only here
+			data.OpSetOutput(fc.op, finaloutvn)
+		} else {
+			joinaddr := data.constructJoinAddress(hivn.Addr(), hivn.Size(), lovn.Addr(), lovn.Size())
+			finaloutvn = data.NewVarnode(hivn.Size()+lovn.Size(), joinaddr)
+			data.OpSetOutput(fc.op, finaloutvn)
+			sublo := data.NewOp(2, fc.op.Addr())
+			data.OpSetOpcode(sublo, CPUI_SUBPIECE)
+			data.OpSetInput(sublo, finaloutvn, 0)
+			data.OpSetInput(sublo, data.NewConstant(4, 0), 1)
+			data.OpSetOutput(sublo, lovn)
+			data.OpInsertAfter(sublo, fc.op)
+			subhi := data.NewOp(2, fc.op.Addr())
+			data.OpSetOpcode(subhi, CPUI_SUBPIECE)
+			data.OpSetInput(subhi, finaloutvn, 0)
+			data.OpSetInput(subhi, data.NewConstant(4, uint64(lovn.Size())), 1)
+			data.OpSetOutput(subhi, hivn)
+			data.OpInsertAfter(subhi, fc.op)
+		}
 	} else {
-		// TODO known mismatch: the two-trial join path (double-precision returns,
-		// findPreexistingWhole + constructJoinAddress) is not yet ported. Leaving
-		// the output unrecovered reproduces the pre-port behavior for such calls.
 		return
 	}
 
@@ -201,4 +251,29 @@ func (fc *FuncCallSpecs) buildOutputFromTrials(data *Funcdata, trialvn []*Varnod
 			data.DeleteVarnode(in1)
 		}
 	}
+}
+
+// findPreexistingWhole is the output of a PIECE that is the only reader of
+// both vn1 and vn2, or nil. C++ parity: FuncCallSpecs::findPreexistingWhole.
+func findPreexistingWhole(vn1, vn2 *Varnode) *Varnode {
+	op1 := vn1.LoneDescend()
+	if op1 == nil || op1 != vn2.LoneDescend() || op1.Code() != CPUI_PIECE {
+		return nil
+	}
+	return op1.Output()
+}
+
+// constructJoinAddress is the storage of the whole made of hi and lo.
+// C++ parity: AddrSpaceManager::constructJoinAddress.
+func (fd *Funcdata) constructJoinAddress(hi address.Address, hisz int32, lo address.Address, losz int32) address.Address {
+	return address.ConstructJoinAddress(fd.joinSpace, fd.codeSpace, hi, hisz, lo, losz, fd.registerExists)
+}
+
+// registerExists reports whether a named register covers exactly
+// [addr, addr+size). C++ parity: Translate::getRegisterName != "".
+func (fd *Funcdata) registerExists(addr address.Address, size int32) bool {
+	if addr.Space == nil {
+		return false
+	}
+	return fd.registerNames[fmt.Sprintf("%d:%d:%d", addr.Space.Index, addr.Offset, size)] != ""
 }

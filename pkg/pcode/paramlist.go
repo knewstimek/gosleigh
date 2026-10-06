@@ -15,6 +15,8 @@
 package pcode
 
 import (
+	"sort"
+
 	"gosleigh/pkg/address"
 )
 
@@ -37,6 +39,7 @@ type typeClass int32
 const (
 	typeclassGeneral typeClass = 0   // TYPECLASS_GENERAL
 	typeclassFloat   typeClass = 1   // TYPECLASS_FLOAT
+	typeclassPtr     typeClass = 2   // TYPECLASS_PTR
 	typeclassClass4  typeClass = 103 // TYPECLASS_CLASS4 sentinel
 )
 
@@ -44,7 +47,10 @@ const (
 const (
 	peForceLeftJustify uint32 = 1
 	peReverseStack     uint32 = 2
+	peExtracheckHigh   uint32 = 0x80
+	peExtracheckLow    uint32 = 0x100
 	peIsGrouped        uint32 = 0x200
+	peOverlapping      uint32 = 0x400
 )
 
 // paramEntry is the full port of Ghidra ParamEntry: a contiguous range of
@@ -68,6 +74,9 @@ type paramEntry struct {
 	minsize     int32 // minimum bytes for a logical value
 	alignment   int32 // 0 means exclusion (single value)
 	numslots    int32
+	// joinrec is the record of a join-space entry (pieces most significant
+	// first), nil otherwise. C++ parity: ParamEntry::joinrec.
+	joinrec *address.JoinRecord
 
 	// Denormalized mirrors read directly by ParamTrial ordering (paramactive.go).
 	group        int32
@@ -83,6 +92,42 @@ func (pe *paramEntry) getAlign() int32       { return pe.alignment }
 func (pe *paramEntry) getType() typeClass    { return pe.tclass }
 func (pe *paramEntry) isExclusion() bool     { return pe.alignment == 0 }
 func (pe *paramEntry) isReverseStack() bool  { return pe.flags&peReverseStack != 0 }
+
+// isParamCheckHigh / isParamCheckLow: a join piece overlapping an earlier
+// entry needs extra checks. C++ parity: ParamEntry::isParamCheckHigh/Low.
+func (pe *paramEntry) isParamCheckHigh() bool { return pe.flags&peExtracheckHigh != 0 }
+func (pe *paramEntry) isParamCheckLow() bool  { return pe.flags&peExtracheckLow != 0 }
+
+// resolveJoin takes the groups of the earlier entries the join pieces overlap.
+// C++ parity: ParamEntry::resolveJoin / findEntryByStorage.
+func (pe *paramEntry) resolveJoin(prev []*paramEntry) {
+	if pe.joinrec == nil {
+		return
+	}
+	var groups []int32
+	for i, piece := range pe.joinrec.Pieces {
+		for j := len(prev) - 1; j >= 0; j-- { // Most recent first
+			e := prev[j]
+			if e.joinrec == nil && e.space == piece.Space && e.addressbase == piece.Offset {
+				groups = append(groups, e.groupSet...)
+				// The overlapping most significant part puts extra checks on
+				// the least significant part, and vice versa
+				if i == 0 {
+					pe.flags |= peExtracheckLow
+				} else {
+					pe.flags |= peExtracheckHigh
+				}
+				break
+			}
+		}
+	}
+	if len(groups) == 0 {
+		return // C++ throws: a join must overlap a previous entry
+	}
+	sort.Slice(groups, func(a, b int) bool { return groups[a] < groups[b] })
+	pe.groupSet = groups
+	pe.flags |= peOverlapping
+}
 
 // isLeftJustified reports whether the logical value is left-justified within its
 // container. C++ parity: ParamEntry::isLeftJustified (fspec.hh:123).
@@ -119,6 +164,19 @@ func (pe *paramEntry) groupOverlap(op2 *paramEntry) bool {
 // (fspec.cc:248). Join records are not modeled (no join pentries in the ABIs
 // exercised here).
 func (pe *paramEntry) justifiedContain(addr address.Address, sz int32) int32 {
+	if pe.joinrec != nil {
+		res := int32(0)
+		for i := len(pe.joinrec.Pieces) - 1; i >= 0; i-- { // Least significant first
+			v := pe.joinrec.Pieces[i]
+			cur := addressJustifiedContain(v.Addr(), v.Size, addr, sz, false)
+			if cur < 0 {
+				res += v.Size // Skipped this many less significant bytes
+			} else {
+				return res + cur
+			}
+		}
+		return -1 // Not contained at all
+	}
 	if pe.alignment == 0 {
 		entry := address.Address{Space: pe.space, Offset: pe.addressbase}
 		return addressJustifiedContain(entry, pe.size, addr, sz, pe.flags&peForceLeftJustify != 0)
@@ -231,6 +289,14 @@ func (pe *paramEntry) getAddrBySlot(slotnum *int32, sz int32) address.Address {
 // containsOffset reports whether addr lies within this entry's range in the same
 // space. Used by findEntry's resolver walk.
 func (pe *paramEntry) containsOffset(addr address.Address) bool {
+	if pe.joinrec != nil { // The resolver holds each piece range
+		for _, v := range pe.joinrec.Pieces {
+			if addr.Space == v.Space && addr.Offset >= v.Offset && addr.Offset <= v.Offset+uint64(v.Size)-1 {
+				return true
+			}
+		}
+		return false
+	}
 	if addr.Space == nil || addr.Space.Index != pe.spaceIndex {
 		return false
 	}
@@ -341,6 +407,8 @@ type ParamEntrySpec struct {
 	IsFloat     bool
 	Grouped     bool
 	GroupID     int32
+	// Join is the record of a join-space pentry (Space is the join space).
+	Join *address.JoinRecord
 }
 
 // NewParamListStandard builds a ParamListStandard from resolved pentry specs, in
@@ -365,6 +433,7 @@ func NewParamListStandard(specs []ParamEntrySpec) *ParamListStandard {
 		if s.Space != nil {
 			pe.spaceIndex = s.Space.Index
 		}
+		pe.joinrec = s.Join
 		pe.tclass = typeclassGeneral
 		if s.IsFloat {
 			pe.tclass = typeclassFloat
@@ -382,6 +451,7 @@ func NewParamListStandard(specs []ParamEntrySpec) *ParamListStandard {
 		}
 		// reverse_stack is set only for positive-growth stacks (!normalstack); the
 		// x86/x64 ABIs exercised here are all normalstack, so it stays clear.
+		pe.resolveJoin(pl.entry)
 		pe.group = pe.groupSet[0]
 		pe.exclusion = pe.alignment == 0
 		pe.reverseStack = pe.flags&peReverseStack != 0
@@ -822,4 +892,94 @@ func addressJustifiedContain(base address.Address, sz int32, op2 address.Address
 		return int32(off1 - off2)
 	}
 	return int32(op2.Offset - base.Offset)
+}
+
+// FillinMapOut marks the active output trials covered by the best matching
+// output entry as used. C++ parity: ParamListStandardOut::fillinMapFallback
+// with firstOnly false, which fillinMap uses when the list has no model rules
+// (the x86/x64 cspecs loaded here have none).
+func (pl *ParamListStandard) FillinMapOut(active *ParamActive) {
+	if active.NumTrials() == 0 {
+		return // No trials to check
+	}
+	var bestentry *paramEntry
+	bestcover := int32(0)
+	bestclass := typeclassPtr
+	// Find the entry best covered by the active trials
+	for _, curentry := range pl.entry {
+		putativematch := false
+		for j := 0; j < active.NumTrials(); j++ { // Evaluate all trials against curentry
+			trial := active.Trial(j)
+			if trial.IsActive() {
+				if res := curentry.justifiedContain(trial.GetAddress(), trial.GetSize()); res >= 0 {
+					trial.SetEntry(curentry, res)
+					putativematch = true
+					continue
+				}
+			}
+			trial.SetEntry(nil, 0)
+		}
+		if !putativematch {
+			continue
+		}
+		active.SortTrials()
+		// Number of least justified, contiguous bytes for this entry
+		offmatch := int32(0)
+		k := 0
+		for ; k < active.NumTrials(); k++ {
+			trial := active.Trial(k)
+			if trial.GetEntry() == nil {
+				continue
+			}
+			if offmatch != trial.GetOffset() {
+				break
+			}
+			if (offmatch == 0 && curentry.isParamCheckLow()) || (offmatch != 0 && curentry.isParamCheckHigh()) {
+				// Multi-precision: check this portion is not created normally
+				if trial.IsRemFormed() || trial.IsIndCreateFormed() {
+					break
+				}
+			}
+			offmatch += trial.GetSize()
+		}
+		if offmatch < curentry.getMinSize() { // Not enough to cover the minimum size
+			k = 0
+		}
+		// Prefer a more generic type restriction, then the larger coverage
+		if k == active.NumTrials() && (curentry.getType() < bestclass || offmatch > bestcover) {
+			bestentry = curentry
+			bestcover = offmatch
+			bestclass = curentry.getType()
+		}
+	}
+	if bestentry == nil {
+		for i := 0; i < active.NumTrials(); i++ {
+			active.Trial(i).MarkNoUse()
+		}
+		return
+	}
+	for i := 0; i < active.NumTrials(); i++ {
+		trial := active.Trial(i)
+		if trial.IsActive() {
+			if res := bestentry.justifiedContain(trial.GetAddress(), trial.GetSize()); res >= 0 {
+				trial.MarkUsed() // Only actives are ever marked used
+				trial.SetEntry(bestentry, res)
+				continue
+			}
+		}
+		trial.MarkNoUse()
+		trial.SetEntry(nil, 0)
+	}
+	active.SortTrials()
+}
+
+// PossibleOutput reports that some output entry contains the storage.
+// C++ parity: ParamListStandardOut::possibleParam.
+func (pl *ParamListStandard) PossibleOutput(loc address.Address, size int32) bool {
+	for _, pe := range pl.entry {
+		if pe.justifiedContain(loc, size) >= 0 {
+			return true
+		}
+	}
+	return false
 }

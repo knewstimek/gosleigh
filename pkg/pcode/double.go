@@ -42,7 +42,6 @@ import (
 //   - Form classes         (SplitVarnode::applyRuleIn) -- 13/13 ported;
 //                            IndirectForm is PARTIAL pending IOP-affector encoding
 //   - RuleDoubleStore::reassignIndirects op-from-const chain
-//   - RuleDoubleIn::reset  -- Funcdata.setDoublePrecisRecovery not yet plumbed
 
 // SplitVarnode mirrors the C++ SplitVarnode class.
 //

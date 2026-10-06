@@ -70,7 +70,7 @@ func TestX64Corpus2GoldenMap(t *testing.T) {
 					t.Logf("[%s] PANIC: %v", fn.Name, r)
 				}
 			}()
-			db.SetCurrent("decompile").Perform(fd)
+			db.Run("decompile", fd)
 		}()
 		out, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).SetGhidraFormat().Emit(fd)
 		if err != nil {

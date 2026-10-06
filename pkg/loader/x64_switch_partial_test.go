@@ -142,7 +142,7 @@ func TestX64SwitchPartialHeritageRecovers(t *testing.T) {
 				t.Fatalf("PANIC during jumptable-group heritage on partial: %v", r)
 			}
 		}()
-		db.SetCurrent("jumptable").Perform(fd)
+		db.Run("jumptable", fd)
 	}()
 
 	// The BRANCHIND target input must now be an SSA-written varnode (heritage fed

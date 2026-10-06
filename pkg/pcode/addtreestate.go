@@ -211,7 +211,7 @@ func (op *PcodeOp) HasPtrFlow() bool {
 }
 
 func (fd *Funcdata) HasTypeRecoveryStarted() bool {
-	return fd.HasFlag(FuncTypeRecoveryOn)
+	return fd.HasFlag(FuncTypeRecoveryStart)
 }
 
 func (fd *Funcdata) NewSpaceIDConst(spc *address.Space) *Varnode {

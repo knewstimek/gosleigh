@@ -58,7 +58,7 @@ func TestX64RegParamOrder(t *testing.T) {
 		db := pcode.NewActionDatabase()
 		db.BuildUniversalAction(nil)
 		db.BuildDefaultGroups()
-		db.SetCurrent("decompile").Perform(fd)
+		db.Run("decompile", fd)
 		out, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).SetGhidraFormat().Emit(fd)
 		if err != nil {
 			t.Fatalf("[%s] Emit: %v", c.name, err)

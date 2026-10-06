@@ -63,7 +63,11 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 		db := pcode.NewActionDatabase()
 		db.BuildUniversalAction(nil)
 		db.BuildDefaultGroups()
-		db.SetCurrent("decompile").Perform(fd)
+		// C++ parity: ifacedecomp.cc resets the current action before perform
+		// (Action::reset reaches every Rule::reset).
+		act := db.SetCurrent("decompile")
+		act.Reset(fd)
+		act.Perform(fd)
 		ov := fd.IndirectOverrides()
 		if !fd.RebuildRequested() || result.rebuild == nil || restarts >= 2 {
 			break

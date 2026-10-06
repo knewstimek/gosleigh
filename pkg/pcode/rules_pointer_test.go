@@ -14,7 +14,7 @@ func makePointerRuleTypes() (*Base, *Struct, *Pointer) {
 
 func TestAddTreeState_ClassifyAndRebuild(t *testing.T) {
 	data := newRulesFuncdata()
-	data.SetFlag(FuncTypeRecoveryOn)
+	data.SetFlag(FuncTypeRecoveryOn | FuncTypeRecoveryStart)
 	int4, _, ptrType := makePointerRuleTypes()
 
 	ptr := newRuleInput(data, 4, 0x10)
@@ -80,7 +80,7 @@ func TestAddTreeState_ClassifyAndRebuild(t *testing.T) {
 
 func TestRulePtrArith_RewriteAndNonRewrite(t *testing.T) {
 	data := newRulesFuncdata()
-	data.SetFlag(FuncTypeRecoveryOn)
+	data.SetFlag(FuncTypeRecoveryOn | FuncTypeRecoveryStart)
 	int4, _, ptrType := makePointerRuleTypes()
 
 	ptr := newRuleInput(data, 4, 0x100)
@@ -114,7 +114,7 @@ func TestRulePtrArith_RewriteAndNonRewrite(t *testing.T) {
 
 func TestRulePtrUndoPaths(t *testing.T) {
 	data := newRulesFuncdata()
-	data.SetFlag(FuncTypeRecoveryOn)
+	data.SetFlag(FuncTypeRecoveryOn | FuncTypeRecoveryStart)
 	int4 := sharedTypeFactory.GetBase(4, TYPE_INT, "int4")
 	ptrType := sharedTypeFactory.GetPointer(4, int4, 1)
 
@@ -155,7 +155,7 @@ func TestRulePtrUndoPaths(t *testing.T) {
 
 func TestRulePtrFlowMarksFlags(t *testing.T) {
 	data := newRulesFuncdata()
-	data.SetFlag(FuncTypeRecoveryOn)
+	data.SetFlag(FuncTypeRecoveryOn | FuncTypeRecoveryStart)
 	int4, _, ptrType := makePointerRuleTypes()
 
 	ptr := newRuleInput(data, 4, 0x300)

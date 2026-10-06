@@ -3984,6 +3984,13 @@ func NewRuleDoubleIn(group string) *RuleDoubleIn {
 	return r
 }
 
+// Reset marks that double precision recovery is in progress.
+// C++ parity: RuleDoubleIn::reset.
+func (r *RuleDoubleIn) Reset(data *Funcdata) {
+	r.batchRule.Reset(data)
+	data.SetDoublePrecisRecovery(true)
+}
+
 // C++ parity: RuleDoubleIn::attemptMarking (double.cc:3218)
 func (r *RuleDoubleIn) attemptMarking(vn *Varnode, subpieceOp *PcodeOp) int {
 	whole := subpieceOp.Input(0)

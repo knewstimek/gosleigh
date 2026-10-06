@@ -142,7 +142,7 @@ func TestX64SwitchGoldenMap(t *testing.T) {
 				t.Fatalf("[%s] PANIC during decompile: %v", target.Name, r)
 			}
 		}()
-		db.SetCurrent("decompile").Perform(fd)
+		db.Run("decompile", fd)
 	}()
 
 	out, err := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).SetGhidraFormat().Emit(fd)

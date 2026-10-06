@@ -27,6 +27,7 @@ func TestUniversalActionTreeConverges(t *testing.T) {
 	db.BuildUniversalAction(nil)
 	db.BuildDefaultGroups()
 	act := db.SetCurrent("decompile")
+	act.Reset(fd)
 
 	done := make(chan struct{})
 	go func() {

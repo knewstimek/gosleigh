@@ -37,6 +37,7 @@ func runTreeGhidra(t *testing.T, prog []byte) string {
 	db.BuildUniversalAction(nil)
 	db.BuildDefaultGroups()
 	act := db.SetCurrent("decompile")
+	act.Reset(fd)
 	act.Perform(fd)
 	out, err := pcode.NewPrintC().
 		SetRegisterNames(engine.RegisterNamesByLocation()).

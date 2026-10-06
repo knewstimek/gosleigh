@@ -65,6 +65,12 @@ func (p *ParamTrial) GetAddress() address.Address {
 	return p.addr
 }
 
+// SetAddress resets the trial storage. C++ parity: ParamTrial::setAddress.
+func (p *ParamTrial) SetAddress(addr address.Address, sz int32) {
+	p.addr = addr
+	p.size = sz
+}
+
 // GetSize returns the trial size.
 // C++ parity: ParamTrial::getSize
 func (p *ParamTrial) GetSize() int32 {

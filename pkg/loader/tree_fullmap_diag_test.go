@@ -66,7 +66,9 @@ func runTreeCase(t *testing.T, dir string, c treeMapCase) (string, bool) {
 	db := pcode.NewActionDatabase()
 	db.BuildUniversalAction(nil)
 	db.BuildDefaultGroups()
-	db.SetCurrent("decompile").Perform(fd)
+	act := db.SetCurrent("decompile")
+	act.Reset(fd)
+	act.Perform(fd)
 	p := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation()).SetGhidraFormat()
 	if c.procEntry != "" {
 		p = p.SetProcessEntry(c.procEntry, c.ghosts)

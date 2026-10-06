@@ -916,6 +916,14 @@ func (db *ActionDatabase) SetCurrent(name string) Action {
 	return db.currentAct
 }
 
+// Run selects the named root action, resets it for fd and performs it.
+// C++ parity: ifacedecomp.cc (allacts.getCurrent()->reset, then perform).
+func (db *ActionDatabase) Run(name string, fd *Funcdata) int {
+	act := db.SetCurrent(name)
+	act.Reset(fd)
+	return act.Perform(fd)
+}
+
 // ToggleAction adds or removes a group from a root and re-derives it.
 func (db *ActionDatabase) ToggleAction(group string, baseGroup string, val bool) Action {
 	if val {

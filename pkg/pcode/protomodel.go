@@ -314,6 +314,9 @@ type ProtoModel struct {
 	// builds; recovery then falls back to the register/stack heuristics.
 	// C++ parity: PrototypeModel::input (compiler.hh).
 	InputParams *ParamListStandard
+	// OutputParams is the output storage model (the <output> pentries,
+	// including join entries). C++ parity: ProtoModel::output.
+	OutputParams *ParamListStandard
 }
 
 // GetExtraPop returns the model's extrapop.
@@ -323,6 +326,13 @@ func (pm *ProtoModel) GetExtraPop() int32 { return pm.ExtraPop }
 // HasThisPointer reports whether the model passes an implicit this pointer.
 // C++ parity: ProtoModel::hasThisPointer.
 func (pm *ProtoModel) HasThisPointer() bool { return pm != nil && pm.hasThis }
+
+// SetOutputParams attaches the output parameter-storage model.
+func (pm *ProtoModel) SetOutputParams(pl *ParamListStandard) {
+	if pm != nil {
+		pm.OutputParams = pl
+	}
+}
 
 // SetInputParams attaches the faithful input parameter-storage model.
 func (pm *ProtoModel) SetInputParams(pl *ParamListStandard) {

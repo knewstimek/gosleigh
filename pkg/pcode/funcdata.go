@@ -16,6 +16,7 @@ const (
 	FuncProcessingStarted  uint32 = 0x0008
 	FuncProcessingComplete uint32 = 0x0010
 	FuncTypeRecoveryOn     uint32 = 0x0020
+	FuncTypeRecoveryStart  uint32 = 0x0040
 	FuncNoCode             uint32 = 0x0080
 	FuncUnimplPresent      uint32 = 0x0800
 	FuncBadDataPresent     uint32 = 0x1000
@@ -85,6 +86,11 @@ type Funcdata struct {
 
 	// globalRanges is the global scope's storage (cspec <global>).
 	globalRanges []GlobalRange
+	// joinSpace holds storage split across pieces (EDX:EAX returns).
+	// C++ parity: AddrSpaceManager::getJoinSpace.
+	joinSpace *address.Space
+	// codeSpace is the default code space. C++ parity: getDefaultCodeSpace.
+	codeSpace *address.Space
 
 	// evalCurrent is the model used to evaluate this function's own prototype
 	// when it differs from the default (possibly a merged model).
@@ -419,10 +425,13 @@ func (fd *Funcdata) StartCleanUp() {
 // StartTypeRecovery enables type recovery if it is not already active.
 // C++ parity: funcdata.hh Funcdata::startTypeRecovery
 func (fd *Funcdata) StartTypeRecovery() bool {
-	if fd.HasFlag(FuncTypeRecoveryOn) {
-		return false
+	if !fd.HasFlag(FuncTypeRecoveryOn) {
+		return false // Type recovery is not on
 	}
-	fd.SetFlag(FuncTypeRecoveryOn)
+	if fd.HasFlag(FuncTypeRecoveryStart) {
+		return false // Already started
+	}
+	fd.SetFlag(FuncTypeRecoveryStart)
 	return true
 }
 
@@ -1179,6 +1188,15 @@ type GlobalRange struct {
 // SetGlobalRanges installs the global scope's storage ranges (cspec <global>).
 // C++ parity: Architecture::addToGlobalScope.
 func (fd *Funcdata) SetGlobalRanges(r []GlobalRange) { fd.globalRanges = r }
+
+// SetJoinSpace installs the join and default code spaces.
+func (fd *Funcdata) SetJoinSpace(join, code *address.Space) {
+	fd.joinSpace = join
+	fd.codeSpace = code
+}
+
+// JoinSpace is the join address space, or nil when none is configured.
+func (fd *Funcdata) JoinSpace() *address.Space { return fd.joinSpace }
 
 // inGlobalScope reports whether [addr, addr+size) lies inside a global range.
 func (fd *Funcdata) inGlobalScope(addr address.Address, size int32) bool {

@@ -56,6 +56,7 @@ func TestUniversalActionTreeGcdGolden(t *testing.T) {
 	db.BuildUniversalAction(nil)
 	db.BuildDefaultGroups()
 	act := db.SetCurrent("decompile")
+	act.Reset(fd)
 	act.Perform(fd)
 
 	out, err := pcode.NewPrintC().

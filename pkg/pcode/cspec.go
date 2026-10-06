@@ -53,6 +53,10 @@ func isIntegerRegPentry(pe CspecPentry) bool {
 type CspecAddr struct {
 	Space  string `xml:"space,attr"`
 	Offset int64  `xml:"offset,attr"`
+	// Piece1, Piece2 name the registers of a join address, most significant
+	// first. C++ parity: AddrSpaceManager join decoding (piece1..pieceN).
+	Piece1 string `xml:"piece1,attr"`
+	Piece2 string `xml:"piece2,attr"`
 }
 
 // CspecRegister is the <register> sub-element of <pentry>.
