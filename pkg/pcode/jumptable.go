@@ -1183,6 +1183,8 @@ func indexPairLess(a, b IndexPair) bool {
 // JumpTable maps computed-jump values to control flow targets.
 // C++ parity: jumptable.hh JumpTable
 type JumpTable struct {
+	// recoverFailMsg is the warning text of a failed first-stage recovery.
+	recoverFailMsg   string
 	jmodel           JumpModel
 	origModel        JumpModel
 	addressTable     []address.Address
@@ -1357,10 +1359,10 @@ func (jt *JumpTable) JumpModel() JumpModel { return jt.jmodel }
 // warning to the ORIGINAL Funcdata's BRANCHIND via warning(err.explain,
 // op->getAddr()) (funcdata_block.cc:543).
 func (jt *JumpTable) EmulateFailMsg() string {
-	if jb, ok := jt.jmodel.(*JumpBasic); ok {
+	if jb, ok := jt.jmodel.(*JumpBasic); ok && jb.emulateFailMsg != "" {
 		return jb.emulateFailMsg
 	}
-	return ""
+	return jt.recoverFailMsg
 }
 
 // AddBlockToSwitch appends a synthetic destination (used when a guard
@@ -1545,11 +1547,15 @@ func (jt *JumpTable) RecoverModel(fd *Funcdata) {
 // C++ parity: jumptable.cc JumpTable::recoverAddresses
 func (jt *JumpTable) RecoverAddresses(fd *Funcdata) error {
 	jt.RecoverModel(fd)
+	// The LowlevelError text becomes the function's warning.
+	// C++ parity: Funcdata::stageJumpTable catch -> warning(err.explain).
 	if jt.jmodel == nil {
+		jt.recoverFailMsg = "Could not recover jumptable at " + PrintRawAddr(jt.opAddress) + ". Too many branches"
 		return fmt.Errorf("%w: could not recover jumptable at %s (too many branches)",
 			JumptableRecoveryError, jt.opAddress)
 	}
 	if jt.jmodel.TableSize() == 0 {
+		jt.recoverFailMsg = "Jumptable with 0 entries at " + PrintRawAddr(jt.opAddress)
 		return fmt.Errorf("%w: jumptable with 0 entries at %s",
 			JumptableRecoveryError, jt.opAddress)
 	}
