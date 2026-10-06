@@ -1739,22 +1739,37 @@ func NewRuleShiftSub(group string) *RuleShiftSub {
 	return r
 }
 
+// apply folds sub(V << 8n, c) into sub(V, c - n) when the result is a
+// natural truncation of V. C++ parity: RuleShiftSub::applyOp.
 func (r *RuleShiftSub) apply(op *PcodeOp, data *Funcdata) int {
-	shift := definedBy(op.Input(0), CPUI_INT_RIGHT)
-	if shift == nil || shift.NumInput() != 2 {
+	if !op.Input(0).IsWritten() {
 		return 0
 	}
-	shiftAmt, shiftOK := constantValue(shift.Input(1))
-	subAmt, subOK := constantValue(op.Input(1))
-	if !shiftOK || !subOK || shiftAmt%8 != 0 {
+	shiftop := op.Input(0).Def()
+	if shiftop.Code() != CPUI_INT_LEFT {
 		return 0
 	}
-	byteOff := shiftAmt/8 + subAmt
-	if byteOff+uint64(outputSize(op)) > uint64(shift.Input(0).Size()) {
+	sa := shiftop.Input(1)
+	if !sa.IsConstant() {
 		return 0
 	}
-	replaceInputSlot(data, op, 0, shift.Input(0))
-	replaceInputSlot(data, op, 1, data.NewConstant(op.Input(1).Size(), byteOff))
+	n := int64(sa.Offset())
+	if n&7 != 0 {
+		return 0 // must shift by a multiple of 8 bits
+	}
+	c := int64(op.Input(1).Offset())
+	vn := shiftop.Input(0)
+	if vn.IsFree() {
+		return 0
+	}
+	insize := int64(vn.Size())
+	outsize := int64(op.Output().Size())
+	c -= n / 8
+	if c < 0 || c+outsize > insize {
+		return 0 // not a natural truncation
+	}
+	data.OpSetInput(op, vn, 0)
+	data.OpSetInput(op, data.NewConstant(op.Input(1).Size(), uint64(c)), 1)
 	return 1
 }
 
