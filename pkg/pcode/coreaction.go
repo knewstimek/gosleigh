@@ -2571,80 +2571,126 @@ func (a *ActionMultiCse) Clone(groups ActionGroupList) Action {
 	return NewActionMultiCse(a.GetGroup())
 }
 
-// multiCsePreferredOutput returns true if out1 should survive vs out2.
+// multiCsePreferredOutput reports whether out2 should survive in place of
+// out1: the one read by a RETURN, then addrtied over register over unique.
 // C++ parity: coreaction.cc ActionMultiCse::preferredOutput
 func multiCsePreferredOutput(out1, out2 *Varnode) bool {
-	if out1 == nil {
-		return false
-	}
-	if out2 == nil {
-		return true
-	}
-	if out1.IsAddrTied() && !out2.IsAddrTied() {
-		return true
-	}
-	if !out1.IsAddrTied() && out2.IsAddrTied() {
-		return false
-	}
-	return out1.CreateIndex() < out2.CreateIndex()
-}
-
-// multiCseProcessBlock performs one MULTIEQUAL dedup pass on a basic block.
-// C++ parity: coreaction.cc ActionMultiCse::processBlock
-// TODO known mismatch: findMatch uses functionalEqualityLevel which is not
-// ported yet. The Go port currently only handles identical-input MULTIEQUAL
-// pairs (a strict subset of the C++ behaviour).
-func (a *ActionMultiCse) multiCseProcessBlock(data *Funcdata, bl *BlockBasic) bool {
-	if bl == nil {
-		return false
-	}
-	// Simple pairwise comparison: two MULTIEQUAL ops in the same block with
-	// element-wise equal inputs are functional duplicates.
-	ops := bl.Ops()
-	var mes []*PcodeOp
-	for _, op := range ops {
-		if op == nil || op.IsDead() {
-			continue
+	for _, op := range out1.DescendIter() {
+		if op.Code() == CPUI_RETURN {
+			return false
 		}
-		if op.Code() == CPUI_COPY {
-			continue
-		}
-		if op.Code() != CPUI_MULTIEQUAL {
-			break
-		}
-		mes = append(mes, op)
 	}
-	for i := 0; i < len(mes); i++ {
-		for j := i + 1; j < len(mes); j++ {
-			p := mes[i]
-			q := mes[j]
-			if p.NumInput() != q.NumInput() {
-				continue
-			}
-			equal := true
-			for k := 0; k < p.NumInput(); k++ {
-				if p.Input(k) != q.Input(k) {
-					equal = false
-					break
-				}
-			}
-			if !equal {
-				continue
-			}
-			out1 := p.Output()
-			out2 := q.Output()
-			if multiCsePreferredOutput(out1, out2) {
-				data.TotalReplace(out1, out2)
-				data.OpDestroy(p)
-			} else {
-				data.TotalReplace(out2, out1)
-				data.OpDestroy(q)
-			}
-			a.count++
+	for _, op := range out2.DescendIter() {
+		if op.Code() == CPUI_RETURN {
+			return true
+		}
+	}
+	if !out1.IsAddrTied() {
+		if out2.IsAddrTied() {
+			return true
+		}
+		if out1.Space() != nil && out1.Space().IsUnique() && (out2.Space() == nil || !out2.Space().IsUnique()) {
 			return true
 		}
 	}
 	return false
+}
+
+// multiCseThruCopy looks through a COPY, allowing for differences in copy
+// propagation between otherwise equal MULTIEQUAL inputs.
+func multiCseThruCopy(vn *Varnode) *Varnode {
+	if vn.IsWritten() && vn.Def().Code() == CPUI_COPY {
+		return vn.Def().Input(0)
+	}
+	return vn
+}
+
+// multiCseFindMatch finds a MULTIEQUAL before target in bl that reads in and
+// is functionally equal to target.
+// C++ parity: coreaction.cc ActionMultiCse::findMatch
+func multiCseFindMatch(bl *BlockBasic, target *PcodeOp, in *Varnode) *PcodeOp {
+	for _, op := range bl.Ops() {
+		if op == target { // Caught up with target, nothing else before it
+			break
+		}
+		numinput := op.NumInput()
+		i := 0
+		for ; i < numinput; i++ {
+			if multiCseThruCopy(op.Input(i)) == in {
+				break
+			}
+		}
+		if i == numinput {
+			continue
+		}
+		j := 0
+		for ; j < numinput; j++ {
+			in1 := multiCseThruCopy(op.Input(j))
+			in2 := multiCseThruCopy(target.Input(j))
+			if in1 == in2 {
+				continue
+			}
+			if functionalEqualityLevel(in1, in2, make([]*Varnode, 2), make([]*Varnode, 2)) != 0 {
+				break
+			}
+		}
+		if j == numinput { // We have found a redundancy
+			return op
+		}
+	}
+	return nil
+}
+
+// multiCseProcessBlock removes one redundant pair of MULTIEQUALs sharing an
+// input at the top of bl.
+// C++ parity: coreaction.cc ActionMultiCse::processBlock
+func (a *ActionMultiCse) multiCseProcessBlock(data *Funcdata, bl *BlockBasic) bool {
+	var vnlist []*Varnode
+	var targetop, pairop *PcodeOp
+	for _, op := range bl.Ops() {
+		opc := op.Code()
+		if opc == CPUI_COPY {
+			continue
+		}
+		if opc != CPUI_MULTIEQUAL {
+			break
+		}
+		vnpos := len(vnlist)
+		numinput := op.NumInput()
+		i := 0
+		for ; i < numinput; i++ {
+			vn := multiCseThruCopy(op.Input(i)) // Some copies may not propagate into MULTIEQUAL
+			vnlist = append(vnlist, vn)
+			if vn.IsMark() { // Seen this varnode before
+				if pairop = multiCseFindMatch(bl, op, vn); pairop != nil {
+					break
+				}
+			}
+		}
+		if i < numinput {
+			targetop = op
+			break
+		}
+		for _, vn := range vnlist[vnpos:] {
+			vn.SetMark()
+		}
+	}
+	for _, vn := range vnlist {
+		vn.ClearMark()
+	}
+	if targetop == nil {
+		return false
+	}
+	out1, out2 := pairop.Output(), targetop.Output()
+	if multiCsePreferredOutput(out1, out2) {
+		data.TotalReplace(out1, out2) // Keep targetop and out2
+		data.OpDestroy(pairop)
+	} else {
+		data.TotalReplace(out2, out1)
+		data.OpDestroy(targetop)
+	}
+	a.count++
+	return true
 }
 
 // Apply runs multiCseProcessBlock on every basic block until stable.
