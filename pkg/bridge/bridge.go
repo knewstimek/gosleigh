@@ -11,6 +11,11 @@ import (
 )
 
 type BuildConfig struct {
+	// IndirectOverrides turns the CALLIND of an instruction (keyed by its
+	// address offset) into a CALL to the given target.
+	// C++ parity: Override::insertIndirectOverride (applied by FlowInfo).
+	IndirectOverrides map[uint64]address.Address
+
 	Name            string
 	Entry           address.Address
 	End             address.Address
@@ -157,6 +162,8 @@ type Result struct {
 	Warnings       []string
 	// CspecData is set when BuildConfig.CspecPath is non-empty.
 	CspecData *pcode.CspecData
+	// rebuild re-runs Build with indirect-call overrides (a decompiler restart).
+	rebuild func(map[uint64]address.Address) (*Result, error)
 }
 
 type instructionRecord struct {
@@ -274,10 +281,18 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 
 	summary := summarizeSpaces(records, cfg.Entry.Space)
 	fixFlowOverrideReturns(records, summary.constSpace)
+	applyIndirectOverrides(records, cfg.IndirectOverrides)
 	injectWarnings := applyInjections(records, cfg.Injections, summary.constSpace)
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, summary.uniqueBase, summary.constSpace)
 	fd.UserOps().RegisterNames(engine.UserOpNames())
 	fd.SetRegisterNames(engine.RegisterNamesByLocation())
+	if len(cfg.IndirectOverrides) != 0 {
+		ov := make(map[uint64]address.Address, len(cfg.IndirectOverrides))
+		for k, v := range cfg.IndirectOverrides {
+			ov[k] = v
+		}
+		fd.SetIndirectOverrides(ov) // a restart keeps earlier overrides
+	}
 	if err := attachEnvironment(fd, cfg); err != nil {
 		return nil, err
 	}
@@ -489,6 +504,11 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		Instructions:   translations,
 		HeritageSpaces: summary.heritageSpaces,
 		Warnings:       warnings,
+		rebuild: func(ov map[uint64]address.Address) (*Result, error) {
+			next := cfg
+			next.IndirectOverrides = ov
+			return Build(engine, next)
+		},
 	}
 
 	// Attach the analysis context to the Funcdata so the universal-action tree
@@ -1473,6 +1493,30 @@ func fixFlowOverrideReturns(records []instructionRecord, constSpace *address.Spa
 			if ops[j].OpCode == pcode.CPUI_RETURN && len(ops[j].Inputs) == 1 && ops[j].Inputs[0].Space == nil {
 				ops[j].Inputs[0].Space = constSpace
 			}
+		}
+	}
+}
+
+// applyIndirectOverrides rewrites an overridden CALLIND into a direct CALL.
+// C++ parity: FlowInfo::setupCallindSpecs (Override::getIndirectOverride).
+func applyIndirectOverrides(records []instructionRecord, ov map[uint64]address.Address) {
+	if len(ov) == 0 {
+		return
+	}
+	for i := range records {
+		target, ok := ov[records[i].translation.Address.Offset]
+		if !ok {
+			continue
+		}
+		ops := records[i].translation.Ops
+		for j := range ops {
+			if ops[j].OpCode != pcode.CPUI_CALLIND || len(ops[j].Inputs) == 0 {
+				continue
+			}
+			in := &ops[j].Inputs[0]
+			ops[j].OpCode = pcode.CPUI_CALL
+			in.Space = target.Space
+			in.Offset = target.Offset
 		}
 	}
 }

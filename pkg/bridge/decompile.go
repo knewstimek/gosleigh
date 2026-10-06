@@ -54,10 +54,27 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 	// a cspec, so requiring one here is faithful, not a Gosleigh simplification.
 	// The lone in-repo callers are the golden test harnesses; any real downstream
 	// integration must honor this contract.
-	db := pcode.NewActionDatabase()
-	db.BuildUniversalAction(nil)
-	db.BuildDefaultGroups()
-	db.SetCurrent("decompile").Perform(fd)
+	// A deindirected call through an external reference restarts the
+	// decompilation with the call made direct, so the callee's prototype
+	// applies from the start.
+	// C++ parity: FuncCallSpecs::deindirect -> setRestartPending +
+	// Override::insertIndirectOverride; ActionRestartGroup re-runs flow.
+	for restarts := 0; ; restarts++ {
+		db := pcode.NewActionDatabase()
+		db.BuildUniversalAction(nil)
+		db.BuildDefaultGroups()
+		db.SetCurrent("decompile").Perform(fd)
+		ov := fd.IndirectOverrides()
+		if !fd.RebuildRequested() || result.rebuild == nil || restarts >= 2 {
+			break
+		}
+		next, err := result.rebuild(ov)
+		if err != nil || next == nil || next.Funcdata == nil {
+			break
+		}
+		result = next
+		fd = result.Funcdata
+	}
 
 	p := pcode.NewPrintC().SetRegisterNames(engine.RegisterNamesByLocation())
 	if cfg.ProcessEntryName != "" {

@@ -95,6 +95,11 @@ type Funcdata struct {
 	// registerNames maps "spaceIdx:offset:size" to a register name.
 	// C++ parity: Translate::getRegisterName (used by buildVariableName).
 	registerNames map[string]string
+	// indirectOverrides are CALLIND sites (instruction offset) resolved to a
+	// target during this run; rebuildRequested asks the driver to restart.
+	// C++ parity: Override indirect overrides + Funcdata restartPending.
+	indirectOverrides map[uint64]address.Address
+	rebuildRequested  bool
 	// trackedSet are the register values known at entry (ActionConstbase).
 	trackedSet []constbaseTrackedContext
 
@@ -2125,3 +2130,27 @@ func (fd *Funcdata) registerName(vn *Varnode) string {
 	}
 	return fd.registerNames[fmt.Sprintf("%d:%d:%d", vn.Space().Index, vn.Offset(), vn.Size())]
 }
+
+
+// addIndirectOverride records a resolved indirect call and requests a rebuild.
+func (fd *Funcdata) addIndirectOverride(at uint64, target address.Address) {
+	if fd.indirectOverrides == nil {
+		fd.indirectOverrides = make(map[uint64]address.Address)
+	}
+	if _, ok := fd.indirectOverrides[at]; ok {
+		return
+	}
+	fd.indirectOverrides[at] = target
+	fd.rebuildRequested = true
+}
+
+// SetIndirectOverrides seeds the overrides a rebuilt function inherits.
+func (fd *Funcdata) SetIndirectOverrides(ov map[uint64]address.Address) {
+	fd.indirectOverrides = ov
+}
+
+// IndirectOverrides returns the indirect-call overrides recorded so far.
+func (fd *Funcdata) IndirectOverrides() map[uint64]address.Address { return fd.indirectOverrides }
+
+// RebuildRequested reports whether a new indirect override needs a restart.
+func (fd *Funcdata) RebuildRequested() bool { return fd.rebuildRequested }

@@ -207,6 +207,13 @@ func (fc *FuncCallSpecs) deindirectExternal(data *Funcdata, name string, ref add
 	}
 	fc.name = name
 	fc.entryAddress = ref
+	// The host describes the external function at its reference: restart with
+	// the call made direct so its prototype applies from the start.
+	if h := data.HostScope(); h != nil {
+		if _, ok := h.QueryFunction(ref); ok {
+			data.addIndirectOverride(op.Addr().Offset, ref)
+		}
+	}
 	data.OpSetOpcode(op, CPUI_CALL)
 	if in0 := op.Input(0); in0 != nil {
 		data.OpSetInput(op, data.NewConstant(in0.Size(), 0), 0)
