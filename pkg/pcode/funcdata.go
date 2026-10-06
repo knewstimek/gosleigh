@@ -1545,9 +1545,21 @@ func (fd *Funcdata) OpInsertBefore(op *PcodeOp, follow *PcodeOp) {
 // The op is marked alive and its parent block is set.
 // C++ parity: Funcdata::opInsertAfter
 func (fd *Funcdata) OpInsertAfter(op *PcodeOp, prev *PcodeOp) {
+	// After an INDIRECT, insert after the op causing the indirect effect.
+	if prev.Code() == CPUI_INDIRECT {
+		if targ := prev.Input(1).GetIndirectCause(); targ != nil && !targ.IsDead() {
+			prev = targ
+		}
+	}
 	bb := prev.Parent()
 	if bb == nil {
 		return
+	}
+	// A non-MULTIEQUAL never lands among the MULTIEQUALs heading a block.
+	if op.Code() != CPUI_MULTIEQUAL {
+		for next := prev.NextOp(); next != nil && next.Code() == CPUI_MULTIEQUAL; next = next.NextOp() {
+			prev = next
+		}
 	}
 	fd.OpMarkAlive(op)
 	op.SetParent(bb)
