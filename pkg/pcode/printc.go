@@ -100,23 +100,7 @@ type printCState struct {
 	activeExpr   map[*PcodeOp]bool
 	blockLabels  map[*FlowBlock]string
 
-	// prologueOps is the set of ops that are part of the callee-saved register
-	// save/restore frame: PUSH EBP/EBX in the prologue and POP in the epilogue.
-	// These are STORE ops whose value is a non-param register-space input varnode,
-	// plus the address-computing ops (INT_ADD etc.) that feed their pointer input.
-	// C++ parity: ActionPrototypeTypes marks callee-saved regs dead; we approximate
-	// this at render time by suppressing these ops from C output.
-	prologueOps map[*PcodeOp]bool
-	// prologueVarnodes is the set of register-space input varnodes used only as
-	// values in prologueOps. They are excluded from locals declarations.
-	prologueVarnodes map[*Varnode]bool
 
-	// identityOps is the set of COPY ops that are identity assignments of a param
-	// to the return carrier (e.g., "eax = param_3" when param_3 is the return value).
-	// These ops are suppressed in emitOps since they are no-ops when the carrier is
-	// renamed to the param's name.
-	// C++ parity: ActionReturnSplit eliminates identity branches from the return path.
-	identityOps map[*PcodeOp]bool
 	// returnCarrierParams maps a return-carrier location key to the param varnode that
 	// serves as the direct return carrier (G5: identity-copy phi input detection).
 	// Names are resolved post-ghost-rename by finalizeReturnCarrierRenames.
@@ -174,9 +158,6 @@ func newPrintCState(printer *PrintC, fd *Funcdata) *printCState {
 		emittedTypes:        make(map[uint64]bool),
 		activeExpr:          make(map[*PcodeOp]bool),
 		blockLabels:         make(map[*FlowBlock]string),
-		prologueOps:         make(map[*PcodeOp]bool),
-		prologueVarnodes:    make(map[*Varnode]bool),
-		identityOps:         make(map[*PcodeOp]bool),
 		returnCarrierParams: make(map[locationKey]*Varnode),
 		entryAnnotation:     printer.entryAnnotation,
 		ghostParamCount:     printer.ghostParamCount,
@@ -291,7 +272,6 @@ func (s *printCState) collectSymbols() {
 	// Identify and mark prologue/epilogue register-save ops before classifying locals.
 	// This prevents callee-saved register spills (PUSH EBP/EBX) from appearing as
 	// C statements or local variable declarations.
-	s.markPrologueOps()
 
 	regNameByLoc := s.printer.registerNames
 
@@ -467,7 +447,7 @@ func (s *printCState) collectSymbols() {
 					}
 					if vn.Def() != nil && s.shouldInline(vn.Def()) {
 						s.inline[vn.Def()] = true
-					} else if !s.prologueVarnodes[vn] {
+					} else {
 						// Only add one representative varnode per HighVariable for locals too.
 						// Input varnodes (isInput=true, no Def) cannot generate assignment
 						// statements. When a HighVariable has written SSA versions (e.g. COPY
@@ -601,11 +581,6 @@ func (s *printCState) collectSymbols() {
 			if vn.Def() == nil {
 				continue
 			}
-			// Skip varnodes used only in prologue register-save ops.
-			// C++ parity: ActionPrototypeTypes marks callee-saved reg chains dead.
-			if s.prologueVarnodes[vn] {
-				continue
-			}
 			// Skip unique-space varnodes with no consumers: these are dead stores
 			// created or left over by BatchA rules after ActionDeadCode already ran.
 			// Declaring them produces empty tmp_N declarations with no body assignment.
@@ -720,18 +695,10 @@ func (s *printCState) collectSymbols() {
 			if s.isSpecialInputRegister(vn, regNameByLoc) {
 				continue
 			}
-			// Skip callee-saved register inputs used only in prologue store ops.
-			if s.prologueVarnodes[vn] {
-				continue
-			}
 			params = append(params, vn)
 			continue
 		}
 		if vn.Def() == nil {
-			continue
-		}
-		// Skip varnodes used only in prologue register-save ops.
-		if s.prologueVarnodes[vn] {
 			continue
 		}
 		// Skip unique-space dead stores (no consumers): BatchA may leave these
@@ -1064,11 +1031,6 @@ func (s *printCState) emitLocalDeclarations() bool {
 	}
 	decls := make([]localDecl, 0, len(s.locals))
 	for _, vn := range s.locals {
-		// Skip varnodes that were identified as prologue/return-chain only
-		// after collectSymbols ran (markReturnOnlyCopies runs post-collect).
-		if s.prologueVarnodes[vn] {
-			continue
-		}
 		// Skip implied unique-space varnodes: their defining ops are suppressed by
 		// emitOps (unique-space ops are SSA intermediates, not C variables), so a
 		// tmp_N name is never used in any emitted statement. Declaring them produces
@@ -1658,12 +1620,6 @@ func (s *printCState) isBlockEmpty(bl *FlowBlock) bool {
 		if op.HasFlag(PcodeOpNonPrinting) {
 			continue
 		}
-		if s.prologueOps[op] {
-			continue
-		}
-		if s.identityOps[op] {
-			continue
-		}
 		if out := op.Output(); out != nil {
 			if out.Space() != nil && out.Space().IsUnique() && out.NumDescend() == 0 {
 				continue
@@ -1974,12 +1930,6 @@ func (s *printCState) renderCondBlockComma(bl *FlowBlock) string {
 			}
 		}
 		if op.HasFlag(PcodeOpNonPrinting) {
-			continue
-		}
-		if s.prologueOps[op] {
-			continue
-		}
-		if s.identityOps[op] {
 			continue
 		}
 		// Skip marker ops (MULTIEQUAL/INDIRECT) -- these are phi merge points.
@@ -2549,21 +2499,6 @@ func (s *printCState) emitOps(bb *BlockBasic, suppressControl bool) error {
 		// artificial halt after a call that never returns.
 		// C++ parity: PcodeOp::notPrinted (marker|nonprinting|noreturn).
 		if op.HasFlag(PcodeOpNonPrinting | PcodeOpNoReturn) {
-			continue
-		}
-		// Skip prologue/epilogue register-save ops (PUSH EBP, PUSH EBX, etc.)
-		// and the address-computing chains that feed them. These are identified
-		// during collectSymbols and represent callee-saved register spills that
-		// Ghidra's ActionPrototypeTypes would eliminate.
-		// C++ parity: ActionPrototypeTypes marks these as dead before printing.
-		if s.prologueOps[op] {
-			continue
-		}
-		// Skip identity COPY ops that are "param = param" assignments produced when
-		// the return carrier is renamed to a parameter name. These are no-ops that
-		// Ghidra eliminates via ActionReturnSplit.
-		// C++ parity: ActionReturnSplit removes the identity branch of the phi.
-		if s.identityOps[op] {
 			continue
 		}
 		if out := op.Output(); out != nil {
@@ -4615,182 +4550,6 @@ func (s *printCState) isMachineGeneratedName(name string) bool {
 	return s.isKnownRegisterName(name)
 }
 
-// markPrologueOps identifies callee-saved register save/restore sequences
-// (PUSH EBP, PUSH EBX, etc.) and marks them in prologueOps so they are
-// suppressed from C output. Also marks the intermediate varnodes that are
-// used only as operands to prologue ops in prologueVarnodes.
-//
-// Detection heuristic: a STORE op is a register-save prologue op when:
-//  1. Its value (storeValue) is a register-space input varnode, AND
-//  2. That varnode is not classified as a C parameter by ScopeLocal.
-//
-// The address-computing ops (INT_ADD/COPY feeding the pointer input) are also
-// marked as prologue ops if their output is only consumed by prologue STOREs.
-//
-// C++ parity: ActionPrototypeTypes::apply marks callee-saved inputs/outputs;
-// this is a render-time approximation that avoids modifying the p-code graph.
-func (s *printCState) markPrologueOps() {
-	if s.fd == nil {
-		return
-	}
-
-	// Build a set of varnode pointers that are classified as params.
-	// We need this to avoid suppressing actual function parameter registers.
-	paramVns := make(map[*Varnode]bool)
-	if sl := s.fd.GetScopeLocal(); sl != nil {
-		for _, vn := range s.fd.GetVarnodeBank().AllVarnodes() {
-			if vn == nil || !vn.IsInput() {
-				continue
-			}
-			if hv := sl.FindEntry(vn); hv != nil {
-				if name := hv.Name(); len(name) >= 6 && name[:6] == "param_" {
-					paramVns[vn] = true
-				}
-			}
-		}
-	}
-	// Also check FuncProto params (set by ApplyCallingConvention). Iterate the
-	// param HighVariable's own instances rather than scanning AllVarnodes for
-	// High()==hv: a 1-byte param slice (e.g. DL for an `undefined1 param_2` whose
-	// full-width instance is the 8-byte RDX) may not carry a back-link so the
-	// scan misses it, dropping RDX from paramVns. Missing it makes markPrologueOps
-	// misclassify a real `*p = (char)param_2` store as a callee-saved spill and
-	// drop it (empty memset loop body). The instance list is authoritative.
-	if fp := s.fd.GetFuncProto(); fp != nil {
-		for i := 0; i < fp.NumParams(); i++ {
-			hv := fp.GetParam(i)
-			if hv == nil {
-				continue
-			}
-			for _, vn := range hv.Instances() {
-				if vn != nil {
-					paramVns[vn] = true
-				}
-			}
-		}
-	}
-
-	// First pass: find STORE ops that save callee-saved registers to the stack.
-	// These are STORE ops where the value is a register-space input varnode that
-	// is not a function parameter.
-	for _, op := range s.fd.GetPcodeOpBank().AllOps() {
-		if op == nil || op.IsDead() || op.Code() != CPUI_STORE {
-			continue
-		}
-		val := storeValue(op)
-		if val == nil || !val.IsInput() {
-			continue
-		}
-		if val.Space() == nil || val.Space().IsUnique() || val.Space().Kind == address.SpaceKindStack {
-			continue
-		}
-		// val is a register-space (or ram-space) input varnode. If it's a param, keep it.
-		if paramVns[val] {
-			continue
-		}
-		// ...or if it is a sub-register piece of a param (e.g. DL as the low byte of
-		// the RDX param): a 1-byte param slice does not share the param's exact
-		// Varnode/HighVariable, so paramVns misses it, but storing it (memset-style
-		// `*p = (char)c`) is a real memory write, not a callee-saved spill. Keep any
-		// value whose storage overlaps a known param's storage.
-		isParamPiece := false
-		for pvn := range paramVns {
-			if pvn.Space() == val.Space() &&
-				val.Offset() >= pvn.Offset() &&
-				val.Offset()+uint64(val.Size()) <= pvn.Offset()+uint64(pvn.Size()) {
-				isParamPiece = true
-				break
-			}
-		}
-		if isParamPiece {
-			continue
-		}
-		// This is a callee-saved register store. Mark it.
-		s.prologueOps[op] = true
-		s.prologueVarnodes[val] = true
-	}
-
-	// Second pass: mark address-computing ops whose output is only consumed by
-	// prologue STOREs (as the pointer argument). These produce the "*(local_N + -4)"
-	// style pointer chain that should not appear as a local declaration or statement.
-	//
-	// Additionally handles self-referential MULTIEQUAL loops: Heritage SSA inserts
-	// phi nodes for stack-pointer (ESP) at loop headers. These MULTIEQUALs are
-	// self-referential (their output appears in their own descend list) and are
-	// never consumed by meaningful C code. They are treated as vacuous (prologue)
-	// consumers so the ESP write chain can be fully marked.
-	// C++ parity: Ghidra ActionDeadCode propagates consume bits and detects
-	// vacuously-consumed MULTIEQUAL cycles; we approximate at render time.
-	isSelfReferentialMultiequal := func(consumer *PcodeOp) bool {
-		if consumer.Code() != CPUI_MULTIEQUAL {
-			return false
-		}
-		out := consumer.Output()
-		if out == nil {
-			return false
-		}
-		// The vacuous case this targets is a stack-pointer (ESP/EIP) register
-		// live-through phi at a loop header -- a register/unique value that
-		// recirculates without feeding real C. A stack-slot phi output, by
-		// contrast, is a real named local: in a loop where one branch leaves the
-		// variable unchanged (`if (c) lo = mid+1;`), the merge phi legitimately
-		// takes its own output as the unchanged-path input, which is NOT vacuous.
-		// Treating it as vacuous cascades -- the update (`lo = mid+1`) and the
-		// loop-head snapshot feeding it (iVar1) get marked prologue and the loop
-		// body empties (probe_binsearch). Restrict the classification to non-stack
-		// storage so real stack locals are never suppressed.
-		if out.Space() != nil && out.Space().Kind == address.SpaceKindStack {
-			return false
-		}
-		// A MULTIEQUAL is self-referential when its output is one of its own consumers.
-		for _, grandConsumer := range out.DescendIter() {
-			if grandConsumer == consumer {
-				return true
-			}
-		}
-		return false
-	}
-
-	for {
-		changed := false
-		for _, op := range s.fd.GetPcodeOpBank().AllOps() {
-			if op == nil || op.IsDead() || op.Output() == nil {
-				continue
-			}
-			if s.prologueOps[op] {
-				continue // already marked
-			}
-			out := op.Output()
-			// Check if every consumer of this op's output is a prologue op or a
-			// self-referential MULTIEQUAL (vacuous ESP-loop phi node).
-			allPrologue := true
-			if out.NumDescend() == 0 {
-				allPrologue = false // no consumers; don't suppress
-			}
-			for _, consumer := range out.DescendIter() {
-				if s.prologueOps[consumer] {
-					continue
-				}
-				// A self-referential MULTIEQUAL is vacuously consumed: its output
-				// loops back to itself and does not flow into any real computation.
-				if isSelfReferentialMultiequal(consumer) {
-					continue
-				}
-				allPrologue = false
-				break
-			}
-			if allPrologue {
-				s.prologueOps[op] = true
-				s.prologueVarnodes[out] = true
-				changed = true
-			}
-		}
-		if !changed {
-			break
-		}
-	}
-}
-
 func (s *printCState) isSpecialInputRegister(vn *Varnode, regNameByLoc map[string]string) bool {
 	if vn == nil || vn.Space() == nil || regNameByLoc == nil {
 		return false
@@ -4872,7 +4631,7 @@ func (s *printCState) finalizeReturnCarrierRenames() {
 				}
 			}
 		}
-		// Update MULTIEQUAL outputs at this location (prologueVarnodes, not in s.locals).
+		// Update MULTIEQUAL outputs at this location (they are not in s.locals).
 		for _, op := range s.fd.GetPcodeOpBank().AllOps() {
 			if op == nil || op.Code() != CPUI_MULTIEQUAL || op.Output() == nil {
 				continue
@@ -4906,7 +4665,7 @@ func maxInt(a, b int) int {
 // marker, not a prologue/epilogue register save.
 func (s *printCState) hasPrintedUse(vn *Varnode) bool {
 	for _, op := range vn.DescendIter() {
-		if op == nil || op.IsDead() || op.IsMarker() || s.prologueOps[op] {
+		if op == nil || op.IsDead() || op.IsMarker() {
 			continue
 		}
 		return true
