@@ -276,6 +276,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	fixFlowOverrideReturns(records, summary.constSpace)
 	injectWarnings := applyInjections(records, cfg.Injections, summary.constSpace)
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, summary.uniqueBase, summary.constSpace)
+	fd.UserOps().RegisterNames(engine.UserOpNames())
 	if err := attachEnvironment(fd, cfg); err != nil {
 		return nil, err
 	}

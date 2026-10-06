@@ -405,6 +405,28 @@ func cloneSectionID(section *int64) *int64 {
 	return &value
 }
 
+// UserOpNames returns the names of the user-defined p-code ops, indexed by
+// their CALLOTHER index. C++ parity: SleighArchitecture registers each
+// UserOpSymbol with UserOpManage (UnspecializedPcodeOp).
+func (e *Engine) UserOpNames() []string {
+	var names []string
+	if e == nil || e.symbols == nil {
+		return names
+	}
+	for i := range e.symbols.Symbols {
+		sym := &e.symbols.Symbols[i]
+		if sym.Body.UserOp == nil {
+			continue
+		}
+		idx := int(sym.Body.UserOp.Index)
+		for len(names) <= idx {
+			names = append(names, "")
+		}
+		names[idx] = sym.Name
+	}
+	return names
+}
+
 // RegisterNamesByLocation returns a map of "spaceIdx:offset:size" -> register name
 // for all VarnodeSymbol entries in the SLA symbol table.
 // Key format matches the encoding used by PrintC.SetRegisterNames.

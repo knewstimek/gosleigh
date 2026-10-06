@@ -3607,6 +3607,11 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	case CPUI_CALLIND:
 		return s.renderCall(op, true)
 	case CPUI_CALLOTHER:
+		// C++ parity: PrintC::opCallother -- the user op's name applied to
+		// inputs 1..n.
+		if uop := s.fd.UserOps().GetOp(uint32(op.Input(0).Offset())); uop != nil && uop.Name() != "" {
+			return s.renderPseudoCall(uop.Name(), op, 1)
+		}
 		return s.renderPseudoCall("CALLOTHER", op, 0)
 	case CPUI_RETURN:
 		if vn := returnValue(op); vn != nil {

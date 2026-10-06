@@ -123,6 +123,19 @@ func NewUserOpManage() *UserOpManage {
 	}
 }
 
+// RegisterNames installs the processor's user ops, by CALLOTHER index.
+// C++ parity: UserOpManage::initialize (UnspecializedPcodeOp per symbol).
+func (m *UserOpManage) RegisterNames(names []string) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.byIndex = make([]*UserPcodeOp, len(names))
+	for i, n := range names {
+		if n != "" {
+			m.byIndex[i] = &UserPcodeOp{name: n, index: uint32(i)}
+		}
+	}
+}
+
 // GetOp looks up a registered op by CALLOTHER index.
 // C++ parity: UserOpManage::getOp.
 func (m *UserOpManage) GetOp(index uint32) *UserPcodeOp {
