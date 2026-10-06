@@ -54,6 +54,7 @@ type Symbol struct {
 	// namespace is the "::"-joined path of the scope owning a global symbol
 	// ("" = the global namespace). C++ parity: Symbol::scope's parent chain.
 	namespace string
+	nsPath    []string // scope names, global excluded (nil when unknown)
 }
 
 // Namespace returns the symbol's namespace path ("" for global/local).

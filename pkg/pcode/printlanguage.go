@@ -876,3 +876,21 @@ func resolutionDepth(sym, use []string) int {
 	// distinguishing scope.
 	return len(sym) - dist
 }
+
+// symbolNameExpr builds a global symbol reference: its scope names as raw
+// tokens joined by the scope operator and the (already display-cleaned) base
+// name, so the printer can break the line between scopes.
+// C++ parity: PrintC::pushSymbolScope + pushSymbol.
+func symbolNameExpr(scoped, base string) ExprFragment {
+	parts := splitScopePath(scoped)
+	if len(parts) < 2 {
+		return ExprFragment{Text: base, Precedence: ExprPrecPrimary}
+	}
+	left := scopedNameExprScope(strings.Join(parts[:len(parts)-1], "::"))
+	if parts[0] == "" { // Global scope (empty display name)
+		left = ExprFragment{Text: "", Precedence: ExprPrecPrimary}
+	}
+	right := ExprFragment{Text: base, Precedence: ExprPrecPrimary}
+	return ExprFragment{Text: left.Text + "::" + base, Precedence: ExprPrecPrimary, node: &fragNode{
+		kind: fragBinary, print1: "::", kids: []ExprFragment{left, right}, parens: []bool{false, false}}}
+}

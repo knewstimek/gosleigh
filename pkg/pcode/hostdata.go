@@ -10,6 +10,9 @@ type HostData struct {
 	Name string
 	// Namespace is the "::"-joined namespace path; "" is the global namespace.
 	Namespace string
+	// NamespacePath is the same path one scope name per element, when the
+	// host keeps the scopes apart (a scope name may itself contain "::").
+	NamespacePath []string
 	Addr      address.Address
 	Size      int32
 	// Type is the symbol's data-type; nil means undefined of Size bytes.

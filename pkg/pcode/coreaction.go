@@ -1215,7 +1215,11 @@ func (a *ActionOutputPrototype) Apply(data *Funcdata) int {
 		return 0
 	}
 	out := fp.GetOutput()
-	if out != nil && out.Type() != nil && out.Type().Metatype() != TYPE_VOID && fp.IsOutputLocked() {
+	// A locked undefined type locks only the size: it floats to the returned
+	// value's type. C++ parity: Symbol::checkSizeTypeLock +
+	// FuncProto::updateOutputTypes (overrideSizeLockType).
+	sizeLocked := fp.IsOutputLocked() && out != nil && out.Type() != nil && out.Type().Metatype() == TYPE_UNKNOWN
+	if out != nil && out.Type() != nil && out.Type().Metatype() != TYPE_VOID && fp.IsOutputLocked() && !sizeLocked {
 		return 0
 	}
 	var firstRet *Varnode
@@ -1236,6 +1240,11 @@ func (a *ActionOutputPrototype) Apply(data *Funcdata) int {
 	if firstRet == nil {
 		fp.ClearUnlockedOutput()
 		return 0
+	}
+	if sizeLocked {
+		if addr, size, ok := fp.OutputStorage(); ok && (firstRet.Addr() != addr || firstRet.Size() != size) {
+			return 0
+		}
 	}
 	hv := fp.GetOutput()
 	if hv == nil {

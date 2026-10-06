@@ -149,9 +149,22 @@ func loadCaptureData(path string, ram *address.Space) (*captureData, error) {
 		}
 		return parent + "::" + s.attr("name")
 	}
+	var nsList func(id string) []string
+	nsList = func(id string) []string {
+		s := scopes[id]
+		if s == nil || s.attr("name") == "" {
+			return nil
+		}
+		var parent []string
+		if p := s.child("parent"); p != nil {
+			parent = nsList(p.attr("id"))
+		}
+		return append(append([]string(nil), parent...), s.attr("name"))
+	}
 	cd := &captureData{}
 	for id, s := range scopes {
 		ns := nsPath(id)
+		nsl := nsList(id)
 		list := s.child("symbollist")
 		if list == nil {
 			continue
@@ -166,11 +179,12 @@ func loadCaptureData(path string, ram *address.Space) (*captureData, error) {
 				continue
 			}
 			hd := pcode.HostData{
-				Name:      sym.attr("name"),
-				Namespace: ns,
-				Addr:      address.Address{Space: ram, Offset: parseUint(at.attr("offset"))},
-				Size:      int32(parseUint(at.attr("size"))),
-				ReadOnly:  sym.attr("readonly") == "true",
+				Name:          sym.attr("name"),
+				Namespace:     ns,
+				NamespacePath: nsl,
+				Addr:          address.Address{Space: ram, Offset: parseUint(at.attr("offset"))},
+				Size:          int32(parseUint(at.attr("size"))),
+				ReadOnly:      sym.attr("readonly") == "true",
 			}
 			switch sym.XMLName.Local {
 			case "symbol":

@@ -75,6 +75,39 @@ func (s *printCState) globalSymbolName(sym *Symbol) string {
 	return name
 }
 
+// globalSymbolExpr is globalSymbolName as an expression whose scope names
+// are separate tokens. C++ parity: PrintC::pushSymbolScope.
+func (s *printCState) globalSymbolExpr(sym *Symbol) ExprFragment {
+	if len(sym.nsPath) > 0 {
+		var useScope []string
+		fn := s.fd.DisplayName()
+		if fn == "" {
+			fn = s.fd.Name()
+		}
+		if up := splitScopePath(fn); len(up) > 1 {
+			useScope = up[:len(up)-1]
+		}
+		base := cppDisplayName(sym.Name())
+		depth := resolutionDepth(sym.nsPath, useScope)
+		if depth == 0 {
+			return s.lang.Atom(base)
+		}
+		expr := ExprFragment{Text: base, Precedence: ExprPrecPrimary}
+		for i := len(sym.nsPath) - 1; i >= 0 && i >= len(sym.nsPath)-depth; i-- {
+			scope := ExprFragment{Text: sym.nsPath[i], Precedence: ExprPrecPrimary}
+			expr = ExprFragment{Text: scope.Text + "::" + expr.Text, Precedence: ExprPrecPrimary, node: &fragNode{
+				kind: fragBinary, print1: "::", kids: []ExprFragment{scope, expr}, parens: []bool{false, false}}}
+		}
+		return expr
+	}
+	q := s.globalSymbolName(sym)
+	base := cppDisplayName(sym.Name())
+	if !strings.HasSuffix(q, "::"+base) {
+		return s.lang.Atom(q)
+	}
+	return symbolNameExpr(q[:len(q)-len(base)]+sym.Name(), base)
+}
+
 // globalVarnodeName names vn through the global symbol entry it maps to:
 // the symbol itself, a piece of it (field, element or ._off_size_) when vn
 // lies inside the symbol, or the symbol name prefixed with '_' when vn
@@ -252,6 +285,7 @@ func (fd *Funcdata) resolveGlobal(addr address.Address) *SymbolEntry {
 	}
 	e := gs.AddSymbol(hd.Name, dt, hd.Addr, hd.Size, fl)
 	e.Symbol().namespace = hd.Namespace
+	e.Symbol().nsPath = hd.NamespacePath
 	return e
 }
 

@@ -125,6 +125,7 @@ func (fd *Funcdata) resolveGlobalSymbol(addr address.Address) *SymbolEntry {
 		if hd, ok := hs.QueryData(addr); ok && hd.Label && hd.Addr == addr {
 			e := gs.AddSymbol(hd.Name, sharedTypeFactory.GetBase(1, TYPE_UNKNOWN, ""), hd.Addr, 1, VarnodeTypeLock|VarnodeNameLock)
 			e.Symbol().namespace = hd.Namespace
+			e.Symbol().nsPath = hd.NamespacePath
 			return e
 		}
 	}
