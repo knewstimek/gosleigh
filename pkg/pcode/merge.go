@@ -497,7 +497,11 @@ func (m *Merge) TrimOpInput(op *PcodeOp, slot int) {
 		}
 		copyOp := m.fd.NewOp(1, addr)
 		m.fd.OpSetOpcode(copyOp, CPUI_COPY)
-		m.fd.NewUniqueOut(vn.Size(), copyOp)
+		if dt := vn.Type(); dt != nil {
+			SetVarnodeType(m.fd.NewUniqueOut(vn.Size(), copyOp), dt)
+		} else {
+			m.fd.NewUniqueOut(vn.Size(), copyOp)
+		}
 		m.fd.OpSetInput(copyOp, vn, 0)
 		// Assign a HighVariable to the new unique output so merge Phase 3 can find it.
 		trimHigh := NewHighVariable("")
@@ -508,7 +512,11 @@ func (m *Merge) TrimOpInput(op *PcodeOp, slot int) {
 	} else {
 		copyOp := m.fd.NewOp(1, op.Addr())
 		m.fd.OpSetOpcode(copyOp, CPUI_COPY)
-		m.fd.NewUniqueOut(vn.Size(), copyOp)
+		if dt := vn.Type(); dt != nil {
+			SetVarnodeType(m.fd.NewUniqueOut(vn.Size(), copyOp), dt)
+		} else {
+			m.fd.NewUniqueOut(vn.Size(), copyOp)
+		}
 		m.fd.OpSetInput(copyOp, vn, 0)
 		trimHigh := NewHighVariable("")
 		trimHigh.AddInstance(copyOp.Output())
@@ -528,12 +536,19 @@ func (m *Merge) TrimOpOutput(op *PcodeOp) {
 	if vn == nil {
 		return
 	}
-	// For INDIRECT: C++ inserts after the op causing the effect via getOpFromConst.
-	// Gosleigh falls back to inserting after op itself (same block, correct ordering).
+	// An INDIRECT's COPY goes after the op causing the effect.
 	afterop := op
+	if op.Code() == CPUI_INDIRECT {
+		if cause := op.Input(1).GetIndirectCause(); cause != nil {
+			afterop = cause
+		}
+	}
 
-	// Allocate a new free unique varnode; it will become the tiny MULTIEQUAL output.
+	// The stubby output keeps the original's data-type (newUnique(size,ct)).
 	uniq := m.fd.GetVarnodeBank().CreateUnique(vn.Size())
+	if dt := vn.Type(); dt != nil {
+		SetVarnodeType(uniq, dt)
+	}
 
 	// Create the COPY op that carries the original output forward.
 	copyOp := m.fd.NewOp(1, op.Addr())
@@ -1074,6 +1089,9 @@ func (m *Merge) allocateCopyTrim(inVn *Varnode, addr address.Address) *PcodeOp {
 	copyOp := m.fd.NewOp(1, addr)
 	m.fd.OpSetOpcode(copyOp, CPUI_COPY)
 	outVn := m.fd.NewUniqueOut(inVn.Size(), copyOp)
+	if dt := inVn.Type(); dt != nil {
+		SetVarnodeType(outVn, dt)
+	}
 	m.fd.OpSetInput(copyOp, inVn, 0)
 	// Assign a fresh HighVariable to the new output so later merge phases find it.
 	// Inherit the input's type so a trim COPY created after type inference (e.g.
