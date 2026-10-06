@@ -121,24 +121,62 @@ func NewRuleSubCancel(group string) *RuleSubCancel {
 	return r
 }
 
+// apply cancels a SUBPIECE against the extension (or mask) it truncates:
+// sub(zext(V),0) => V, a smaller SUBPIECE, or 0 above V.
+// C++ parity: RuleSubCancel::applyOp.
 func (r *RuleSubCancel) apply(op *PcodeOp, data *Funcdata) int {
-	piece := definedBy(op.Input(0), CPUI_PIECE)
-	if piece == nil {
+	base := op.Input(0)
+	if !base.IsWritten() {
 		return 0
 	}
-	offset, ok := constantValue(op.Input(1))
-	if !ok {
+	extop := base.Def()
+	opc := extop.Code()
+	if opc != CPUI_INT_ZEXT && opc != CPUI_INT_SEXT && opc != CPUI_INT_AND {
 		return 0
 	}
-	lo := piece.Input(1)
-	hi := piece.Input(0)
-	if offset == 0 && outputSize(op) == lo.Size() {
-		return rewriteToCopy(data, op, lo)
+	offset := int(op.Input(1).Offset())
+	outsize := op.Output().Size()
+	if opc == CPUI_INT_AND {
+		cvn := extop.Input(1)
+		if offset == 0 && cvn.IsConstant() && cvn.Offset() == bitfieldSizeMask(outsize) {
+			if thruvn := extop.Input(0); !thruvn.IsFree() {
+				data.OpSetInput(op, thruvn, 0)
+				return 1
+			}
+		}
+		return 0
 	}
-	if offset == uint64(lo.Size()) && outputSize(op) == hi.Size() {
-		return rewriteToCopy(data, op, hi)
+	insize := base.Size()
+	farinsize := extop.Input(0).Size()
+	var thruvn *Varnode
+	if offset == 0 { // least significant part
+		thruvn = extop.Input(0) // something still comes through
+		switch {
+		case thruvn.IsFree():
+			if !thruvn.IsConstant() || insize <= 8 || outsize != farinsize {
+				return 0 // original is constant or undefined
+			}
+			// A constant too big to represent, totally eliminated.
+			opc = CPUI_COPY
+			thruvn = data.NewConstant(thruvn.Size(), thruvn.Offset())
+		case outsize == farinsize:
+			opc = CPUI_COPY // total elimination of the extension
+		case outsize < farinsize:
+			opc = CPUI_SUBPIECE
+		}
+	} else {
+		if opc != CPUI_INT_ZEXT || int(farinsize) > offset {
+			return 0
+		}
+		opc = CPUI_COPY // nothing but zero comes through
+		thruvn = data.NewConstant(outsize, 0)
 	}
-	return 0
+	data.OpSetOpcode(op, opc)
+	data.OpSetInput(op, thruvn, 0)
+	if opc != CPUI_SUBPIECE {
+		data.OpRemoveInput(op, 1) // ZEXT, SEXT or COPY take one input
+	}
+	return 1
 }
 
 // RuleSubIdentity folds a SUBPIECE that keeps its whole input, sub(V,0) of

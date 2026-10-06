@@ -16,13 +16,15 @@ func TestRulesCopy_RewriteAndRegistration(t *testing.T) {
 		t.Fatalf("expected propagated x input")
 	}
 
-	piece := newRuleOp(data, CPUI_PIECE, 4, newRuleInput(data, 2, 0x30), newRuleInput(data, 2, 0x40))
-	sub := newRuleOp(data, CPUI_SUBPIECE, 2, piece.Output(), data.NewConstant(4, 0))
+	// sub(zext(V),0) back to V's size is V (C++ RuleSubCancel).
+	low := newRuleInput(data, 2, 0x30)
+	ext := newRuleOp(data, CPUI_INT_ZEXT, 4, low)
+	sub := newRuleOp(data, CPUI_SUBPIECE, 2, ext.Output(), data.NewConstant(4, 0))
 	if got := NewRuleSubCancel("copy").ApplyOp(sub, data); got != 1 {
 		t.Fatalf("subcancel ApplyOp=%d, want 1", got)
 	}
-	if sub.Code() != CPUI_COPY || sub.Input(0) != piece.Input(1) {
-		t.Fatalf("expected COPY of low piece, got %v", sub.Code())
+	if sub.Code() != CPUI_COPY || sub.Input(0) != low {
+		t.Fatalf("expected COPY of the extended value, got %v", sub.Code())
 	}
 
 	// C++ parity: RuleMultiCollapse on absolute equality calls totalReplace +
