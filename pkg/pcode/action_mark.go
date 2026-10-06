@@ -378,42 +378,91 @@ func (a *ActionMarkImplied) Clone(groups ActionGroupList) Action {
 	return NewActionMarkImplied(a.GetGroup())
 }
 
-// known mismatch: alias reasoning only distinguishes exact varnode identity and
-// equal constants. The current Go port does not yet model the richer PTRADD and
-// shadow alias analysis used by Ghidra.
+// markImpliedPossibleAliasStep is false only when one Varnode is the other
+// plus a constant. C++ parity: ActionMarkImplied::isPossibleAliasStep.
 func markImpliedPossibleAliasStep(vn1, vn2 *Varnode) bool {
-	if vn1 == vn2 {
-		return true
-	}
-	if vn1 == nil || vn2 == nil {
-		return false
-	}
-	if vn1.IsConstant() && vn2.IsConstant() {
-		return vn1.Offset() == vn2.Offset()
+	vars := [2]*Varnode{vn1, vn2}
+	for i := 0; i < 2; i++ {
+		vncur := vars[i]
+		if !vncur.IsWritten() {
+			continue
+		}
+		op := vncur.Def()
+		switch op.Code() {
+		case CPUI_INT_ADD, CPUI_PTRSUB, CPUI_PTRADD, CPUI_INT_XOR:
+		default:
+			continue
+		}
+		if vars[1-i] != op.Input(0) {
+			continue
+		}
+		if op.Input(1).IsConstant() {
+			return false
+		}
 	}
 	return true
 }
 
+// markImpliedPossibleAlias is false only when the two Varnodes provably hold
+// different values. C++ parity: ActionMarkImplied::isPossibleAlias.
 func markImpliedPossibleAlias(vn1, vn2 *Varnode, depth int) bool {
 	if vn1 == vn2 {
-		return true
+		return true // definite alias
 	}
-	if depth <= 0 {
+	if !vn1.IsWritten() || !vn2.IsWritten() {
+		if vn1.IsConstant() && vn2.IsConstant() {
+			return vn1.Offset() == vn2.Offset()
+		}
 		return markImpliedPossibleAliasStep(vn1, vn2)
 	}
-	if vn1 != nil && vn1.IsWritten() && vn1.Def() != nil {
-		switch vn1.Def().Code() {
-		case CPUI_COPY, CPUI_INT_ZEXT, CPUI_INT_SEXT, CPUI_INT_2COMP, CPUI_INT_NEGATE:
-			return markImpliedPossibleAlias(vn1.Def().Input(0), vn2, depth-1)
+	if !markImpliedPossibleAliasStep(vn1, vn2) {
+		return false
+	}
+	op1, op2 := vn1.Def(), vn2.Def()
+	opc1, opc2 := op1.Code(), op2.Code()
+	mult1, mult2 := uint64(1), uint64(1)
+	if opc1 == CPUI_PTRSUB {
+		opc1 = CPUI_INT_ADD
+	} else if opc1 == CPUI_PTRADD {
+		opc1 = CPUI_INT_ADD
+		mult1 = op1.Input(2).Offset()
+	}
+	if opc2 == CPUI_PTRSUB {
+		opc2 = CPUI_INT_ADD
+	} else if opc2 == CPUI_PTRADD {
+		opc2 = CPUI_INT_ADD
+		mult2 = op2.Input(2).Offset()
+	}
+	if opc1 != opc2 || depth == 0 {
+		return true
+	}
+	depth--
+	switch opc1 {
+	case CPUI_COPY, CPUI_INT_ZEXT, CPUI_INT_SEXT, CPUI_INT_2COMP, CPUI_INT_NEGATE:
+		return markImpliedPossibleAlias(op1.Input(0), op2.Input(0), depth)
+	case CPUI_INT_ADD:
+		cvn1, cvn2 := op1.Input(1), op2.Input(1)
+		if cvn1.IsConstant() && cvn2.IsConstant() {
+			if mult1*cvn1.Offset() == mult2*cvn2.Offset() {
+				return markImpliedPossibleAlias(op1.Input(0), op2.Input(0), depth)
+			}
+			return !functionalEquality(op1.Input(0), op2.Input(0))
+		}
+		if mult1 != mult2 {
+			return true
+		}
+		switch {
+		case functionalEquality(op1.Input(0), op2.Input(0)):
+			return markImpliedPossibleAlias(op1.Input(1), op2.Input(1), depth)
+		case functionalEquality(op1.Input(1), op2.Input(1)):
+			return markImpliedPossibleAlias(op1.Input(0), op2.Input(0), depth)
+		case functionalEquality(op1.Input(0), op2.Input(1)):
+			return markImpliedPossibleAlias(op1.Input(1), op2.Input(0), depth)
+		case functionalEquality(op1.Input(1), op2.Input(0)):
+			return markImpliedPossibleAlias(op1.Input(0), op2.Input(1), depth)
 		}
 	}
-	if vn2 != nil && vn2.IsWritten() && vn2.Def() != nil {
-		switch vn2.Def().Code() {
-		case CPUI_COPY, CPUI_INT_ZEXT, CPUI_INT_SEXT, CPUI_INT_2COMP, CPUI_INT_NEGATE:
-			return markImpliedPossibleAlias(vn1, vn2.Def().Input(0), depth-1)
-		}
-	}
-	return markImpliedPossibleAliasStep(vn1, vn2)
+	return true
 }
 
 func markImpliedCheckCover(data *Funcdata, vn *Varnode) bool {
