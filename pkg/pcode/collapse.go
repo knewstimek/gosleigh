@@ -169,12 +169,15 @@ func (b *FlowBlock) clearLoopExit(i int) {
 	b.ClearOutEdgeFlag(i, EdgeFlagLoopExit)
 }
 
+// setGotoBranch marks out edge i unstructured. Whether the target needs a
+// label is decided later by markUnstructured, once it is known the goto
+// prints (it may become a break or continue).
+// C++ parity: FlowBlock::setGotoBranch.
 func (b *FlowBlock) setGotoBranch(i int) {
 	b.SetOutEdgeFlag(i, EdgeFlagGoto)
 	b.SetFlag(BlockFlagGotoGoto)
 	if i >= 0 && i < b.SizeOut() {
 		tgt := b.getOut(i)
-		tgt.SetFlag(BlockFlagUnstructuredTarg)
 		if tgt.Parent() == b.Parent() {
 			b.SetFlag(BlockFlagInteriorGotoOut)
 			tgt.SetFlag(BlockFlagInteriorGotoIn)
