@@ -16,6 +16,7 @@ package pcode
 
 import (
 	"fmt"
+	"os"
 	"sort"
 	"strings"
 
@@ -301,7 +302,23 @@ func (ctx *ssaDumpContext) varnodeToken(vn *Varnode) string {
 		def := vn.Def()
 		fmt.Fprintf(&sb, "(%s:%x)", ctx.formatAddr(def.Addr()), def.Seq().Time)
 	}
+	if ssaDumpTypes {
+		if dt := vn.Type(); dt != nil {
+			fmt.Fprintf(&sb, "{%s}", ssaTypeTag(dt))
+		}
+	}
 	return sb.String()
+}
+
+// ssaDumpTypes appends each varnode's committed type to the dump
+// (diagnostic toggle SSA_DUMP_TYPES=1; not part of the C++ printRaw form).
+var ssaDumpTypes = os.Getenv("SSA_DUMP_TYPES") != ""
+
+func ssaTypeTag(dt Datatype) string {
+	if p, ok := dt.(*Pointer); ok && p.Pointee() != nil {
+		return ssaTypeTag(p.Pointee()) + "*"
+	}
+	return fmt.Sprintf("%s/%d", CTypeString(dt), dt.Size())
 }
 
 // registerName looks up vn's register name via the "spaceIdx:offset:size"

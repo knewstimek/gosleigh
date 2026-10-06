@@ -257,7 +257,21 @@ func (a *ActionSetCasts) Apply(data *Funcdata) int {
 	// spacebase PTRSUB output token can be resolved to its symbol pointer type.
 	// C++ parity: the CastStrategy is bound to the Architecture/Funcdata.
 	cs.fd = data
-	for _, op := range data.allOpsOrdered() {
+	// Ops are visited block by block in list order, as C++ does, so an op's
+	// output cast (which may retype an implied output) is settled before its
+	// readers in the same block are checked. A seq-number order would visit a
+	// STORE before the PTRADD inserted ahead of it at the same address.
+	var ops []*PcodeOp
+	if bbs := data.GetBasicBlocks(); bbs != nil && bbs.GetSize() > 0 {
+		for j := 0; j < bbs.GetSize(); j++ {
+			if bb := asBasic(bbs.GetBlock(j)); bb != nil {
+				ops = append(ops, bb.Ops()...)
+			}
+		}
+	} else {
+		ops = data.allOpsOrdered()
+	}
+	for _, op := range ops {
 		// Skip NonPrinting ops. C++ parity: ActionSetCasts::apply skips op->notPrinted()
 		// (coreaction.cc 2729). These are redundant internal COPYs marked by
 		// ActionCopyMarker. ActionForLoops now runs AFTER ActionSetCasts, so the
