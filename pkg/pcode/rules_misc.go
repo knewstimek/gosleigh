@@ -715,41 +715,258 @@ type RuleThreeWayCompare struct{ batchRule }
 
 func NewRuleThreeWayCompare(group string) *RuleThreeWayCompare {
 	r := &RuleThreeWayCompare{}
-	r.batchRule = newBatchRule(group, "threewaycomp", []OpCode{CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL}, r.apply, func(g string) Rule { return NewRuleThreeWayCompare(g) })
+	r.batchRule = newBatchRule(group, "threewaycomp", []OpCode{CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL, CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL}, r.apply, func(g string) Rule { return NewRuleThreeWayCompare(g) })
 	return r
 }
 
+// apply simplifies a comparison of a three-way compare
+// zext(V < W) + zext(V <= W) - 1 against -1, 0, 1 or 2.
+// C++ parity: RuleThreeWayCompare::applyOp.
 func (r *RuleThreeWayCompare) apply(op *PcodeOp, data *Funcdata) int {
-	for slot := 0; slot < 2; slot++ {
-		left, right, ok := detectThreeWayInputs(op.Input(slot))
-		c, cOK := constantValue(op.Input(1 - slot))
-		if !ok || !cOK {
-			continue
+	constSlot := 0
+	tmpvn := op.Input(constSlot)
+	if !tmpvn.IsConstant() { // one input must be a constant
+		constSlot = 1
+		tmpvn = op.Input(constSlot)
+		if !tmpvn.IsConstant() {
+			return 0
 		}
-		size := op.Input(slot).Size()
-		switch truncateToSize(c, size) {
-		case 0:
-			if op.Code() == CPUI_INT_EQUAL {
-				rewriteOp(data, op, CPUI_INT_EQUAL, left, right)
-				return 1
+	}
+	// Encode the constant (-1, 0, 1, 2) as the top bits of form.
+	var form int
+	switch val := tmpvn.Offset(); {
+	case val <= 2:
+		form = int(val) + 1
+	case val == bitfieldSizeMask(tmpvn.Size()):
+		form = 0
+	default:
+		return 0
+	}
+	tmpvn = op.Input(1 - constSlot)
+	if !tmpvn.IsWritten() || tmpvn.Def().Code() != CPUI_INT_ADD {
+		return 0
+	}
+	lessop, isPartial := detectThreeWay(tmpvn.Def())
+	if lessop == nil {
+		return 0
+	}
+	if isPartial { // complete the partial three-way by subtracting 1
+		if form == 0 {
+			return 0 // -1 is now out of range
+		}
+		form--
+	}
+	form <<= 1
+	if constSlot == 1 {
+		form++
+	}
+	lessform := lessop.Code() // INT_LESS, INT_SLESS or FLOAT_LESS
+	form <<= 2
+	switch op.Code() {
+	case CPUI_INT_SLESSEQUAL:
+		form++
+	case CPUI_INT_EQUAL:
+		form += 2
+	case CPUI_INT_NOTEQUAL:
+		form += 3
+	}
+	bvn := lessop.Input(0) // second parameter of the cmp3way function
+	avn := lessop.Input(1) // first parameter
+	if (!avn.IsConstant() && avn.IsFree()) || (!bvn.IsConstant() && bvn.IsFree()) {
+		return 0
+	}
+	set := func(opc OpCode, in0, in1 *Varnode) {
+		data.OpSetOpcode(op, opc)
+		data.OpSetInput(op, in0, 0)
+		data.OpSetInput(op, in1, 1)
+	}
+	switch form {
+	case 1, 21: // -1 s<= threeway, threeway s<= 1: always true
+		set(CPUI_INT_EQUAL, data.NewConstant(1, 0), data.NewConstant(1, 0))
+	case 4, 16: // threeway s< -1, 1 s< threeway: always false
+		set(CPUI_INT_NOTEQUAL, data.NewConstant(1, 0), data.NewConstant(1, 0))
+	case 2, 5, 6, 12: // a < b
+		set(lessform, avn, bvn)
+	case 13, 19, 20, 23: // a <= b
+		set(lessform+1, avn, bvn)
+	case 8, 17, 18, 22: // a > b
+		set(lessform, bvn, avn)
+	case 0, 3, 7, 9: // a >= b
+		set(lessform+1, bvn, avn)
+	case 10, 14: // a == b
+		if lessform == CPUI_FLOAT_LESS {
+			set(CPUI_FLOAT_EQUAL, avn, bvn)
+		} else {
+			set(CPUI_INT_EQUAL, avn, bvn)
+		}
+	case 11, 15: // a != b
+		if lessform == CPUI_FLOAT_LESS {
+			set(CPUI_FLOAT_NOTEQUAL, avn, bvn)
+		} else {
+			set(CPUI_INT_NOTEQUAL, avn, bvn)
+		}
+	default:
+		return 0
+	}
+	return 1
+}
+
+// detectThreeWay matches zext(V < W) + zext(V <= W) - 1 (in any of its
+// association orders) at the INT_ADD op and returns the less-than op. A
+// missing - 1 is reported as partial.
+// C++ parity: RuleThreeWayCompare::detectThreeWay.
+func detectThreeWay(op *PcodeOp) (*PcodeOp, bool) {
+	isPartial := false
+	defOf := func(vn *Varnode, opc OpCode) *PcodeOp {
+		if !vn.IsWritten() || vn.Def().Code() != opc {
+			return nil
+		}
+		return vn.Def()
+	}
+	isMinusOne := func(vn *Varnode) bool {
+		return vn.IsConstant() && vn.Offset() == bitfieldSizeMask(vn.Size())
+	}
+	var zext1, zext2 *PcodeOp
+	vn2 := op.Input(1)
+	switch {
+	case vn2.IsConstant(): // (z + z) - 1
+		if !isMinusOne(vn2) {
+			return nil, false
+		}
+		addop := defOf(op.Input(0), CPUI_INT_ADD)
+		if addop == nil {
+			return nil, false
+		}
+		zext1 = defOf(addop.Input(0), CPUI_INT_ZEXT)
+		zext2 = defOf(addop.Input(1), CPUI_INT_ZEXT)
+	case vn2.IsWritten():
+		tmpop := vn2.Def()
+		switch tmpop.Code() {
+		case CPUI_INT_ZEXT: // (z - 1) + z
+			zext2 = tmpop
+			vn1 := op.Input(0)
+			if !vn1.IsWritten() {
+				return nil, false
 			}
-			if op.Code() == CPUI_INT_NOTEQUAL {
-				rewriteOp(data, op, CPUI_INT_NOTEQUAL, left, right)
-				return 1
+			addop := vn1.Def()
+			if addop.Code() != CPUI_INT_ADD { // partial form: z + z
+				if addop.Code() != CPUI_INT_ZEXT {
+					return nil, false
+				}
+				zext1 = addop
+				isPartial = true
+			} else {
+				if !isMinusOne(addop.Input(1)) {
+					return nil, false
+				}
+				zext1 = defOf(addop.Input(0), CPUI_INT_ZEXT)
 			}
-		case maskForSize(size):
-			if op.Code() == CPUI_INT_EQUAL {
-				rewriteOp(data, op, CPUI_INT_LESS, left, right)
-				return 1
+		case CPUI_INT_ADD: // z + (z - 1)
+			addop := tmpop
+			zext1 = defOf(op.Input(0), CPUI_INT_ZEXT)
+			if zext1 == nil || !isMinusOne(addop.Input(1)) {
+				return nil, false
 			}
-		case 1:
-			if op.Code() == CPUI_INT_EQUAL {
-				rewriteOp(data, op, CPUI_INT_LESS, right, left)
-				return 1
+			zext2 = defOf(addop.Input(0), CPUI_INT_ZEXT)
+		default:
+			return nil, false
+		}
+	default:
+		return nil, false
+	}
+	if zext1 == nil || zext2 == nil {
+		return nil, false
+	}
+	vn1, vn2 := zext1.Input(0), zext2.Input(0)
+	if !vn1.IsWritten() || !vn2.IsWritten() {
+		return nil, false
+	}
+	lessop, lessequalop := vn1.Def(), vn2.Def()
+	switch lessop.Code() {
+	case CPUI_INT_LESS, CPUI_INT_SLESS, CPUI_FLOAT_LESS:
+	default: // make sure the first zext is the less-than
+		lessop, lessequalop = lessequalop, lessop
+	}
+	form := threeWayCompareEquivalence(lessop, lessequalop)
+	if form < 0 {
+		return nil, false
+	}
+	if form == 1 {
+		lessop = lessequalop
+	}
+	return lessop, isPartial
+}
+
+// threeWayCompareEquivalence checks that the two comparisons of a three-way
+// compare share their operands, allowing V < W+1 in place of V <= W.
+// Returns -1 on no match, 0 on a match, 1 when the ops must be swapped.
+// C++ parity: RuleThreeWayCompare::testCompareEquivalence.
+func threeWayCompareEquivalence(lessop, lessequalop *PcodeOp) int {
+	var twoLessThan bool
+	switch lessop.Code() {
+	case CPUI_INT_LESS:
+		switch lessequalop.Code() {
+		case CPUI_INT_LESSEQUAL:
+		case CPUI_INT_LESS:
+			twoLessThan = true
+		default:
+			return -1
+		}
+	case CPUI_INT_SLESS:
+		switch lessequalop.Code() {
+		case CPUI_INT_SLESSEQUAL:
+		case CPUI_INT_SLESS:
+			twoLessThan = true
+		default:
+			return -1
+		}
+	case CPUI_FLOAT_LESS:
+		if lessequalop.Code() != CPUI_FLOAT_LESSEQUAL {
+			return -1 // no partial form for floating-point
+		}
+	default:
+		return -1
+	}
+	a1, a2 := lessop.Input(0), lessequalop.Input(0)
+	b1, b2 := lessop.Input(1), lessequalop.Input(1)
+	res := 0
+	if a1 != a2 {
+		if !a1.IsConstant() || !a2.IsConstant() {
+			return -1
+		}
+		if a1.Offset() != a2.Offset() && twoLessThan {
+			switch {
+			case a2.Offset()+1 == a1.Offset(): // lessequalop is a LESSTHAN acting as LESSEQUAL
+				twoLessThan = false
+			case a1.Offset()+1 == a2.Offset(): // lessop is the LESSEQUAL: swap
+				twoLessThan = false
+				res = 1
+			default:
+				return -1
 			}
 		}
 	}
-	return 0
+	if b1 != b2 {
+		if !b1.IsConstant() || !b2.IsConstant() {
+			return -1
+		}
+		// C++ returns -1 here unless the constants differ under two
+		// LESSTHANs, even when they are equal; kept as is.
+		if b1.Offset() != b2.Offset() && twoLessThan {
+			if b1.Offset()+1 == b2.Offset() {
+				twoLessThan = false
+			} else if b2.Offset()+1 == b1.Offset() {
+				twoLessThan = false
+				res = 1
+			}
+		} else {
+			return -1
+		}
+	}
+	if twoLessThan {
+		return -1 // two LESSTHANs whose constants did not compensate
+	}
+	return res
 }
 
 type RuleXorSwap struct{ batchRule }
@@ -1328,27 +1545,6 @@ func replaceInputSlot(data *Funcdata, op *PcodeOp, slot int, vn *Varnode) {
 
 func isSingleBitMask(val uint64) bool {
 	return val != 0 && bits.OnesCount64(val) == 1
-}
-
-func detectThreeWayInputs(vn *Varnode) (*Varnode, *Varnode, bool) {
-	sub := definedBy(vn, CPUI_INT_SUB)
-	if sub == nil || sub.NumInput() != 2 {
-		return nil, nil, false
-	}
-	za := definedBy(sub.Input(0), CPUI_INT_ZEXT)
-	zb := definedBy(sub.Input(1), CPUI_INT_ZEXT)
-	if za == nil || zb == nil {
-		return nil, nil, false
-	}
-	ab := definedBy(za.Input(0), CPUI_INT_LESS)
-	ba := definedBy(zb.Input(0), CPUI_INT_LESS)
-	if ab == nil || ba == nil || ab.NumInput() != 2 || ba.NumInput() != 2 {
-		return nil, nil, false
-	}
-	if !sameValue(ab.Input(0), ba.Input(1)) || !sameValue(ab.Input(1), ba.Input(0)) {
-		return nil, nil, false
-	}
-	return ab.Input(0), ab.Input(1), true
 }
 
 // RulePushMultiME fires on 2-input MULTIEQUAL ops where both inputs are
