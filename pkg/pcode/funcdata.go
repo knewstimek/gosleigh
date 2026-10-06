@@ -1136,6 +1136,11 @@ func (fd *Funcdata) queryPropertyFlags(addr address.Address, size int32) uint32 
 		if entry := sl.FindOverlap(addr, size); entry != nil {
 			return entry.AllFlags()
 		}
+		// Inside the local scope but not covered by a symbol.
+		// C++ parity: Scope::queryProperties (found just a scope).
+		if sl.inScopeRange(addr.Offset, size) && addr.Space == sl.SpaceID() {
+			return VarnodeMapped | VarnodeAddrTied
+		}
 	}
 	if fd.inGlobalScope(addr, size) {
 		return VarnodeMapped | VarnodeAddrTied | VarnodePersist
