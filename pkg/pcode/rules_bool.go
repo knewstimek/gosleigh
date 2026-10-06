@@ -808,23 +808,58 @@ func NewRuleEqual2Constant(group string) *RuleEqual2Constant {
 	return r
 }
 
+// apply moves a constant through x+c, -x or ~x on the left of ==/!=, as long
+// as every other reader of the left side is a similar constant comparison.
+// C++ parity: RuleEqual2Constant::applyOp.
 func (r *RuleEqual2Constant) apply(op *PcodeOp, data *Funcdata) int {
-	lhs, _, val, ok := normalizeCompareConst(op)
-	if !ok {
+	cvn := op.Input(1)
+	if !cvn.IsConstant() {
 		return 0
 	}
-	add := definedBy(lhs, CPUI_INT_ADD)
-	if add == nil {
+	lhs := op.Input(0)
+	if !lhs.IsWritten() {
 		return 0
 	}
-	for slot := 0; slot < 2; slot++ {
-		cval, cok := constantValue(add.Input(slot))
-		if !cok || cval != val {
+	leftop := lhs.Def()
+	var newconst uint64
+	switch leftop.Code() {
+	case CPUI_INT_ADD:
+		otherconst := leftop.Input(1)
+		if !otherconst.IsConstant() {
+			return 0
+		}
+		newconst = (cvn.Offset() - otherconst.Offset()) & maskForSize(cvn.Size())
+	case CPUI_INT_MULT:
+		otherconst := leftop.Input(1)
+		if !otherconst.IsConstant() {
+			return 0
+		}
+		// Only a multiply by -1 is transformed.
+		if otherconst.Offset() != maskForSize(otherconst.Size()) {
+			return 0
+		}
+		newconst = -cvn.Offset() & maskForSize(otherconst.Size())
+	case CPUI_INT_NEGATE:
+		newconst = ^cvn.Offset() & maskForSize(lhs.Size())
+	default:
+		return 0
+	}
+	a := leftop.Input(0)
+	if a.IsFree() {
+		return 0
+	}
+	for _, dop := range lhs.DescendIter() {
+		if dop == op {
 			continue
 		}
-		other := add.Input(1 - slot)
-		rewriteOp(data, op, op.Code(), other, data.NewConstant(other.Size(), 0))
-		return 1
+		if dop.Code() != CPUI_INT_EQUAL && dop.Code() != CPUI_INT_NOTEQUAL {
+			return 0
+		}
+		if !dop.Input(1).IsConstant() {
+			return 0
+		}
 	}
-	return 0
+	data.OpSetInput(op, a, 0)
+	data.OpSetInput(op, data.NewConstant(a.Size(), newconst), 1)
+	return 1
 }
