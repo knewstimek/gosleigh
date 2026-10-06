@@ -189,8 +189,13 @@ func TestCollapseStructureIrreducibleFallsBackToGoto(t *testing.T) {
 	if bg.GetSize() == 0 {
 		t.Fatal("expected collapsed graph to remain non-empty")
 	}
-	root := bg.GetBlock(0)
-	if !hasGotoRecursive(root) {
+	// Goto edges split the graph into several top-level components, appended
+	// in collapse order (C++ BlockGraph::addBlock); search them all.
+	found := false
+	for i := 0; i < bg.GetSize(); i++ {
+		found = found || hasGotoRecursive(bg.GetBlock(i))
+	}
+	if !found {
 		t.Fatal("expected irreducible graph to preserve goto/unstructured fallback")
 	}
 }

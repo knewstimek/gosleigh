@@ -226,7 +226,7 @@ func (b *FlowBlock) isLoopDAGIn(i int) bool {
 }
 
 func (b *FlowBlock) isSwitchOut() bool {
-	return b.HasFlag(BlockFlagSwitchOut) || b.Type() == BlockSwitchType || b.Type() == BlockMultiGotoType
+	return b.HasFlag(BlockFlagSwitchOut)
 }
 
 func (b *FlowBlock) isInteriorGotoTarget() bool {
@@ -462,8 +462,13 @@ func (bg *BlockGraph) collapseRegion(nodes []*FlowBlock, tp BlockType) *FlowBloc
 	newBlock := newStructuredFlowBlock(tp)
 	newBlock.SetParent(&bg.FlowBlock)
 	newBlock.setStructuredChildren(nodes)
-	if tp == BlockSwitchType || tp == BlockMultiGotoType {
-		newBlock.SetFlag(BlockFlagSwitchOut)
+	// C++ parity: BlockGraph::addBlock -- a graph's index is its lowest
+	// member's index (orderBlocks sorts on it).
+	newBlock.index = nodes[0].index
+	for _, node := range nodes[1:] {
+		if node.index < newBlock.index {
+			newBlock.index = node.index
+		}
 	}
 
 	// Collect incoming edges from outside the region. These will be redirected
@@ -486,6 +491,11 @@ func (bg *BlockGraph) collapseRegion(nodes []*FlowBlock, tp BlockType) *FlowBloc
 				continue
 			}
 			outgoingRaw = append(outgoingRaw, edgeRecord{other: dst, node: node, label: collapseEdgeLabel(node.OutEdge(i).Label)})
+			if node.isSwitchOut() {
+				// C++ parity: BlockGraph::selfIdentify -- an indirect branch
+				// leaving the region makes the new block a switch out.
+				newBlock.SetFlag(BlockFlagSwitchOut)
+			}
 		}
 	}
 
@@ -554,24 +564,16 @@ func (bg *BlockGraph) collapseRegion(nodes []*FlowBlock, tp BlockType) *FlowBloc
 		node.SetParent(newBlock)
 	}
 
-	firstIndex := len(bg.blocks)
+	// C++ parity: BlockGraph::identifyInternal drops the nodes from the list
+	// and addBlock appends the new block at the end. The position matters:
+	// collapseInternal/collapseConditions walk the list by index.
 	filtered := make([]*FlowBlock, 0, len(bg.blocks)-len(nodes)+1)
-	for idx, block := range bg.blocks {
-		if _, ok := region[block]; ok {
-			if firstIndex == len(bg.blocks) {
-				firstIndex = idx
-			}
-			continue
+	for _, block := range bg.blocks {
+		if _, ok := region[block]; !ok {
+			filtered = append(filtered, block)
 		}
-		filtered = append(filtered, block)
 	}
-	if firstIndex > len(filtered) {
-		firstIndex = len(filtered)
-	}
-	filtered = append(filtered, nil)
-	copy(filtered[firstIndex+1:], filtered[firstIndex:])
-	filtered[firstIndex] = newBlock
-	bg.blocks = filtered
+	bg.blocks = append(filtered, newBlock)
 
 	for _, edge := range outgoing {
 		bg.AddEdge(newBlock, edge.other, edge.label)
@@ -682,7 +684,9 @@ func (bg *BlockGraph) newBlockInfLoop(bl *FlowBlock) *FlowBlock {
 
 func (bg *BlockGraph) newBlockSwitch(cases []*FlowBlock, hasExit bool) *FlowBlock {
 	res := bg.collapseRegion(cases, BlockSwitchType)
-	res.SetFlag(BlockFlagSwitchOut)
+	// C++ parity: BlockGraph::newBlockSwitch -- the switch is resolved, so it
+	// is not a switch out. TODO: forceOutputNum(1) when hasExit is not ported.
+	res.ClearFlag(BlockFlagSwitchOut)
 	_ = hasExit
 	return res
 }

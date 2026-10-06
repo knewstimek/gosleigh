@@ -309,11 +309,74 @@ func (bg *BlockGraph) StructureLoops() {
 	bg.CalcForwardDominator()
 }
 
-// OrderBlocks sorts the blocks slice by RPO index.
+// OrderBlocks sorts the blocks into their final printing order.
+// C++ parity: BlockGraph::orderBlocks.
 func (bg *BlockGraph) OrderBlocks() {
+	if len(bg.blocks) == 1 {
+		return
+	}
 	sort.Slice(bg.blocks, func(i, j int) bool {
-		return bg.blocks[i].index < bg.blocks[j].index
+		return compareFinalOrder(bg.blocks[i], bg.blocks[j])
 	})
+}
+
+// compareFinalOrder puts the entry block first and return blocks last;
+// otherwise blocks keep index order.
+// C++ parity: FlowBlock::compareFinalOrder.
+func compareFinalOrder(bl1, bl2 *FlowBlock) bool {
+	if bl1.index == 0 {
+		return true
+	}
+	if bl2.index == 0 {
+		return false
+	}
+	op1, op2 := bl1.finalLastOp(), bl2.finalLastOp()
+	if op1 != nil {
+		if op2 != nil {
+			if op1.Code() == CPUI_RETURN && op2.Code() != CPUI_RETURN {
+				return false
+			} else if op1.Code() != CPUI_RETURN && op2.Code() == CPUI_RETURN {
+				return true
+			}
+		}
+		if op1.Code() == CPUI_RETURN {
+			return false
+		}
+	} else if op2 != nil && op2.Code() == CPUI_RETURN {
+		return true
+	}
+	return bl1.index < bl2.index
+}
+
+// finalLastOp is the op that ends control flow out of b, or nil.
+// C++ parity: FlowBlock::lastOp and its BlockBasic/BlockCopy/BlockList/
+// BlockCondition/BlockIf/BlockGoto/BlockMultiGoto overrides.
+func (b *FlowBlock) finalLastOp() *PcodeOp {
+	if bb, ok := b.Concrete().(*BlockBasic); ok {
+		if bb.EmptyOp() {
+			return nil
+		}
+		return bb.LastOp()
+	}
+	children := b.StructuredChildren()
+	if len(children) == 0 {
+		return nil
+	}
+	switch b.Type() {
+	case BlockListType:
+		return children[len(children)-1].finalLastOp()
+	case BlockConditionType:
+		if len(children) > 1 {
+			return children[1].finalLastOp()
+		}
+	case BlockIfType:
+		if len(children) == 1 {
+			return children[0].finalLastOp()
+		}
+	case BlockGotoType, BlockMultiGotoType:
+		return children[0].finalLastOp()
+	}
+	return nil
 }
 
 // MoveOutEdge retargets blold's out-edge at slot to point to blnew instead.
