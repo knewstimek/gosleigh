@@ -14,7 +14,10 @@
 
 package pcode
 
-import "sort"
+import (
+	"sort"
+	"sync/atomic"
+)
 
 // HighVariable is a high-level variable that may be backed by one or more
 // low-level Varnodes (SSA values). It carries a human-readable name for
@@ -22,6 +25,8 @@ import "sort"
 //
 // C++ parity: varnode.hh HighVariable (partial)
 type HighVariable struct {
+	serial uint64 // creation order (see highSerial)
+
 	// mergeClasses counts speculatively merged groups (0 means 1).
 	// C++ parity: HighVariable::numMergeClasses.
 	mergeClasses int
@@ -126,8 +131,13 @@ func symbolOffsetFor(vn *Varnode, entry *SymbolEntry) int32 {
 // NewHighVariable creates a HighVariable with the given name and zero instances.
 // C++ parity: HighVariable::HighVariable
 func NewHighVariable(name string) *HighVariable {
-	return &HighVariable{name: name}
+	return &HighVariable{name: name, serial: highSerial.Add(1)}
 }
+
+// highSerial numbers HighVariables in creation order. C++ walks
+// map<HighVariable *,...> containers in pointer order, which follows
+// allocation order; the serial stands in for that order.
+var highSerial atomic.Uint64
 
 // Name returns the display name of this variable.
 func (hv *HighVariable) Name() string {

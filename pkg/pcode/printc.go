@@ -391,6 +391,17 @@ func (s *printCState) collectSymbols() {
 					}
 				}
 			}
+			// An irregular input (named in_<reg> by ActionNameVars) is a local
+			// symbol, declared once. C++ parity: ScopeInternal::buildVariableName
+			// (input with index < 0) + PrintC::emitScopeVarDecls.
+			if hv := vn.High(); vn.IsInput() && hv != nil && strings.HasPrefix(hv.Name(), "in_") {
+				s.names[vn] = hv.Name()
+				if !seenHV[hv] {
+					seenHV[hv] = true
+					locals = append(locals, vn)
+				}
+				continue
+			}
 			// Classify via ScopeLocal/HighVariable assignment.
 			if hv := vn.High(); hv != nil {
 				name := hv.Name()

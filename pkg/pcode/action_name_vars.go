@@ -235,6 +235,7 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		hv     *HighVariable
 		bestVn *Varnode // best representative (non-unique, non-input)
 		uniqVn *Varnode // explicit unique-space fallback (e.g. loop-head snapshot iVar1)
+		inVn   *Varnode // an input instance (irregular input naming)
 	}
 	hvMap := make(map[*HighVariable]*hvCandidate)
 
@@ -276,6 +277,9 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		// cheap multi-use expression that ActionMarkImplied term-duplicated (e.g.
 		// a>>0x20 used twice) would still consume a uVarN slot, shifting the numbers
 		// of the real explicit locals (umulhi: cross should be uVar1, not uVar3).
+		if vn.IsInput() && (c.inVn == nil || vn.CreateIndex() < c.inVn.CreateIndex()) {
+			c.inVn = vn
+		}
 		if vn.Space() != nil && !vn.Space().IsUnique() && !vn.IsInput() && vn.IsExplicit() {
 			if c.bestVn == nil {
 				c.bestVn = vn
@@ -322,12 +326,35 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		}
 	}
 
-	var toName []hvEntry
+	// Visit the variables in creation order, as C++ walks its HighVariable
+	// keyed maps (recmap renames in that order).
+	cands := make([]*hvCandidate, 0, len(hvMap))
 	for _, c := range hvMap {
+		cands = append(cands, c)
+	}
+	sort.Slice(cands, func(i, j int) bool { return cands[i].hv.serial < cands[j].hv.serial })
+	var toName []hvEntry
+	for _, c := range cands {
 		rep := c.bestVn
 		if rep == nil {
 			// Fall back to an explicit unique-space instance (e.g. snapshot iVar1).
 			rep = c.uniqVn
+		}
+		if rep == nil && c.inVn != nil && highHasName(c.hv) && sl != nil && sl.model != nil &&
+			(sl.model.EntryPoint || !regParamHigh(c.hv, sl)) && c.inVn.Space() != nil &&
+			c.inVn.Space().Kind != address.SpaceKindStack {
+			// An input that is not a formal parameter: in_<register>.
+			// C++ parity: ScopeInternal::buildVariableName (irregular input,
+			// index < 0).
+			nm := "in_" + c.inVn.Space().Name + "_" + fmt.Sprintf("%08x", c.inVn.Offset())
+			if rn := data.registerName(c.inVn); rn != "" {
+				nm = "in_" + rn
+			}
+			nm = makeNameUnique(nm, used)
+			used[nm] = true
+			c.hv.SetName(nm)
+			a.count++
+			continue
 		}
 		if rep == nil {
 			// No nameable representative -- skip (params, implied unique-only HVs).
@@ -695,4 +722,10 @@ func finalizeLocalHighTypes(data *Funcdata) {
 		off := int64(rep.Offset()-entry.Addr().Offset) + int64(entry.Offset())
 		high.finalizeDatatype(data.TypeFactory(), entry.Symbol(), off)
 	}
+}
+
+// regParamHigh reports whether the variable holds a formal register parameter.
+func regParamHigh(hv *HighVariable, sl *ScopeLocal) bool {
+	_, ok := regParamSlotOfHigh(hv, sl)
+	return ok
 }
