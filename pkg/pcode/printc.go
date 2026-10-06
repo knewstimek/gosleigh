@@ -4176,7 +4176,7 @@ func (s *printCState) renderPtrSub(op *PcodeOp) (ExprFragment, error) {
 	if symExpr, ok := s.renderPtrSubSpacebaseSymbol(base, off); ok {
 		return symExpr, nil
 	}
-	if fieldExpr, ok := s.renderPtrSubField(base, off); ok {
+	if fieldExpr, ok := s.renderPtrSubField(base, off, false); ok {
 		return fieldExpr, nil
 	}
 	baseExpr, err := s.renderVarnodeExpr(base)
@@ -4270,7 +4270,7 @@ func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode) (ExprFragm
 	return s.lang.UnaryExpr("&", cPrecUnary, name), true
 }
 
-func (s *printCState) renderPtrSubField(base, off *Varnode) (ExprFragment, bool) {
+func (s *printCState) renderPtrSubField(base, off *Varnode, valueon bool) (ExprFragment, bool) {
 	if base == nil || off == nil || !off.IsConstant() {
 		return ExprFragment{}, false
 	}
@@ -4286,11 +4286,63 @@ func (s *printCState) renderPtrSubField(base, off *Varnode) (ExprFragment, bool)
 	if !ok || field.Name == "" {
 		return ExprFragment{}, false
 	}
-	baseExpr, err := s.renderVarnodeExpr(base)
-	if err != nil {
-		return ExprFragment{}, false
+	// An array field is printed without '&'. C++ parity: opPtrsub arrayvalue.
+	if _, isArr := field.Type.(*Array); isArr {
+		valueon = true
 	}
-	return s.lang.PostfixExpr(baseExpr, "->"+field.Name), true
+	var expr ExprFragment
+	if isValueFlexible(base) {
+		// The base is itself an implied PTRADD/PTRSUB: print its value form
+		// and select the member with '.' (EMIT ( ).name).
+		baseExpr, ok := s.renderPointerValue(base)
+		if !ok {
+			return ExprFragment{}, false
+		}
+		expr = s.lang.PostfixExpr(baseExpr, "."+field.Name)
+	} else {
+		baseExpr, err := s.renderVarnodeExpr(base)
+		if err != nil {
+			return ExprFragment{}, false
+		}
+		expr = s.lang.PostfixExpr(baseExpr, "->"+field.Name) // EMIT ( )->name
+	}
+	if !valueon {
+		expr = s.lang.UnaryExpr("&", cPrecUnary, expr)
+	}
+	return expr, true
+}
+
+// isValueFlexible reports an implied PTRSUB/PTRADD whose value can be printed
+// directly ('.' member access, array subscript) instead of through a pointer.
+// C++ parity: PrintC::isValueFlexible.
+func isValueFlexible(vn *Varnode) bool {
+	if vn == nil || !vn.IsImplied() || !vn.IsWritten() {
+		return false
+	}
+	switch vn.Def().Code() {
+	case CPUI_PTRSUB, CPUI_PTRADD:
+		return true
+	}
+	return false
+}
+
+// renderPointerValue prints the object an implied PTRADD/PTRSUB points at
+// (the print_load_value form): base[index] or base->field / base.field.
+func (s *printCState) renderPointerValue(vn *Varnode) (ExprFragment, bool) {
+	def := vn.Def()
+	switch def.Code() {
+	case CPUI_PTRADD:
+		frag, ok, err := s.tryRenderSubscript(vn)
+		if err != nil || !ok {
+			return ExprFragment{}, false
+		}
+		return frag, true
+	case CPUI_PTRSUB:
+		s.opStack = append(s.opStack, def)
+		defer func() { s.opStack = s.opStack[:len(s.opStack)-1] }()
+		return s.renderPtrSubField(def.Input(0), def.Input(1), true)
+	}
+	return ExprFragment{}, false
 }
 
 func (s *printCState) renderConditionOp(op *PcodeOp) (ExprFragment, error) {
