@@ -333,3 +333,69 @@ func datatypeNameBase(dt Datatype) string {
 	}
 	return name[:1]
 }
+
+// aliasChecker decides whether a stack location may be reached through a
+// pointer into the frame: every local at or beyond the shallowest local whose
+// address is taken counts as aliased.
+// C++ parity: varmap.cc AliasChecker (deriveBoundaries, gatherInternal,
+// hasLocalAlias). The stack is assumed to grow negative (direction 1).
+type aliasChecker struct {
+	fd            *Funcdata
+	space         *address.Space
+	calculated    bool
+	localBoundary uint64
+	aliasBoundary uint64
+	localExtreme  uint64
+}
+
+// newAliasChecker sets up the boundaries; the pointers are gathered on the
+// first query. C++ parity: AliasChecker::gather (defer=true).
+func newAliasChecker(fd *Funcdata, spc *address.Space) *aliasChecker {
+	a := &aliasChecker{fd: fd, space: spc, localExtreme: ^uint64(0), localBoundary: 0x1000000}
+	if fp := fd.GetFuncProto(); fp != nil && fp.Model() != nil {
+		m := fp.Model()
+		params := m.ParamRanges()
+		if len(m.LocalRanges) > 0 && len(params) > 0 {
+			a.localBoundary = params[len(params)-1][1]
+		}
+	}
+	return a
+}
+
+// C++ parity: AliasChecker::gatherInternal.
+func (a *aliasChecker) gatherInternal() {
+	a.calculated = true
+	a.aliasBoundary = a.localExtreme
+	spacebase := a.fd.findSpacebaseInput(a.space)
+	if spacebase == nil {
+		return
+	}
+	wordSize := uint64(a.space.WordSize)
+	if wordSize == 0 {
+		wordSize = 1
+	}
+	for _, ab := range gatherAdditiveBase(spacebase) {
+		offset := aliasGatherOffset(ab.base) * wordSize
+		if offset < a.localBoundary {
+			continue // parameter reference
+		}
+		if offset < a.aliasBoundary {
+			a.aliasBoundary = offset
+		}
+	}
+}
+
+// hasLocalAlias reports whether vn looks reachable through a frame pointer.
+// C++ parity: AliasChecker::hasLocalAlias.
+func (a *aliasChecker) hasLocalAlias(vn *Varnode) bool {
+	if vn == nil || a.space == nil {
+		return false
+	}
+	if !a.calculated {
+		a.gatherInternal()
+	}
+	if vn.Space() != a.space {
+		return false
+	}
+	return vn.Offset() >= a.aliasBoundary
+}

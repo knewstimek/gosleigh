@@ -98,14 +98,9 @@ func (fp *FuncProto) ResolveModel(_ *ParamActive) {}
 // for anything besides this call (ancestorOpUse).
 //
 // Divergences from C++ (fspec.cc:5585), each forced by an unported dependency:
-//   - AliasChecker is not ported, so the hasLocalAlias(vn) rejection for
-//     stack-space Varnodes is skipped. Gosleigh registers no stack trials today
-//     (GetSpacebaseOffset is unknown), so the branch is only reachable when copy
-//     propagation has already replaced a register trial's Varnode with a stack
-//     one, where the localRange test below still applies.
 //
 // C++ parity: fspec.cc FuncCallSpecs::checkInputTrialUse.
-func (fc *FuncCallSpecs) checkInputTrialUse(data *Funcdata) {
+func (fc *FuncCallSpecs) checkInputTrialUse(data *Funcdata, aliascheck *aliasChecker) {
 	active := fc.GetActiveInput()
 	if active == nil || fc.op == nil || fc.op.IsDead() || data == nil {
 		return
@@ -149,6 +144,8 @@ func (fc *FuncCallSpecs) checkInputTrialUse(data *Funcdata) {
 			// zeroes the CALL input, so a false reject would destroy a live
 			// argument, while a false accept only defers to the ancestor tests.
 			switch {
+			case aliascheck != nil && aliascheck.hasLocalAlias(vn):
+				trial.MarkNoUse()
 			case fp == nil || fp.Model() == nil ||
 				(!fp.Model().IsLocalOffset(vn.Offset()) && !fp.Model().IsParamOffset(vn.Offset())):
 				trial.MarkNoUse()

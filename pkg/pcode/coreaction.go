@@ -1307,6 +1307,10 @@ func (a *ActionActiveParam) Apply(data *Funcdata) int {
 	if data == nil {
 		return 0
 	}
+	var aliascheck *aliasChecker
+	if sl := data.GetScopeLocal(); sl != nil {
+		aliascheck = newAliasChecker(data, sl.SpaceID())
+	}
 	for i := 0; i < data.NumCalls(); i++ {
 		fc := data.GetCallSpecs(i)
 		if fc == nil || !fc.IsInputActive() {
@@ -1317,7 +1321,7 @@ func (a *ActionActiveParam) Apply(data *Funcdata) int {
 		// pass has had a chance to deindirect it.
 		trimmable := activeinput.NumPasses() > 0 || (fc.op != nil && fc.op.Code() != CPUI_CALLIND)
 		if !activeinput.IsFullyChecked() {
-			fc.checkInputTrialUse(data)
+			fc.checkInputTrialUse(data, aliascheck)
 		}
 		activeinput.FinishPass()
 		if activeinput.NumPasses() > activeinput.MaxPass() {
