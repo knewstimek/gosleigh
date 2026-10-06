@@ -238,7 +238,13 @@ func (b *FlowBlock) isInteriorGotoTarget() bool {
 func (b *FlowBlock) isComplex() bool {
 	switch b.Concrete().(type) {
 	case *BlockBasic:
-		return b.Concrete().(*BlockBasic).isComplexBasic(b.SizeOut())
+		// C++ BlockCopy::isComplex asks the underlying basic block, whose
+		// out-edges are those of the control-flow graph, not the copy's.
+		bb := b.Concrete().(*BlockBasic)
+		if bb.srcDelegate != nil {
+			return bb.isComplexBasic(bb.srcDelegate.SizeOut())
+		}
+		return bb.isComplexBasic(bb.SizeOut())
 	case *BlockCondition:
 		// BlockCondition::isComplex -> getBlock(0)->isComplex().
 		children := b.StructuredChildren()

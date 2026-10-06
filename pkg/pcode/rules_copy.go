@@ -335,15 +335,8 @@ func (r *RuleMultiCollapse) apply(op *PcodeOp, data *Funcdata) int {
 		} else if defcopyr == copyr {
 			continue // a matching branch
 		} else if !nofunc && functionalEquality(defcopyr, copyr) {
-			// Functional-equality collapse path not yet ported; bail rather than
-			// risk a malformed op. Absolute-equality (incl. self-ref skip) below
-			// is what the gcd loop-phi collapse needs.
-			// TODO known mismatch: port the func_eq copy/CSE path (ruleaction.cc 3324-3351).
-			_ = funcEq
-			for _, v := range skiplist {
-				v.ClearMark()
-			}
-			return 0
+			funcEq = true // now matching by functional equality
+			continue
 		} else if copyr.IsWritten() && copyr.Def().Code() == CPUI_MULTIEQUAL {
 			// Give the branch one last chance: add its inputs to the match list.
 			newop := copyr.Def()
@@ -375,6 +368,20 @@ func (r *RuleMultiCollapse) apply(op *PcodeOp, data *Funcdata) int {
 			// Only functional equality: rebuild cur as a copy of defcopyr's op.
 			newop := defcopyr.Def()
 			if newop == nil {
+				continue
+			}
+			// Reuse a copy of newop already made in this block.
+			earliest := cur.Parent().EarliestUse(cur.Output())
+			var substitute *PcodeOp
+			for i := 0; i < newop.NumInput(); i++ {
+				if invn := newop.Input(i); !invn.IsConstant() {
+					substitute = data.CseFindInBlock(newop, invn, cur.Parent(), earliest)
+					break
+				}
+			}
+			if substitute != nil {
+				data.TotalReplace(copyr, substitute.Output())
+				data.OpDestroy(cur)
 				continue
 			}
 			needsReinsert := cur.Code() == CPUI_MULTIEQUAL
