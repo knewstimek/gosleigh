@@ -129,6 +129,13 @@ func (hv *HighVariable) AddInstance(vn *Varnode) {
 	if hv == nil || vn == nil {
 		return
 	}
+	if vn.high == hv {
+		for _, w := range hv.instances {
+			if w == vn {
+				return // already an instance
+			}
+		}
+	}
 	hv.instances = append(hv.instances, vn)
 	vn.SetHigh(hv)
 }
