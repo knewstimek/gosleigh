@@ -1183,6 +1183,7 @@ func (fd *Funcdata) OpSetOutput(op *PcodeOp, vn *Varnode) {
 	// C++ parity: vbank.setDef(vn, op) in funcdata_op.cc:83 -- updates written tree.
 	// Simple vn.SetDef(op) would leave vn in free state after MakeFree above.
 	fd.vbank.SetDef(vn, op)
+	fd.setVarnodeProperties(vn)
 	op.SetOutput(vn)
 }
 
@@ -1232,15 +1233,9 @@ func (fd *Funcdata) OpUnsetOutput(op *PcodeOp) {
 	if vn.IsWritten() {
 		// Varnode is in VarnodeBank's defTree. Must remove/transition while
 		// vn.def is still valid so CompareDefLoc can sort during removal.
-		if vn.NumDescend() == 0 {
-			// No consumers: fully destroy from bank, then clear def.
-			fd.vbank.Destroy(vn)
-			vn.SetDef(nil)
-		} else {
-			// Still has consumers: transition to free so they remain valid.
-			// MakeFree internally clears def and VarnodeWritten.
-			fd.vbank.MakeFree(vn)
-		}
+		// The output becomes free but stays in the bank (clearDeadVarnodes
+		// reclaims it). MakeFree clears def and VarnodeWritten.
+		fd.vbank.MakeFree(vn)
 		return
 	}
 	// Non-bank-managed varnode (free or directly assigned def): just clear.
