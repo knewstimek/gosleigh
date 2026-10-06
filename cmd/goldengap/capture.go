@@ -384,7 +384,7 @@ func typeDesc(n *xnode, types map[string]*xnode, depth int) *pcode.HostTypeDesc 
 	if len(n.Kids) > 0 && (d.Meta == "ptr" || d.Meta == "array") {
 		d.Elem = typeDesc(&n.Kids[0], types, depth+1)
 	}
-	if d.Meta == "struct" {
+	if d.Meta == "struct" || d.Meta == "union" {
 		// One description per host structure, shared before its fields are
 		// read so a field pointing back to it closes the cycle.
 		if id := n.attr("id"); id != "" && id != "0x0" {

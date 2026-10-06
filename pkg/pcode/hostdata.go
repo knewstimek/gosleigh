@@ -74,8 +74,10 @@ var hostMetatypes = map[string]metatype{
 	"bool": TYPE_BOOL, "code": TYPE_CODE, "float": TYPE_FLOAT,
 }
 
+// unionsInProgress breaks a cycle through a host union's own fields.
+var unionsInProgress = map[*HostTypeDesc]bool{}
+
 // ResolveHostType builds the Datatype a host description names.
-// TODO known mismatch: host unions resolve to an undefined blob of their size.
 func ResolveHostType(d *HostTypeDesc) Datatype {
 	if d == nil {
 		return nil
@@ -141,6 +143,25 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 			}
 		}
 		return tf.GetStructSized(d.Name, d.Size, fields)
+	case "union":
+		// C++ parity: TypeFactory::decodeUnion (fields all at offset 0).
+		if unionsInProgress[d] {
+			return tf.GetBase(d.Size, TYPE_UNKNOWN, "")
+		}
+		unionsInProgress[d] = true
+		var fields []TypeField
+		for i, fd := range d.Fields {
+			if ft := ResolveHostType(fd.Type); ft != nil {
+				fields = append(fields, TypeField{Ident: int32(i), Offset: fd.Offset, Name: fd.Name, Type: ft})
+			}
+		}
+		delete(unionsInProgress, d)
+		if len(fields) == 0 {
+			return tf.GetBase(d.Size, TYPE_UNKNOWN, "")
+		}
+		u := tf.GetUnion(d.Name, fields)
+		u.flags |= datatypeHostNamed
+		return u
 	}
 	if d.Char && d.Size == 1 {
 		meta := TYPE_INT
