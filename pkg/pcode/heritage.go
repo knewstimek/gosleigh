@@ -1,6 +1,8 @@
 package pcode
 
 import (
+	"sort"
+
 	"gosleigh/pkg/address"
 )
 
@@ -941,6 +943,53 @@ func startBasicBlock(graph *BlockGraph) *BlockBasic {
 	return toBasic(graph.GetBlock(0))
 }
 
+// guardInput makes the inputs of [addr,addr+size) fill the range and, when
+// there is more than one, concatenates them into a single full-size Varnode
+// at the start of the function, so renaming sees one input value.
+// C++ parity: heritage.cc Heritage::guardInput.
+func (h *Heritage) guardInput(graph *BlockGraph, addr address.Address, size int32, input []*Varnode) {
+	if len(input) == 0 {
+		return
+	}
+	// If there is only one input and it fills everything it will get linked
+	// in automatically
+	if len(input) == 1 && input[0].Size() == size {
+		return
+	}
+	sorted := append([]*Varnode(nil), input...)
+	sort.SliceStable(sorted, func(i, j int) bool { return sorted[i].Offset() < sorted[j].Offset() })
+	var newinput []*Varnode
+	cur := addr.Offset // Range that needs to be covered
+	end := cur + uint64(size)
+	i := 0
+	for cur < end {
+		var vn *Varnode
+		if i < len(sorted) {
+			vn = sorted[i]
+			if vn.Offset() > cur {
+				sz := int32(vn.Offset() - cur)
+				vn = h.fd.SetInputVarnode(h.fd.NewVarnode(sz, address.Address{Space: addr.Space, Offset: cur}))
+			} else {
+				i++
+			}
+		} else {
+			sz := int32(end - cur)
+			vn = h.fd.SetInputVarnode(h.fd.NewVarnode(sz, address.Address{Space: addr.Space, Offset: cur}))
+		}
+		newinput = append(newinput, vn)
+		cur += uint64(vn.Size())
+	}
+	// Now make sure all the inputs get linked together into a single input
+	if len(newinput) == 1 {
+		return // Will get linked in automatically
+	}
+	for _, vn := range newinput {
+		vn.SetAddlFlags(VarnodeWriteMask)
+	}
+	newout := h.fd.NewVarnode(size, addr)
+	h.concatPieces(graph, newinput, nil, newout).SetActiveHeritage()
+}
+
 // concatPieces builds a chain of PIECE ops reconstructing one value out of
 // vnlist (given in increasing address order) and makes finalvn the result.
 // insertop is the op the expression is inserted before; nil inserts at the
@@ -1430,6 +1479,7 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			// (C++ placeMultiequals skips guard otherwise).
 			if r, w, in := h.Collect(task.Addr, task.Size); len(r) > 0 ||
 				((len(w) > 0 || len(in) > 0) && !task.Addr.Space.IsUnique() && task.NewAddresses()) {
+				h.guardInput(graph, task.Addr, task.Size, in) // C++ parity: placeMultiequals (guardInput before guard)
 				h.normalizeRange(task.Addr, task.Size, r, nil)
 			}
 			// Insert INDIRECT guards for call-site side-effects on this range BEFORE
