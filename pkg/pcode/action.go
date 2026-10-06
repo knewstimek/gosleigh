@@ -1280,11 +1280,6 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	actprop.AddRule(NewRuleConcatZero("analysis"))
 	actprop.AddRule(NewRuleConcatLeftShift("analysis"))
 	actprop.AddRule(NewRuleSubZext("analysis"))
-	// Faithful C++ RuleSubZext (INT_ZEXT -> INT_AND mask). Registered here, ahead of
-	// RuleSubvarZext below, so zext(sub(V,0)) collapses to V & mask before the
-	// subvariable-flow narrowing can strip the extension. C++ parity: coreaction.cc
-	// registers RuleSubZext (5596) before RuleSubvarZext (5638).
-	actprop.AddRule(NewRuleSubZextMask("analysis"))
 	actprop.AddRule(NewRuleSubCancel("analysis"))
 	actprop.AddRule(NewRuleShiftSub("analysis"))
 	actprop.AddRule(NewRuleHumptyDumpty("analysis"))

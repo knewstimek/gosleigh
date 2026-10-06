@@ -24,12 +24,15 @@ func TestRulesExt_RewriteAndNonRewrite(t *testing.T) {
 	}
 
 	zext := newRuleOp(data, CPUI_INT_ZEXT, 4, x)
-	sub := newRuleOp(data, CPUI_SUBPIECE, 2, zext.Output(), data.NewConstant(4, 0))
-	if got := NewRuleSubZext("ext").ApplyOp(sub, data); got != 1 {
+	// zext(sub(V,0)) back to V's size becomes V & mask (C++ RuleSubZext).
+	wide := newRuleOp(data, CPUI_COPY, 4, zext.Output())
+	low := newRuleOp(data, CPUI_SUBPIECE, 2, wide.Output(), data.NewConstant(4, 0))
+	ext := newRuleOp(data, CPUI_INT_ZEXT, 4, low.Output())
+	if got := NewRuleSubZext("ext").ApplyOp(ext, data); got != 1 {
 		t.Fatalf("subzext ApplyOp=%d, want 1", got)
 	}
-	if sub.Code() != CPUI_COPY || sub.Input(0) != x {
-		t.Fatalf("expected COPY(x), got %v", sub.Code())
+	if ext.Code() != CPUI_INT_AND || ext.Input(0) != wide.Output() || ext.Input(1).Offset() != 0xffff {
+		t.Fatalf("expected INT_AND(V,#0xffff), got %v", ext.Code())
 	}
 
 	cmp := newRuleOp(data, CPUI_INT_SLESS, 1, zext.Output(), data.NewConstant(4, 0))
