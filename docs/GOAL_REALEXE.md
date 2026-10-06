@@ -18,6 +18,7 @@
 | `be538b3` | 결정성(AllOps SeqNum 순), 상수 단일 reader, guardCalls 모델, 레이블/goto 본문, 부분 전역 심볼, bool 반환 | 139 | - |
 | `929028e` | downChain, BlockSwitch/MultiGoto, DeterminedBranch, 다중 루트 지배자, removeUnreachableBlocks, 규칙 감사(SLess2Zero 등 8종 원본화) | 143 | - |
 | `37a144b` | 캐스트가 HighVariable 타입 사용, arithmeticOutputStandard, getExactPiece, baseExplicit 원본화, PIECE 토큰, 프로토타입 출력형 | 147 | - |
+| `f241da2` | 반환값 복원 수명 원본화(guardReturns/ReturnRecovery), finalTransform/isMoveable, dominant copy, AliasChecker, guardStores, 이름 번호 순서, CALLOTHER 이름 | 164 | - |
 | `07bedd0` | TraceDAG 원본화, 액션 변경 신호=count, cover의 implied 추적, heritage 단일 rename, mergeByDatatype, CMOV 블록 분할, 루프 조건 우회로 제거 | 160 | - |
 
 ## 도구 (`tools/realexe/`)
