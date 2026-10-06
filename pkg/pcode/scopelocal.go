@@ -118,6 +118,8 @@ type ScopeLocal struct {
 	paramByVn map[*Varnode]*HighVariable
 	// localByVn maps a stack local varnode to its HighVariable.
 	localByVn map[*Varnode]*HighVariable
+	// extState holds the symbol table and range state (see ext).
+	extState *scopeLocalExt
 }
 
 // NewScopeLocal creates an empty ScopeLocal for the given calling convention.

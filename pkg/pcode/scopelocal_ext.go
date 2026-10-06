@@ -86,19 +86,12 @@ type scopeLocalExt struct {
 	notMapped [][2]uint64
 }
 
-// scopeLocalExtMap binds ScopeLocal pointers to their extended state.
-// C++ parity: the extended state lives on the class in Ghidra; here we use a
-// side map so that adding new fields never forces us to touch the struct
-// literal in existing construction paths.
-var scopeLocalExtMap = map[*ScopeLocal]*scopeLocalExt{}
-
-// ext returns the extended state for this ScopeLocal, creating it on demand.
 func (sl *ScopeLocal) ext() *scopeLocalExt {
 	if sl == nil {
 		return nil
 	}
-	if e, ok := scopeLocalExtMap[sl]; ok {
-		return e
+	if sl.extState != nil {
+		return sl.extState
 	}
 	e := &scopeLocalExt{
 		vnMap: make(map[*Varnode]*SymbolEntry),
@@ -107,7 +100,7 @@ func (sl *ScopeLocal) ext() *scopeLocalExt {
 		e.stackSpace = sl.model.StackSpace
 	}
 	e.stackGrows = true // Ghidra default on stack-negative architectures
-	scopeLocalExtMap[sl] = e
+	sl.extState = e
 	return e
 }
 
