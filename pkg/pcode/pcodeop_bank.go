@@ -1,6 +1,10 @@
 package pcode
 
-import "gosleigh/pkg/address"
+import (
+	"sort"
+
+	"gosleigh/pkg/address"
+)
 
 // PcodeOpBank manages all PcodeOps within a function.
 // C++ parity: op.hh PcodeOpBank
@@ -9,6 +13,10 @@ type PcodeOpBank struct {
 	deadList  []*PcodeOp          // dead ops (not in CFG)
 	aliveList []*PcodeOp          // alive ops (in CFG)
 	uniqID    uint64              // monotonic sequence counter
+	// sorted caches opTree in SeqNum order (C++ optree is a std::map keyed
+	// by SeqNum); nil when stale. Iterating the Go map directly would make
+	// every caller's order, and so the output, vary from run to run.
+	sorted []*PcodeOp
 }
 
 // NewPcodeOpBank creates an empty PcodeOpBank.
@@ -43,6 +51,7 @@ func (b *PcodeOpBank) createInternal(numInputs int, seq SeqNum) *PcodeOp {
 	op := NewPcodeOp(numInputs, seq)
 	op.SetFlag(PcodeOpDead)
 	b.opTree[seq] = op
+	b.sorted = nil
 	b.deadList = append(b.deadList, op)
 	return op
 }
@@ -67,6 +76,7 @@ func (b *PcodeOpBank) MarkDead(op *PcodeOp) {
 // C++ parity: PcodeOpBank::destroy
 func (b *PcodeOpBank) Destroy(op *PcodeOp) {
 	delete(b.opTree, op.seq)
+	b.sorted = nil
 	if op.IsDead() {
 		b.deadList = removeFromSlice(b.deadList, op)
 	} else {
@@ -79,10 +89,10 @@ func (b *PcodeOpBank) FindOp(seq SeqNum) *PcodeOp {
 	return b.opTree[seq]
 }
 
-// Target returns the first op whose address matches addr, or nil.
-// C++ uses a tree iterator; we do a linear scan for now.
+// Target returns the first op (in SeqNum order) at addr, or nil.
+// C++ parity: PcodeOpBank::target.
 func (b *PcodeOpBank) Target(addr address.Address) *PcodeOp {
-	for _, op := range b.opTree {
+	for _, op := range b.ordered() {
 		if op.seq.Address == addr {
 			return op
 		}
@@ -96,18 +106,27 @@ func (b *PcodeOpBank) NumOps() int { return len(b.opTree) }
 // Clear removes all ops from the bank.
 func (b *PcodeOpBank) Clear() {
 	b.opTree = make(map[SeqNum]*PcodeOp)
+	b.sorted = nil
 	b.deadList = nil
 	b.aliveList = nil
 	// uniqID is not reset -- matches C++ behavior
 }
 
-// AllOps returns a snapshot of all ops in the bank.
+// AllOps returns a snapshot of all ops in the bank in SeqNum order.
+// C++ parity: PcodeOpBank::beginAll/endAll (optree iteration).
 func (b *PcodeOpBank) AllOps() []*PcodeOp {
-	result := make([]*PcodeOp, 0, len(b.opTree))
-	for _, op := range b.opTree {
-		result = append(result, op)
+	return append([]*PcodeOp(nil), b.ordered()...)
+}
+
+func (b *PcodeOpBank) ordered() []*PcodeOp {
+	if b.sorted == nil {
+		b.sorted = make([]*PcodeOp, 0, len(b.opTree))
+		for _, op := range b.opTree {
+			b.sorted = append(b.sorted, op)
+		}
+		sort.Slice(b.sorted, func(i, j int) bool { return SeqNumLess(b.sorted[i].seq, b.sorted[j].seq) })
 	}
-	return result
+	return b.sorted
 }
 
 // AliveOps returns a copy of the alive list.
