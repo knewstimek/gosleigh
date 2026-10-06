@@ -4359,7 +4359,15 @@ func (s *printCState) renderPtrSubField(base, off *Varnode, valueon bool) (ExprF
 		return ExprFragment{}, false
 	}
 	field, ok := structType.FieldAt(int32(off.Offset()))
-	if !ok || field.Name == "" {
+	if !ok {
+		// No field holds the offset: Ghidra's default name for the gap.
+		// C++ parity: opPtrsub (DataTypeComponent.getDefaultFieldName).
+		suboff := int64(off.Offset())
+		if suboff < 0 || suboff >= int64(structType.Size()) {
+			return ExprFragment{}, false
+		}
+		field = TypeField{Name: fmt.Sprintf("field_0x%x", suboff), Offset: int32(suboff)}
+	} else if field.Name == "" {
 		return ExprFragment{}, false
 	}
 	// An array field is printed without '&'. C++ parity: opPtrsub arrayvalue.
