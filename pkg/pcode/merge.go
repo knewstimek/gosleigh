@@ -313,6 +313,11 @@ func mergeTestRequired(h1, h2 *HighVariable) bool {
 			return false
 		}
 	}
+	// The extra output of a call (a register it clobbers) is never merged.
+	// C++ parity: merge.cc Merge::mergeTestRequired (isExtraOut).
+	if (!h1.IsInput() && h1.isExtraOut()) || (!h2.IsInput() && h2.isExtraOut()) {
+		return false
+	}
 	// Symbol guard: two HighVariables that map to different Symbols -- or to
 	// different byte offsets within the same Symbol -- name distinct storage and
 	// must not merge. This is what keeps a namelocked register parameter (e.g.

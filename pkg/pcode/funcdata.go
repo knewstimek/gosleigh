@@ -92,6 +92,9 @@ type Funcdata struct {
 	hostLocals map[uint64]string
 	// hostLocalTypes are the host's type-locked stack symbol types by offset.
 	hostLocalTypes map[uint64]Datatype
+	// registerNames maps "spaceIdx:offset:size" to a register name.
+	// C++ parity: Translate::getRegisterName (used by buildVariableName).
+	registerNames map[string]string
 	// trackedSet are the register values known at entry (ActionConstbase).
 	trackedSet []constbaseTrackedContext
 
@@ -2109,4 +2112,16 @@ func hashInternalString(addr address.Address, buf []byte, charType Datatype) uin
 		sum = 1 // reserve 0 as the failure sentinel
 	}
 	return sum
+}
+
+// SetRegisterNames installs the location-to-register-name map.
+func (fd *Funcdata) SetRegisterNames(names map[string]string) { fd.registerNames = names }
+
+// registerName returns the register name at (addr, size), or "".
+// C++ parity: Translate::getRegisterName.
+func (fd *Funcdata) registerName(vn *Varnode) string {
+	if vn.Space() == nil {
+		return ""
+	}
+	return fd.registerNames[fmt.Sprintf("%d:%d:%d", vn.Space().Index, vn.Offset(), vn.Size())]
 }

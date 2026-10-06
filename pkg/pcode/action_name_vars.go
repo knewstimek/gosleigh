@@ -441,6 +441,18 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 	// single base assignDefaultNames threads through.
 	idx := 1
 	for _, e := range toName {
+		// The output of an INDIRECT creation (a register a call clobbers) is
+		// extraout_<reg> and does not consume an index.
+		// C++ parity: ScopeInternal::buildVariableName (indirect_creation branch).
+		if e.key.HasFlags(VarnodeIndirectCreation) {
+			nm := "extraout_var"
+			if rn := data.registerName(e.key); rn != "" {
+				nm = "extraout_" + rn
+			}
+			e.hv.SetName(makeNameUnique(nm, used))
+			a.count++
+			continue
+		}
 		e.hv.SetName(fmt.Sprintf("%s%d", e.prefix, idx))
 		idx++
 		a.count++

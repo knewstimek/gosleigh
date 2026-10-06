@@ -376,3 +376,14 @@ func (hv *HighVariable) ClearImplied() {
 		}
 	}
 }
+
+// isExtraOut reports whether the variable holds an extra call output: an
+// INDIRECT creation that is not address tied.
+// C++ parity: HighVariable::isExtraOut.
+func (hv *HighVariable) isExtraOut() bool {
+	var fl uint32
+	for _, vn := range hv.instances {
+		fl |= vn.flags & (VarnodeIndirectCreation | VarnodeAddrTied)
+	}
+	return fl == VarnodeIndirectCreation
+}

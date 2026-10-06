@@ -436,6 +436,13 @@ func (s *printCState) collectSymbols() {
 					// C++ parity: Ghidra's implied-varnode mechanism (ActionMarkExplicit)
 					// marks phi inputs as explicit so their defining COPY ops become statements;
 					// the phi itself is never emitted as a statement.
+					// An extra call output (extraout_<reg>) is only ever defined by its
+					// INDIRECT creation, which then stands for the declaration.
+					if vn.Def() != nil && vn.Def().IsMarker() && hv.isExtraOut() && !seenHV[hv] {
+						seenHV[hv] = true
+						locals = append(locals, vn)
+						continue
+					}
 					if vn.Def() != nil && vn.Def().IsMarker() {
 						// Name is already registered in s.names above (line: s.names[vn] = name).
 						// Do NOT mark seenHV so that a non-marker SSA version of the same

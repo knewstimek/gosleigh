@@ -321,7 +321,7 @@ func (vb *VarnodeBank) SetDef(vn *Varnode, op *PcodeOp) {
 func (vb *VarnodeBank) MakeFree(vn *Varnode) {
 	vb.removeLoc(vn)
 	vb.removeDef(vn)
-	vn.flags &^= (VarnodeInput | VarnodeWritten | VarnodeInsert)
+	vn.flags &^= (VarnodeInput | VarnodeWritten | VarnodeInsert | VarnodeIndirectCreation)
 	vn.def = nil
 	vb.insertLoc(vn)
 	vb.insertDef(vn)
