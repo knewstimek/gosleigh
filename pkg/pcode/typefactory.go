@@ -48,7 +48,7 @@ func (f *TypeFactory) Intern(dt Datatype) Datatype {
 	case *Array:
 		return f.GetArray(typed.Count(), typed.Element())
 	case *Struct:
-		return f.GetStruct(typed.Name(), typed.Fields())
+		return f.GetStructSized(typed.Name(), typed.Size(), typed.Fields()) // keep a declared size beyond the fields (incomplete structs)
 	case *Union:
 		return f.GetUnion(typed.Name(), typed.Fields())
 	case *Enum:

@@ -1370,7 +1370,7 @@ func (s *printCState) normalizeTypeForDecl(dt Datatype) Datatype {
 			normalizedFields[i] = field
 			normalizedFields[i].Type = s.normalizeTypeForDecl(field.Type)
 		}
-		return sharedTypeFactory.GetStruct(typed.Name(), normalizedFields)
+		return sharedTypeFactory.GetStructSized(typed.Name(), typed.Size(), normalizedFields)
 	case *Union:
 		fields := typed.Fields()
 		normalizedFields := make([]TypeField, len(fields))
