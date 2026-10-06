@@ -2125,7 +2125,9 @@ func (a *ActionDirectWrite) Apply(data *Funcdata) int {
 				}
 			}
 		default:
-			if vn.IsConstant() && !vn.IsIndirectZero() {
+			// An INDIRECT's op reference lives in the IOP space in C++, not
+			// the constant space, so it never seeds a direct write.
+			if vn.IsConstant() && !vn.IsIndirectZero() && vn.GetIndirectCause() == nil {
 				push(vn)
 			}
 		}

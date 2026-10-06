@@ -222,11 +222,7 @@ func (fc *FuncCallSpecs) finalInputCheck() {
 // the model kept: unused speculative inputs are dropped, oversized Varnodes are
 // truncated with a SUBPIECE, and the fspec input (slot 0) is preserved.
 //
-// TODO known mismatch: the isUnref branch (a parameter the model inferred but
-// that has no Varnode) creates the Varnode at the trial address; for a stack
-// parameter C++ also calls ScopeLocal::markNotMapped, which Gosleigh has not
-// ported. Gosleigh registers no stack trials today, so no unref stack parameter
-// can reach that path.
+// Every kept stack parameter's range is marked not mapped in the local scope.
 // C++ parity: fspec.cc FuncCallSpecs::buildInputFromTrials (fspec.cc:5685).
 func (fc *FuncCallSpecs) buildInputFromTrials(data *Funcdata) {
 	active := fc.GetActiveInput()
@@ -257,7 +253,7 @@ func (fc *FuncCallSpecs) buildInputFromTrials(data *Funcdata) {
 		isspacebase := spc.Kind == address.SpaceKindStack
 		if isspacebase {
 			// Translate the parameter address back to the caller's spacebase.
-			off += fc.GetSpacebaseOffset()
+			off = wrapSpaceOffset(spc, fc.GetSpacebaseOffset()+off)
 		}
 		var vn *Varnode
 		if paramtrial.IsUnref() {
@@ -287,6 +283,12 @@ func (fc *FuncCallSpecs) buildInputFromTrials(data *Funcdata) {
 			}
 		}
 		newparam = append(newparam, vn)
+		// The stack range passing this parameter is not a local variable.
+		if isspacebase {
+			if sl := data.GetScopeLocal(); sl != nil {
+				sl.MarkNotMapped(spc, off, sz, true)
+			}
+		}
 	}
 	data.OpSetAllInput(op, newparam) // set the final parameter list
 	active.DeleteUnusedTrials()
