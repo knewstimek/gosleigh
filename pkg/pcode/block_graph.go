@@ -465,8 +465,9 @@ func (bg *BlockGraph) MoveOutEdge(blold *FlowBlock, slot int, blnew *FlowBlock) 
 // FinalTransform gives each control-flow structure a final chance to transform.
 // C++ parity: blockaction.cc ActionStructureTransform::apply / BlockGraph::finalTransform
 func (bg *BlockGraph) FinalTransform(data *Funcdata) {
-	_ = bg
-	_ = data
+	for _, bl := range bg.blocks {
+		bl.finalTransform(data)
+	}
 }
 
 // collectReachable lists the blocks reachable from bl, or with un set every
