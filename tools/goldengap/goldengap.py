@@ -214,11 +214,15 @@ def classify_functions(goldens_path, gosleigh_out_path):
 	gf = load_json(goldens_path)
 	rf = load_json(gosleigh_out_path)
 	got_by_name = {f["name"]: f for f in rf["functions"]}
+	# Real binaries repeat names (dtor$0, thunks): when the run output lists
+	# the goldens in order, pair by position instead of by name.
+	positional = len(rf["functions"]) == len(gf["functions"]) and all(
+		g["name"] == r["name"] for g, r in zip(gf["functions"], rf["functions"]))
 
 	records = []
-	for fn in gf["functions"]:
+	for i, fn in enumerate(gf["functions"]):
 		name = fn["name"]
-		got_entry = got_by_name.get(name)
+		got_entry = rf["functions"][i] if positional else got_by_name.get(name)
 		if got_entry is None:
 			result = {
 				"tags": ["ENGINE-ERR"],

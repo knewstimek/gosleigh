@@ -290,6 +290,11 @@ public class GenSample extends GhidraScript {
 	}
 
 	private String decompile(DecompInterface iface, Function f) {
+		// Reset the core's type factory first: data-type warnings accumulate
+		// there across decompilations (TypeFactory::clearNoncore runs only on
+		// flushNative), which would make a golden depend on the functions
+		// decompiled before it. The capture of each function runs fresh too.
+		iface.flushCache();
 		DecompileResults res = iface.decompileFunction(f, 60, monitor);
 		if (res == null || !res.decompileCompleted()) {
 			return "";
