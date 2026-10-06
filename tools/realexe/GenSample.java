@@ -17,6 +17,7 @@
 
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileOptions;
 import ghidra.app.decompiler.DecompileResults;
 import ghidra.app.decompiler.DecompiledFunction;
 import ghidra.program.model.listing.Function;
@@ -32,8 +33,9 @@ import java.util.Random;
 
 public class GenSample extends GhidraScript {
 
-	private static final ghidra.program.model.symbol.NameTransformer DISPLAY_NT =
-		new ghidra.program.model.symbol.IllegalCharCppTransformer();
+	// The NameTransformer of the decompiler options in use (the program's own:
+	// a project may turn illegal-character replacement off).
+	private ghidra.program.model.symbol.NameTransformer DISPLAY_NT;
 
 	@Override
 	public void run() throws Exception {
@@ -70,6 +72,13 @@ public class GenSample extends GhidraScript {
 		}
 
 		DecompInterface iface = new DecompInterface();
+		// Load the program decompiler options explicitly (GenCapture does the
+		// same): a saved project may carry none, and the golden and the capture
+		// must decompile under identical options.
+		DecompileOptions opts = new DecompileOptions();
+		opts.grabFromProgram(currentProgram);
+		iface.setOptions(opts);
+		DISPLAY_NT = opts.getNameTransformer();
 		iface.openProgram(currentProgram);
 		StringBuilder sb = new StringBuilder();
 		sb.append("{\n  \"total_functions\": ").append(total);
@@ -111,13 +120,12 @@ public class GenSample extends GhidraScript {
 	// The host symbol table the decompiler core queries through the Java
 	// layer (ScopeGhidra): every function entry with its name. Gosleigh's
 	// harness serves it back as the HostScope.
-	// Names pass through the decompiler's own NameTransformer (the default
-	// DecompileOptions one, as DecompInterface installs it), and namespaces are
+	// Names pass through the decompiler's own NameTransformer (that of the
+	// DecompileOptions installed in DecompInterface), and namespaces are
 	// the transformed parent path below the global namespace -- exactly what
 	// DecompileCallback hands the core.
 	private void writeSymbols(java.io.File path) throws Exception {
-		ghidra.program.model.symbol.NameTransformer nt =
-			new ghidra.program.model.symbol.IllegalCharCppTransformer();
+		ghidra.program.model.symbol.NameTransformer nt = DISPLAY_NT;
 		StringBuilder sb = new StringBuilder("{\n  \"functions\": [\n");
 		boolean first = true;
 		for (Function f : currentProgram.getFunctionManager().getFunctions(true)) {

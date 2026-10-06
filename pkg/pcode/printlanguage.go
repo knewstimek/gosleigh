@@ -475,10 +475,39 @@ func scopedNameExpr(name string) ExprFragment {
 			}
 		}
 	}
+	// Only the base name is a function-name token; the scope names are syntax
+	// and stay raw. Java parity: PrettyPrinter cleans ClangFuncNameToken.
+	if cut <= 0 || cut+2 >= len(name) {
+		return ExprFragment{Text: cppDisplayName(name), Precedence: ExprPrecPrimary}
+	}
+	left := scopedNameExprScope(name[:cut])
+	right := ExprFragment{Text: cppDisplayName(name[cut+2:]), Precedence: ExprPrecPrimary}
+	return ExprFragment{Text: left.Text + "::" + right.Text, Precedence: ExprPrecPrimary, node: &fragNode{
+		kind: fragBinary, print1: "::", kids: []ExprFragment{left, right}, parens: []bool{false, false}}}
+}
+
+// scopedNameExprScope is scopedNameExpr for the scope part of a name, whose
+// tokens are printed raw.
+func scopedNameExprScope(name string) ExprFragment {
+	depth := 0
+	cut := -1
+	for i := 0; i+1 < len(name); i++ {
+		switch name[i] {
+		case '<', '(':
+			depth++
+		case '>', ')':
+			depth--
+		case ':':
+			if depth == 0 && name[i+1] == ':' {
+				cut = i
+				i++
+			}
+		}
+	}
 	if cut <= 0 || cut+2 >= len(name) {
 		return ExprFragment{Text: name, Precedence: ExprPrecPrimary}
 	}
-	left := scopedNameExpr(name[:cut])
+	left := scopedNameExprScope(name[:cut])
 	right := ExprFragment{Text: name[cut+2:], Precedence: ExprPrecPrimary}
 	return ExprFragment{Text: name, Precedence: ExprPrecPrimary, node: &fragNode{
 		kind: fragBinary, print1: "::", kids: []ExprFragment{left, right}, parens: []bool{false, false}}}

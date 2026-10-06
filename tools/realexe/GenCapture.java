@@ -14,6 +14,7 @@
 
 import ghidra.app.script.GhidraScript;
 import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileOptions;
 import ghidra.program.model.listing.Function;
 
 import java.io.File;
@@ -38,8 +39,19 @@ public class GenCapture extends GhidraScript {
 			// No setOptions: openProgram then installs the program's options
 			// (grabFromProgram), as for the goldens -- e.g. protoeval is the
 			// cspec eval_current_prototype, not "default".
+			// Some saved projects carry no decompiler options, leaving the
+			// interface without any (enableDebug then fails on encode): load
+			// them from the program explicitly, which is what openProgram does
+			// when they exist.
+			DecompileOptions opts = new DecompileOptions();
+			opts.grabFromProgram(currentProgram);
+			iface.setOptions(opts);
 			iface.enableDebug(out);
-			iface.openProgram(currentProgram);
+			if (!iface.openProgram(currentProgram)) {
+				println("GenCapture: openProgram failed for " + args[i] + ": " + iface.getLastMessage());
+				iface.dispose();
+				continue;
+			}
 			iface.decompileFunction(f, 60, monitor);
 			iface.dispose();
 			println("GenCapture: wrote " + out);
