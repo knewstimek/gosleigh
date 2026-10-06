@@ -246,11 +246,112 @@ func NewRuleAndCommute(group string) *RuleAndCommute {
 	return r
 }
 
+// apply commutes an AND with a shift when the shifted value is an OR or
+// PIECE whose pieces the mask can then separate:
+// (V << c) & W becomes (V & (W >> c)) << c.
+// C++ parity: RuleAndCommute::applyOp.
 func (r *RuleAndCommute) apply(op *PcodeOp, data *Funcdata) int {
-	if op.Input(0) != nil && op.Input(0).IsConstant() && (op.Input(1) == nil || !op.Input(1).IsConstant()) {
-		return swapInputs(data, op)
+	size := op.Output().Size()
+	if size > 8 {
+		return 0
 	}
-	return 0
+	fullmask := bitfieldSizeMask(size)
+	var orvn, othervn, savn *Varnode
+	opc := CPUI_INT_OR
+	found := false
+	for i := 0; i < 2 && !found; i++ {
+		shiftvn := op.Input(i)
+		shiftop := shiftvn.Def()
+		if shiftop == nil {
+			continue
+		}
+		opc = shiftop.Code()
+		if opc != CPUI_INT_LEFT && opc != CPUI_INT_RIGHT {
+			continue
+		}
+		savn = shiftop.Input(1)
+		if !savn.IsConstant() {
+			continue
+		}
+		sa := uint(savn.Offset())
+		othervn = op.Input(1 - i)
+		if !othervn.IsHeritageKnown() {
+			continue
+		}
+		othermask := othervn.NZMask()
+		// Skip an AND that only clears bits the shift already zeroed (andmask
+		// handles it).
+		if opc == CPUI_INT_RIGHT {
+			if fullmask>>sa == othermask {
+				continue
+			}
+			othermask <<= sa // the mask as it will be after the commute
+		} else {
+			// C++ tests ((fullmask<<sa) && fullmask), a logical AND that
+			// yields 1; kept as is.
+			if fullmask<<sa != 0 && fullmask != 0 && othermask == 1 {
+				continue
+			}
+			othermask >>= sa
+		}
+		if othermask == 0 || othermask == fullmask {
+			continue
+		}
+		orvn = shiftop.Input(0)
+		if opc == CPUI_INT_LEFT && othervn.IsConstant() {
+			// (v & #c) << #sa is preferred to (v << #sa) & #(c << sa): the
+			// mask is least justified, a normalization.
+			if shiftvn.LoneDescend() == op {
+				found = true
+				break
+			}
+		}
+		if !orvn.IsWritten() {
+			continue
+		}
+		orop := orvn.Def()
+		switch orop.Code() {
+		case CPUI_INT_OR:
+			ormask1 := orop.Input(0).NZMask()
+			ormask2 := orop.Input(1).NZMask()
+			if ormask1&othermask == 0 || ormask2&othermask == 0 {
+				found = true
+			} else if othervn.IsConstant() && (ormask1&othermask == ormask1 || ormask2&othermask == ormask2) {
+				found = true
+			}
+		case CPUI_PIECE:
+			ormask1 := orop.Input(1).NZMask() // low part of the piece
+			ormask2 := orop.Input(0).NZMask() << (uint(orop.Input(1).Size()) * 8)
+			if ormask1&othermask == 0 || ormask2&othermask == 0 {
+				found = true
+			}
+		}
+	}
+	if !found {
+		return 0
+	}
+	newop1 := data.NewOp(2, op.Addr())
+	newvn1 := data.NewUniqueOut(size, newop1)
+	if opc == CPUI_INT_LEFT {
+		data.OpSetOpcode(newop1, CPUI_INT_RIGHT)
+	} else {
+		data.OpSetOpcode(newop1, CPUI_INT_LEFT)
+	}
+	data.OpSetInput(newop1, othervn, 0)
+	data.OpSetInput(newop1, savn, 1)
+	data.OpInsertBefore(newop1, op)
+
+	newop2 := data.NewOp(2, op.Addr())
+	newvn2 := data.NewUniqueOut(size, newop2)
+	data.OpSetOpcode(newop2, CPUI_INT_AND)
+	data.OpSetInput(newop2, orvn, 0)
+	data.OpSetInput(newop2, newvn1, 1)
+	data.OpInsertBefore(newop2, op)
+
+	data.OpSetInput(op, newvn2, 0)
+	data.OpSetInput(op, savn, 1)
+	data.OpSetOpcode(op, opc)
+	return 1
 }
 
 type RuleAndPiece struct{ batchRule }

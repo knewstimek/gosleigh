@@ -510,22 +510,105 @@ func NewRuleShiftCompare(group string) *RuleShiftCompare {
 	return r
 }
 
+// apply moves a shift by a constant off one side of an (in)equality with a
+// constant: (V << c) == d becomes V == d >> c when no bits are lost.
+// C++ parity: RuleShiftCompare::applyOp.
 func (r *RuleShiftCompare) apply(op *PcodeOp, data *Funcdata) int {
-	for slot := 0; slot < 2; slot++ {
-		shift := op.Input(slot).Def()
-		if shift == nil {
-			continue
+	shiftvn, constvn := op.Input(0), op.Input(1)
+	if !constvn.IsConstant() || !shiftvn.IsWritten() {
+		return 0
+	}
+	shiftop := shiftvn.Def()
+	if shiftop.NumInput() != 2 { // none of the shift forms below
+		return 0
+	}
+	savn := shiftop.Input(1)
+	var sa int
+	var isleft bool
+	switch shiftop.Code() {
+	case CPUI_INT_LEFT:
+		if !savn.IsConstant() {
+			return 0
 		}
-		switch shift.Code() {
-		case CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT:
-			if !isZeroConst(shift.Input(1)) {
-				continue
+		isleft, sa = true, int(savn.Offset())
+	case CPUI_INT_RIGHT:
+		if !savn.IsConstant() {
+			return 0
+		}
+		sa = int(savn.Offset())
+		// A right shift likely extracts a bit field; only apply when the
+		// shift variable goes away.
+		if shiftvn.LoneDescend() != op {
+			return 0
+		}
+	case CPUI_INT_MULT:
+		if !savn.IsConstant() {
+			return 0
+		}
+		val := savn.Offset()
+		sa = leastSigBitSet(val)
+		if val>>uint(sa) != 1 { // not a power of 2
+			return 0
+		}
+		isleft = true
+	case CPUI_INT_DIV:
+		if !savn.IsConstant() {
+			return 0
+		}
+		val := savn.Offset()
+		sa = leastSigBitSet(val)
+		if val>>uint(sa) != 1 || shiftvn.LoneDescend() != op {
+			return 0
+		}
+	default:
+		return 0
+	}
+	if sa == 0 {
+		return 0
+	}
+	mainvn := shiftop.Input(0)
+	if mainvn.IsFree() || mainvn.Size() > 8 {
+		return 0
+	}
+	constval := constvn.Offset()
+	nzmask := mainvn.NZMask()
+	var newconst uint64
+	if isleft {
+		newconst = constval >> uint(sa)
+		if newconst<<uint(sa) != constval { // information lost in constval
+			return 0
+		}
+		tmp := (nzmask << uint(sa)) & bitfieldSizeMask(shiftvn.Size())
+		if tmp>>uint(sa) != nzmask {
+			// Information is lost in main: replace the LEFT with an AND
+			// mask, which needs to be the lone use of the shift.
+			if shiftvn.LoneDescend() != op {
+				return 0
 			}
-			replaceInputSlot(data, op, slot, shift.Input(0))
+			sa = 8*int(shiftvn.Size()) - sa
+			newmask := data.NewConstant(constvn.Size(), uint64(1)<<uint(sa)-1)
+			newop := data.NewOp(2, op.Addr())
+			data.OpSetOpcode(newop, CPUI_INT_AND)
+			newtmpvn := data.NewUniqueOut(constvn.Size(), newop)
+			data.OpSetInput(newop, mainvn, 0)
+			data.OpSetInput(newop, newmask, 1)
+			data.OpInsertBefore(newop, shiftop)
+			data.OpSetInput(op, newtmpvn, 0)
+			data.OpSetInput(op, data.NewConstant(constvn.Size(), newconst), 1)
 			return 1
 		}
+	} else {
+		if (nzmask>>uint(sa))<<uint(sa) != nzmask { // information is lost
+			return 0
+		}
+		newconst = (constval << uint(sa)) & bitfieldSizeMask(shiftvn.Size())
+		if newconst>>uint(sa) != constval { // information lost in constval
+			return 0
+		}
 	}
-	return 0
+	data.OpSetInput(op, mainvn, 0)
+	data.OpSetInput(op, data.NewConstant(constvn.Size(), newconst), 1)
+	return 1
 }
 
 type RuleLessOne struct{ batchRule }

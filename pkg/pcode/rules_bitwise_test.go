@@ -23,12 +23,11 @@ func TestRulesBitwise_RewriteAndNonRewrite(t *testing.T) {
 		t.Fatalf("ormask failed: opcode=%v input=%v", ormask.Code(), ormask.Input(0))
 	}
 
+	// RuleAndCommute only commutes an AND with a shift; a plain mask is left
+	// alone (C++ RuleAndCommute::applyOp).
 	andop := newRuleOp(data, CPUI_INT_AND, 4, data.NewConstant(4, 0xff), x)
-	if got := NewRuleAndCommute("bitwise").ApplyOp(andop, data); got != 1 {
-		t.Fatalf("andcommute ApplyOp=%d, want 1", got)
-	}
-	if andop.Input(0) != x {
-		t.Fatalf("expected variable first after commute")
+	if got := NewRuleAndCommute("bitwise").ApplyOp(andop, data); got != 0 {
+		t.Fatalf("andcommute ApplyOp=%d, want 0", got)
 	}
 
 	neg := newRuleOp(data, CPUI_INT_NEGATE, 4, x)
