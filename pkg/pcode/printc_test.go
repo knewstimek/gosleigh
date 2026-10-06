@@ -97,8 +97,8 @@ func TestPrintCZextNotCast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("renderOpExpr(zext): %v", err)
 	}
-	if got != "ZEXT(param_1)" {
-		t.Fatalf("ZEXT of signed input: got %q, want \"ZEXT(param_1)\"", got)
+	if got != "ZEXT48(param_1)" {
+		t.Fatalf("ZEXT of signed input: got %q, want \"ZEXT48(param_1)\"", got)
 	}
 }
 

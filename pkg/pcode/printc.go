@@ -1859,13 +1859,11 @@ func (s *printCState) emitWhileBlock(bl *FlowBlock) error {
 	// ops before the CBRANCH (e.g. iVar1 = param_4 produced by NodeJoin).
 	// C++ parity: PrintC::emitBlockWhileDo sets setMod(comma_separate) for condBlock
 	// emission (printc.cc ~3186).
-	condStr := s.renderCondBlockComma(children[0])
+	cond := s.renderCondBlockCommaFrag(children[0])
 	s.lang.OpenBlockAfter(func() {
 		s.lang.Token("while")
 		s.lang.Space()
-		s.lang.Token("(")
-		s.lang.Token(condStr)
-		s.lang.Token(")")
+		s.emitConditionParen(cond) // emitted structurally so it can break
 	})
 	if err := s.emitBlock(children[1]); err != nil {
 		return err
@@ -3326,6 +3324,10 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 		// TYPE_PTR -> default printing (typecast + force_hex).
 		// TODO known mismatch: pushPtrCodeConstant (a function name) is not ported.
 		return "(" + printedTypeString(s.normalizeTypeForDecl(typed)) + ")" + fmt.Sprintf("0x%x", vn.Offset())
+	case *Array, *Struct, *Union:
+		// Composite constants (a zeroed XMM register) take the default
+		// printing too: typecast + force_hex. C++ parity: PrintC::pushConstant.
+		return "(" + printedTypeString(typed) + ")" + fmt.Sprintf("0x%x", vn.Offset())
 	}
 	// Untyped constant: choose decimal vs hex following Ghidra's heuristic.
 	// C++ parity: PrintC::push_integer (printc.cc:1395-1399) -- values <= 10
@@ -3678,26 +3680,27 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 		// option_hide_exts (on by default): when the extension is an implied
 		// integer promotion for the consuming op, drop it and render the operand
 		// alone. C++ parity: PrintC::opIntZext + isExtensionCastImplied.
-		if s.extensionCastHidden(op) {
-			return s.renderVarnodeExpr(op.Input(0))
-		}
 		// A zero-extension reads as a plain cast only when the input is unsigned;
-		// otherwise it stays an explicit ZEXT(). C++ parity: CastStrategyC::isZextCast.
+		// otherwise it stays an explicit ZEXT<in><out>(). C++ parity:
+		// CastStrategyC::isZextCast, TypeOpIntZext::getOperatorName.
 		if s.extensionIsCast(op, false) {
+			if s.extensionCastHidden(op) {
+				return s.renderVarnodeExpr(op.Input(0))
+			}
 			return s.renderCast(op)
 		}
-		return s.renderPseudoCall("ZEXT", op, 0)
+		return s.renderPseudoCall(fmt.Sprintf("ZEXT%d%d", op.Input(0).Size(), op.Output().Size()), op, 0)
 	case CPUI_INT_SEXT:
 		// option_hide_exts: same implied-promotion hiding as INT_ZEXT.
-		if s.extensionCastHidden(op) {
-			return s.renderVarnodeExpr(op.Input(0))
-		}
 		// A sign-extension reads as a plain cast only when the input is signed.
-		// C++ parity: CastStrategyC::isSextCast.
+		// C++ parity: CastStrategyC::isSextCast, TypeOpIntSext::getOperatorName.
 		if s.extensionIsCast(op, true) {
+			if s.extensionCastHidden(op) {
+				return s.renderVarnodeExpr(op.Input(0))
+			}
 			return s.renderCast(op)
 		}
-		return s.renderPseudoCall("SEXT", op, 0)
+		return s.renderPseudoCall(fmt.Sprintf("SEXT%d%d", op.Input(0).Size(), op.Output().Size()), op, 0)
 	case CPUI_INT_ADD:
 		// C++ parity: cleanup-phase Rule2Comp2Sub converts INT_ADD(x, INT_2COMP(y))
 		// to INT_SUB(x, y) before rendering. Mirror this at render time: when the
