@@ -871,25 +871,3 @@ func (r *RulePtrFlowCopy) apply(op *PcodeOp, data *Funcdata) int {
 	return 0
 }
 
-func newPointerRuleSet(group string) []Rule {
-	return []Rule{
-		NewRulePtrArith(group),
-		NewRulePtraddUndo(group),
-		NewRulePtrsubUndo(group),
-		NewRuleStructOffset0(group),
-		NewRuleSegment(group),
-		NewRulePtrFlow(group),
-		NewRulePtrsubCharConstant(group),
-		NewRulePtraddZero(group),
-		NewRulePtraddConstantIndex(group),
-		NewRulePtrsubZero(group),
-		NewRulePtrsubAddConst(group),
-		NewRulePtrsubCollapse(group),
-		NewRulePtrFlowCopy(group),
-	}
-}
-
-func bindAbsolutePointer(vn *Varnode, spc *address.Space, ptr *Pointer) {
-	BindSpaceConstant(vn, spc)
-	SetVarnodeType(vn, ptr)
-}

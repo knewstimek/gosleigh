@@ -291,17 +291,3 @@ func (r *RuleStoreStackMark) apply(op *PcodeOp, data *Funcdata) int {
 	return 0
 }
 
-func newLoadStoreRuleSet(group string) []Rule {
-	return []Rule{
-		NewRuleLoadVarnode(group),
-		NewRuleStoreVarnode(group),
-		NewRuleLoadConstAddr(group),
-		NewRuleLoadSpacebase(group),
-		NewRuleLoadSegment(group),
-		NewRuleLoadPlaceholderClear(group),
-		NewRuleStoreConstAddr(group),
-		NewRuleStoreSpacebase(group),
-		NewRuleStoreSegment(group),
-		NewRuleStoreStackMark(group),
-	}
-}

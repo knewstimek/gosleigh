@@ -666,13 +666,6 @@ func (s *AddTreeState) calcSubtype() {
 	}
 }
 
-func (s *AddTreeState) assignPropagatedType(op *PcodeOp) {
-	if op == nil || op.Output() == nil || op.NumInput() == 0 {
-		return
-	}
-	SetVarnodeType(op.Output(), op.Input(0).TypeReadFacing(op))
-}
-
 func (s *AddTreeState) buildMultiples() *Varnode {
 	if s.elemSize == 0 {
 		return nil

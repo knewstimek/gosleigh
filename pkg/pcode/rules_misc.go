@@ -2240,32 +2240,9 @@ func (r *RuleShiftSub) apply(op *PcodeOp, data *Funcdata) int {
 	return 1
 }
 
-func combineNestedShift(op *PcodeOp, data *Funcdata, opcode OpCode) int {
-	inner := definedBy(op.Input(0), opcode)
-	if inner == nil || inner.NumInput() != 2 {
-		return 0
-	}
-	amt0, ok0 := constantValue(inner.Input(1))
-	amt1, ok1 := constantValue(op.Input(1))
-	if !ok0 || !ok1 {
-		return 0
-	}
-	width := uint64(outputOrInputSize(op) * 8)
-	total := amt0 + amt1
-	if total >= width {
-		return 0
-	}
-	rewriteOp(data, op, opcode, inner.Input(0), data.NewConstant(op.Input(1).Size(), total))
-	return 1
-}
-
 func replaceInputSlot(data *Funcdata, op *PcodeOp, slot int, vn *Varnode) {
 	data.OpUnsetInput(op, slot)
 	data.OpSetInput(op, vn, slot)
-}
-
-func isSingleBitMask(val uint64) bool {
-	return val != 0 && bits.OnesCount64(val) == 1
 }
 
 // RulePushMultiME fires on 2-input MULTIEQUAL ops where both inputs are

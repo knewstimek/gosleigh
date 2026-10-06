@@ -100,7 +100,6 @@ type printCState struct {
 	activeExpr   map[*PcodeOp]bool
 	blockLabels  map[*FlowBlock]string
 
-
 	// returnCarrierParams maps a return-carrier location key to the param varnode that
 	// serves as the direct return carrier (G5: identity-copy phi input detection).
 	// Names are resolved post-ghost-rename by finalizeReturnCarrierRenames.
@@ -238,7 +237,6 @@ func (s *printCState) emit() (string, error) {
 	// Apply post-ghost-rename param names to return-carrier varnodes detected in G5.
 	// renderFunctionSignature has now updated param names (param_1 -> param_3 etc.),
 	// so we can resolve the correct final name for the return carrier.
-	s.finalizeReturnCarrierRenames()
 	// Emit blank line between declarations and body only when at least one
 	// declaration was actually emitted. C++ parity: PrintC::emitLocalVarDecls
 	// (printc.cc:2343) emits its separating tagLine on the same `notempty` flag
@@ -4567,28 +4565,6 @@ func (s *printCState) isSpecialInputRegister(vn *Varnode, regNameByLoc map[strin
 	}
 }
 
-func sanitizeIdent(name string) string {
-	if name == "" {
-		return "var"
-	}
-	var builder strings.Builder
-	for i, ch := range name {
-		valid := ch == '_' || ch >= '0' && ch <= '9' || ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z'
-		if !valid {
-			builder.WriteByte('_')
-			continue
-		}
-		if i == 0 && ch >= '0' && ch <= '9' {
-			builder.WriteByte('_')
-		}
-		builder.WriteRune(ch)
-	}
-	if builder.Len() == 0 {
-		return "var"
-	}
-	return builder.String()
-}
-
 // findParamCopyVarnode returns the param varnode if vn is a direct param varnode
 // or a COPY of one. paramVns is the set of known parameter varnodes.
 // Returns nil if vn is not an identity copy of a parameter.
@@ -4612,35 +4588,6 @@ func (s *printCState) findParamCopyVarnode(vn *Varnode, paramVns map[*Varnode]bo
 		return src
 	}
 	return nil
-}
-
-// finalizeReturnCarrierRenames updates return-carrier varnodes to use the
-// post-ghost-rename param name. This must run AFTER renderFunctionSignature
-// has applied the ghost param offset (param_1 -> param_3 etc.).
-//
-// C++ parity: ActionReturnSplit renames the return carrier; ghost param offset
-// is applied during signature rendering in Ghidra's PrintC.
-func (s *printCState) finalizeReturnCarrierRenames() {
-	for key, paramVn := range s.returnCarrierParams {
-		newName := s.nameOf(paramVn)
-		// Update locals at this location key.
-		for _, vn := range s.locals {
-			if vn.Space() != nil && !vn.Space().IsUnique() {
-				if varnodeLocKey(vn) == key {
-					s.names[vn] = newName
-				}
-			}
-		}
-		// Update MULTIEQUAL outputs at this location (they are not in s.locals).
-		for _, op := range s.fd.GetPcodeOpBank().AllOps() {
-			if op == nil || op.Code() != CPUI_MULTIEQUAL || op.Output() == nil {
-				continue
-			}
-			if varnodeLocKey(op.Output()) == key {
-				s.names[op.Output()] = newName
-			}
-		}
-	}
 }
 
 // isParamName reports whether name is the declared name of a function parameter
