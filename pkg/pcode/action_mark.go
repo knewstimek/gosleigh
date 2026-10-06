@@ -474,7 +474,8 @@ func markImpliedCheckCover(data *Funcdata, vn *Varnode) bool {
 	if high == nil {
 		return false
 	}
-	cov := high.getCover()
+	// C++ checkImpliedCover tests the Varnode's own cover.
+	cov := vnGetCover(vn)
 	if cov == nil {
 		return false
 	}
