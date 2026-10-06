@@ -617,14 +617,13 @@ const aliasBlockLevel = 2
 // markUnaliased marks each stack Symbol that no alias start can reach as
 // nolocalalias. An alias reaches every Symbol after it until an unmapped gap
 // in the scope's ranges, a locked aggregate, or more than 0xffff bytes.
-// C++ parity: varmap.cc ScopeLocal::markUnaliased (1332-1384). The scope's
-// range tree is the model's local+param ranges (resetLocalWindow);
-// markNotMapped is unported, so no temporary-storage holes are cut out of it.
+// C++ parity: varmap.cc ScopeLocal::markUnaliased (1332-1384), walking the
+// scope's range tree with the markNotMapped holes cut out.
 func (sl *ScopeLocal) markUnaliased(alias []uint64) {
 	ext := sl.ext()
 	entries := append([]*SymbolEntry(nil), ext.entries...)
 	sort.SliceStable(entries, func(i, j int) bool { return entries[i].Addr().Offset < entries[j].Addr().Offset })
-	ranges := sl.model.StackRanges()
+	ranges := sl.scopeRanges()
 	ri := 0
 	aliason := false
 	var curalias uint64
