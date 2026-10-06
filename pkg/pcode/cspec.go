@@ -109,6 +109,16 @@ type CspecPrototype struct {
 	// frozen for this slice).
 	// C++ parity: compiler.hh ProtoModel::likelytrash
 	LikelyTrash CspecRegList `xml:"likelytrash"`
+	// LocalRange is the <localrange> list of stack ranges holding locals.
+	// C++ parity: ProtoModel::localrange.
+	LocalRange []CspecRange `xml:"localrange>range"`
+}
+
+// CspecRange is one <range space first last> element.
+type CspecRange struct {
+	Space string `xml:"space,attr"`
+	First string `xml:"first,attr"`
+	Last  string `xml:"last,attr"`
 }
 
 // ExtrapopUnknown is the reserved extrapop meaning the callee's stack-pointer

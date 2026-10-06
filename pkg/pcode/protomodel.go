@@ -16,6 +16,7 @@ package pcode
 
 import (
 	"sort"
+	"strconv"
 
 	"gosleigh/pkg/address"
 )
@@ -102,6 +103,24 @@ func wrapSpaceOffset(spc *address.Space, off uint64) uint64 {
 	return off & ((uint64(1) << (8 * uint(spc.AddrSize))) - 1)
 }
 
+// ParamRanges is the model's stack parameter range, with the C++ default
+// when the cspec gives none. C++ parity: ProtoModel::paramrange.
+func (pm *ProtoModel) ParamRanges() [][2]uint64 {
+	if pm == nil || pm.StackSpace == nil {
+		return nil
+	}
+	if len(pm.StackParamRanges) > 0 {
+		return pm.StackParamRanges
+	}
+	paramLast := uint64(15)
+	if sz := pm.StackSpace.AddrSize; sz >= 4 {
+		paramLast = 511
+	} else if sz >= 2 {
+		paramLast = 255
+	}
+	return [][2]uint64{{0, paramLast}}
+}
+
 // StackRanges returns the model's local and parameter ranges in the stack
 // space, sorted by first offset, applying the C++ defaults when the cspec
 // gives none.
@@ -123,7 +142,11 @@ func (pm *ProtoModel) StackRanges() [][2]uint64 {
 	if len(ranges) == 0 {
 		ranges = append(ranges, [2]uint64{0, paramLast})
 	}
-	ranges = append(ranges, [2]uint64{highest - localSpan, highest})
+	if len(pm.LocalRanges) > 0 {
+		ranges = append(ranges, pm.LocalRanges...)
+	} else {
+		ranges = append(ranges, [2]uint64{highest - localSpan, highest})
+	}
 	sort.Slice(ranges, func(i, j int) bool { return ranges[i][0] < ranges[j][0] })
 	return ranges
 }
@@ -151,6 +174,10 @@ type ProtoModel struct {
 	// (<output killedbycall="true">).
 	// C++ parity: ParamListStandard::autoKilledByCall via isAutoKilledByCall.
 	AutoKilledByCall bool
+
+	// LocalRanges are the cspec <localrange> stack ranges, empty for the
+	// default. C++ parity: ProtoModel::localrange.
+	LocalRanges [][2]uint64
 
 	// ExtraPop is the stack-pointer change across a call beyond the pushed
 	// parameters (ExtrapopUnknown when the callee decides, as with __stdcall).
@@ -307,6 +334,16 @@ func NewProtoModelFromCspec(cs *CspecData, stackSpace *address.Space, regLookup 
 		pm.ExtraPop = int32(cs.DefaultProto.ExtraPop)
 		pm.hasThis = cs.DefaultProto.ProtoModelHasThis()
 		pm.AutoKilledByCall = cs.DefaultProto.Output.KilledByCall
+		for _, r := range cs.DefaultProto.LocalRange {
+			if r.Space != "stack" {
+				continue
+			}
+			first, err1 := strconv.ParseUint(r.First, 0, 64)
+			last, err2 := strconv.ParseUint(r.Last, 0, 64)
+			if err1 == nil && err2 == nil {
+				pm.LocalRanges = append(pm.LocalRanges, [2]uint64{first, last})
+			}
+		}
 		for _, reg := range cs.DefaultProto.Unaffected.Registers {
 			pm.UnaffectedRegs[reg.Name] = true
 		}

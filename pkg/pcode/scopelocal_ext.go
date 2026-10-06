@@ -550,105 +550,19 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 	ext.entries = nil
 	ext.vnMap = make(map[*Varnode]*SymbolEntry)
 
-	// Group stack varnodes by offset and build SymbolEntries. This mirrors
-	// the restructureHigh portion already handled by BuildFromVarnodes but
-	// produces SymbolEntry records instead of just HighVariables.
-	type slot struct {
-		addr address.Address
-		size int32
+	// Turn the stack Varnodes and the pointers into the frame into RangeHints
+	// and sweep them into a disjoint cover of Symbols.
+	// C++ parity: ScopeLocal::restructureVarnode (gatherVarnodes, gatherOpen,
+	// restructure).
+	if space := sl.SpaceID(); space != nil && sl.model != nil {
+		ms := &mapState{sl: sl, space: space, types: sharedTypeFactory,
+			defaultType: sharedTypeFactory.GetBase(1, TYPE_UNKNOWN, "")}
+		ms.gatherVarnodes(fd)
+		for _, h := range sl.gatherOpen(fd) {
+			ms.addRange(h.start, h.elem, 0, rhOpen, h.minItems)
+		}
+		sl.restructureMap(ms)
 	}
-	slots := make(map[slot]bool)
-	for _, vn := range fd.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		// Free (unattached / dead) Varnodes contribute no RangeHint. C++
-		// MapState::gatherVarnodes (varmap.cc:1134) opens its loop with
-		// `if (vn->isFree()) continue;`, and it walks the live location index
-		// (Funcdata::beginLoc), not a creation-order bank.
-		//
-		// This matters because Gosleigh's bank retains Varnodes that later passes
-		// detached. A wide stack spill that SubvariableFlow/SplitVarnode has since
-		// replaced by its 4-byte halves (add_pt: the 8-byte `mov [rsp+8],rcx` slot,
-		// superseded by SUB84 writes at +8 and +0xc) is dead but still in the bank.
-		// Emitting a SymbolEntry for it leaves an 8-byte Symbol at +8 overlapping the
-		// live 4-byte Symbols at +8 and +0xc, which breaks the disjoint-cover
-		// invariant ScopeLocal::restructure guarantees; findOverlap then answers the
-		// +0xc query with the stale wide Symbol and two distinct slots render under
-		// one name.
-		if vn.IsFree() {
-			continue
-		}
-		if !isStackSpace(vn, sl.model) {
-			continue
-		}
-		// A range removed from the scope (MarkNotMapped) gets no symbol.
-		// C++ parity: MapState only gathers hints inside the scope's range.
-		if sl.isNotMapped(vn.Offset(), vn.Size()) {
-			continue
-		}
-		slots[slot{vn.Addr(), vn.Size()}] = true
-	}
-	// Sort the slot list for deterministic output.
-	ordered := make([]slot, 0, len(slots))
-	for s := range slots {
-		ordered = append(ordered, s)
-	}
-	sort.Slice(ordered, func(i, j int) bool {
-		if ordered[i].addr.Offset != ordered[j].addr.Offset {
-			return ordered[i].addr.Offset < ordered[j].addr.Offset
-		}
-		return ordered[i].size < ordered[j].size
-	})
-
-	types := sharedTypeFactory
-	// Signed start offset of every fixed slot, ascending -- the bounds the open
-	// RangeHints from gatherOpen are stretched against below.
-	// C++ parity: the sorted RangeHint maplist ScopeLocal::restructure walks.
-	fixedStarts := make([]int64, 0, len(ordered))
-	// Gather the reconciled (RangeHint::preferred) committed data-type for each
-	// stack offset from the live Varnodes, once. C++ parity: MapState::gatherVarnodes
-	// + ScopeLocal::restructure merge loop (varmap.cc:1124/1294). The type is read
-	// from vn.Type() at this call, so the snapshot follows the surrounding
-	// mainloop timing (ActionInferTypes reports no data-flow change, so the last
-	// restructure sees the pre-typeprop committed type -- the type-leak mechanism).
-	slotTypes := mapStateStackTypes(fd, sl)
-	for _, s := range ordered {
-		sz := s.size
-		if sz <= 0 {
-			sz = 4
-		}
-		// Symbol type = reconciled committed type for this offset, or a sized
-		// undefined when no active-write hint was gathered (C++ default unknown).
-		var dt Datatype
-		if h := slotTypes[s.addr.Offset]; h != nil && h.typ != nil {
-			dt = h.typ
-		} else {
-			dt = types.GetBase(sz, TYPE_UNKNOWN, "")
-		}
-		name := sl.buildVariableName(s.addr, address.Address{}, dt)
-		sym := NewSymbol(name, dt)
-		// Stack slots are address-tied: identified by frame address, not SSA number,
-		// and valid across the whole function (no usepoint limitation). The symbol must
-		// carry addrtied so SyncVarnodesWithSymbols propagates it to the slot's Varnodes
-		// BEFORE the speculative type-merge (ActionMergeType/mergeByDatatype) runs --
-		// otherwise mergeTestRequired's addr-tied guard cannot tell two distinct stack
-		// locals apart and merges them (and the registers merged into each) into one
-		// HighVariable. C++ parity: database.cc ScopeInternal::buildFrom sets
-		// symbol->flags |= Varnode::addrtied for entries without a usepoint limitation.
-		sym.SetFlags(VarnodeAddrTied)
-		entry := NewSymbolEntry(sym, 0, s.addr, sz, 0)
-		sym.attachEntry(entry)
-		ext.entries = append(ext.entries, entry)
-		fixedStarts = append(fixedStarts, signExtendSpaceOffset(s.addr.Offset, s.addr.Space))
-	}
-
-	// Recover stack objects that no Varnode covers: an array reached only
-	// through PTRSUB(sp,off)+PTRADD(.,index,step) shows up as an open
-	// RangeHint, never as a stack Varnode, so the loop above cannot see it.
-	// C++ parity: MapState::gatherOpen feeding ScopeLocal::restructure
-	// (varmap.cc:1268 / 1313).
-	sl.createOpenEntries(fd, fixedStarts)
 
 	if aliasyes {
 		sl.markUnaliased(sl.gatherAlias(fd))
