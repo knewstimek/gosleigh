@@ -1507,11 +1507,8 @@ func (s *printCState) emitTopLevelBlock(bl *FlowBlock) error {
 // the target of a printed goto, unless an enclosing block prints it.
 // C++ parity: PrintC::emitAnyLabelStatement / emitLabelStatement.
 func (s *printCState) emitAnyLabel(bl *FlowBlock) {
-	if bl == nil || bl.HasFlag(BlockFlagLabelBumpUp) {
-		return
-	}
-	leaf := bl.getFrontLeaf()
-	if leaf == nil || !leaf.HasFlag(BlockFlagUnstructuredTarg) || s.labelDone[leaf] {
+	leaf := s.pendingLabelLeaf(bl)
+	if leaf == nil {
 		return
 	}
 	if s.labelDone == nil {
@@ -1519,6 +1516,18 @@ func (s *printCState) emitAnyLabel(bl *FlowBlock) {
 	}
 	s.labelDone[leaf] = true
 	s.lang.Label(s.labelForBlock(leaf))
+}
+
+// pendingLabelLeaf returns the leaf whose label emitAnyLabel would print.
+func (s *printCState) pendingLabelLeaf(bl *FlowBlock) *FlowBlock {
+	if bl == nil || bl.HasFlag(BlockFlagLabelBumpUp) {
+		return nil
+	}
+	leaf := bl.getFrontLeaf()
+	if leaf == nil || !leaf.HasFlag(BlockFlagUnstructuredTarg) || s.labelDone[leaf] {
+		return nil
+	}
+	return leaf
 }
 
 func (s *printCState) emitBlock(bl *FlowBlock) error {
@@ -1693,6 +1702,9 @@ func (s *printCState) emitConditionLead(bl *FlowBlock) error {
 		return s.emitConditionLead(children[len(children)-1])
 	}
 	if basic := toBasic(bl); basic != nil {
+		// A condition leaf is still a BlockCopy: its label comes first.
+		// C++ parity: PrintC::emitBlockCopy (emitAnyLabelStatement).
+		s.emitAnyLabel(bl)
 		return s.emitOps(basic, true)
 	}
 	return nil
@@ -1716,7 +1728,7 @@ func (s *printCState) conditionLeadEmpty(bl *FlowBlock) bool {
 		return len(children) == 0 || s.conditionLeadEmpty(children[len(children)-1])
 	}
 	if basic := toBasic(bl); basic != nil {
-		return s.isBlockEmpty(&basic.FlowBlock)
+		return s.pendingLabelLeaf(bl) == nil && s.isBlockEmpty(&basic.FlowBlock)
 	}
 	return true
 }
