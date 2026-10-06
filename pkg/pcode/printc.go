@@ -653,7 +653,17 @@ func (s *printCState) collectSymbols() {
 				locals = append(locals, vn)
 			}
 		}
-		sort.Slice(locals, func(i, j int) bool { return CompareLocDef(locals[i], locals[j]) < 0 })
+		// Mapped symbols declare in storage order, then dynamic symbols.
+		// C++ parity: PrintC::emitScopeVarDecls (MapIterator, then the
+		// dynamic list).
+		sort.Slice(locals, func(i, j int) bool {
+			di := locals[i].High() != nil && locals[i].High().dynamicSym
+			dj := locals[j].High() != nil && locals[j].High().dynamicSym
+			if di != dj {
+				return dj
+			}
+			return CompareLocDef(locals[i], locals[j]) < 0
+		})
 		s.params = dedupVarnodes(params)
 		s.locals = dedupVarnodes(locals)
 		s.applySelfLockedParams()

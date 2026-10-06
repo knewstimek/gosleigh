@@ -170,6 +170,12 @@ func tryMarkForLoop(data *Funcdata, wdo *BlockWhileDo) {
 	// C++ parity: BlockWhileDo::findInitializer
 	initOp := findInitializerOp(wdo, loopDef, headBasic, tailSlot)
 	if initOp != nil {
+		// The initializer must be explicit and printed too: a redundant
+		// (non-printing) COPY of an input yields no initializer.
+		// C++ parity: BlockWhileDo::finalizePrinting testTerminal(data,1-slot).
+		initOp = forLoopTerminal(loopDef, 1-tailSlot)
+	}
+	if initOp != nil {
 		initOp.SetFlag(PcodeOpNonPrinting)
 	}
 

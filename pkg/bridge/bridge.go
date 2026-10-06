@@ -360,6 +360,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		knownAddrs[record.translation.Address] = struct{}{}
 	}
 
+	assignFlowTimes(records, cfg.Entry, recoveredTables)
 	var current *pcode.BlockBasic
 	for idx, record := range records {
 		addr := record.translation.Address
@@ -2053,4 +2054,135 @@ func spaceHighest(spc *address.Space) uint64 {
 		return ^uint64(0)
 	}
 	return (uint64(1) << (8 * uint(spc.AddrSize))) - 1
+}
+
+// assignFlowTimes renumbers every raw op's SeqNum time with one counter in
+// the order C++ generates p-code: FlowInfo::generateOps follows fall-through
+// first, stacking branch targets (LIFO) and skipping instructions already
+// seen, then decodes each recovered jump table's targets the same way.
+// PcodeOpBank::create hands out times from that single counter, and later
+// passes compare times across instructions (HighVariable::compareName,
+// location order), so instruction-local indices would rank ops differently.
+// C++ parity: FlowInfo::generateOps / fallthru / setFallthruBound /
+// processInstruction / newAddress.
+func assignFlowTimes(records []instructionRecord, entry address.Address, tables map[uint64]*pcode.JumpTable) {
+	byAddr := make(map[address.Address]int, len(records))
+	addrs := make([]address.Address, 0, len(records))
+	for i, r := range records {
+		byAddr[r.translation.Address] = i
+		addrs = append(addrs, r.translation.Address)
+	}
+	sort.Slice(addrs, func(i, j int) bool { return addrs[i].Less(addrs[j]) })
+	visited := make(map[address.Address]bool, len(records))
+	var counter uint64
+	var addrlist []address.Address
+	var tablelist []uint64
+
+	// nextVisited is the first visited instruction past addr (the fall-through
+	// bound), or the zero Address when there is none.
+	nextVisited := func(addr address.Address) (address.Address, bool) {
+		k := sort.Search(len(addrs), func(i int) bool { return addr.Less(addrs[i]) })
+		for ; k < len(addrs); k++ {
+			if visited[addrs[k]] {
+				return addrs[k], true
+			}
+		}
+		return address.Address{}, false
+	}
+	newAddress := func(to address.Address) {
+		if _, ok := byAddr[to]; !ok || visited[to] {
+			return
+		}
+		addrlist = append(addrlist, to)
+	}
+	// processInstruction numbers the instruction's ops and reports fall-through.
+	processInstruction := func(cur address.Address) bool {
+		idx, ok := byAddr[cur]
+		if !ok {
+			return false
+		}
+		visited[cur] = true
+		r := &records[idx]
+		ops := r.translation.Ops
+		for i := range ops {
+			ops[i].SeqNum.Time = counter
+			counter++
+		}
+		bounds := splitInstruction(ops)
+		n := bounds[len(bounds)-1][1]
+		for i := 0; i < n; i++ {
+			switch ops[i].OpCode {
+			case pcode.CPUI_BRANCH, pcode.CPUI_CBRANCH:
+				if _, rel := relativeTargetIndex(ops, i); rel {
+					continue
+				}
+				if in := ops[i].Inputs; len(in) > 0 && in[0].Space != nil {
+					newAddress(in[0].Address())
+				}
+			case pcode.CPUI_BRANCHIND:
+				if tables[cur.Offset] != nil {
+					tablelist = append(tablelist, cur.Offset)
+				}
+			}
+		}
+		if !instructionFallsThrough(ops) || r.translation.Next.IsInvalid() {
+			return false
+		}
+		addrlist = append(addrlist, r.translation.Next)
+		return true
+	}
+	fallthru := func() {
+		top := addrlist[len(addrlist)-1]
+		if visited[top] {
+			addrlist = addrlist[:len(addrlist)-1]
+			return
+		}
+		bound, hasBound := nextVisited(top)
+		for {
+			cur := addrlist[len(addrlist)-1]
+			addrlist = addrlist[:len(addrlist)-1]
+			if !processInstruction(cur) || len(addrlist) == 0 {
+				return
+			}
+			next := addrlist[len(addrlist)-1]
+			if hasBound && !next.Less(bound) {
+				if next == bound { // Hit the bound exactly
+					addrlist = addrlist[:len(addrlist)-1]
+					return
+				}
+				if visited[next] {
+					addrlist = addrlist[:len(addrlist)-1]
+					return
+				}
+				bound, hasBound = nextVisited(next)
+			}
+		}
+	}
+	addrlist = append(addrlist, entry)
+	for len(addrlist) > 0 {
+		fallthru()
+	}
+	for len(tablelist) > 0 {
+		pending := tablelist
+		tablelist = nil
+		for _, off := range pending {
+			jt := tables[off]
+			for i := 0; i < jt.NumEntries(); i++ {
+				newAddress(address.Address{Space: entry.Space, Offset: jt.AddressByIndex(i).Offset})
+			}
+			for len(addrlist) > 0 {
+				fallthru()
+			}
+		}
+	}
+	// Anything flow never reached keeps program order after the rest.
+	for _, a := range addrs {
+		if !visited[a] {
+			ops := records[byAddr[a]].translation.Ops
+			for i := range ops {
+				ops[i].SeqNum.Time = counter
+				counter++
+			}
+		}
+	}
 }

@@ -18,6 +18,8 @@ import (
 	"fmt"
 	"sort"
 	"strings"
+
+	"gosleigh/pkg/address"
 )
 
 // ActionNameVars assigns human-readable Ghidra-style names to unnamed register-space
@@ -107,10 +109,8 @@ func highNameRepresentativeLive(hv *HighVariable, live func(*Varnode) bool) *Var
 // compareNameRep reports whether vn2 is preferred over vn1 as the name
 // representative. Faithful port of HighVariable::compareName (variable.cc:456).
 // Precedence (most preferred first): name-lock, unaffected, persistent, input,
-// address-tied, proto-partial, non-internal (non-unique), written, earliest def.
-// Def-time ordering uses the output Varnode's create index as a proxy for
-// PcodeOp::getTime (only breaks ties between same-address members, so it never
-// changes the selected Symbol).
+// address-tied, proto-partial, non-internal (non-unique), written, earliest def
+// (PcodeOp time, numbered in C++ flow order by the bridge).
 func compareNameRep(vn1, vn2 *Varnode) bool {
 	if vn1.IsNameLock() {
 		return false
@@ -147,8 +147,9 @@ func compareNameRep(vn1, vn2 *Varnode) bool {
 	if !vn1.IsWritten() {
 		return false
 	}
-	if vn1.CreateIndex() != vn2.CreateIndex() {
-		return vn2.CreateIndex() < vn1.CreateIndex()
+	// Prefer earlier
+	if t1, t2 := vn1.Def().Seq().Time, vn2.Def().Seq().Time; t1 != t2 {
+		return t2 < t1
 	}
 	return false
 }
@@ -444,6 +445,44 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 	// One counter shared by every prefix (iVar1, puVar2, ...).
 	// C++ parity: ScopeInternal::buildVariableName "Var" << index++ with the
 	// single base assignDefaultNames threads through.
+	// Symbols are linked in this order; a variable whose name representative
+	// lands on storage and a use point an earlier variable's entry already
+	// covers conflicts with it and gets a dynamic symbol.
+	// C++ parity: ActionNameVars::linkSymbols -> Funcdata::linkSymbol
+	// (queryProperties at the use point) -> handleSymbolConflict.
+	type claim struct {
+		space    *address.Space
+		lo, hi   uint64
+		usepoint address.Address
+	}
+	var claims []claim
+	usePoint := func(vn *Varnode) address.Address { // Varnode::getUsePoint
+		if vn.IsWritten() {
+			return vn.Def().Addr()
+		}
+		return data.BaseAddr().Add(^uint64(0))
+	}
+	for _, e := range toName {
+		vn := e.key
+		up := usePoint(vn)
+		conflict := false
+		for _, c := range claims {
+			if c.space == vn.Space() && vn.Offset() >= c.lo && vn.Offset() < c.hi && c.usepoint == up {
+				conflict = true
+				break
+			}
+		}
+		if conflict && !(vn.IsInput() || vn.IsAddrTied() || vn.IsPersist() || vn.IsConstant()) {
+			e.hv.dynamicSym = true
+			continue
+		}
+		sz := uint64(vn.Size())
+		if t := e.hv.Type(); t != nil && t.Size() > 0 {
+			sz = uint64(t.Size())
+		}
+		claims = append(claims, claim{vn.Space(), vn.Offset(), vn.Offset() + sz, up})
+	}
+
 	idx := 1
 	for _, e := range toName {
 		// The output of an INDIRECT creation (a register a call clobbers) is

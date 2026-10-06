@@ -35,6 +35,11 @@ type HighVariable struct {
 	// piece places the variable in a group of overlapping variables.
 	// C++ parity: HighVariable::piece.
 	piece *variablePiece
+
+	// dynamicSym marks a variable whose storage and use point were already
+	// claimed by another variable's symbol, so it gets a dynamic symbol
+	// (declared after the mapped ones). C++ parity: Funcdata::handleSymbolConflict.
+	dynamicSym bool
 }
 
 // GetSymbol returns the Symbol this high variable maps to, or nil. It walks the
