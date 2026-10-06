@@ -45,7 +45,6 @@ func (a *ActionNormalizeBranches) Apply(data *Funcdata) int {
 	if bg == nil {
 		return 0
 	}
-	changed := 0
 	for i := 0; i < bg.GetSize(); i++ {
 		bb := bg.GetBlock(i)
 		if bb == nil || bb.SizeOut() != 2 {
@@ -66,12 +65,9 @@ func (a *ActionNormalizeBranches) Apply(data *Funcdata) int {
 		opFlipInPlaceExecute(data, fliplist)
 		// flipInPlaceExecuteBlock takes *FlowBlock (from prefer_complement.go).
 		flipInPlaceExecuteBlock(&concrete.FlowBlock)
-		changed++
+		a.count++ // Indicate a change was made
 	}
 	data.ClearDeadOps()
-	if changed > 0 {
-		return 1
-	}
 	return 0
 }
 
@@ -369,7 +365,6 @@ func (a *ActionNodeJoin) Apply(data *Funcdata) int {
 	}
 
 	condjoin := newConditionalJoin(data)
-	changed := 0
 
 	for i := 0; i < bg.GetSize(); i++ {
 		bb := bg.GetBlock(i)
@@ -407,15 +402,13 @@ func (a *ActionNodeJoin) Apply(data *Funcdata) int {
 			}
 			matchResult := condjoin.match(bbConc, bb2Conc)
 			if matchResult {
-				changed++
+				// The group repeats on count, not on the return value.
+				a.count++
 				condjoin.execute()
 				condjoin.clear()
 				break
 			}
 		}
-	}
-	if changed > 0 {
-		return 1
 	}
 	return 0
 }
