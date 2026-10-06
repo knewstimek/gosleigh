@@ -1037,74 +1037,15 @@ func (s *printCState) inferReturnType() Datatype {
 				}
 			}
 		}
-		// CDECL default: a 4-byte return value that was computed by arithmetic
-		// (INT_ADD/INT_SUB/INT_MULT/INT_2COMP or similar) defaults to int when the
-		// inferred type is still unknown. Pure constant-selection returns (a MULTIEQUAL
-		// whose inputs are all constants, as in switch-like functions) stay undefined4.
-		// C++ parity: Ghidra's CDECL prototype defaults return type to int for
-		// accumulator/arithmetic functions; constant-selector functions stay undefined4.
+		// An untyped return value stays undefined%d: C++ takes the return type
+		// from the HighVariable type (FuncProto::updateOutputTypes) with no
+		// arithmetic-implies-int default.
 		if dt == nil || dt.Metatype() == TYPE_UNKNOWN {
-			if vn.Size() == 4 && hasArithmeticAncestor(vn, 4) {
-				return sharedTypeFactory.GetBase(4, TYPE_INT, "int")
-			}
 			return sharedTypeFactory.GetBase(int32(vn.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", vn.Size()))
 		}
 		return dt
 	}
 	return sharedTypeFactory.GetVoid()
-}
-
-// hasArithmeticAncestor returns true if vn (or any varnode reachable from vn
-// by following def chains up to maxDepth levels) is the output of an arithmetic
-// operation with at least one non-constant input. This distinguishes computed
-// values (counters, accumulators) from pure constant-selection returns.
-// Used by inferReturnType to decide whether an unknown-typed return should
-// default to int (CDECL convention) or stay undefined4 (constant-only path).
-func hasArithmeticAncestor(vn *Varnode, maxDepth int) bool {
-	return hasArithAnc(vn, maxDepth, make(map[*Varnode]bool))
-}
-
-func hasArithAnc(vn *Varnode, depth int, visited map[*Varnode]bool) bool {
-	if vn == nil || depth < 0 || visited[vn] {
-		return false
-	}
-	visited[vn] = true
-	def := vn.Def()
-	if def == nil {
-		return false
-	}
-	// A LOAD breaks the value-provenance chain: the loaded value's type comes
-	// from the pointer's target, never from the address arithmetic. Following
-	// LOAD's address inputs would misclassify a raw undefined%d memory read as
-	// "arithmetic" (its address is an INT_ADD/INT_MULT of the base+index) and
-	// wrongly default the return to int. Ghidra types such a return from the
-	// LOAD output's own (undefined) type, so stop here.
-	if def.Code() == CPUI_LOAD {
-		return false
-	}
-	switch def.Code() {
-	case CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_MULT, CPUI_INT_DIV, CPUI_INT_2COMP,
-		CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR,
-		CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT,
-		CPUI_INT_SDIV, CPUI_INT_SREM, CPUI_INT_REM:
-		// Arithmetic op -- check that at least one input is non-constant.
-		for i := 0; i < def.NumInput(); i++ {
-			in := def.Input(i)
-			if in != nil && !in.IsConstant() {
-				return true
-			}
-		}
-	}
-	// Recurse into defining op inputs (COPY, MULTIEQUAL, etc.).
-	for i := 0; i < def.NumInput(); i++ {
-		in := def.Input(i)
-		if in != nil && !in.IsConstant() {
-			if hasArithAnc(in, depth-1, visited) {
-				return true
-			}
-		}
-	}
-	return false
 }
 
 func returnValue(op *PcodeOp) *Varnode {
