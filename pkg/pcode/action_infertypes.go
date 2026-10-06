@@ -389,6 +389,25 @@ func inferPropagateTypeEdge(data *Funcdata, tf *TypeFactory, op *PcodeOp, inslot
 // TypeOpIndirect(2007).
 func inferPropagateEdge(data *Funcdata, tf *TypeFactory, op *PcodeOp, invn, outvn *Varnode, inslot, outslot int, alttype Datatype) Datatype {
 	switch op.Code() {
+	case CPUI_PIECE:
+		// A composite output types each input as the piece it fills.
+		// C++ parity: TypeOpPiece::propagateType (near/far pointer case omitted).
+		if inslot != -1 {
+			return nil
+		}
+		var byteOff int64
+		if in0 := op.Input(0); in0.Space() != nil && in0.Space().BigEndian {
+			if outslot != 0 {
+				byteOff = int64(in0.Size())
+			}
+		} else if outslot == 0 {
+			byteOff = int64(op.Input(1).Size())
+		}
+		t := alttype
+		for t != nil && (byteOff != 0 || t.Size() != outvn.Size()) {
+			t, byteOff = datatypeSubType(t, byteOff)
+		}
+		return t
 	case CPUI_PTRSUB:
 		// Mirror TypeOpPtrsub::propagateType (typeop.cc L2368-2380): a pointer
 		// input propagates to the output through propagateAddIn2Out. This is the

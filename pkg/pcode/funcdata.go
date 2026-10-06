@@ -28,6 +28,10 @@ const (
 // with decompiling a single function.
 // C++ parity: funcdata.hh Funcdata
 type Funcdata struct {
+	// protoPartial lists the CONCAT roots RulePieceStructure registered for
+	// Merge::groupPartials. C++ parity: Merge::protoPartial.
+	protoPartial []*PcodeOp
+
 	flags       uint32
 	name        string
 	displayName string

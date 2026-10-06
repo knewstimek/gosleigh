@@ -1064,6 +1064,11 @@ func (s *printCState) emitLocalDeclarations() bool {
 		if s.fd.globalEntryOf(vn) != nil {
 			continue
 		}
+		// A piece of a grouped variable is printed through the whole variable,
+		// which carries the declaration. C++ parity: the group shares one Symbol.
+		if groupRootOf(vn.High()) != nil {
+			continue
+		}
 		name := s.nameOf(vn)
 		if _, seen := declared[name]; seen {
 			continue
@@ -4652,6 +4657,17 @@ func (s *printCState) readExpr(vn *Varnode) ExprFragment {
 // symbol (an element of a local array) through the symbol's type.
 // C++ parity: PrintC::pushSymbolDetail (pushPartialSymbol).
 func (s *printCState) localPieceName(vn *Varnode, name string, castTo Datatype) (string, Datatype) {
+	// A piece of a VariableGroup prints as part of the group's whole variable
+	// (pt.y). C++ parity: pushSymbolDetail -> pushPartialSymbol with
+	// HighVariable::getSymbolOffset.
+	if root := groupRootOf(vn.High()); root != nil {
+		if rvn := root.high.Instances(); len(rvn) > 0 {
+			if rt := root.high.Type(); rt != nil {
+				be := vn.Space() != nil && vn.Space().BigEndian
+				return symbolPieceName(s.nameOf(rvn[0]), rt, int32(vn.High().piece.offset-root.offset), vn.Size(), castTo, be)
+			}
+		}
+	}
 	sl := s.fd.GetScopeLocal()
 	if sl == nil || sl.SpaceID() == nil {
 		return name, nil

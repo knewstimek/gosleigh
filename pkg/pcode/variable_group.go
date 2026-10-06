@@ -208,6 +208,20 @@ func (vn *Varnode) findPieceShadow(leastByte int64, piece *Varnode) bool {
 	return tmp.findPieceShadow(leastByte, piece)
 }
 
+// groupRootOf returns the piece holding the whole group when hv is a proper
+// part of it, else nil.
+func groupRootOf(hv *HighVariable) *variablePiece {
+	if hv == nil || hv.piece == nil {
+		return nil
+	}
+	for _, p := range hv.piece.group.pieces {
+		if p.offset == 0 && p.size == hv.piece.group.size && p.high != hv {
+			return p
+		}
+	}
+	return nil
+}
+
 // size returns the storage size of the variable.
 func (hv *HighVariable) size() int32 {
 	for _, vn := range hv.instances {

@@ -1452,12 +1452,3 @@ func (r *RuleExtensionPush) apply(op *PcodeOp, data *Funcdata) int {
 	return 1
 }
 
-type RulePieceStructure struct{ batchRule }
-
-func NewRulePieceStructure(group string) *RulePieceStructure {
-	r := &RulePieceStructure{}
-	// RulePieceStructure::applyOp -- ruleaction.cc.
-	// known mismatch: structured-type discovery, PieceNode traversal, and symbol splitting are not ported.
-	r.batchRule = newKnownMismatchBatchRule(group, "piecestructure", []OpCode{CPUI_PIECE, CPUI_INT_ZEXT}, func(g string) Rule { return NewRulePieceStructure(g) })
-	return r
-}

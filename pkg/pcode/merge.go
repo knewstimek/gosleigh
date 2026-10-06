@@ -1146,9 +1146,9 @@ func (m *Merge) mergeOpcode(opc OpCode) {
 }
 
 func (m *Merge) mergeRequired() {
-	// C++ parity: ActionMergeRequired::apply calls mergeAddrTied, groupPartials, mergeMarker.
-	// groupPartials is not yet ported (known mismatch). mergeAddrTied is now implemented.
+	// C++ parity: ActionMergeRequired::apply.
 	m.mergeAddrTied()
+	m.groupPartials()
 	m.MergeMarker()
 }
 

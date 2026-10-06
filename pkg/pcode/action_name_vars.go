@@ -244,6 +244,10 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		if hv == nil {
 			continue
 		}
+		// A piece of a grouped variable is named through the whole variable.
+		if groupRootOf(hv) != nil {
+			continue
+		}
 		// Skip if already has a human-readable name.
 		if hv.Name() != "" {
 			if _, ok := hvMap[hv]; !ok {
