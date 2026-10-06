@@ -659,9 +659,12 @@ func (r *RulePtrsubUndo) apply(op *PcodeOp, data *Funcdata) int {
 }
 
 // apply makes a LOAD/STORE through a pointer to a structure (or array) read
-// its first field (element) explicitly: ptr becomes PTRSUB(ptr, 0).
-// C++ parity: RuleStructOffset0::applyOp. The TypePointerRel branch
-// (evaluateThruParent) is not ported: a relative pointer never matches here.
+// its first field (element) explicitly: ptr becomes PTRSUB(ptr, 0). A formal
+// relative pointer into a structure gets a PTRSUB back to the field holding
+// its offset. The new PTRSUB output keeps the default type
+// (Funcdata::newOpBefore); typing it here made RulePtrArith/RulePtrsubUndo
+// cycle with this rule.
+// C++ parity: RuleStructOffset0::applyOp.
 func (r *RuleStructOffset0) apply(op *PcodeOp, data *Funcdata) int {
 	if !data.HasTypeRecoveryStarted() {
 		return 0
@@ -681,19 +684,53 @@ func (r *RuleStructOffset0) apply(op *PcodeOp, data *Funcdata) int {
 		return 0
 	}
 	baseType := ptr.Pointee()
-	var subType Datatype
+	if ptr.IsFormalPointerRel() && ptr.EvaluateThruParent(0) {
+		baseType = ptr.Parent()
+		if baseType.Metatype() != TYPE_STRUCT {
+			return 0
+		}
+		offset := int64(ptr.ByteOffset())
+		if offset >= int64(baseType.Size()) {
+			return 0
+		}
+		if baseType.Size() < movesize {
+			return 0 // Moving something bigger than the entire structure
+		}
+		subType, newoff := datatypeSubType(baseType, offset) // Field at the pointer's offset
+		if subType == nil || subType.Size() < movesize {
+			return 0 // The field is too small for the LOAD/STORE
+		}
+		ws := int64(ptr.WordSize())
+		if ws <= 0 {
+			ws = 1
+		}
+		newoff /= ws // byteToAddress
+		// Create a pointer up to the parent
+		newop := data.newUntypedOpBefore(op, CPUI_PTRSUB, ptrVn.Size(), ptrVn,
+			data.NewConstant(ptrVn.Size(), uint64(-newoff)&maskForSize(ptrVn.Size())))
+		newop.SetStopTypePropagation()
+		if newoff != 0 {
+			// Add newoff back in to get to zero total offset
+			addop := data.newUntypedOpBefore(op, CPUI_INT_ADD, ptrVn.Size(), newop.Output(),
+				data.NewConstant(ptrVn.Size(), uint64(newoff)))
+			data.OpSetInput(op, addop.Output(), 1)
+		} else {
+			data.OpSetInput(op, newop.Output(), 1)
+		}
+		return 1
+	}
 	switch baseType.Metatype() {
 	case TYPE_STRUCT:
 		if baseType.Size() < movesize {
-			return 0 // moving something bigger than the entire structure
+			return 0 // Moving something bigger than the entire structure
 		}
-		subType, _ = datatypeSubType(baseType, 0)
+		subType, _ := datatypeSubType(baseType, 0)
 		if subType == nil || subType.Size() < movesize {
-			return 0 // the field is too small for the LOAD/STORE
+			return 0 // The field is too small for the LOAD/STORE
 		}
 	case TYPE_ARRAY:
 		if baseType.Size() < movesize {
-			return 0 // moving something bigger than the entire array
+			return 0 // Moving something bigger than the entire array
 		}
 		arr, _ := baseType.(*Array)
 		if arr == nil {
@@ -702,12 +739,10 @@ func (r *RuleStructOffset0) apply(op *PcodeOp, data *Funcdata) int {
 		if baseType.Size() == movesize && arr.Count() != 1 {
 			return 0
 		}
-		subType = arr.Element()
 	default:
 		return 0
 	}
-	// The PTRSUB output type is what TypeOpPtrsub::getOutputLocal derives.
-	newop := data.NewTypedOpBefore(op, CPUI_PTRSUB, ptrVn.Size(), pointerSubtypeType(ptr, subType), ptrVn, data.NewConstant(ptrVn.Size(), 0))
+	newop := data.newUntypedOpBefore(op, CPUI_PTRSUB, ptrVn.Size(), ptrVn, data.NewConstant(ptrVn.Size(), 0))
 	newop.SetStopTypePropagation()
 	data.OpSetInput(op, newop.Output(), 1)
 	return 1

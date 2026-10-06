@@ -506,6 +506,22 @@ func (p *Pointer) Parent() Datatype { return p.relParent }
 // C++ parity: TypePointerRel::getByteOffset.
 func (p *Pointer) ByteOffset() int32 { return p.relOffset }
 
+// EvaluateThruParent reports whether an access at addrOff past this relative
+// pointer is better expressed through its parent structure.
+// C++ parity: TypePointerRel::evaluateThruParent.
+func (p *Pointer) EvaluateThruParent(addrOff uint64) bool {
+	ws := uint64(p.wordSize)
+	if ws == 0 {
+		ws = 1
+	}
+	byteOff := addrOff * ws // addressToByte
+	if pt := p.Pointee(); pt != nil && pt.Metatype() == TYPE_STRUCT && byteOff < uint64(pt.Size()) {
+		return false
+	}
+	byteOff = (byteOff + uint64(int64(p.relOffset))) & maskForSize(p.Size())
+	return p.relParent != nil && byteOff < uint64(p.relParent.Size())
+}
+
 // Stripped returns the plain pointer an ephemeral relative pointer stands
 // for in formal declarations, nil otherwise.
 // C++ parity: TypePointerRel::getStripped.

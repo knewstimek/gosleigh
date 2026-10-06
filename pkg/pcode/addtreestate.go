@@ -654,11 +654,8 @@ func (s *AddTreeState) checkTerm(vn *Varnode, treeCoeff uint64) bool {
 		if s.elemSize != 0 {
 			rem = signed % int64(s.elemSize)
 		}
-		if rem != 0 {
+		if rem != 0 { // Constant is not a multiple of the size
 			s.nonmultsum = truncateToSize(s.nonmultsum+val, s.ptrSize)
-			if absInt64(signed) > int64(s.biggestNonMultCoeff) {
-				s.biggestNonMultCoeff = uint64(absInt64(signed))
-			}
 			return true
 		}
 		s.multsum = truncateToSize(s.multsum+val, s.ptrSize)
