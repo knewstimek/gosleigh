@@ -281,6 +281,7 @@ func (a *ActionSetCasts) Apply(data *Funcdata) int {
 		// TODO known mismatch: the PTRSUB isPtrsubMatching re-check is not ported.
 		// Do input casts first, as the output token may depend on the inputs.
 		for i := 0; i < op.NumInput(); i++ {
+			a.resolveUnion(op, i, data, cs) // Union resolution must happen before casts are determined
 			a.castInput(op, i, data, cs)
 		}
 		if op.Output() == nil {
@@ -332,10 +333,14 @@ func (a *ActionSetCasts) castInput(op *PcodeOp, slot int, data *Funcdata, cs *Ca
 		}
 	} else if ct.Metatype() == TYPE_PTR && testStructOffset0(ct, vn.HighTypeReadFacing(op), cs) {
 		// Insert a PTRSUB(vn,#0) instead of a CAST
-		insertPtrsubZero(op, slot, ct, data)
+		newop := insertPtrsubZero(op, slot, ct, data)
+		if ht := vn.High().Type(); ht != nil && ht.NeedsResolution() {
+			data.inheritResolution(ht, newop, 0, op, slot)
+		}
+		return 1
+	} else if tryResolutionAdjustment(op, slot, data) {
 		return 1
 	}
-	// resolveUnion / tryResolutionAdjustment omitted.
 	if vnin == nil {
 		return 0
 	}
@@ -347,6 +352,93 @@ func (a *ActionSetCasts) castInput(op *PcodeOp, slot int, data *Funcdata, cs *Ca
 	data.OpSetInput(newop, vnin, 0)
 	data.OpSetInput(op, vnout, slot)
 	data.OpInsertBefore(newop, op) // cast comes BEFORE the operation
+	if ct.NeedsResolution() {
+		data.forceFacingType(ct, -1, newop, -1)
+	}
+	if hv := vn.High(); hv != nil && hv.Type() != nil && hv.Type().NeedsResolution() {
+		data.inheritResolution(hv.Type(), newop, 0, op, slot)
+	}
+	return 1
+}
+
+// tryResolutionAdjustment removes the need for a cast between an input and
+// the output of op by resolving a union (or single-component) data-type on
+// either side to a compatible form.
+// C++ parity: ActionSetCasts::tryResolutionAdjustment.
+func tryResolutionAdjustment(op *PcodeOp, slot int, data *Funcdata) bool {
+	outvn := op.Output()
+	if outvn == nil || outvn.High() == nil || op.Input(slot).High() == nil {
+		return false
+	}
+	outType := outvn.High().Type()
+	inType := op.Input(slot).High().Type()
+	if outType == nil || inType == nil || (!inType.NeedsResolution() && !outType.NeedsResolution()) {
+		return false
+	}
+	inResolve, outResolve := -1, -1
+	if inType.NeedsResolution() {
+		if inResolve = findCompatibleResolve(inType, outType); inResolve < 0 {
+			return false
+		}
+	}
+	if outType.NeedsResolution() {
+		if inResolve >= 0 {
+			outResolve = findCompatibleResolve(outType, datatypeDepend(inType, inResolve))
+		} else {
+			outResolve = findCompatibleResolve(outType, inType)
+		}
+		if outResolve < 0 {
+			return false
+		}
+	}
+	if inType.NeedsResolution() && !data.setUnionField(inType, op, slot, newResolvedField(inType, inResolve, sharedTypeFactory)) {
+		return false
+	}
+	if outType.NeedsResolution() && !data.setUnionField(outType, op, -1, newResolvedField(outType, outResolve, sharedTypeFactory)) {
+		return false
+	}
+	return true
+}
+
+// resolveUnion settles the union field the input at slot reads: a pointer
+// to a union gets a PTRSUB #0 naming the field, an implied value is marked
+// to print the field.
+// C++ parity: ActionSetCasts::resolveUnion.
+func (a *ActionSetCasts) resolveUnion(op *PcodeOp, slot int, data *Funcdata, cs *CastStrategyC) int {
+	vn := op.Input(slot)
+	if vn == nil || vn.IsAnnotation() || vn.High() == nil {
+		return 0
+	}
+	dt := vn.High().Type()
+	if dt == nil || !dt.NeedsResolution() {
+		return 0
+	}
+	if dt != vn.Type() {
+		resolveInFlow(dt, op, slot) // Last chance to resolve data-type based on flow
+	}
+	resUnion := data.getUnionField(dt, op, slot)
+	if resUnion == nil || resUnion.fieldNum < 0 {
+		return 0
+	}
+	if dt.Metatype() == TYPE_PTR {
+		// Test if a cast is still needed even after resolution
+		reqtype := vn.TypeReadFacing(op)
+		if cs.CastStandard(reqtype, resUnion.resolve, true, true) != nil {
+			return 0 // If cast still needed, don't do the resolve
+		}
+		// Insert specific placeholder indicating which field is accessed
+		ptrsub := insertPtrsubZero(op, slot, reqtype, data)
+		data.setUnionField(dt, ptrsub, -1, *resUnion) // Attach the resolution to the PTRSUB
+	} else if vn.IsImplied() {
+		if vn.IsWritten() {
+			// Identical write- and read-facing resolutions: treat vn as having
+			// the field data-type, no implied field to print
+			if writeRes := data.getUnionField(dt, vn.Def(), -1); writeRes != nil && writeRes.fieldNum == resUnion.fieldNum {
+				return 0
+			}
+		}
+		vn.SetAddlFlags(VarnodeHasImpliedField)
+	}
 	return 1
 }
 
@@ -357,10 +449,23 @@ func (a *ActionSetCasts) castOutput(op *PcodeOp, data *Funcdata, cs *CastStrateg
 	tokenct := op.GetOpcode().GetOutputToken(op, cs)
 	outvn := op.Output()
 	outHighType := outvn.HighTypeDefFacing()
+	if hv := outvn.High(); hv != nil && hv.Type() != nil {
+		outHighType = hv.Type()
+	}
 	if tokenct == outHighType {
+		if tokenct != nil && tokenct.NeedsResolution() {
+			// The operation copies directly to outvn AS a union
+			data.setUnionField(tokenct, op, -1, newResolvedSelf(tokenct))
+		}
 		return 0 // same type, no cast
 	}
 	outHighResolve := outHighType
+	if outHighType != nil && outHighType.NeedsResolution() {
+		if outHighType != outvn.Type() {
+			resolveInFlow(outHighType, op, -1) // Last chance to resolve data-type based on flow
+		}
+		outHighResolve = findResolve(outHighType, op, -1) // Finish fetching DefFacing data-type
+	}
 	if outvn.IsImplied() {
 		// Implied varnode must take on the parse (token) type for atomic types,
 		// or for pointers that do not point to a composite.
@@ -402,6 +507,12 @@ func (a *ActionSetCasts) castOutput(op *PcodeOp, data *Funcdata, cs *CastStrateg
 	}
 	data.OpSetOutput(op, vn)
 	data.OpInsertAfter(newop, op) // cast comes AFTER the operation
+	if tokenct != nil && tokenct.NeedsResolution() {
+		data.forceFacingType(tokenct, -1, newop, 0)
+	}
+	if outHighType != nil && outHighType.NeedsResolution() {
+		data.inheritResolution(outHighType, newop, -1, op, -1) // Inherit write resolution
+	}
 	return 1
 }
 

@@ -23,9 +23,7 @@ package pcode
 // C++ parity: unionresolve.hh/cc (ResolvedUnion, ResolveEdge), funcdata.cc
 // (getUnionField, setUnionField, forceFacingType, inheritResolution) and the
 // resolveInFlow/findResolve/findCompatibleResolve methods of type.cc.
-// Known mismatch: ScoreUnionFields (scoring the fields of a real union) is
-// not ported; a union or a pointer to a union resolves to itself unless a
-// resolution was set explicitly.
+// Known mismatch: TypePartialUnion is not modelled.
 
 // ResolvedUnion is a data-type resolved from a parent that needs
 // resolution: one of its components (fieldNum >= 0) or the parent itself.
@@ -202,13 +200,76 @@ func resolveInFlow(dt Datatype, op *PcodeOp, slot int) Datatype {
 		compFill := newResolvedField(dt, scoreSingleComponent(dt, op, slot), sharedTypeFactory)
 		fd.setUnionField(dt, op, slot, compFill)
 		return compFill.resolve
-	case *Pointer, *Union:
-		// Known mismatch: ScoreUnionFields is not ported.
+	case *Union:
+		// C++ parity: TypeUnion::resolveInFlow.
 		if res := fd.getUnionField(dt, op, slot); res != nil {
 			return res.resolve
 		}
+		res := scoreUnionField(sharedTypeFactory, dt, op, slot)
+		fd.setUnionField(dt, op, slot, res)
+		return res.resolve
+	case *Pointer:
+		// C++ parity: TypePointer::resolveInFlow (only a pointer to a union).
+		if dt.(*Pointer).Pointee().Metatype() != TYPE_UNION {
+			return dt
+		}
+		if res := fd.getUnionField(dt, op, slot); res != nil {
+			return res.resolve
+		}
+		res := scoreUnionField(sharedTypeFactory, dt, op, slot)
+		fd.setUnionField(dt, op, slot, res)
+		return res.resolve
 	}
 	return dt
+}
+
+// resolveTruncation picks the union field a truncation to offset reads,
+// scoring it when no answer is cached; it returns the field index (or -1)
+// and the offset left within the field.
+// C++ parity: TypeUnion::resolveTruncation.
+func resolveTruncation(u *Union, offset int64, op *PcodeOp, slot int) (int, int64) {
+	fd := opFuncdata(op)
+	if fd == nil {
+		return -1, offset
+	}
+	if res := fd.getUnionField(u, op, slot); res != nil {
+		if res.fieldNum >= 0 {
+			return res.fieldNum, offset - int64(u.fields[res.fieldNum].Offset)
+		}
+		return -1, offset
+	}
+	var res ResolvedUnion
+	if op.Code() == CPUI_SUBPIECE && slot == 1 { // The slot is artificial in this case
+		res = scoreUnionSubpiece(sharedTypeFactory, u, offset, op)
+		fd.setUnionField(u, op, slot, res)
+		if res.fieldNum >= 0 {
+			return res.fieldNum, 0
+		}
+		return -1, offset
+	}
+	res = scoreUnionTruncation(sharedTypeFactory, u, offset, op, slot)
+	fd.setUnionField(u, op, slot, res)
+	if res.fieldNum >= 0 {
+		return res.fieldNum, offset - int64(u.fields[res.fieldNum].Offset)
+	}
+	return -1, offset
+}
+
+// unionFindTruncation is the cached field of a union a truncation of sz
+// bytes at offset reads, or -1; no new scoring is done.
+// C++ parity: TypeUnion::findTruncation.
+func unionFindTruncation(u *Union, offset int64, sz int32, op *PcodeOp, slot int) (int, int64) {
+	fd := opFuncdata(op)
+	res := fd.getUnionField(u, op, slot)
+	if res != nil && res.fieldNum >= 0 {
+		f := u.fields[res.fieldNum]
+		newoff := offset - int64(f.Offset)
+		if newoff+int64(sz) > int64(f.Type.Size()) {
+			return -1, offset // Truncation spans more than one field
+		}
+		return res.fieldNum, newoff
+	}
+	return -1, offset
 }
 
 // findResolve is the cached resolution of dt for the read or write by op; a
@@ -232,9 +293,15 @@ func findResolve(dt Datatype, op *PcodeOp, slot int) Datatype {
 			return res.resolve
 		}
 		return t.Element() // If not calculated before, assume referring to the element
-	case *Pointer, *Union:
+	case *Union:
 		if res := fd.getUnionField(dt, op, slot); res != nil {
 			return res.resolve
+		}
+	case *Pointer:
+		if t.Pointee().Metatype() == TYPE_UNION {
+			if res := fd.getUnionField(dt, op, slot); res != nil {
+				return res.resolve
+			}
 		}
 	}
 	return dt

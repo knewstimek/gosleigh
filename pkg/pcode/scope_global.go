@@ -197,6 +197,22 @@ func symbolPieceName(name string, ct Datatype, off, sz int32, castTo Datatype, b
 					break
 				}
 			}
+		case *Union:
+			// C++ parity: pushPartialSymbol TYPE_UNION (findTruncation reads
+			// the cached resolution of this use).
+			if rop != nil {
+				if idx, newoff := unionFindTruncation(t, int64(off), sz, rop, rslot); idx >= 0 {
+					f := t.fields[idx]
+					sb.WriteString("." + f.Name)
+					off = int32(newoff)
+					ct = f.Type
+					ok = true
+					break
+				}
+			}
+			if ct.Size() == sz {
+				return sb.String(), finalcast // Turns out we don't need to resolve the field
+			}
 		case *Array:
 			if el := t.Element(); el != nil && el.Size() > 0 {
 				idx, rem := off/el.Size(), off%el.Size()

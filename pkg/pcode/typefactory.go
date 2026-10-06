@@ -188,6 +188,22 @@ func (f *TypeFactory) GetTypedefStruct(name string, s *Struct) *Struct {
 	return &value
 }
 
+// GetTypedefUnion returns a typedef of union u: the same union under the
+// typedef's name. C++ parity: TypeFactory::getTypedef (decodeTypedef).
+func (f *TypeFactory) GetTypedefUnion(name string, u *Union) *Union {
+	key := "typedefunion:" + name
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if v, ok := f.intern[key].(*Union); ok {
+		return v
+	}
+	value := *u
+	value.datatypeBase.name = name
+	value.datatypeBase.flags |= datatypeTypedef
+	f.intern[key] = &value
+	return &value
+}
+
 // GetPartialStruct returns the piece of size bytes at offset of container.
 // C++ parity: TypeFactory::getTypePartialStruct.
 func (f *TypeFactory) GetPartialStruct(container Datatype, offset int64, size int32) *PartialStruct {

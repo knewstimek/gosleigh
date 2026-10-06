@@ -97,6 +97,8 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 			return tf.GetTypedefPointer(d.Typedef, t)
 		case *Struct:
 			return tf.GetTypedefStruct(d.Typedef, t)
+		case *Union:
+			return tf.GetTypedefUnion(d.Typedef, t)
 		default:
 			return t
 		}
