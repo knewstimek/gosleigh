@@ -14,6 +14,11 @@
 
 package pcode
 
+import (
+	"fmt"
+	"os"
+)
+
 // ActionInferTypes is the C++-parity data-flow type propagation pass.
 //
 // C++ parity: coreaction.cc ActionInferTypes (apply 5385, buildLocaltypes 5019,
@@ -40,6 +45,8 @@ type ActionInferTypes struct {
 }
 
 // NewActionInferTypes creates the faithful ActionInferTypes in the given group.
+var inferTraceOn = os.Getenv("INFER_TRACE") != ""
+
 func NewActionInferTypes(group string) *ActionInferTypes {
 	a := &ActionInferTypes{}
 	// C++ parity: ActionInferTypes uses flags=0 (coreaction.hh:974); it re-runs
@@ -363,6 +370,9 @@ func inferPropagateTypeEdge(data *Funcdata, tf *TypeFactory, op *PcodeOp, inslot
 	// least-specific type so the incoming type wins.
 	cur := outvn.GetTempType()
 	if cur == nil || TypeOrder(newtype, cur) < 0 {
+		if inferTraceOn {
+			fmt.Fprintf(os.Stderr, "INFER %v@%x:%x slot%d->%d %v => %v (%v)\n", op.Code(), op.Addr().Offset, op.Seq().Time, inslot, outslot, invn.Addr(), outvn.Addr(), newtype.Name())
+		}
 		outvn.SetTempType(newtype)
 		return !outvn.IsMark()
 	}
