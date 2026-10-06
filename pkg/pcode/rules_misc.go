@@ -1304,19 +1304,267 @@ func NewRulePullsubMulti(group string) *RulePullsubMulti {
 	return r
 }
 
+// apply pulls a SUBPIECE of a MULTIEQUAL output back through the MULTIEQUAL,
+// so the phi works on the smaller value.
+// C++ parity: RulePullsubMulti::applyOp.
 func (r *RulePullsubMulti) apply(op *PcodeOp, data *Funcdata) int {
-	phi := definedBy(op.Input(0), CPUI_MULTIEQUAL)
-	if phi == nil || phi.NumInput() == 0 {
+	vn := op.Input(0)
+	if !vn.IsWritten() {
 		return 0
 	}
-	base := phi.Input(0)
-	for i := 1; i < phi.NumInput(); i++ {
-		if !sameValue(base, phi.Input(i)) {
-			return 0
+	mult := vn.Def()
+	if mult.Code() != CPUI_MULTIEQUAL {
+		return 0
+	}
+	// Only pull up, never "down" to the bottom of a loop.
+	if mult.Parent().HasLoopIn() {
+		return 0
+	}
+	maxByte, minByte := pullsubMinMaxUse(vn)
+	newSize := maxByte - minByte + 1
+	if maxByte < minByte || newSize >= int(vn.Size()) {
+		return 0 // all or none of vn is used
+	}
+	if !pullsubAcceptableSize(newSize) {
+		return 0
+	}
+	if outvn := op.Output(); outvn.IsPrecisLo() || outvn.IsPrecisHi() {
+		return 0 // don't pull apart a double precision object
+	}
+	// Don't add SUBPIECEs that will not cancel.
+	if minByte > 8 {
+		return 0
+	}
+	var consume uint64
+	if minByte < 8 {
+		consume = bitfieldSizeMask(int32(newSize)) << (8 * uint(minByte))
+	}
+	consume = ^consume // bits outside what gets truncated later
+	branches := mult.NumInput()
+	for i := 0; i < branches; i++ {
+		inVn := mult.Input(i)
+		if consume&inVn.Consumed() == 0 {
+			continue
+		}
+		// An extension matching the truncation cancels anyway.
+		if minByte == 0 && inVn.IsWritten() {
+			if defOp := inVn.Def(); defOp.Code() == CPUI_INT_ZEXT || defOp.Code() == CPUI_INT_SEXT {
+				if newSize == int(defOp.Input(0).Size()) {
+					continue
+				}
+			}
+		}
+		return 0
+	}
+	smalladdr2 := pullsubPieceAddr(vn, minByte, maxByte)
+	params := make([]*Varnode, 0, branches)
+	for i := 0; i < branches; i++ {
+		vnPiece := mult.Input(i)
+		// Avoid exponential splitting: reuse a SUBPIECE already pulled.
+		vnSub := pullsubFindSubpiece(vnPiece, newSize, minByte)
+		if vnSub == nil {
+			vnSub = pullsubBuildSubpiece(vnPiece, newSize, minByte, data)
+		}
+		params = append(params, vnSub)
+	}
+	newMulti := data.NewOp(len(params), mult.Addr())
+	newVn := data.NewVarnodeOut(int32(newSize), smalladdr2, newMulti)
+	data.OpSetOpcode(newMulti, CPUI_MULTIEQUAL)
+	data.OpSetAllInput(newMulti, params)
+	data.OpInsertBegin(newMulti, mult.Parent())
+	pullsubReplaceDescendants(vn, newVn, maxByte, minByte, data)
+	return 1
+}
+
+// apply pulls a SUBPIECE of an INDIRECT output back through the INDIRECT.
+// C++ parity: RulePullsubIndirect::applyOp.
+func (r *RulePullsubIndirect) apply(op *PcodeOp, data *Funcdata) int {
+	vn := op.Input(0)
+	if !vn.IsWritten() || vn.Size() > 8 {
+		return 0
+	}
+	indir := vn.Def()
+	if indir.Code() != CPUI_INDIRECT {
+		return 0
+	}
+	targOp := indir.Input(1).GetIndirectCause()
+	if targOp == nil || targOp.IsDead() || vn.IsAddrForce() {
+		return 0
+	}
+	maxByte, minByte := pullsubMinMaxUse(vn)
+	newSize := maxByte - minByte + 1
+	if maxByte < minByte || newSize >= int(vn.Size()) {
+		return 0
+	}
+	if !pullsubAcceptableSize(newSize) {
+		return 0
+	}
+	if outvn := op.Output(); outvn.IsPrecisLo() || outvn.IsPrecisHi() {
+		return 0
+	}
+	consume := ^(bitfieldSizeMask(int32(newSize)) << (8 * uint(minByte)))
+	if consume&indir.Input(0).Consumed() != 0 {
+		return 0
+	}
+	smalladdr2 := pullsubPieceAddr(vn, minByte, maxByte)
+	var small2 *Varnode
+	if indir.IsIndirectCreation() {
+		possibleout := !indir.Input(0).IsIndirectZero()
+		small2 = data.NewIndirectCreation(targOp, smalladdr2, int32(newSize), possibleout).Output()
+	} else {
+		basevn := indir.Input(0)
+		small1 := pullsubFindSubpiece(basevn, newSize, int(op.Input(1).Offset()))
+		if small1 == nil {
+			small1 = pullsubBuildSubpiece(basevn, newSize, int(op.Input(1).Offset()), data)
+		}
+		// A new INDIRECT next to the original one.
+		newInd := data.NewOp(2, indir.Addr())
+		data.OpSetOpcode(newInd, CPUI_INDIRECT)
+		small2 = data.NewVarnodeOut(int32(newSize), smalladdr2, newInd)
+		data.OpSetInput(newInd, small1, 0)
+		data.OpSetInput(newInd, data.NewVarnodeIop(targOp), 1)
+		data.OpInsertBefore(newInd, indir)
+	}
+	pullsubReplaceDescendants(vn, small2, maxByte, minByte, data)
+	return 1
+}
+
+// pullsubPieceAddr is the storage address of bytes minByte..maxByte of vn.
+func pullsubPieceAddr(vn *Varnode, minByte, maxByte int) address.Address {
+	a := vn.Addr()
+	if a.Space != nil && a.Space.BigEndian {
+		a.Offset += uint64(int(vn.Size()) - maxByte - 1)
+	} else {
+		a.Offset += uint64(minByte)
+	}
+	return a
+}
+
+// pullsubMinMaxUse returns the range of bytes of vn its readers use; any
+// reader other than a SUBPIECE uses all of it.
+// C++ parity: RulePullsubMulti::minMaxUse.
+func pullsubMinMaxUse(vn *Varnode) (maxByte, minByte int) {
+	inSize := int(vn.Size())
+	maxByte, minByte = -1, inSize
+	for _, op := range vn.DescendIter() {
+		if op.Code() != CPUI_SUBPIECE {
+			return inSize - 1, 0
+		}
+		lo := int(op.Input(1).Offset())
+		hi := lo + int(op.Output().Size()) - 1
+		if lo < minByte {
+			minByte = lo
+		}
+		if hi > maxByte {
+			maxByte = hi
 		}
 	}
-	replaceInputSlot(data, op, 0, base)
-	return 1
+	return maxByte, minByte
+}
+
+// pullsubReplaceDescendants points every SUBPIECE reading origVn at newVn
+// (which holds bytes minByte..maxByte), fixing up the truncation amount.
+// C++ parity: RulePullsubMulti::replaceDescendants.
+func pullsubReplaceDescendants(origVn, newVn *Varnode, maxByte, minByte int, data *Funcdata) {
+	for _, op := range origVn.DescendIter() {
+		if op.Code() != CPUI_SUBPIECE {
+			panic("Could not perform -replaceDescendants-")
+		}
+		truncAmount := int(op.Input(1).Offset())
+		outSize := op.Output().Size()
+		data.OpSetInput(op, newVn, 0)
+		switch {
+		case newVn.Size() == outSize:
+			if truncAmount != minByte {
+				panic("Could not perform -replaceDescendants-")
+			}
+			data.OpSetOpcode(op, CPUI_COPY)
+			data.OpRemoveInput(op, 1)
+		case newVn.Size() > outSize:
+			newTrunc := truncAmount - minByte
+			if newTrunc < 0 {
+				panic("Could not perform -replaceDescendants-")
+			}
+			if newTrunc != truncAmount {
+				data.OpSetInput(op, data.NewConstant(4, uint64(newTrunc)), 1)
+			}
+		default:
+			panic("Could not perform -replaceDescendants-")
+		}
+	}
+}
+
+// pullsubAcceptableSize reports whether a pulled piece of this size is a
+// natural size. C++ parity: RulePullsubMulti::acceptableSize.
+func pullsubAcceptableSize(size int) bool {
+	if size == 0 {
+		return false
+	}
+	return size >= 8 || size == 1 || size == 2 || size == 4
+}
+
+// pullsubBuildSubpiece builds sub(basevn, shift) of outsize bytes next to the
+// definition of basevn.
+// C++ parity: RulePullsubMulti::buildSubpiece. A join-space base takes a
+// unique output (join records are not modelled; C++ may find a piece).
+func pullsubBuildSubpiece(basevn *Varnode, outsize, shift int, data *Funcdata) *Varnode {
+	var newaddr address.Address
+	if basevn.IsInput() {
+		newaddr = asBasic(data.GetBasicBlocks().GetBlock(0)).startAddr()
+	} else {
+		if !basevn.IsWritten() {
+			panic("Undefined pullsub")
+		}
+		newaddr = basevn.Def().Addr()
+	}
+	usetmp := basevn.Space() != nil && basevn.Space().Kind == address.SpaceKindJoin
+	newOp := data.NewOp(2, newaddr)
+	data.OpSetOpcode(newOp, CPUI_SUBPIECE)
+	var outvn *Varnode
+	if usetmp {
+		outvn = data.NewUniqueOut(int32(outsize), newOp)
+	} else {
+		smalladdr1 := basevn.Addr()
+		if smalladdr1.Space.BigEndian {
+			smalladdr1.Offset += uint64(int(basevn.Size()) - (shift + outsize))
+		} else {
+			smalladdr1.Offset += uint64(shift)
+		}
+		outvn = data.NewVarnodeOut(int32(outsize), smalladdr1, newOp)
+	}
+	data.OpSetInput(newOp, basevn, 0)
+	data.OpSetInput(newOp, data.NewConstant(4, uint64(shift)), 1)
+	if basevn.IsInput() {
+		data.OpInsertBegin(newOp, asBasic(data.GetBasicBlocks().GetBlock(0)))
+	} else {
+		data.OpInsertAfter(newOp, basevn.Def())
+	}
+	return outvn
+}
+
+// pullsubFindSubpiece finds an existing sub(basevn, shift) of outsize bytes
+// in the block defining basevn.
+// C++ parity: RulePullsubMulti::findSubpiece.
+func pullsubFindSubpiece(basevn *Varnode, outsize, shift int) *Varnode {
+	for _, prevop := range basevn.DescendIter() {
+		if prevop.Code() != CPUI_SUBPIECE {
+			continue
+		}
+		// The output must be defined in the same block as basevn.
+		if basevn.IsInput() && prevop.Parent().Index() != 0 {
+			continue
+		}
+		if !basevn.IsWritten() {
+			continue
+		}
+		if basevn.Def().Parent() != prevop.Parent() {
+			continue
+		}
+		if prevop.Input(0) == basevn && int(prevop.Output().Size()) == outsize && int(prevop.Input(1).Offset()) == shift {
+			return prevop.Output()
+		}
+	}
+	return nil
 }
 
 type RulePullsubIndirect struct{ batchRule }
@@ -1325,15 +1573,6 @@ func NewRulePullsubIndirect(group string) *RulePullsubIndirect {
 	r := &RulePullsubIndirect{}
 	r.batchRule = newBatchRule(group, "pullsub_indirect", []OpCode{CPUI_SUBPIECE}, r.apply, func(g string) Rule { return NewRulePullsubIndirect(g) })
 	return r
-}
-
-func (r *RulePullsubIndirect) apply(op *PcodeOp, data *Funcdata) int {
-	ind := definedBy(op.Input(0), CPUI_INDIRECT)
-	if ind == nil || ind.NumInput() == 0 {
-		return 0
-	}
-	replaceInputSlot(data, op, 0, ind.Input(0))
-	return 1
 }
 
 // The C++ RulePushMulti (2-branch MULTIEQUAL phi CSE, coreaction.cc:1062) is
@@ -3244,7 +3483,6 @@ func (r *RuleInsertAbsorb) absorbNestedAnd(data *Funcdata, baseOp, insertOp *Pco
 	}
 	return 0
 }
-
 
 // isDoublePrecisionArithOp classifies opcodes that the C++ decompiler treats
 // as "acting on a logical whole" for the purpose of double-precision marking.
