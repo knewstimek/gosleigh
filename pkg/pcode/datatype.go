@@ -90,6 +90,10 @@ const (
 	// datatypeTypedef marks a host typedef name over a base type (DWORD,
 	// UINT): it prints by its own name. C++ parity: Datatype::typedefImm set.
 	datatypeTypedef datatypeFlags = 0x20000
+	// datatypeHostNamed marks a base type the host named (ulong for a 4-byte
+	// unsigned): its name is printed as is. Gosleigh-made base types are
+	// renamed to the core names instead (normalizedBaseType).
+	datatypeHostNamed datatypeFlags = 0x40000
 )
 
 // Datatype is the common surface shared by the supported p-code data-types.

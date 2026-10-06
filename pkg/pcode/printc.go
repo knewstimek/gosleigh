@@ -1362,6 +1362,9 @@ func (s *printCState) normalizeTypeForDecl(dt Datatype) Datatype {
 				return typed // a character type prints by its name (wchar_t, uchar)
 			}
 		}
+		if typed.Flags()&datatypeHostNamed != 0 {
+			return typed // C++ prints every data-type by its own name
+		}
 		return normalizedBaseType(typed, s.longSize())
 	default:
 		return dt

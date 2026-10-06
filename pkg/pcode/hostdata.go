@@ -122,7 +122,13 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 		return tf.GetUnicode(d.Name, d.Size, meta)
 	}
 	if m, ok := hostMetatypes[d.Meta]; ok {
-		return tf.GetBase(d.Size, m, d.Name)
+		bt := tf.GetBase(d.Size, m, d.Name)
+		// Base types intern by name, so an internally made type sharing the
+		// name also prints it -- which is the core name anyway.
+		if b, ok := bt.(*Base); ok && d.Name != "" && b.Name() == d.Name {
+			b.flags |= datatypeHostNamed
+		}
+		return bt
 	}
 	return tf.GetBase(d.Size, TYPE_UNKNOWN, "")
 }
