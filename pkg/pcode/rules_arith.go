@@ -477,15 +477,24 @@ type RuleAddMultCollapse struct{ batchRule }
 
 func NewRuleAddMultCollapse(group string) *RuleAddMultCollapse {
 	r := &RuleAddMultCollapse{}
-	r.batchRule = newBatchRule(group, "addmultcollapse", []OpCode{CPUI_INT_ADD}, r.apply, func(g string) Rule { return NewRuleAddMultCollapse(g) })
+	r.batchRule = newBatchRule(group, "addmultcollapse", []OpCode{CPUI_INT_ADD, CPUI_INT_MULT}, r.apply, func(g string) Rule { return NewRuleAddMultCollapse(g) })
 	return r
 }
 
 func (r *RuleAddMultCollapse) apply(op *PcodeOp, data *Funcdata) int {
+	if op.Code() == CPUI_INT_ADD && r.applyAddTerms(op, data) {
+		return 1
+	}
+	return r.applyFaithful(op, data)
+}
+
+// applyAddTerms holds Gosleigh's x+x / x*c+x INT_ADD folds, which C++ does
+// in RuleCollectTerms rather than here.
+func (r *RuleAddMultCollapse) applyAddTerms(op *PcodeOp, data *Funcdata) bool {
 	size := outputOrInputSize(op)
 	if sameValue(op.Input(0), op.Input(1)) {
 		rewriteOp(data, op, CPUI_INT_MULT, op.Input(0), data.NewConstant(size, 2))
-		return 1
+		return true
 	}
 	for slot := 0; slot < 2; slot++ {
 		mul := definedBy(op.Input(slot), CPUI_INT_MULT)
@@ -503,9 +512,14 @@ func (r *RuleAddMultCollapse) apply(op *PcodeOp, data *Funcdata) int {
 				continue
 			}
 			rewriteOp(data, op, CPUI_INT_MULT, base, data.NewConstant(size, truncateToSize(cval+1, size)))
-			return 1
+			return true
 		}
 	}
+	return false
+}
+
+// applyFaithful is C++ RuleAddMultCollapse::applyOp over INT_ADD and INT_MULT.
+func (r *RuleAddMultCollapse) applyFaithful(op *PcodeOp, data *Funcdata) int {
 	// Faithful C++ RuleAddMultCollapse branches (ruleaction.cc:4113-4182). These
 	// are the two branches the earlier Go port omitted:
 	//   main:    (sub2 + c1) + c0            => sub2 + (c0+c1)
