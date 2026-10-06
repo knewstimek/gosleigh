@@ -25,7 +25,9 @@ import (
 //
 // C++ parity: funcdata.hh FuncProto (partial)
 type FuncProto struct {
-	model *ProtoModel
+	// trashList: FuncProto::likelytrash override.
+	trashList []VarnodeData
+	model     *ProtoModel
 	// returnBytesConsumed is the smallest number of low return-value bytes
 	// known to matter (0 = all). C++ parity: FuncProto::returnBytesConsumed.
 	returnBytesConsumed int32

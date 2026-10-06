@@ -20,8 +20,10 @@ import "gosleigh/pkg/address"
 // C++ parity: fspec.hh FuncCallSpecs (partial)
 type FuncCallSpecs struct {
 	FuncProto
-	op *PcodeOp
-	fd *Funcdata
+	// activeInputState: FuncCallSpecs::activeinput.
+	activeInputState *ParamActive
+	op               *PcodeOp
+	fd               *Funcdata
 
 	// effectiveExtraPop is the working extrapop for this call site: the
 	// prototype's when known, otherwise solved by ActionStackPtrFlow.

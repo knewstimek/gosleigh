@@ -120,6 +120,8 @@ type ScopeLocal struct {
 	localByVn map[*Varnode]*HighVariable
 	// extState holds the symbol table and range state (see ext).
 	extState *scopeLocalExt
+	// funcTable: functions known at code addresses (Scope::queryFunction).
+	funcTable *scopeFunctionTable
 }
 
 // NewScopeLocal creates an empty ScopeLocal for the given calling convention.
@@ -307,7 +309,7 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 	// C++ parity: ScopeLocal::restructureHigh -- Ghidra merges all SSA versions at the
 	// same address into a single HighVariable with multiple instances.
 	type offsetGroup struct {
-		offset  uint64
+		offset   uint64
 		varnodes []*Varnode
 	}
 	paramGroups := make(map[uint64]*offsetGroup) // offset -> group

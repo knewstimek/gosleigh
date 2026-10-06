@@ -100,6 +100,8 @@ type Funcdata struct {
 	// actionState/blockState: driver flags and the basic/structured graphs.
 	actionState funcdataActionState
 	blockState  funcdataBlockState
+	// laneAccess: laned register records (Funcdata::lanedMap).
+	laneAccess *laneAccessData
 
 	// commentDB accumulates auto-generated warning comments (e.g. jump-table
 	// recovery failures) so PrintC can render them as inline block comments. In

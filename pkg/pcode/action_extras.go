@@ -16,6 +16,7 @@ package pcode
 
 import (
 	"sort"
+	"sync"
 
 	"gosleigh/pkg/address"
 )
@@ -461,12 +462,6 @@ func (fc *FuncCallSpecs) DoInputJoin(slot1 int, ishislot bool) {
 	active.JoinTrial(int32(slot1), joinaddr, totalsz)
 }
 
-// fcActiveInputMap stores the per-FuncCallSpecs ParamActive for active-input
-// recovery. A side map is used instead of adding a struct field so that
-// funccallspec.go's declaration stays untouched for a clean merge.
-// C++ parity: FuncCallSpecs::activeinput field (container only)
-var fcActiveInputMap = map[*FuncCallSpecs]*ParamActive{}
-
 // activeInput/accessors bridge the side map into methods. A linter-visible
 // accessor-style pair is used so the helper is reachable without touching
 // funccallspec.go's declaration list.
@@ -475,7 +470,7 @@ func (fc *FuncCallSpecs) getActiveInputState() *ParamActive {
 	if fc == nil {
 		return nil
 	}
-	return fcActiveInputMap[fc]
+	return fc.activeInputState
 }
 
 // setActiveInputState stores the side-mapped ParamActive.
@@ -483,22 +478,12 @@ func (fc *FuncCallSpecs) setActiveInputState(p *ParamActive) {
 	if fc == nil {
 		return
 	}
-	if p == nil {
-		delete(fcActiveInputMap, fc)
-		return
-	}
-	fcActiveInputMap[fc] = p
+	fc.activeInputState = p
 }
 
 // -----------------------------------------------------------------------------
 // FuncProto extensions (fspec.hh / fspec.cc subset)
 // -----------------------------------------------------------------------------
-
-// fpTrashListMap stores the per-FuncProto likelyTrash override so that the
-// funcproto.go declaration list stays untouched. The side-map pattern mirrors
-// fcActiveInputMap above.
-// C++ parity: FuncProto::likelytrash field (container only)
-var fpTrashListMap = map[*FuncProto][]VarnodeData{}
 
 // SetLikelyTrash installs the likelyTrash override list. Called by the
 // compiler spec loader once the <likelytrash> section is ported.
@@ -509,11 +494,7 @@ func (fp *FuncProto) SetLikelyTrash(entries []VarnodeData) {
 	if fp == nil {
 		return
 	}
-	if len(entries) == 0 {
-		delete(fpTrashListMap, fp)
-		return
-	}
-	fpTrashListMap[fp] = append([]VarnodeData(nil), entries...)
+	fp.trashList = append([]VarnodeData(nil), entries...)
 }
 
 // TrashBegin returns the start of the trash-register list. The C++ routine
@@ -528,10 +509,7 @@ func (fp *FuncProto) TrashBegin() []VarnodeData {
 	if fp == nil {
 		return nil
 	}
-	if entries, ok := fpTrashListMap[fp]; ok {
-		return entries
-	}
-	return nil
+	return fp.trashList
 }
 
 // TrashEnd is a marker companion to TrashBegin; Go iteration uses the slice
@@ -541,7 +519,7 @@ func (fp *FuncProto) TrashEnd() int {
 	if fp == nil {
 		return 0
 	}
-	return len(fpTrashListMap[fp])
+	return len(fp.trashList)
 }
 
 // PossibleInputParam reports whether (addr,sz) could be a legal parameter
@@ -587,21 +565,17 @@ type scopeFunctionTable struct {
 	external map[address.Address]*Funcdata
 }
 
-var scopeFunctionRegistry = map[*ScopeLocal]*scopeFunctionTable{}
-
 func scopeFunctionEnsure(sl *ScopeLocal) *scopeFunctionTable {
 	if sl == nil {
 		return nil
 	}
-	tab, ok := scopeFunctionRegistry[sl]
-	if !ok {
-		tab = &scopeFunctionTable{
+	if sl.funcTable == nil {
+		sl.funcTable = &scopeFunctionTable{
 			direct:   map[address.Address]*Funcdata{},
 			external: map[address.Address]*Funcdata{},
 		}
-		scopeFunctionRegistry[sl] = tab
 	}
-	return tab
+	return sl.funcTable
 }
 
 // RegisterFunctionAt installs a direct address -> Funcdata mapping. The
@@ -635,11 +609,10 @@ func (sl *ScopeLocal) FindFunctionByAddress(addr address.Address) *Funcdata {
 	if sl == nil {
 		return nil
 	}
-	tab, ok := scopeFunctionRegistry[sl]
-	if !ok {
+	if sl.funcTable == nil {
 		return nil
 	}
-	return tab.direct[addr]
+	return sl.funcTable.direct[addr]
 }
 
 // QueryExternalRefFunction returns the Funcdata reached by following the
@@ -651,11 +624,10 @@ func (sl *ScopeLocal) QueryExternalRefFunction(addr address.Address) *Funcdata {
 	if sl == nil {
 		return nil
 	}
-	tab, ok := scopeFunctionRegistry[sl]
-	if !ok {
+	if sl.funcTable == nil {
 		return nil
 	}
-	return tab.external[addr]
+	return sl.funcTable.external[addr]
 }
 
 // -----------------------------------------------------------------------------
@@ -738,9 +710,6 @@ type LaneAccessEntry struct {
 	Laned *LanedRegister
 }
 
-// laneAccessState is held in a side map keyed by function.
-var laneAccessState = map[*Funcdata]*laneAccessData{}
-
 type laneAccessData struct {
 	// records are the architecture's laned registers sorted by whole size.
 	// C++ parity: Architecture::lanerecords.
@@ -755,12 +724,10 @@ func laneState(fd *Funcdata) *laneAccessData {
 	if fd == nil {
 		return nil
 	}
-	s, ok := laneAccessState[fd]
-	if !ok {
-		s = &laneAccessData{lanedMap: map[VarnodeData]*LanedRegister{}}
-		laneAccessState[fd] = s
+	if fd.laneAccess == nil {
+		fd.laneAccess = &laneAccessData{lanedMap: map[VarnodeData]*LanedRegister{}}
 	}
-	return s
+	return fd.laneAccess
 }
 
 // SetLanedRegisters installs the architecture's laned register records,
@@ -959,7 +926,10 @@ func processLaneVarnode(data *Funcdata, vn *Varnode, lanedRegister *LanedRegiste
 // address.Space type.
 // C++ parity: AddrSpace::getSpacebase(0) container -- the per-space list of
 // (size, base reg) entries that the C++ AddrSpace owns directly.
-var spacebaseRegisterMap = map[*address.Space]VarnodeData{}
+var (
+	spacebaseRegisterMu  sync.RWMutex
+	spacebaseRegisterMap = map[*address.Space]VarnodeData{}
+)
 
 // RegisterSpacebaseRegister wires the SP register location for the given
 // stack-like address space. Loaders call this once per space at construction
@@ -969,6 +939,8 @@ func RegisterSpacebaseRegister(stackSpace *address.Space, spReg VarnodeData) {
 	if stackSpace == nil {
 		return
 	}
+	spacebaseRegisterMu.Lock()
+	defer spacebaseRegisterMu.Unlock()
 	if spReg.Space == nil || spReg.Size == 0 {
 		delete(spacebaseRegisterMap, stackSpace)
 		return
@@ -982,6 +954,8 @@ func spacebaseRegisterFor(stackSpace *address.Space) (VarnodeData, bool) {
 	if stackSpace == nil {
 		return VarnodeData{}, false
 	}
+	spacebaseRegisterMu.RLock()
+	defer spacebaseRegisterMu.RUnlock()
 	vd, ok := spacebaseRegisterMap[stackSpace]
 	return vd, ok
 }
@@ -1254,7 +1228,7 @@ func (fd *Funcdata) ResolveSpacebaseSymbol(spc *address.Space, off int64) (Datat
 	if ws <= 0 {
 		ws = 1
 	}
-	addrOff := off / ws // byteToAddress
+	addrOff := off / ws                                                                 // byteToAddress
 	probe := address.Address{Space: spc, Offset: wrapSpaceOffset(spc, uint64(addrOff))} // resolveConstant wraps
 	var entry *SymbolEntry
 	if g := fd.GetGlobalScope(); g != nil {
