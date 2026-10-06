@@ -152,8 +152,21 @@ func isBoolLike(vn *Varnode) bool {
 	if _, ok := boolConst(vn); ok {
 		return true
 	}
-	def := vn.Def()
-	return def != nil && def.IsBoolOutput()
+	return vn.IsBooleanValue(true)
+}
+
+// IsBooleanValue reports whether vn is known to hold only 0 or 1: the
+// output of a boolean-valued op, or (with useAnnotation) a type-locked
+// 1-byte bool input. C++ parity: Varnode::isBooleanValue.
+func (vn *Varnode) IsBooleanValue(useAnnotation bool) bool {
+	if vn.IsWritten() {
+		def := vn.Def()
+		return def.IsBoolOutput() || def.HasFlag(PcodeOpCalculatedBool)
+	}
+	if !useAnnotation {
+		return false
+	}
+	return vn.IsInput() && vn.IsTypeLock() && vn.Size() == 1 && vn.Type() != nil && vn.Type().Metatype() == TYPE_BOOL
 }
 
 func replaceInputs(data *Funcdata, op *PcodeOp, inputs ...*Varnode) {

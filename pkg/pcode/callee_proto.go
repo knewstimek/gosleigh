@@ -130,6 +130,11 @@ func (fc *FuncCallSpecs) linkLockedOutput(data *Funcdata) {
 	if out == nil || out.Type == nil || out.Type.Metatype() == TYPE_VOID || out.Addr.Space == nil {
 		return
 	}
+	// A locked boolean return makes the CALL a boolean-valued op.
+	// C++ parity: funcLinkOutput opMarkCalculatedBool (type recovery is on).
+	if out.Type.Metatype() == TYPE_BOOL {
+		fc.op.SetFlag(PcodeOpCalculatedBool)
+	}
 	if out.Addr.Space.Kind == address.SpaceKindStack {
 		return
 	}
@@ -172,6 +177,12 @@ func (t *typeOpCall) OutputTypeLocal(op *PcodeOp, tf *TypeFactory) Datatype {
 		return fc.lockedOut.Type
 	}
 	return t.typeOpBase.OutputTypeLocal(op, tf)
+}
+
+// GetOutputToken must dispatch through typeOpCall's OutputTypeLocal.
+// C++ parity: TypeOp::getOutputToken -> virtual getOutputLocal.
+func (t *typeOpCall) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	return t.OutputTypeLocal(op, cs.tlst)
 }
 
 // GetInputCast must dispatch through typeOpCall's InputTypeLocal.
