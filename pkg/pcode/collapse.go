@@ -714,13 +714,17 @@ func (bg *BlockGraph) finalizePrinting(fd *Funcdata) {
 	}
 }
 
+// sameBlockIndex compares blocks the way scopeBreak's int4 indices do: a
+// structured block carries the index of its entry component, so a goto to a
+// basic block hits the loop exit that starts with it (nil is index -1).
+func sameBlockIndex(a, b *FlowBlock) bool {
+	return a != nil && b != nil && a.index == b.index
+}
+
 // scopeBreak walks the top-level structured list, assigning a fall-through exit
 // to each block (the next sibling, or the enclosing curexit for the last one),
 // then recurses. curloopexit is the innermost loop's exit block (nil at top).
-// C++ parity: block.cc BlockGraph::scopeBreak (block.cc:1270). Pointers replace
-// C++ int4 indices: the stored goto target and the loop-exit sibling are the
-// same structure-graph FlowBlock object, so identity is equivalent to index
-// equality without depending on post-collapse index reassignment.
+// C++ parity: block.cc BlockGraph::scopeBreak (block.cc:1270).
 func (bg *BlockGraph) scopeBreak(curexit, curloopexit *FlowBlock) {
 	blocks := bg.blocks
 	for i, curbl := range blocks {
@@ -758,7 +762,7 @@ func (b *FlowBlock) scopeBreak(curexit, curloopexit *FlowBlock) {
 		if len(children) > 0 {
 			children[0].scopeBreak(b.GotoTargetBlock(), curloopexit)
 		}
-		if tgt := b.GotoTargetBlock(); tgt != nil && tgt == curloopexit {
+		if sameBlockIndex(b.GotoTargetBlock(), curloopexit) {
 			b.setGotoType(BlockFlagBreakGoto)
 		}
 	case BlockIfType:
@@ -770,7 +774,7 @@ func (b *FlowBlock) scopeBreak(curexit, curloopexit *FlowBlock) {
 		for i := 1; i < len(children); i++ {
 			children[i].scopeBreak(curexit, curloopexit)
 		}
-		if tgt := b.GotoTargetBlock(); tgt != nil && tgt == curloopexit {
+		if sameBlockIndex(b.GotoTargetBlock(), curloopexit) {
 			b.setGotoType(BlockFlagBreakGoto)
 		}
 	case BlockConditionType:
