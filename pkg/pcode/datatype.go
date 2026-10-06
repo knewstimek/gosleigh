@@ -596,10 +596,10 @@ func (p *Pointer) Stripped() *Pointer { return p.relStripped }
 // then size descending (larger size = earlier). A negative result means a
 // is more specific / larger than b.
 //
-// This models the base Datatype::compare plus the TypePointer::compare override
-// (pointee recursion) -- required so a more-specific pointer (int*) can displace
-// a less-specific one (undefined4*) during type inference. Array/Struct override
-// levels remain unported (their leaves are not reached by the current sweeps).
+// This models the base Datatype::compare plus the TypePointer, TypeArray,
+// TypeStruct, TypeUnion and TypeEnum overrides.
+// Known mismatch: the final id tie-break uses Gosleigh's name-hash ids, and
+// TypeCode/partial types compare as the base.
 func TypeOrder(a, b Datatype) int {
 	return typeOrderLevel(a, b, 10)
 }
@@ -651,8 +651,128 @@ func typeOrderLevel(a, b Datatype, level int) int {
 			}
 			return 1
 		}
+		return 0
+	}
+	switch ta := a.(type) {
+	case *Array: // C++ parity: TypeArray::compare
+		tb, ok := b.(*Array)
+		if !ok {
+			return 0
+		}
+		if level--; level < 0 {
+			return compareTypeID(a, b)
+		}
+		return typeOrderLevel(ta.Element(), tb.Element(), level)
+	case *Struct: // C++ parity: TypeStruct::compare
+		tb, ok := b.(*Struct)
+		if !ok {
+			return 0
+		}
+		return compareFieldLists(a, b, ta.fields, tb.fields, level, true)
+	case *Union: // C++ parity: TypeUnion::compare
+		tb, ok := b.(*Union)
+		if !ok {
+			return 0
+		}
+		return compareFieldLists(a, b, ta.fields, tb.fields, level, false)
+	case *Enum: // C++ parity: TypeEnum::compare (compareDependency)
+		tb, ok := b.(*Enum)
+		if !ok {
+			return 0
+		}
+		if len(ta.values) != len(tb.values) {
+			if len(ta.values) < len(tb.values) {
+				return -1
+			}
+			return 1
+		}
+		ka, kb := sortedEnumKeys(ta.values), sortedEnumKeys(tb.values)
+		for i := range ka {
+			if ka[i] != kb[i] {
+				if ka[i] < kb[i] {
+					return -1
+				}
+				return 1
+			}
+			if na, nb := ta.values[ka[i]], tb.values[kb[i]]; na != nb {
+				if na < nb {
+					return -1
+				}
+				return 1
+			}
+		}
 	}
 	return 0
+}
+
+// compareTypeID is the last tie-break between two equal-looking data-types.
+func compareTypeID(a, b Datatype) int {
+	if a.ID() == b.ID() {
+		return 0
+	}
+	if a.ID() < b.ID() {
+		return -1
+	}
+	return 1
+}
+
+// compareFieldLists orders two structures (byOffset) or unions by their
+// fields: count (more fields first), then each field's offset (structures
+// only), name and metatype, then the field types themselves.
+// C++ parity: TypeStruct::compare (TypeField::compare) / TypeUnion::compare.
+func compareFieldLists(a, b Datatype, fa, fb []TypeField, level int, byOffset bool) int {
+	if len(fa) != len(fb) {
+		return len(fb) - len(fa)
+	}
+	for i := range fa {
+		if byOffset && fa[i].Offset != fb[i].Offset {
+			if fa[i].Offset < fb[i].Offset {
+				return -1
+			}
+			return 1
+		}
+		if fa[i].Name != fb[i].Name {
+			if fa[i].Name < fb[i].Name {
+				return -1
+			}
+			return 1
+		}
+		ma, mb := metatypeOf(fa[i].Type), metatypeOf(fb[i].Type)
+		if ma != mb {
+			if ma < mb {
+				return -1
+			}
+			return 1
+		}
+	}
+	if level--; level < 0 {
+		return compareTypeID(a, b)
+	}
+	// Still equal: go down into each field type
+	for i := range fa {
+		if fa[i].Type != fb[i].Type && fa[i].Type != nil && fb[i].Type != nil { // Short circuit recursive loops
+			if c := typeOrderLevel(fa[i].Type, fb[i].Type, level); c != 0 {
+				return c
+			}
+		}
+	}
+	return 0
+}
+
+func metatypeOf(dt Datatype) metatype {
+	if dt == nil {
+		return TYPE_UNKNOWN
+	}
+	return dt.Metatype()
+}
+
+func sortedEnumKeys(m map[uint64]string) []uint64 {
+	keys := make([]uint64, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	return keys
 }
 
 func subMetaForMetatype(meta metatype) subMetatype {
