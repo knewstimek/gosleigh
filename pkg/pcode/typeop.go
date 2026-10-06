@@ -447,11 +447,11 @@ func RegisterTypeOps() []TypeOp {
 	inst[CPUI_INT_CARRY] = &typeOpBase{CPUI_INT_CARRY, PcodeOpBinary | PcodeOpBoolOutput | PcodeOpCommutative, "CARRY"}
 	inst[CPUI_INT_SCARRY] = &typeOpBase{CPUI_INT_SCARRY, PcodeOpBinary | PcodeOpBoolOutput | PcodeOpCommutative, "SCARRY"}
 	inst[CPUI_INT_SBORROW] = &typeOpBase{CPUI_INT_SBORROW, PcodeOpBinary | PcodeOpBoolOutput, "SBORROW"}
-	inst[CPUI_INT_2COMP] = &typeOpBase{CPUI_INT_2COMP, PcodeOpUnary, "-"}
-	inst[CPUI_INT_NEGATE] = &typeOpBase{CPUI_INT_NEGATE, PcodeOpUnary, "~"}
-	inst[CPUI_INT_XOR] = &typeOpBase{CPUI_INT_XOR, PcodeOpBinary | PcodeOpCommutative, "^"}
-	inst[CPUI_INT_AND] = &typeOpBase{CPUI_INT_AND, PcodeOpBinary | PcodeOpCommutative, "&"}
-	inst[CPUI_INT_OR] = &typeOpBase{CPUI_INT_OR, PcodeOpBinary | PcodeOpCommutative, "|"}
+	inst[CPUI_INT_2COMP] = &typeOpArith{typeOpBase{CPUI_INT_2COMP, PcodeOpUnary, "-"}}
+	inst[CPUI_INT_NEGATE] = &typeOpArith{typeOpBase{CPUI_INT_NEGATE, PcodeOpUnary, "~"}}
+	inst[CPUI_INT_XOR] = &typeOpArith{typeOpBase{CPUI_INT_XOR, PcodeOpBinary | PcodeOpCommutative, "^"}}
+	inst[CPUI_INT_AND] = &typeOpArith{typeOpBase{CPUI_INT_AND, PcodeOpBinary | PcodeOpCommutative, "&"}}
+	inst[CPUI_INT_OR] = &typeOpArith{typeOpBase{CPUI_INT_OR, PcodeOpBinary | PcodeOpCommutative, "|"}}
 	inst[CPUI_INT_LEFT] = &typeOpIntLeft{typeOpBase{CPUI_INT_LEFT, PcodeOpBinary, "<<"}}
 	inst[CPUI_INT_RIGHT] = &typeOpIntRight{typeOpBase{CPUI_INT_RIGHT, PcodeOpBinary, ">>"}}
 	inst[CPUI_INT_SRIGHT] = &typeOpIntSright{typeOpBase{CPUI_INT_SRIGHT, PcodeOpBinary, ">>"}}

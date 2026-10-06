@@ -700,3 +700,35 @@ func (t *typeOpIntSright) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory)
 	}
 	return t.typeOpBase.InputTypeLocal(op, slot, tf)
 }
+
+// typeOpArith is an integer op whose output token follows the arithmetic
+// typing rules: INT_2COMP, INT_NEGATE, INT_XOR, INT_AND, INT_OR.
+// C++ parity: TypeOpInt2Comp/IntNegate/IntXor/IntAnd/IntOr::getOutputToken.
+type typeOpArith struct{ typeOpBase }
+
+func (t *typeOpArith) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	return cs.arithmeticOutputStandard(op)
+}
+
+// shiftOutputToken is the token of a shift: the type of the shifted value,
+// with a boolean read as an integer.
+// C++ parity: TypeOpIntLeft/IntRight/IntSright::getOutputToken.
+func shiftOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	res1 := op.Input(0).HighTypeReadFacing(op)
+	if res1.Metatype() == TYPE_BOOL {
+		res1 = baseForMeta(cs.tlst, res1.Size(), TYPE_INT)
+	}
+	return res1
+}
+
+func (t *typeOpIntLeft) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	return shiftOutputToken(op, cs)
+}
+
+func (t *typeOpIntRight) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	return shiftOutputToken(op, cs)
+}
+
+func (t *typeOpIntSright) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	return shiftOutputToken(op, cs)
+}
