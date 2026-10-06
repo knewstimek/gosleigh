@@ -349,10 +349,12 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// within-instruction writes are tracked but not propagated across instructions.
 	var instructionDefs map[varKey]*pcode.Varnode
 
-	// splitTail links a block ending in an instruction-internal CBRANCH to the
-	// block holding the rest of that instruction (CMOVcc lowers to
-	// 'goto next if !cond; dst = src').
+	// splitTail links a block ending inside an instruction to the block
+	// holding the rest of that instruction (CMOVcc lowers to
+	// 'goto next if !cond; dst = src'). relTarget holds the destination of a
+	// block ending in a relative (constant-space) branch.
 	splitTail := make(map[*pcode.BlockBasic]*pcode.BlockBasic)
+	relTarget := make(map[*pcode.BlockBasic]relLink)
 	knownAddrs := make(map[address.Address]struct{}, len(records))
 	for _, record := range records {
 		knownAddrs[record.translation.Address] = struct{}{}
@@ -381,21 +383,38 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		instructionDefs = make(map[varKey]*pcode.Varnode)
 		// An op after a branch inside one instruction starts a new block.
 		// C++ parity: FlowInfo marks the op following a branch startbasic.
-		segs := splitAtInnerBranches(record.translation.Ops)
-		for si, seg := range segs {
+		ops := record.translation.Ops
+		bounds := splitInstruction(ops)
+		segBlocks := make([]*pcode.BlockBasic, len(bounds))
+		for si, b := range bounds {
 			sub, rec := record.translation, record
-			if len(segs) > 1 {
-				sub.Ops = seg
+			if len(bounds) > 1 || len(ops) != b[1] {
+				sub.Ops = ops[b[0]:b[1]]
 				rec = instructionRecord{translation: sub, flow: analyzeInstructionFlow(sub, cfg.Entry.Space, knownAddrs)}
 			}
 			if si > 0 {
 				tail := graph.NewBlockBasicInGraph()
 				splitTail[current] = tail
 				current = tail
+				// A value crossing a block boundary inside the instruction
+				// (a relative-branch loop) must reach heritage as a free read.
+				instructionDefs = make(map[varKey]*pcode.Varnode)
 			}
+			segBlocks[si] = current
 			lastInBlock[current] = rec
 			if err := addInstructionOps(fd, current, sub, instructionDefs); err != nil {
 				return nil, err
+			}
+		}
+		for si, b := range bounds {
+			if t, ok := relativeTargetIndex(ops, b[1]-1); ok {
+				link := relLink{next: record.translation.Next}
+				for sj, c := range bounds {
+					if c[0] == t {
+						link.seg = segBlocks[sj]
+					}
+				}
+				relTarget[segBlocks[si]] = link
 			}
 		}
 	}
@@ -433,7 +452,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		registerRecoveredTables(fd, recoveredTables)
 	}
 
-	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock, recoveredTables, splitTail)
+	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock, recoveredTables, splitTail, relTarget)
 	graph.StructureLoops()
 	fd.SetBasicBlocks(graph)
 	fd.SetFlag(pcode.FuncBlocksGenerated)
@@ -1345,13 +1364,8 @@ func extractBranchTarget(translation sla.InstructionTranslation, entrySpace *add
 			if input.Space.Kind != address.SpaceKindConstant {
 				return input.Address(), true
 			}
-			// Constant-space operand: interpret as relative offset from Next.
-			if target, ok := addSignedOffset(translation.Next, int64(int8(input.Offset))); ok {
-				return target, true
-			}
-			if entrySpace != nil {
-				return address.Address{Space: entrySpace, Offset: input.Offset}, true
-			}
+			// A constant-space operand is a relative p-code op offset inside
+			// the instruction (C++ FlowInfo::findRelTarget), not an address.
 		}
 	}
 	return address.Address{}, false
@@ -1632,8 +1646,24 @@ func resolveInput(fd *pcode.Funcdata, input pcode.VarnodeData, defs map[varKey]*
 	return vn
 }
 
-func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode.BlockBasic, instToBlock map[address.Address]*pcode.BlockBasic, lastInBlock map[*pcode.BlockBasic]instructionRecord, recoveredTables map[uint64]*pcode.JumpTable, splitTail map[*pcode.BlockBasic]*pcode.BlockBasic) {
+func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode.BlockBasic, instToBlock map[address.Address]*pcode.BlockBasic, lastInBlock map[*pcode.BlockBasic]instructionRecord, recoveredTables map[uint64]*pcode.JumpTable, splitTail map[*pcode.BlockBasic]*pcode.BlockBasic, relTarget map[*pcode.BlockBasic]relLink) {
 	seen := make(map[edgeKey]struct{})
+	// branchTarget resolves a block's branch destination: an op inside the
+	// same instruction, the next instruction for a relative branch past the
+	// last op, or a decoded instruction address.
+	// C++ parity: FlowInfo::branchTarget / findRelTarget.
+	branchTarget := func(block *pcode.BlockBasic, rec instructionRecord) *pcode.BlockBasic {
+		if l, ok := relTarget[block]; ok {
+			if l.seg != nil {
+				return l.seg
+			}
+			return instToBlock[l.next]
+		}
+		if rec.flow.hasDirect {
+			return blockByAddr[rec.flow.directTarget]
+		}
+		return nil
+	}
 	// Visit blocks in ascending source-op-address order. Ghidra builds CFG edges
 	// by walking the dead op list in ascending address order (FlowInfo::collectEdges,
 	// flow.cc:906) and calling bblocks.addEdge in that order (connectBasic,
@@ -1651,9 +1681,12 @@ func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode
 		// Blocks split inside one instruction: each falls through to the next
 		// piece, and a conditional piece also branches to its target.
 		for tail := splitTail[block]; tail != nil; tail = splitTail[block] {
-			addEdge(graph, seen, block, tail)
-			if rec, ok := lastInBlock[block]; ok && rec.flow.hasDirect {
-				addEdge(graph, seen, block, blockByAddr[rec.flow.directTarget])
+			rec := lastInBlock[block]
+			if rec.flow.hasFallthrough {
+				addEdge(graph, seen, block, tail)
+			}
+			if t := branchTarget(block, rec); t != nil {
+				addEdge(graph, seen, block, t)
 			}
 			block = tail
 		}
@@ -1682,13 +1715,14 @@ func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode
 			}
 			continue
 		}
+		target := branchTarget(block, record)
 		if record.flow.conditional {
 			addEdge(graph, seen, block, instToBlock[record.flow.fallthroughAddr])
-			addEdge(graph, seen, block, blockByAddr[record.flow.directTarget])
+			addEdge(graph, seen, block, target)
 			continue
 		}
-		if record.flow.hasDirect {
-			addEdge(graph, seen, block, blockByAddr[record.flow.directTarget])
+		if target != nil {
+			addEdge(graph, seen, block, target)
 			continue
 		}
 		if record.flow.hasFallthrough {
@@ -1697,18 +1731,74 @@ func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode
 	}
 }
 
-// splitAtInnerBranches cuts an instruction's ops after every CBRANCH that is
-// not the last op.
-func splitAtInnerBranches(ops []pcode.RawOp) [][]pcode.RawOp {
-	var segs [][]pcode.RawOp
-	start := 0
+// relLink is the destination of a relative branch: seg when it lands on an
+// op of the same instruction, else the next instruction.
+type relLink struct {
+	seg  *pcode.BlockBasic
+	next address.Address
+}
+
+// relativeTargetIndex returns the op index a relative (constant-space)
+// BRANCH/CBRANCH at ops[i] jumps to; len(ops) means the next instruction.
+// C++ parity: FlowInfo::findRelTarget (target time = op time + offset).
+func relativeTargetIndex(ops []pcode.RawOp, i int) (int, bool) {
+	if i < 0 || i >= len(ops) {
+		return 0, false
+	}
+	op := ops[i]
+	if (op.OpCode != pcode.CPUI_BRANCH && op.OpCode != pcode.CPUI_CBRANCH) || len(op.Inputs) == 0 {
+		return 0, false
+	}
+	in := op.Inputs[0]
+	if in.Space == nil || in.Space.Kind != address.SpaceKindConstant {
+		return 0, false
+	}
+	off := int64(in.Offset)
+	if in.Size > 0 && in.Size < 8 {
+		shift := 64 - 8*uint(in.Size)
+		off = off << shift >> shift
+	}
+	t := i + int(off)
+	if t < 0 || t > len(ops) {
+		return 0, false
+	}
+	return t, true
+}
+
+// splitInstruction cuts an instruction's ops into basic-block pieces
+// [start,end): after every branch that is not the last op and before every
+// op a relative branch targets. Ops after a BRANCH/BRANCHIND/RETURN that no
+// earlier relative branch reaches past are dropped.
+// C++ parity: FlowInfo::processInstruction (opMarkStartBasic on relative
+// targets, startbasic after branches, deleteRemainingOps).
+func splitInstruction(ops []pcode.RawOp) [][2]int {
+	n := len(ops)
+	start := make([]bool, n+1)
+	maxTarget := 0
 	for i, op := range ops {
-		if op.OpCode == pcode.CPUI_CBRANCH && i+1 < len(ops) {
-			segs = append(segs, ops[start:i+1])
-			start = i + 1
+		if t, ok := relativeTargetIndex(ops, i); ok && t < n {
+			start[t] = true
+			if t > maxTarget {
+				maxTarget = t
+			}
+		}
+		if (op.OpCode == pcode.CPUI_BRANCH || op.OpCode == pcode.CPUI_BRANCHIND || op.OpCode == pcode.CPUI_RETURN) && i >= maxTarget {
+			n = i + 1
+			break
+		}
+		if op.OpCode == pcode.CPUI_BRANCH || op.OpCode == pcode.CPUI_CBRANCH {
+			start[i+1] = true
 		}
 	}
-	return append(segs, ops[start:])
+	var segs [][2]int
+	from := 0
+	for i := 1; i < n; i++ {
+		if start[i] {
+			segs = append(segs, [2]int{from, i})
+			from = i
+		}
+	}
+	return append(segs, [2]int{from, n})
 }
 
 func addEdge(graph *pcode.BlockGraph, seen map[edgeKey]struct{}, from *pcode.BlockBasic, to *pcode.BlockBasic) {
@@ -1780,29 +1870,7 @@ func resolveTarget(translation sla.InstructionTranslation, raw pcode.RawOp, entr
 		_, exists := known[target]
 		return target, exists
 	}
-
-	candidates := make([]address.Address, 0, 5)
-	if entrySpace != nil {
-		candidates = append(candidates, address.Address{Space: entrySpace, Offset: input.Offset})
-	}
-	if translation.Address.Space != nil {
-		candidates = append(candidates, address.Address{Space: translation.Address.Space, Offset: input.Offset})
-	}
-	if translation.Next.Space != nil {
-		candidates = append(candidates, address.Address{Space: translation.Next.Space, Offset: input.Offset})
-	}
-	if target, ok := addSignedOffset(translation.Next, int64(int8(input.Offset))); ok {
-		candidates = append(candidates, target)
-	}
-	if target, ok := addSignedOffset(translation.Address, int64(int8(input.Offset))); ok {
-		candidates = append(candidates, target)
-	}
-
-	for _, candidate := range candidates {
-		if _, exists := known[candidate]; exists {
-			return candidate, true
-		}
-	}
+	// Relative branch: resolved inside the instruction (relTarget).
 	return address.Address{}, false
 }
 
@@ -1953,16 +2021,29 @@ func registerRecoveredTables(fd *pcode.Funcdata, recoveredTables map[uint64]*pco
 // continues to the next sequential instruction, which must still be collected.
 // C++ ref: FlowInfo::hasTerminator / BasicBlock successor discovery in FlowInfo.cc.
 func hasHardTerminator(translation sla.InstructionTranslation) bool {
-	for _, op := range translation.Ops {
-		switch op.OpCode {
-		case pcode.CPUI_RETURN, pcode.CPUI_BRANCHIND:
-			return true
-		case pcode.CPUI_BRANCH:
-			// Unconditional branch: no fall-through.
+	return !instructionFallsThrough(translation.Ops)
+}
+
+// instructionFallsThrough reports whether control can leave the instruction
+// to the next one: a relative branch past its last op, or a last (kept) op
+// that is not BRANCH/BRANCHIND/RETURN.
+// C++ parity: FlowInfo::xrefControlFlow isfallthru.
+func instructionFallsThrough(ops []pcode.RawOp) bool {
+	bounds := splitInstruction(ops)
+	n := bounds[len(bounds)-1][1]
+	for i := 0; i < n; i++ {
+		if t, ok := relativeTargetIndex(ops, i); ok && t == len(ops) {
 			return true
 		}
 	}
-	return false
+	if n == 0 {
+		return true
+	}
+	switch ops[n-1].OpCode {
+	case pcode.CPUI_BRANCH, pcode.CPUI_BRANCHIND, pcode.CPUI_RETURN:
+		return false
+	}
+	return true
 }
 
 // spaceHighest is the largest byte offset in the space.
