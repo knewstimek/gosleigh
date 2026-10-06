@@ -85,10 +85,28 @@ func (s *printCState) globalVarnodeName(vn *Varnode, e *SymbolEntry) string {
 	sym := e.Symbol()
 	name := s.globalSymbolName(sym)
 	ct := sym.Type()
-	if ct == nil || vn.Space() != e.Addr().Space || vn.Offset() < e.Addr().Offset {
+	if ct == nil {
 		return name
 	}
-	off := int32(vn.Offset() - e.Addr().Offset)
+	// A varnode merged into the global's variable from other storage (a
+	// register) sits where the high's global member sits.
+	// C++ parity: PrintC::pushSymbolDetail (high->getSymbolOffset, vn size).
+	at := vn
+	if vn.Space() != e.Addr().Space {
+		at = nil
+		if hv := vn.High(); hv != nil {
+			for _, w := range hv.Instances() {
+				if w.Space() == e.Addr().Space {
+					at = w
+					break
+				}
+			}
+		}
+	}
+	if at == nil || at.Offset() < e.Addr().Offset {
+		return name
+	}
+	off := int32(at.Offset() - e.Addr().Offset)
 	sz := vn.Size()
 	if off == 0 && sz == ct.Size() {
 		return name
