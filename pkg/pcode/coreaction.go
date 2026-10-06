@@ -922,7 +922,7 @@ func (a *ActionPrototypeTypes) Apply(data *Funcdata) int {
 				// arity. C++ parity: data.opInsertInput(op,vn,op->numInput())
 				// (coreaction.cc:4656).
 				data.OpInsertInput(op, vn, op.NumInput())
-				SetVarnodeType(vn, out.Type())
+				vn.UpdateTypeLock(out.Type(), true, true) // C++ parity: vn->updateType(outparam->getType(),true,true)
 			}
 		}
 	} else {

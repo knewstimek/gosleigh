@@ -361,6 +361,24 @@ func (a *ActionSetCasts) castInput(op *PcodeOp, slot int, data *Funcdata, cs *Ca
 	return 1
 }
 
+// isOpIdentical reports whether a variable of type ct1 can stand in for one
+// of type ct2 in every operation: the same type once matching pointer levels
+// and typedefs are stripped.
+// C++ parity: ActionSetCasts::isOpIdentical.
+// Known mismatch: a Go typedef keeps no link to the type it names, so a
+// typedef is only identical to itself.
+func isOpIdentical(ct1, ct2 Datatype) bool {
+	for {
+		p1, ok1 := ct1.(*Pointer)
+		p2, ok2 := ct2.(*Pointer)
+		if !ok1 || !ok2 {
+			break
+		}
+		ct1, ct2 = p1.Pointee(), p2.Pointee()
+	}
+	return ct1 == ct2
+}
+
 // tryResolutionAdjustment removes the need for a cast between an input and
 // the output of op by resolving a union (or single-component) data-type on
 // either side to a compatible form.
@@ -466,10 +484,17 @@ func (a *ActionSetCasts) castOutput(op *PcodeOp, data *Funcdata, cs *CastStrateg
 		}
 		outHighResolve = findResolve(outHighType, op, -1) // Finish fetching DefFacing data-type
 	}
+	force := false
 	if outvn.IsImplied() {
 		// Implied varnode must take on the parse (token) type for atomic types,
 		// or for pointers that do not point to a composite.
-		if outHighResolve == nil || outHighResolve.Metatype() != TYPE_PTR {
+		if outvn.IsTypeLock() {
+			// The Varnode input to a RETURN is marked as implied but casting
+			// should act as if it were explicit.
+			if outOp := outvn.LoneDescend(); outOp == nil || outOp.Code() != CPUI_RETURN {
+				force = !isOpIdentical(outHighResolve, tokenct)
+			}
+		} else if outHighResolve == nil || outHighResolve.Metatype() != TYPE_PTR {
 			outvn.UpdateType(tokenct)
 			outHighResolve = outvn.HighTypeDefFacing()
 		} else if tokenct != nil && tokenct.Metatype() == TYPE_PTR {
@@ -481,13 +506,14 @@ func (a *ActionSetCasts) castOutput(op *PcodeOp, data *Funcdata, cs *CastStrateg
 				}
 			}
 		}
-		// Type-lock force branch omitted (no implied type locks modeled here).
 	}
 	opc := CPUI_CAST
-	if outHighResolve != nil && outHighResolve.Metatype() == TYPE_PTR && testStructOffset0(outHighResolve, tokenct, cs) {
-		opc = CPUI_PTRSUB
-	} else if cs.CastStandard(outHighResolve, tokenct, false, true) == nil {
-		return 0
+	if !force {
+		if outHighResolve != nil && outHighResolve.Metatype() == TYPE_PTR && testStructOffset0(outHighResolve, tokenct, cs) {
+			opc = CPUI_PTRSUB
+		} else if cs.CastStandard(outHighResolve, tokenct, false, true) == nil {
+			return 0
+		}
 	}
 	// Generate the cast op: op now writes a fresh implied unique, and the CAST
 	// produces the original output Varnode from it.
