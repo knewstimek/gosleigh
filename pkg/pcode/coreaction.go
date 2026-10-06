@@ -3156,18 +3156,37 @@ func (a *ActionVarnodeProps) Clone(groups ActionGroupList) Action {
 // Funcdata::totalReplaceConstant used by ActionVarnodeProps::apply.
 // C++ parity: funcdata_varnode.cc Funcdata::totalReplaceConstant
 func totalReplaceConstant(data *Funcdata, vn *Varnode, val uint64) {
-	if data == nil || vn == nil {
-		return
-	}
-	uses := vn.DescendIter()
-	for _, useOp := range uses {
-		slot := useOp.GetSlot(vn)
+	// A marker (MULTIEQUAL/INDIRECT) never takes a constant directly: its
+	// readers share one COPY of the constant placed after vn's definition
+	// (or at the start of the entry block for an input).
+	var newrep *Varnode
+	for _, op := range vn.DescendIter() {
+		slot := op.GetSlot(vn)
 		if slot < 0 {
 			continue
 		}
-		c := data.NewConstant(vn.Size(), val)
-		data.OpUnsetInput(useOp, slot)
-		data.OpSetInput(useOp, c, slot)
+		rep := data.NewConstant(vn.Size(), val)
+		if op.IsMarker() {
+			if newrep == nil {
+				var copyop *PcodeOp
+				if vn.IsWritten() {
+					copyop = data.NewOp(1, vn.Def().Addr())
+					data.OpSetOpcode(copyop, CPUI_COPY)
+					newrep = data.NewUniqueOut(vn.Size(), copyop)
+					data.OpSetInput(copyop, rep, 0)
+					data.OpInsertAfter(copyop, vn.Def())
+				} else {
+					bb := asBasic(data.GetBasicBlocks().GetBlock(0))
+					copyop = data.NewOp(1, bb.startAddr())
+					data.OpSetOpcode(copyop, CPUI_COPY)
+					newrep = data.NewUniqueOut(vn.Size(), copyop)
+					data.OpSetInput(copyop, rep, 0)
+					data.OpInsertBegin(copyop, bb)
+				}
+			}
+			rep = newrep
+		}
+		data.OpSetInput(op, rep, slot)
 	}
 }
 
