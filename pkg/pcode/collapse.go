@@ -580,8 +580,20 @@ func (bg *BlockGraph) collapseRegion(nodes []*FlowBlock, tp BlockType) *FlowBloc
 	return newBlock
 }
 
+// newBlockList collapses nodes into a list. A binary condition keeps the
+// false edge of its last node: collapseRegion's edge redirection does not
+// preserve the order when an exit turns into a loop back to the list.
+// C++ parity: BlockGraph::newBlockList (forceOutputNum + forceFalseEdge).
 func (bg *BlockGraph) newBlockList(nodes []*FlowBlock) *FlowBlock {
-	return bg.collapseRegion(nodes, BlockListType)
+	var out0 *FlowBlock
+	if last := nodes[len(nodes)-1]; last.SizeOut() == 2 {
+		out0 = last.getOut(0)
+	}
+	res := bg.collapseRegion(nodes, BlockListType)
+	if out0 != nil && res.SizeOut() == 2 {
+		res.ForceFalseEdge(out0) // Preserve the condition
+	}
+	return res
 }
 
 func (bg *BlockGraph) newBlockCondition(left, right *FlowBlock) *FlowBlock {
