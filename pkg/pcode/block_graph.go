@@ -144,7 +144,7 @@ func (bg *BlockGraph) ClearVisitCount() {
 // and so is any block left unvisited; the entry block is traversed last so it
 // gets index 0. Returns the roots, entry first.
 // C++ parity: block.cc BlockGraph::findSpanningTree. Irreducible edges are not
-// modelled, and only the tree/forward/cross/back labels are cleared (C++
+// modelled, and only the spanning-tree and loop labels are cleared (C++
 // clears every edge flag).
 func (bg *BlockGraph) FindSpanningTree() []*FlowBlock {
 	n := len(bg.blocks)
@@ -177,7 +177,7 @@ func (bg *BlockGraph) FindSpanningTree() []*FlowBlock {
 		bl   *FlowBlock
 		edge int
 	}
-	const spanFlags = EdgeFlagTree | EdgeFlagForward | EdgeFlagCross | EdgeFlagBack
+	const spanFlags = EdgeFlagTree | EdgeFlagForward | EdgeFlagCross | EdgeFlagBack | EdgeFlagLoop
 	for repeat := 0; repeat < 2; repeat++ {
 		extraroots := false
 		rpostcount := n
@@ -243,7 +243,7 @@ func (bg *BlockGraph) FindSpanningTree() []*FlowBlock {
 					child.numDesc = 1
 					stack = append(stack, frame{bl: child})
 				case child.index == -1: // child is on the stack
-					cur.SetOutEdgeFlag(edge, EdgeFlagBack)
+					cur.SetOutEdgeFlag(edge, EdgeFlagBack|EdgeFlagLoop)
 				case cur.visitCount < child.visitCount:
 					cur.SetOutEdgeFlag(edge, EdgeFlagForward)
 				default:
