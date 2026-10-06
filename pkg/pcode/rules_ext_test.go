@@ -39,8 +39,9 @@ func TestRulesExt_RewriteAndNonRewrite(t *testing.T) {
 	if got := NewRuleZextSless("ext").ApplyOp(cmp, data); got != 1 {
 		t.Fatalf("zextsless ApplyOp=%d, want 1", got)
 	}
-	if cmp.Code() != CPUI_COPY || !isZeroConst(cmp.Input(0)) {
-		t.Fatalf("expected false copy, got %v", cmp.Code())
+	// C++ RuleZextSless: the extension is dropped and the comparison turns unsigned.
+	if cmp.Code() != CPUI_INT_LESS || !isZeroConst(cmp.Input(1)) {
+		t.Fatalf("expected INT_LESS(x,0), got %v", cmp.Code())
 	}
 
 	noneShift := newRuleOp(data, CPUI_INT_SRIGHT, 2, x, data.NewConstant(2, 1))

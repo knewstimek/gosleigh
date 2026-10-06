@@ -139,20 +139,33 @@ func NewRuleBooleanNegate(group string) *RuleBooleanNegate {
 	return r
 }
 
+// apply turns b == 1 / b != 0 into b, and b == 0 / b != 1 into !b, for a
+// boolean b. C++ parity: RuleBooleanNegate::applyOp.
 func (r *RuleBooleanNegate) apply(op *PcodeOp, data *Funcdata) int {
-	subbool, _, val, ok := normalizeCompareConst(op)
-	if !ok || val > 1 || !isBoolLike(subbool) {
+	constvn := op.Input(1)
+	subbool := op.Input(0)
+	if !constvn.IsConstant() {
+		return 0
+	}
+	val := constvn.Offset()
+	if val != 0 && val != 1 {
 		return 0
 	}
 	negate := op.Code() == CPUI_INT_NOTEQUAL
 	if val == 0 {
 		negate = !negate
 	}
-	if negate {
-		rewriteOp(data, op, CPUI_BOOL_NEGATE, subbool)
-		return 1
+	if !subbool.IsBooleanValue(data.HasTypeRecoveryStarted()) {
+		return 0
 	}
-	return rewriteToCopy(data, op, subbool)
+	data.OpRemoveInput(op, 1)
+	data.OpSetInput(op, subbool, 0)
+	if negate {
+		data.OpSetOpcode(op, CPUI_BOOL_NEGATE)
+	} else {
+		data.OpSetOpcode(op, CPUI_COPY)
+	}
+	return 1
 }
 
 type RuleBooleanDedup struct{ batchRule }

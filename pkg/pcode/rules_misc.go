@@ -527,8 +527,40 @@ func NewRuleDoubleArithShift(group string) *RuleDoubleArithShift {
 	return r
 }
 
+// apply merges two arithmetic right shifts, saturating at the size.
+// C++ parity: RuleDoubleArithShift::applyOp.
 func (r *RuleDoubleArithShift) apply(op *PcodeOp, data *Funcdata) int {
-	return combineNestedShift(op, data, CPUI_INT_SRIGHT)
+	constD := op.Input(1)
+	if !constD.IsConstant() {
+		return 0
+	}
+	shiftin := op.Input(0)
+	if !shiftin.IsWritten() {
+		return 0
+	}
+	shift2op := shiftin.Def()
+	if shift2op.Code() != CPUI_INT_SRIGHT {
+		return 0
+	}
+	constC := shift2op.Input(1)
+	if !constC.IsConstant() {
+		return 0
+	}
+	inVn := shift2op.Input(0)
+	if inVn.IsFree() {
+		return 0
+	}
+	max := int64(op.Output().Size())*8 - 1
+	sa := int64(int32(constC.Offset())) + int64(int32(constD.Offset()))
+	if sa <= 0 {
+		return 0
+	}
+	if sa > max {
+		sa = max // the shift has saturated
+	}
+	data.OpSetInput(op, inVn, 0)
+	data.OpSetInput(op, data.NewConstant(4, uint64(sa)), 1)
+	return 1
 }
 
 type RuleConcatShift struct{ batchRule }
@@ -587,25 +619,52 @@ type RuleLeftRight struct{ batchRule }
 
 func NewRuleLeftRight(group string) *RuleLeftRight {
 	r := &RuleLeftRight{}
-	r.batchRule = newBatchRule(group, "leftright", []OpCode{CPUI_INT_RIGHT}, r.apply, func(g string) Rule { return NewRuleLeftRight(g) })
+	r.batchRule = newBatchRule(group, "leftright", []OpCode{CPUI_INT_RIGHT, CPUI_INT_SRIGHT}, r.apply, func(g string) Rule { return NewRuleLeftRight(g) })
 	return r
 }
 
+// apply turns (V << 8n) >> 8n into an extension of the low bytes of V.
+// C++ parity: RuleLeftRight::applyOp.
 func (r *RuleLeftRight) apply(op *PcodeOp, data *Funcdata) int {
-	left := definedBy(op.Input(0), CPUI_INT_LEFT)
-	if left == nil {
+	if !op.Input(1).IsConstant() {
 		return 0
 	}
-	amt0, ok0 := constantValue(left.Input(1))
-	amt1, ok1 := constantValue(op.Input(1))
-	if !ok0 || !ok1 || amt0 != amt1 {
+	shiftin := op.Input(0)
+	if !shiftin.IsWritten() {
 		return 0
 	}
-	width := uint64(outputOrInputSize(op) * 8)
-	if amt0 >= width {
+	leftshift := shiftin.Def()
+	if leftshift.Code() != CPUI_INT_LEFT || !leftshift.Input(1).IsConstant() {
 		return 0
 	}
-	rewriteOp(data, op, CPUI_INT_AND, left.Input(0), data.NewConstant(outputOrInputSize(op), lowMask(width-amt0)))
+	sa := op.Input(1).Offset()
+	if leftshift.Input(1).Offset() != sa || sa&7 != 0 {
+		return 0
+	}
+	isa := int32(sa >> 3)
+	tsz := shiftin.Size() - isa
+	if tsz != 1 && tsz != 2 && tsz != 4 && tsz != 8 {
+		return 0
+	}
+	if shiftin.LoneDescend() != op {
+		return 0
+	}
+	addr := shiftin.Addr()
+	if addr.Space != nil && addr.Space.BigEndian {
+		addr.Offset += uint64(isa)
+	}
+	data.OpUnsetInput(op, 0)
+	data.OpUnsetOutput(leftshift)
+	newvn := data.NewVarnodeOut(tsz, addr, leftshift)
+	data.OpSetOpcode(leftshift, CPUI_SUBPIECE)
+	data.OpSetInput(leftshift, data.NewConstant(leftshift.Input(1).Size(), 0), 1)
+	data.OpSetInput(op, newvn, 0)
+	data.OpRemoveInput(op, 1)
+	if op.Code() == CPUI_INT_SRIGHT {
+		data.OpSetOpcode(op, CPUI_INT_SEXT)
+	} else {
+		data.OpSetOpcode(op, CPUI_INT_ZEXT)
+	}
 	return 1
 }
 

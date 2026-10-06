@@ -154,19 +154,36 @@ func NewRuleZextSless(group string) *RuleZextSless {
 	return r
 }
 
+// apply drops a zero extension from a signed comparison against a constant
+// whose sign bit is clear, turning it unsigned. C++ parity: RuleZextSless::applyOp.
 func (r *RuleZextSless) apply(op *PcodeOp, data *Funcdata) int {
-	lhs, _, val, ok := normalizeCompareConst(op)
-	if !ok || val != 0 {
+	vn1, vn2 := op.Input(0), op.Input(1)
+	zextslot, otherslot := 0, 1
+	if vn2.IsWritten() && vn2.Def().Code() == CPUI_INT_ZEXT {
+		vn1, vn2 = vn2, op.Input(0)
+		zextslot, otherslot = 1, 0
+	} else if !vn1.IsWritten() || vn1.Def().Code() != CPUI_INT_ZEXT {
 		return 0
 	}
-	ext := definedBy(lhs, CPUI_INT_ZEXT)
-	if ext == nil {
+	if !vn2.IsConstant() {
 		return 0
 	}
+	zext := vn1.Def()
+	if !zext.Input(0).IsHeritageKnown() {
+		return 0
+	}
+	smallsize := zext.Input(0).Size()
+	val := vn2.Offset()
+	if val>>(8*uint(smallsize)-1) != 0 {
+		return 0 // the sign bit must also be 0
+	}
+	data.OpSetInput(op, zext.Input(0), zextslot)
+	data.OpSetInput(op, data.NewConstant(smallsize, val), otherslot)
 	if op.Code() == CPUI_INT_SLESS {
-		return rewriteToConst(data, op, 0)
+		data.OpSetOpcode(op, CPUI_INT_LESS)
+	} else {
+		data.OpSetOpcode(op, CPUI_INT_LESSEQUAL)
 	}
-	rewriteOp(data, op, CPUI_INT_EQUAL, ext.Input(0), data.NewConstant(ext.Input(0).Size(), 0))
 	return 1
 }
 
