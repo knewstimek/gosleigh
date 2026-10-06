@@ -74,21 +74,42 @@ func recoverMissingStackParams(data *Funcdata, fp *FuncProto) {
 	}
 	model.InputParams.FillinMap(active)
 
-	// Collect used stack trials whose Varnode is not already a named parameter.
-	type missingParam struct {
-		vn  *Varnode
-		off uint64
-	}
-	var miss []missingParam
+	// Create the unreferenced register inputs fillinMap kept (a __fastcall
+	// ECX hole before a used EDX). C++ frees them again in clearDeadVarnodes
+	// but keeps their parameter symbol; Gosleigh's signature is read from
+	// input Varnodes, so the Varnode is kept alive as a locked input instead.
+	// C++ parity: ActionInputPrototype::apply (unref trial creation).
 	for i := 0; i < active.NumTrials(); i++ {
 		pt := active.Trial(i)
-		if !pt.IsUsed() || pt.IsUnref() {
+		if !pt.IsUnref() || !pt.IsUsed() {
 			continue
 		}
-		addr := pt.GetAddress()
-		if addr.Space == nil || addr.Space.Kind != address.SpaceKindStack {
+		if data.hasInputIntersection(pt.GetSize(), pt.GetAddress()) {
+			pt.MarkNoUse()
 			continue
 		}
+		if sp := pt.GetAddress().Space; sp == nil || sp.Kind == address.SpaceKindStack {
+			// TODO known mismatch: an unreferenced stack hole needs a stack
+			// parameter declaration path; it is left out of the signature.
+			continue
+		}
+		vn := data.SetInputVarnode(data.NewVarnode(pt.GetSize(), pt.GetAddress()))
+		vn.SetAddlFlags(VarnodeLockedInput)
+		triallist = append(triallist, vn)
+		pt.SetSlot(int32(len(triallist)))
+	}
+
+	// A parameter's index is its position among the used trials, which
+	// fillinMap left sorted in ABI order (register groups, then stack).
+	// C++ parity: FuncProto::updateInputTypes.
+	pos := 0
+	for i := 0; i < active.NumTrials(); i++ {
+		pt := active.Trial(i)
+		if !pt.IsUsed() {
+			continue
+		}
+		name := GetParamName(pos)
+		pos++
 		slot := int(pt.GetSlot()) - 1
 		if slot < 0 || slot >= len(triallist) {
 			continue
@@ -97,30 +118,33 @@ func recoverMissingStackParams(data *Funcdata, fp *FuncProto) {
 		if vn == nil || isAlreadyNamedParam(vn) {
 			continue
 		}
-		miss = append(miss, missingParam{vn, addr.Offset})
-	}
-	if len(miss) == 0 {
-		return
-	}
-	// Number the missing stack parameters after the already-recovered params,
-	// ascending by stack offset (ABI order). C++ parity: stack pentry is the last
-	// group, so its slots follow every register parameter, low offset first.
-	sort.Slice(miss, func(i, j int) bool { return miss[i].off < miss[j].off })
-	base := fp.NumParams()
-	for i, m := range miss {
-		name := GetParamName(base + i)
-		hv := m.vn.High()
+		hv := vn.High()
 		if hv != nil {
 			// Reuse the merged HighVariable so the value's SSA instances stay
 			// intact; only stamp the formal parameter name onto it.
 			hv.SetName(name)
 		} else {
 			hv = NewHighVariable(name)
-			hv.AddInstance(m.vn)
+			hv.AddInstance(vn)
 		}
-		sl.registerStackParam(m.vn, hv)
+		if vn.Space().Kind == address.SpaceKindStack {
+			sl.registerStackParam(vn, hv)
+		} else {
+			sl.paramByVn[vn] = hv
+		}
 		fp.AddParam(hv)
 	}
+}
+
+// hasInputIntersection reports whether an input Varnode overlaps the range.
+// C++ parity: VarnodeBank::hasInputIntersection.
+func (fd *Funcdata) hasInputIntersection(sz int32, addr address.Address) bool {
+	for _, vn := range fd.vbank.AllVarnodes() {
+		if vn != nil && vn.IsInput() && vn.IntersectsAddr(addr, sz) {
+			return true
+		}
+	}
+	return false
 }
 
 // inputVarnodesInAddrOrder returns the function's input Varnodes sorted by
