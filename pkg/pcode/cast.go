@@ -328,20 +328,39 @@ func (cs *CastStrategyC) checkIntPromotionForExtension(op *PcodeOp) bool {
 // arithmeticOutputStandard returns the data-type an arithmetic op (INT_ADD etc.)
 // produces, following the C arithmetic typing rules: the most specific of the
 // input read-facing types, treating bool as int.
-// C++ parity: cast.cc CastStrategyC::arithmeticOutputStandard (394-409).
-//
-// Simplification vs C++: Datatype::typeOrder is not ported, so the "most
-// specific" selection keeps input[0]'s type rather than scanning for a strictly
-// more specified operand. The bool->int promotion of input[0] is preserved.
+// C++ parity: cast.cc CastStrategyC::arithmeticOutputStandard.
 func (cs *CastStrategyC) arithmeticOutputStandard(op *PcodeOp) Datatype {
 	if op == nil || op.NumInput() == 0 || op.Input(0) == nil {
 		return nil
 	}
 	res1 := op.Input(0).TypeReadFacing(op)
-	if res1 != nil && res1.Metatype() == TYPE_BOOL {
+	if res1.Metatype() == TYPE_BOOL { // treat a boolean as cast to an integer
 		res1 = baseForMeta(cs.tlst, res1.Size(), TYPE_INT)
 	}
+	for i := 1; i < op.NumInput(); i++ {
+		res2 := op.Input(i).TypeReadFacing(op)
+		if res2.Metatype() == TYPE_BOOL {
+			continue
+		}
+		if typeOrderBool(res2, res1) < 0 {
+			res1 = res2
+		}
+	}
 	return res1
+}
+
+// typeOrderBool is TypeOrder that never prefers a boolean.
+// C++ parity: Datatype::typeOrderBool.
+func typeOrderBool(a, b Datatype) int {
+	switch {
+	case a == b:
+		return 0
+	case a.Metatype() == TYPE_BOOL:
+		return 1
+	case b.Metatype() == TYPE_BOOL:
+		return -1
+	}
+	return TypeOrder(a, b)
 }
 
 // CastStandard returns the data-type to cast to when an expression of type

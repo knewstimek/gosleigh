@@ -301,7 +301,9 @@ func (r *RuleAddUnsigned) apply(op *PcodeOp, data *Funcdata) int {
 		}
 	}
 	data.OpSetOpcode(op, CPUI_INT_SUB)
-	data.OpSetInput(op, data.NewConstant(size, negatedVal), 1)
+	cvn := data.NewConstant(size, negatedVal)
+	cvn.copySymbol(constvn) // keeps the constant data-type
+	data.OpSetInput(op, cvn, 1)
 	return 1
 }
 
