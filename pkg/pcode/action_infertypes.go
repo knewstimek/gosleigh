@@ -97,9 +97,6 @@ func (a *ActionInferTypes) Apply(data *Funcdata) int {
 		if !inferProcessed(vn) {
 			continue
 		}
-		if inferTraceOn {
-			fmt.Fprintf(os.Stderr, "ROOT %s(%d):%x\n", vn.Space().Name, vn.Space().Index, vn.Offset())
-		}
 		inferPropagateOneType(data, tf, vn)
 	}
 	inferPropagateAcrossReturns(data, tf)
@@ -535,11 +532,7 @@ func inferPropagateIntAdd(data *Funcdata, tf *TypeFactory, op *PcodeOp, invn, ou
 	if !ok {
 		return nil
 	}
-	res := inferPropagateAddIn2Out(data, tf, altPtr, op, inslot)
-	if inferTraceOn {
-		fmt.Fprintf(os.Stderr, "ADDIN2OUT %x:%x alt=%v pointee=%v align=%d -> %v\n", op.Addr().Offset, op.Seq().Time, alttype, altPtr.Pointee(), altPtr.Pointee().AlignSize(), res)
-	}
-	return res
+	return inferPropagateAddIn2Out(data, tf, altPtr, op, inslot)
 }
 
 // inferPropagateAddIn2Out mirrors TypeOpIntAdd::propagateAddIn2Out (typeop.cc
