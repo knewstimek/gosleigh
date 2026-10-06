@@ -8,22 +8,9 @@ type funcdataBlockState struct {
 	structure *BlockGraph
 }
 
-var globalFuncdataBlockState = struct {
-	sync.Mutex
-	byFunc map[*Funcdata]*funcdataBlockState
-}{
-	byFunc: make(map[*Funcdata]*funcdataBlockState),
-}
-
+// getFuncdataBlockState returns the block graphs kept on data.
 func getFuncdataBlockState(data *Funcdata) *funcdataBlockState {
-	globalFuncdataBlockState.Lock()
-	defer globalFuncdataBlockState.Unlock()
-	state := globalFuncdataBlockState.byFunc[data]
-	if state == nil {
-		state = &funcdataBlockState{}
-		globalFuncdataBlockState.byFunc[data] = state
-	}
-	return state
+	return &data.blockState
 }
 
 func (fd *Funcdata) SetBasicBlocks(graph *BlockGraph) {

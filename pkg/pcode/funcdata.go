@@ -97,6 +97,10 @@ type Funcdata struct {
 	// C++ parity: funcdata.hh Funcdata::jumpvec
 	jumpTables []*JumpTable
 
+	// actionState/blockState: driver flags and the basic/structured graphs.
+	actionState funcdataActionState
+	blockState  funcdataBlockState
+
 	// commentDB accumulates auto-generated warning comments (e.g. jump-table
 	// recovery failures) so PrintC can render them as inline block comments. In
 	// Ghidra the store is the global Architecture::commentdb keyed by function

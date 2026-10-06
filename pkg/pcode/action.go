@@ -990,23 +990,9 @@ type funcdataActionState struct {
 	messages           []string
 }
 
-var globalFuncdataActionState = struct {
-	mu     sync.Mutex
-	byFunc map[*Funcdata]*funcdataActionState
-}{
-	byFunc: make(map[*Funcdata]*funcdataActionState),
-}
-
+// getFuncdataActionState returns the action-driver state kept on data.
 func getFuncdataActionState(data *Funcdata) *funcdataActionState {
-	globalFuncdataActionState.mu.Lock()
-	defer globalFuncdataActionState.mu.Unlock()
-	state, ok := globalFuncdataActionState.byFunc[data]
-	if ok {
-		return state
-	}
-	state = &funcdataActionState{}
-	globalFuncdataActionState.byFunc[data] = state
-	return state
+	return &data.actionState
 }
 
 func (data *Funcdata) emitActionMessage(msg string) {
