@@ -15,6 +15,7 @@
 | `c87b817` | 헤더 주석(FID), C++ 이름 번호, noreturn halt, 문자열 리터럴, 크래시/행 수정 | 110 | 0.881 |
 | `5ee1024` | callee/외부 잠긴 프로토타입, typedef, callfixup 인젝션, RulePiecePathology, deadcode 공간 게이트, unaff_ | 123 | 0.903 |
 | `d2f1c0f` | 스텁 규칙 8종 포팅(EarlyRemoval 등), isComplex, 호출/캐스트/선언 줄바꿈 구조, SetCasts 블록 순서, LaneDivide | 137 | - |
+| `be538b3` | 결정성(AllOps SeqNum 순), 상수 단일 reader, guardCalls 모델, 레이블/goto 본문, 부분 전역 심볼, bool 반환 | 139 | - |
 
 ## 도구 (`tools/realexe/`)
 - `realexe.py analyze|sample|measure|capture`, `gaps.py`(불일치 유형 집계), `difffn.py`(인덱스별 diff).
@@ -33,7 +34,9 @@ Ghidra API로 Java와 같은 값을 덤프한다.
 |---|---|---|---|
 | T | 타입 추론 차이: 반환형, 지역 타입(uint vs int), 1바이트 시프트 상수가 char로 출력([119]) | typeop.cc propagateType, ActionInferTypes | 사례 다수 |
 | N | 변수 번호(iVar1 vs iVar2) 어긋남 -- merge/이름 순서 | merge.cc, ActionNameVars | 5건 이상 |
-| G | 전역 겹침: `_DAT_` 이름, 부분 필드 `s_X._0_4_`, coverVarnodes 미포팅 | funcdata_varnode.cc mapGlobals | [166][184][188][189] |
+| G | 전역 겹침: normalizeWriteSize PIECE 출력이 ram 변수로 남아 `(uint)CONCAT12`가 두 문장으로 갈라짐, coverVarnodes 미포팅 | heritage.cc normalizeWriteSize | [166][184][188][189] |
+| J | 다단 점프테이블: 1단계 모델 범위로 라벨 계산(case 0..N), 가드가 `if (0)`로 남음 | jumptable.cc recoverLabels/markFoldableGuards | [194] |
+| D | 선언이 심볼이 아니라 남은 varnode 기반이라 clearDeadVarnodes 원본화 불가 | printc.cc emitScopeVarDecls | 원본화 시 decl +8 |
 | S | 출력에 `struct X { }` 정의가 찍힘(Ghidra는 함수 출력에 타입 정의 없음) | printc.cc docFunction | [142][177][196] |
 | P | 호스트 잠긴 현재 함수 프로토타입/파라미터 타입(LPCWSTR, errno_t 등) 미적용 | fspec.cc | [124][128][174][183] |
 | - | known mismatch: RulePieceStructure 스텁, DivTermAdd 128비트, guardCallOverlappingInput, LoadGuard(ValueSet), clearDeadVarnodes 스택/destroy, cseElimination 블록 끝 주소 | ruleaction.cc, heritage.cc | |
