@@ -108,6 +108,15 @@ func (s *printCState) globalVarnodeName(vn *Varnode, e *SymbolEntry) string {
 	}
 	off := int32(at.Offset() - e.Addr().Offset)
 	sz := vn.Size()
+	return symbolPieceName(name, ct, off, sz)
+}
+
+// symbolPieceName prints sz bytes at off within a symbol of type ct: the
+// name for the whole symbol, "_"+name when it overruns it from the start,
+// else a path of .field / [index] steps (._off_sz_ when nothing fits).
+// C++ parity: PrintC::pushSymbolDetail -> pushPartialSymbol /
+// pushMismatchSymbol.
+func symbolPieceName(name string, ct Datatype, off, sz int32) string {
 	if off == 0 && sz == ct.Size() {
 		return name
 	}

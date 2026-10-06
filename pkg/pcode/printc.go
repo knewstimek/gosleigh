@@ -2229,7 +2229,7 @@ func (s *printCState) renderForPartOp(op *PcodeOp) (string, error) {
 		if op.Output() == nil {
 			return rhs, nil
 		}
-		lhs := s.nameOf(op.Output())
+		lhs := s.printName(op.Output())
 		return lhs + " = " + rhs, nil
 	}
 }
@@ -2816,7 +2816,7 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 			})
 			return nil
 		}
-		lhs := s.nameOf(op.Output())
+		lhs := s.printName(op.Output())
 		s.lang.Statement(func() {
 			s.emitAssign(lhs, frag, expr)
 		})
@@ -3259,7 +3259,7 @@ func (s *printCState) renderVarnodeExpr(vn *Varnode) (ExprFragment, error) {
 		defer delete(s.activeExpr, op)
 		return s.renderOpExprFrag(op)
 	}
-	return s.lang.Atom(s.nameOf(vn)), nil
+	return s.lang.Atom(s.printName(vn)), nil
 }
 
 func (s *printCState) renderConstant(vn *Varnode) string {
@@ -4516,6 +4516,44 @@ func (s *printCState) nameOf(vn *Varnode) string {
 	name := fmt.Sprintf("local_%d", vn.CreateIndex())
 	s.names[vn] = name
 	return name
+}
+
+// printName is how a variable prints in an expression: its name, through
+// its symbol's type when it is only part of a local symbol.
+func (s *printCState) printName(vn *Varnode) string {
+	return s.localPieceName(vn, s.nameOf(vn))
+}
+
+// localPieceName prints a stack varnode that is only part of its local
+// symbol (an element of a local array) through the symbol's type.
+// C++ parity: PrintC::pushSymbolDetail (pushPartialSymbol).
+func (s *printCState) localPieceName(vn *Varnode, name string) string {
+	sl := s.fd.GetScopeLocal()
+	if sl == nil || sl.SpaceID() == nil {
+		return name
+	}
+	// A varnode merged into the local from other storage sits where the
+	// high's stack member sits (C++ high->getSymbolOffset).
+	at := vn
+	if vn.Space() != sl.SpaceID() {
+		at = nil
+		if hv := vn.High(); hv != nil {
+			for _, w := range hv.Instances() {
+				if w.Space() == sl.SpaceID() {
+					at = w
+					break
+				}
+			}
+		}
+		if at == nil {
+			return name
+		}
+	}
+	e := sl.QueryContainer(at.Addr(), vn.Size(), address.Address{})
+	if e == nil || e.Symbol() == nil || e.Symbol().Type() == nil || e.Symbol().Name() != name {
+		return name
+	}
+	return symbolPieceName(name, e.Symbol().Type(), int32(at.Offset()-e.Addr().Offset), vn.Size())
 }
 
 func (s *printCState) isKnownRegisterName(name string) bool {
