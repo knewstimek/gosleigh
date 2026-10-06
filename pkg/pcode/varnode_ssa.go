@@ -96,7 +96,7 @@ type Varnode struct {
 	high *HighVariable
 
 	// tempType holds a provisional type assigned during ActionInferTypes propagation.
-	// It is separate from the committed type stored in pcodeMetadata.varTypes so that
+	// It is separate from the committed type (typ) so that
 	// multi-pass propagation can accumulate candidates before committing.
 	// Not part of the C++ Varnode struct; Go-local inference scratch field.
 	tempType Datatype
@@ -106,6 +106,17 @@ type Varnode struct {
 	// resolve the mapped Symbol for the merge guards.
 	// C++ parity: Varnode::mapentry
 	symbolEntry *SymbolEntry
+
+	// typ is the committed data-type. C++ parity: Varnode::type
+	typ Datatype
+	// spaceConst is the address space a constant pointer operand encodes
+	// (LOAD/STORE input 0). C++ parity: Varnode::getSpaceFromConst
+	spaceConst *address.Space
+	// spacebase is the space a spacebase register points into.
+	spacebase *address.Space
+	// indirectCause is the op an INDIRECT's iop operand refers to.
+	// C++ parity: PcodeOp::getOpFromConst on the iop address
+	indirectCause *PcodeOp
 }
 
 // NewVarnode creates a Varnode. Initializes flags based on space type.

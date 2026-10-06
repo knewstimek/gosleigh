@@ -1,48 +1,24 @@
 package pcode
 
-import (
-	"sync"
-
-	"gosleigh/pkg/address"
-)
+import "gosleigh/pkg/address"
 
 var sharedTypeFactory = NewTypeFactory()
-
-type pcodeMetadataState struct {
-	mu             sync.RWMutex
-	varTypes       map[*Varnode]Datatype
-	spaceIDs       map[*Varnode]*address.Space
-	spacebases     map[*Varnode]*address.Space
-	indirectCauses map[*Varnode]*PcodeOp
-}
-
-var pcodeMetadata = pcodeMetadataState{
-	varTypes:       make(map[*Varnode]Datatype),
-	spaceIDs:       make(map[*Varnode]*address.Space),
-	spacebases:     make(map[*Varnode]*address.Space),
-	indirectCauses: make(map[*Varnode]*PcodeOp),
-}
 
 func SetVarnodeType(vn *Varnode, dt Datatype) {
 	if vn == nil {
 		return
 	}
-	pcodeMetadata.mu.Lock()
-	defer pcodeMetadata.mu.Unlock()
-	if dt == nil {
-		delete(pcodeMetadata.varTypes, vn)
-		return
+	if dt != nil {
+		dt = sharedTypeFactory.Intern(dt)
 	}
-	pcodeMetadata.varTypes[vn] = sharedTypeFactory.Intern(dt)
+	vn.typ = dt
 }
 
 func (vn *Varnode) Type() Datatype {
 	if vn == nil {
 		return nil
 	}
-	pcodeMetadata.mu.RLock()
-	defer pcodeMetadata.mu.RUnlock()
-	return pcodeMetadata.varTypes[vn]
+	return vn.typ
 }
 
 func (vn *Varnode) TypeReadFacing(*PcodeOp) Datatype {
@@ -101,22 +77,14 @@ func BindSpaceConstant(vn *Varnode, spc *address.Space) {
 	if vn == nil {
 		return
 	}
-	pcodeMetadata.mu.Lock()
-	defer pcodeMetadata.mu.Unlock()
-	if spc == nil {
-		delete(pcodeMetadata.spaceIDs, vn)
-		return
-	}
-	pcodeMetadata.spaceIDs[vn] = spc
+	vn.spaceConst = spc
 }
 
 func (vn *Varnode) GetSpaceFromConst() *address.Space {
 	if vn == nil {
 		return nil
 	}
-	pcodeMetadata.mu.RLock()
-	defer pcodeMetadata.mu.RUnlock()
-	return pcodeMetadata.spaceIDs[vn]
+	return vn.spaceConst
 }
 
 // BindIndirectCause attaches the PcodeOp that a CPUI_INDIRECT's input(1)
@@ -137,13 +105,7 @@ func BindIndirectCause(vn *Varnode, op *PcodeOp) {
 	if vn == nil {
 		return
 	}
-	pcodeMetadata.mu.Lock()
-	defer pcodeMetadata.mu.Unlock()
-	if op == nil {
-		delete(pcodeMetadata.indirectCauses, vn)
-		return
-	}
-	pcodeMetadata.indirectCauses[vn] = op
+	vn.indirectCause = op
 }
 
 // GetIndirectCause decodes the PcodeOp referenced by a CPUI_INDIRECT's
@@ -155,9 +117,7 @@ func (vn *Varnode) GetIndirectCause() *PcodeOp {
 	if vn == nil {
 		return nil
 	}
-	pcodeMetadata.mu.RLock()
-	defer pcodeMetadata.mu.RUnlock()
-	return pcodeMetadata.indirectCauses[vn]
+	return vn.indirectCause
 }
 
 func BindSpacebase(vn *Varnode, spc *address.Space) {
@@ -165,22 +125,14 @@ func BindSpacebase(vn *Varnode, spc *address.Space) {
 		return
 	}
 	vn.SetFlags(VarnodeSpaceBase)
-	pcodeMetadata.mu.Lock()
-	defer pcodeMetadata.mu.Unlock()
-	if spc == nil {
-		delete(pcodeMetadata.spacebases, vn)
-		return
-	}
-	pcodeMetadata.spacebases[vn] = spc
+	vn.spacebase = spc
 }
 
 func (vn *Varnode) AssociatedSpacebase() *address.Space {
 	if vn == nil {
 		return nil
 	}
-	pcodeMetadata.mu.RLock()
-	defer pcodeMetadata.mu.RUnlock()
-	return pcodeMetadata.spacebases[vn]
+	return vn.spacebase
 }
 
 func (vn *Varnode) SetStackStore() {
