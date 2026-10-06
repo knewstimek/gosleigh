@@ -2021,7 +2021,9 @@ func (s *printCState) renderCondBlockComma(bl *FlowBlock) string {
 		// Skip ops with unique-space outputs that have no named consumer -- these
 		// are pure SSA temporaries that would produce "tmp_N = ..." noise.
 		if out := op.Output(); out != nil {
-			if out.Space() != nil && out.Space().IsUnique() {
+			// An explicit unique def is a statement like any other, as in
+			// emitOps. C++ parity: emitBlockBasic prints non-implied outputs.
+			if out.Space() != nil && out.Space().IsUnique() && !(out.IsExplicit() && out.NumDescend() > 0) {
 				passedUniqueFilter := false
 
 				// Case 2: TrimOpOutput COPY whose output feeds the while condition,
