@@ -63,7 +63,7 @@ func (fc *FuncCallSpecs) IsInputActive() bool {
 	if fc == nil {
 		return false
 	}
-	return fc.getActiveInputState() != nil
+	return fc.inputActive
 }
 
 // GetActiveInput returns the temporary active-input trial container, if any.
@@ -96,6 +96,7 @@ func (fc *FuncCallSpecs) InitActiveInput() {
 		}
 		fc.setActiveInputState(active)
 	}
+	fc.inputActive = true
 }
 
 // InitActiveOutput sets up an empty ParamActive for return-value recovery.

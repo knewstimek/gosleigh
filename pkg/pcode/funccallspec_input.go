@@ -55,7 +55,9 @@ func (fc *FuncCallSpecs) ClearActiveInput() {
 	if fc == nil {
 		return
 	}
-	fc.setActiveInputState(nil)
+	// The trials are kept: double-use checks of other calls still read them.
+	// C++ parity: FuncCallSpecs::clearActiveInput (isinputactive = false).
+	fc.inputActive = false
 }
 
 // CharacterizeAsInputParam classifies how the storage range [addr,addr+size)

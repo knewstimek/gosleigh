@@ -22,6 +22,9 @@ type FuncCallSpecs struct {
 	FuncProto
 	// activeInputState: FuncCallSpecs::activeinput.
 	activeInputState *ParamActive
+	// inputActive: parameter recovery is in progress; the trials outlive it.
+	// C++ parity: FuncCallSpecs::isinputactive.
+	inputActive bool
 	op               *PcodeOp
 	fd               *Funcdata
 
