@@ -3591,11 +3591,22 @@ func (a *ActionRestrictLocal) Apply(data *Funcdata) int {
 		if !fc.IsInputLocked() {
 			continue
 		}
-		// TODO known mismatch: FuncCallSpecs::getSpacebaseOffset and
-		// FuncCallSpecs::getParam are not ported; without them the
-		// per-parameter markNotMapped call cannot be issued. The loop
-		// stays here so the driver fires once those helpers exist.
-		_ = fc
+		so := fc.GetSpacebaseOffset()
+		if so == spacebaseOffsetUnknown {
+			continue
+		}
+		for j := 0; ; j++ {
+			param, ok := fc.LockedParam(j)
+			if !ok {
+				break
+			}
+			spc := param.Addr.Space
+			if spc == nil || spc.Kind != address.SpaceKindStack {
+				continue
+			}
+			off := wrapSpaceOffset(spc, so+param.Addr.Offset)
+			sl.MarkNotMapped(spc, off, param.Size, true)
+		}
 	}
 	// Sub-pass 2: the stack slots where saved (unaffected, reload,
 	// return-address) registers are spilled are not variables.
