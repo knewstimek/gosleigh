@@ -371,6 +371,15 @@ func mapStateIsReadActive(vn *Varnode) bool {
 	return false
 }
 
+// hintType is vn's data-type, undefined of its size when none is committed
+// yet (a C++ Varnode always carries one).
+func hintType(vn *Varnode) Datatype {
+	if dt := vn.Type(); dt != nil {
+		return dt
+	}
+	return sharedTypeFactory.GetBase(vn.Size(), TYPE_UNKNOWN, "")
+}
+
 // gatherVarnodes adds a fixed hint for every stack Varnode that actively
 // holds a value. C++ parity: MapState::gatherVarnodes.
 func (ms *mapState) gatherVarnodes(fd *Funcdata) {
@@ -380,7 +389,7 @@ func (ms *mapState) gatherVarnodes(fd *Funcdata) {
 		}
 		if !vn.IsWritten() {
 			if mapStateIsReadActive(vn) {
-				ms.addRange(vn.Offset(), vn.Type(), 0, rhFixed, -1)
+				ms.addRange(vn.Offset(), hintType(vn), 0, rhFixed, -1)
 			}
 			continue
 		}
@@ -388,7 +397,7 @@ func (ms *mapState) gatherVarnodes(fd *Funcdata) {
 		switch op.Code() {
 		case CPUI_INDIRECT:
 			if vn.Addr() != op.Input(0).Addr() || mapStateIsReadActive(vn) {
-				ms.addRange(vn.Offset(), vn.Type(), 0, rhFixed, -1)
+				ms.addRange(vn.Offset(), hintType(vn), 0, rhFixed, -1)
 			}
 		case CPUI_MULTIEQUAL:
 			same := true
@@ -399,7 +408,7 @@ func (ms *mapState) gatherVarnodes(fd *Funcdata) {
 				}
 			}
 			if !same || mapStateIsReadActive(vn) {
-				ms.addRange(vn.Offset(), vn.Type(), 0, rhFixed, -1)
+				ms.addRange(vn.Offset(), hintType(vn), 0, rhFixed, -1)
 			}
 		case CPUI_PIECE: // two COPYs
 			addr := vn.Addr()
@@ -409,14 +418,14 @@ func (ms *mapState) gatherVarnodes(fd *Funcdata) {
 			}
 			inFirst := op.Input(slot)
 			if inFirst.Addr() != addr {
-				ms.addRange(addr.Offset, inFirst.Type(), 0, rhFixed, -1)
+				ms.addRange(addr.Offset, hintType(inFirst), 0, rhFixed, -1)
 			}
 			addr.Offset += uint64(inFirst.Size())
 			if inSecond := op.Input(1 - slot); inSecond.Addr() != addr {
-				ms.addRange(addr.Offset, inSecond.Type(), 0, rhFixed, -1)
+				ms.addRange(addr.Offset, hintType(inSecond), 0, rhFixed, -1)
 			}
 			if mapStateIsReadActive(vn) {
-				ms.addRange(vn.Offset(), vn.Type(), 0, rhFixed, -1)
+				ms.addRange(vn.Offset(), hintType(vn), 0, rhFixed, -1)
 			}
 		case CPUI_SUBPIECE:
 			// Not an active write when just copying within the same storage.
@@ -427,16 +436,16 @@ func (ms *mapState) gatherVarnodes(fd *Funcdata) {
 			}
 			addr.Offset += uint64(trunc)
 			if addr != vn.Addr() || mapStateIsReadActive(vn) {
-				ms.addRange(vn.Offset(), vn.Type(), 0, rhFixed, -1)
+				ms.addRange(vn.Offset(), hintType(vn), 0, rhFixed, -1)
 			}
 		case CPUI_COPY:
 			var fl uint32
 			if op.Input(0).IsConstant() {
 				fl = rhCopyConstant
 			}
-			ms.addRange(vn.Offset(), vn.Type(), fl, rhFixed, -1)
+			ms.addRange(vn.Offset(), hintType(vn), fl, rhFixed, -1)
 		default:
-			ms.addRange(vn.Offset(), vn.Type(), 0, rhFixed, -1)
+			ms.addRange(vn.Offset(), hintType(vn), 0, rhFixed, -1)
 		}
 	}
 }
