@@ -3053,7 +3053,7 @@ func (s *printCState) renderStoreLHS(ptr *Varnode, parentPrec ExprPrecedence) (s
 	// side of an array write printed as *(base + index), dropping the element
 	// scaling and reading as a byte-sized access in C.
 	if checkArrayDeref(ptr) {
-		if frag, ok, err := s.tryRenderSubscript(ptr); err != nil {
+		if frag, ok, err := s.renderDerefValue(ptr); err != nil {
 			return "", err
 		} else if ok {
 			return s.lang.ExprString(frag, parentPrec, ExprPosNone, ExprAssocNone), nil
@@ -3065,6 +3065,17 @@ func (s *printCState) renderStoreLHS(ptr *Varnode, parentPrec ExprPrecedence) (s
 	}
 	lhs := s.lang.UnaryExpr("*", cPrecUnary, frag)
 	return s.lang.ExprString(lhs, parentPrec, ExprPosNone, ExprAssocNone), nil
+}
+
+// renderDerefValue prints the value a LOAD/STORE pointer expression points at
+// without a dereference: a PTRSUB as the field (base->field), a PTRADD as a
+// subscript. C++ parity: print_load_value/print_store_value in opPtrsub/opPtradd.
+func (s *printCState) renderDerefValue(ptr *Varnode) (ExprFragment, bool, error) {
+	if def := ptr.Def(); def != nil && def.Code() == CPUI_PTRSUB && checkArrayDeref(ptr) {
+		frag, ok := s.renderPointerValue(ptr)
+		return frag, ok, nil
+	}
+	return s.tryRenderSubscript(ptr)
 }
 
 // checkArrayDeref reports whether a LOAD/STORE pointer expression can be printed
@@ -3998,7 +4009,7 @@ func (s *printCState) renderLoad(op *PcodeOp) (ExprFragment, error) {
 	// explicit pointer variable prints as itself (*piVar1).
 	// C++ parity: PrintC::opLoad -> checkArrayDeref.
 	if addrVn.IsImplied() {
-		if frag, ok, err := s.tryRenderSubscript(addrVn); ok || err != nil {
+		if frag, ok, err := s.renderDerefValue(addrVn); ok || err != nil {
 			return frag, err
 		}
 	}
