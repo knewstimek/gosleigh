@@ -1156,7 +1156,7 @@ func (s *printCState) emitLocalDeclarations() bool {
 	for _, d := range decls {
 		text := d.text
 		s.lang.Statement(func() {
-			s.lang.Token(text)
+			s.lang.DeclTokens(text)
 		})
 	}
 	return len(decls) != 0

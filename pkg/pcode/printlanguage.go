@@ -201,6 +201,47 @@ func (pl *PrintLanguage) Statement(fn func()) {
 	})
 }
 
+// DeclTokens emits a variable declaration as its type specifier and its
+// declarator separated by a breakable space.
+// C++ parity: PrintC::emitVarDecl (pushTypeStart's type_expr_space token:
+// spacing 1 between the type name and the declarator).
+func (pl *PrintLanguage) DeclTokens(text string) {
+	ge, ok := pl.emitter.(GroupEmitter)
+	spec, decl := splitDeclText(text)
+	if !ok || spec == "" || decl == "" {
+		pl.Token(text)
+		return
+	}
+	id := ge.OpenGroup()
+	pl.Token(spec)
+	ge.Spaces(1, 0)
+	pl.Token(decl)
+	ge.CloseGroup(id)
+}
+
+// splitDeclText splits "Type *name" at the space in front of the declarator:
+// the last space outside template brackets and parentheses.
+func splitDeclText(text string) (string, string) {
+	depth := 0
+	cut := -1
+	for i := 0; i < len(text); i++ {
+		switch text[i] {
+		case '<', '(':
+			depth++
+		case '>', ')':
+			depth--
+		case ' ':
+			if depth == 0 && cut < 0 {
+				cut = i
+			}
+		}
+	}
+	if cut <= 0 {
+		return "", ""
+	}
+	return text[:cut], text[cut+1:]
+}
+
 // StatementGroup emits fn inside a statement delimiter group, so a line
 // break prefers the space in front of it. C++ parity: Emit::beginStatement /
 // endStatement.
