@@ -412,8 +412,7 @@ type RuleScarry struct{ batchRule }
 func NewRuleScarry(group string) *RuleScarry {
 	r := &RuleScarry{}
 	// RuleScarry::applyOp -- ruleaction.cc.
-	// known mismatch: AddExpression equivalence matching is not ported.
-	r.batchRule = newKnownMismatchBatchRule(group, "scarry", []OpCode{CPUI_INT_SCARRY}, func(g string) Rule { return NewRuleScarry(g) })
+	r.batchRule = newBatchRule(group, "scarry", []OpCode{CPUI_INT_SCARRY}, r.apply, func(g string) Rule { return NewRuleScarry(g) })
 	return r
 }
 
@@ -602,8 +601,7 @@ type RuleBitUndistribute struct{ batchRule }
 func NewRuleBitUndistribute(group string) *RuleBitUndistribute {
 	r := &RuleBitUndistribute{}
 	// RuleBitUndistribute::applyOp -- ruleaction.cc.
-	// known mismatch: exact extension/shift undistribution depends on heritage-known and additional IR rewrite helpers not yet ported.
-	r.batchRule = newKnownMismatchBatchRule(group, "bitundistribute", []OpCode{CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR}, func(g string) Rule { return NewRuleBitUndistribute(g) })
+	r.batchRule = newBatchRule(group, "bitundistribute", []OpCode{CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR}, r.apply, func(g string) Rule { return NewRuleBitUndistribute(g) })
 	return r
 }
 
@@ -611,7 +609,7 @@ type RuleBooleanUndistribute struct{ batchRule }
 
 func NewRuleBooleanUndistribute(group string) *RuleBooleanUndistribute {
 	r := &RuleBooleanUndistribute{}
-	r.batchRule = newKnownMismatchBatchRule(group, "booleanundistribute", []OpCode{CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL}, func(g string) Rule { return NewRuleBooleanUndistribute(g) })
+	r.batchRule = newBatchRule(group, "booleanundistribute", []OpCode{CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL}, r.apply, func(g string) Rule { return NewRuleBooleanUndistribute(g) })
 	return r
 }
 
