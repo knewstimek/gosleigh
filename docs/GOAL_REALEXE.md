@@ -33,7 +33,7 @@ Ghidra API로 Java와 같은 값을 덤프한다.
 
 | # | 갭 | 근거 | 비고 |
 |---|---|---|---|
-| R | Go 규칙이 C++와 다른 변환을 하는 경우가 남음. `scratchpad ruleaudit.py` 방식(Go apply 길이 vs C++ applyOp 길이)으로 상위부터 대조: expandload, pullsub_multi/indirect, subzext, subcancel, structoffset0, andpiece, highorderand, switchsingle, equal2constant, andcompare 등 | ruleaction.cc | 규칙 하나씩 원본화 |
+| R | Go 규칙이 C++와 다른 변환을 하는 경우가 남음. `tools/ruleaudit.py`(Go apply 길이 vs C++ applyOp 길이)로 상위부터 대조: expandload, pullsub_multi/indirect, subzext, subcancel, structoffset0, andpiece, highorderand, switchsingle, equal2constant, andcompare 등 | ruleaction.cc | 규칙 하나씩 원본화 |
 | A | ActionGuardReturns(Go 전용): 반환 레지스터만 따로 재-rename. C++는 Heritage::guard 안의 guardReturns. 넓은 읽기를 좁은 정의로 잇는 부작용을 RuleSubIdentity가 덮음 | heritage.cc guardReturns | 원본화 시 RuleSubIdentity 제거 |
 | T | 타입 추론 차이: 반환형, 지역 타입(uint vs int) | typeop.cc propagateType, ActionInferTypes | 사례 다수 |
 | N | 변수 번호(iVar1 vs iVar2) 어긋남 -- merge/이름 순서 | merge.cc, ActionNameVars | 5건 이상 |
