@@ -76,26 +76,14 @@ func (a *ActionNormalizeBranches) Apply(data *Funcdata) int {
 // mergePair is an ordered pair of varnodes that need to be merged in the joinblock.
 type mergePair struct{ side1, side2 *Varnode }
 
+// mergePairLess orders by the creation index of side1, then of side2; it
+// fixes the order the join's MULTIEQUALs are created in.
+// C++ parity: ConditionalJoin::MergePair::operator<.
 func mergePairLess(a, b mergePair) bool {
-	switch {
-	case a.side1 == nil:
-		return b.side1 != nil
-	case b.side1 == nil:
-		return false
+	if s1, s2 := a.side1.CreateIndex(), b.side1.CreateIndex(); s1 != s2 {
+		return s1 < s2
 	}
-	if cmp := CompareLocDef(a.side1, b.side1); cmp != 0 {
-		return cmp < 0
-	}
-	switch {
-	case a.side2 == nil:
-		return b.side2 != nil
-	case b.side2 == nil:
-		return false
-	}
-	if cmp := CompareLocDef(a.side2, b.side2); cmp != 0 {
-		return cmp < 0
-	}
-	return a.side1.CreateIndex() < b.side1.CreateIndex()
+	return a.side2.CreateIndex() < b.side2.CreateIndex()
 }
 
 // ConditionalJoin merges two identical conditional branches (block1, block2)
