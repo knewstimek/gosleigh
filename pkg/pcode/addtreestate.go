@@ -361,37 +361,140 @@ func normalizeArrayHint(hint uint64) int32 {
 	return int32(hint)
 }
 
-func matchSubtype(base Datatype, offsetBytes int32, arrayHint uint64) (Datatype, int32, bool) {
-	if base == nil {
-		return nil, 0, false
+// structLowerBoundField is the index of the last field starting at or before
+// off, or -1. C++ parity: TypeStruct::getLowerBoundField.
+func structLowerBoundField(fields []TypeField, off int64) int {
+	idx := -1
+	for i, f := range fields {
+		if int64(f.Offset) > off {
+			break
+		}
+		idx = i
 	}
-	switch typed := base.(type) {
-	case *Struct:
-		if field, ok := typed.FieldAt(offsetBytes); ok && field.Type != nil {
-			return field.Type, field.Offset, true
-		}
-		if offsetBytes == 0 {
-			fields := typed.Fields()
-			if len(fields) > 0 && fields[0].Type != nil {
-				return fields[0].Type, fields[0].Offset, true
-			}
-		}
+	return idx
+}
+
+// nearestArrayedComponentBackward finds the closest array at or before off,
+// returning its distance (-1 if none within max), the offset relative to it
+// and its element size. C++ parity: Datatype/TypeStruct/TypeArray
+// ::nearestArrayedComponentBackward.
+func nearestArrayedComponentBackward(dt Datatype, off, max int64) (int64, int64, int64) {
+	switch t := dt.(type) {
 	case *Array:
-		elem := typed.Element()
-		if elem == nil || elem.AlignSize() <= 0 {
-			return nil, 0, false
+		if off < 0 || t.Element() == nil {
+			return -1, 0, 0
 		}
-		elemSize := elem.AlignSize()
-		if hinted := normalizeArrayHint(arrayHint); hinted > 1 && hinted == elemSize {
-			if offsetBytes >= 0 && offsetBytes < typed.Size() {
-				return elem, (offsetBytes / elemSize) * elemSize, true
+		elSize := int64(t.Element().AlignSize())
+		if off <= int64(t.Size()) {
+			return int64(t.Size()) - off, off, elSize
+		}
+		return off - int64(t.Size()), off, elSize
+	case *Struct:
+		fields := t.Fields()
+		firstIndex := structLowerBoundField(fields, off)
+		for i := firstIndex; i >= 0; i-- {
+			diff := off - int64(fields[i].Offset)
+			subtype := fields[i].Type
+			remain := diff
+			if i != firstIndex {
+				remain = int64(subtype.Size())
+			}
+			if diff-remain > max {
+				break
+			}
+			distance, _, elSize := nearestArrayedComponentBackward(subtype, remain, max)
+			if distance >= 0 {
+				distance += diff - remain
+				if distance > max {
+					break
+				}
+				return distance, diff, elSize
 			}
 		}
-		if offsetBytes >= 0 && offsetBytes < typed.Size() && offsetBytes%elemSize == 0 {
-			return elem, offsetBytes, true
+	}
+	return -1, 0, 0
+}
+
+// nearestArrayedComponentForward finds the closest array at or after off.
+// C++ parity: Datatype/TypeStruct/TypeArray::nearestArrayedComponentForward.
+func nearestArrayedComponentForward(dt Datatype, off, max int64) (int64, int64, int64) {
+	switch t := dt.(type) {
+	case *Array:
+		if off > 0 || t.Element() == nil {
+			return -1, 0, 0 // skip if we are in the middle of the array
+		}
+		return -off, off, int64(t.Element().AlignSize())
+	case *Struct:
+		fields := t.Fields()
+		i := structLowerBoundField(fields, off)
+		var remain int64
+		if i < 0 { // no component starting before off
+			i = 0
+		} else {
+			remain = off - int64(fields[i].Offset)
+		}
+		for ; i < len(fields); i++ {
+			diff := int64(fields[i].Offset) - off // the first field may have a negative diff
+			if diff+remain > max {
+				break
+			}
+			distance, _, elSize := nearestArrayedComponentForward(fields[i].Type, remain, max)
+			if distance >= 0 {
+				distance += diff + remain
+				if distance > max {
+					break
+				}
+				return distance, -diff, elSize
+			}
+			remain = 0
 		}
 	}
-	return nil, 0, false
+	return -1, 0, 0
+}
+
+// hasMatchingSubType reports whether off falls in a component of base and
+// returns the offset relative to that component (the extra part a PTRSUB
+// does not cover). An array hint steers toward a nearby arrayed component.
+// C++ parity: AddTreeState::hasMatchingSubType.
+func hasMatchingSubType(base Datatype, off int64, arrayHint uint64) (int64, bool) {
+	if arrayHint == 0 {
+		sub, newoff := datatypeSubType(base, off)
+		return newoff, sub != nil
+	}
+	typeBefore, offBefore, elSizeBefore := nearestArrayedComponentBackward(base, off, 128)
+	typeAfter, offAfter, elSizeAfter := nearestArrayedComponentForward(base, off, 128)
+	if typeBefore < 0 && typeAfter < 0 {
+		sub, newoff := datatypeSubType(base, off)
+		return newoff, sub != nil
+	}
+	if typeBefore < 0 {
+		return offAfter, true // only an array after
+	}
+	if typeAfter < 0 {
+		return offBefore, true // only an array before
+	}
+	if offAfter == offBefore {
+		return offAfter, true
+	}
+	// There is an array before and after the offset point.
+	if arrayHint != 1 && elSizeBefore != elSizeAfter {
+		if uint64(elSizeBefore) == arrayHint {
+			return offBefore, true
+		}
+		if uint64(elSizeAfter) == arrayHint {
+			return offAfter, true
+		}
+	}
+	if sub, newoff := datatypeSubType(base, off); sub != nil {
+		if newoff == offBefore || newoff == offAfter {
+			return newoff, true // contained in one of the arrayed components
+		}
+	}
+	distBefore, distAfter := absInt64(offBefore), absInt64(offAfter)
+	if distAfter < distBefore {
+		return offAfter, true
+	}
+	return offBefore, true
 }
 
 func pointerSubtypeType(ptr *Pointer, subtype Datatype) Datatype {
@@ -603,32 +706,57 @@ func (s *AddTreeState) calcSubtype() {
 	if s.elemSize == 0 || tmpoff < s.elemSize {
 		s.offset = tmpoff
 	} else {
-		s.offset = tmpoff % s.elemSize
+		// A sum outside the data-type is presumably an array index plus a
+		// constant, at this level or lower.
+		stmpoff := signExtendToInt64(tmpoff, s.ptrSize) % int64(s.elemSize)
+		if stmpoff >= 0 {
+			s.offset = uint64(stmpoff) // an array index at this level
+		} else if s.baseType.Metatype() == TYPE_STRUCT && s.biggestNonMultCoeff != 0 && s.multsum == 0 {
+			s.offset = tmpoff // an array index at a lower level
+		} else {
+			s.offset = truncateToSize(uint64(stmpoff+int64(s.elemSize)), s.ptrSize)
+		}
 	}
-	s.correct = s.nonmultsum
+	s.correct = s.nonmultsum // non-multiple constants are double counted
 	s.multsum = truncateToSize(tmpoff-s.offset, s.ptrSize)
 	if len(s.nonmult) == 0 {
 		s.valid = s.multsum != 0 || len(s.multiple) != 0
-		s.isSubtype = false
+		s.isSubtype = false // no offsets INTO the pointer
 		return
 	}
+	ws := int64(s.wordSize)
+	if ws <= 0 {
+		ws = 1
+	}
 	switch s.baseType.Metatype() {
-	case TYPE_STRUCT, TYPE_ARRAY:
-		offsetBytes := addressUnitsToBytes(s.offset, s.wordSize)
-		subType, actualBytes, ok := matchSubtype(s.baseType, offsetBytes, s.biggestNonMultCoeff)
+	case TYPE_STRUCT:
+		offsetBytes := signExtendToInt64(s.offset, s.ptrSize) * ws
+		extra, ok := hasMatchingSubType(s.baseType, offsetBytes, s.biggestNonMultCoeff)
 		if !ok {
-			if offsetBytes < 0 || offsetBytes >= s.baseType.Size() {
-				s.valid = false
+			if offsetBytes < 0 || offsetBytes >= int64(s.baseType.Size()) {
+				s.valid = false // out of the structure's bounds
 				return
 			}
-			actualBytes = 0
-			subType = s.baseType
+			extra = 0 // no field, but pretend there is something there
 		}
-		actual := bytesToAddressUnits(actualBytes, s.wordSize)
-		s.offset = truncateToSize(s.offset-actual, s.ptrSize)
-		s.correct = truncateToSize(s.correct-actual, s.ptrSize)
-		s.subType = subType
+		extraUnits := uint64(extra / ws)
+		s.offset = truncateToSize(s.offset-extraUnits, s.ptrSize)
+		s.correct = truncateToSize(s.correct-extraUnits, s.ptrSize)
+		// Gosleigh types the PTRSUB output up front (C++ derives it later in
+		// TypeOpPtrsub): the component starting exactly at the new offset.
+		s.subType = s.baseType
+		if sub, rem := datatypeSubType(s.baseType, signExtendToInt64(s.offset, s.ptrSize)*ws); sub != nil && rem == 0 {
+			s.subType = sub
+		}
 		s.isSubtype = true
+	case TYPE_ARRAY:
+		s.isSubtype = true
+		s.correct = truncateToSize(s.correct-s.offset, s.ptrSize)
+		s.offset = 0
+		s.subType = s.baseType
+		if arr, ok := s.baseType.(*Array); ok && arr.Element() != nil {
+			s.subType = arr.Element()
+		}
 	case TYPE_SPACEBASE:
 		// C++ ruleaction.cc:6306-6317. hasMatchingSubType resolves the mapped
 		// variable containing `offset` (TypeSpacebase::getSubType -- Gosleigh's

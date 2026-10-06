@@ -44,8 +44,10 @@ func TestAddTreeState_ClassifyAndRebuild(t *testing.T) {
 	if len(state.multiple) != 1 {
 		t.Fatalf("multiple len = %d, want 1", len(state.multiple))
 	}
-	if !state.isSubtype || state.offset != 0 {
-		t.Fatalf("subtype=%v offset=%d, want true/0", state.isSubtype, state.offset)
+	// The constant 4 lands on field tail: the PTRSUB offset is the field start.
+	// C++ parity: AddTreeState::calcSubtype / TypeStruct::getSubType.
+	if !state.isSubtype || state.offset != 4 {
+		t.Fatalf("subtype=%v offset=%d, want true/4", state.isSubtype, state.offset)
 	}
 	if len(state.nonmult) != 2 {
 		t.Fatalf("nonmult len = %d, want 2", len(state.nonmult))
@@ -68,8 +70,8 @@ func TestAddTreeState_ClassifyAndRebuild(t *testing.T) {
 	if ptrAdd == nil || ptrAdd.Code() != CPUI_PTRADD {
 		t.Fatalf("ptradd = %v, want PTRADD", ptrAdd)
 	}
-	if val, ok := constantValue(ptrSub.Input(1)); !ok || val != 0 {
-		t.Fatalf("ptrsub offset = %d ok=%v, want 0/true", val, ok)
+	if val, ok := constantValue(ptrSub.Input(1)); !ok || val != 4 {
+		t.Fatalf("ptrsub offset = %d ok=%v, want 4/true", val, ok)
 	}
 	if val, ok := constantValue(ptrAdd.Input(2)); !ok || val != 8 {
 		t.Fatalf("ptradd scale = %d ok=%v, want 8/true", val, ok)

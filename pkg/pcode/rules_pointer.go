@@ -234,7 +234,7 @@ func ptrsubMatches(ptr *Pointer, val int64, extra int64, multiplier int64) bool 
 		if totalBytes == 0 {
 			return true
 		}
-		_, _, ok := matchSubtype(base, totalBytes, uint64(multiplier))
+		_, ok := hasMatchingSubType(base, int64(totalBytes), uint64(multiplier))
 		return ok
 	case TYPE_ARRAY:
 		arr, ok := base.(*Array)
