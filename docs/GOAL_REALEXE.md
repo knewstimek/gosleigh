@@ -23,6 +23,7 @@
 | `5505fee` | 점프테이블 실패 경고 문구, lookForFuncParamNames, 현재 함수 잠긴 프로토타입(부분), RuleShiftSub 원본화 | 165 | - |
 | `85c1531` | 규칙 원본화 20여 종(ExpandLoad, ConditionalMove+cloneExpression, SwitchSingle 등), opInsertAfter의 MULTIEQUAL 건너뛰기, totalReplaceConstant의 marker COPY, 파라미터형=High 타입, 반환 운반자 개명 등 printc 휴리스틱 ~900줄 제거 | 175 | - |
 | `c6ab701` | 상수 공간 정렬, 선언/캐스트=High 타입, extraout_, isComplex(원본 블록), MultiCollapse 기능동등, BoolNegate/ExpandLoad 원본화, tryCallPull+호출인자 consume, 외부 간접호출 재시작(override), 포인터 typedef | 180 | - |
+| `ead2d24` | checkCallDoubleUse/getTrialForInputVarnode/clearActiveInput 원본화, isPossibleAlias, 쉼표 조건 토큰 구조, 조건 리프 레이블, RuleDivOpt/isCollapsible/isZeroExtended 원본화, PTRSUB 오프셋=필드 시작(hasMatchingSubType) | 189 | - |
 
 ## 도구 (`tools/realexe/`)
 - `realexe.py analyze|sample|measure|capture`, `gaps.py`(불일치 유형 집계), `difffn.py`(인덱스별 diff).
@@ -48,4 +49,5 @@ Ghidra API로 Java와 같은 값을 덤프한다.
 | D | 선언이 심볼이 아니라 남은 varnode 기반이라 clearDeadVarnodes 원본화 불가 | printc.cc emitScopeVarDecls | 원본화 시 decl +8 |
 | S | 출력에 `struct X { }` 정의가 찍힘(Ghidra는 함수 출력에 타입 정의 없음) | printc.cc docFunction | [142][177][196] |
 | P | 현재 함수의 잠긴 호스트 프로토타입: 반환형/레지스터 파라미터 타입/스택 파라미터 이름은 적용(ApplyHostSelfPrototype). 남음: C++처럼 입력 잠금으로 두고 잠긴 저장소에서 입력 varnode 생성(ActionPrototypeTypes locked-input, ActionInputPrototype updateInputNoTypes) -- 지금은 파라미터를 추정한 뒤 덮어써서 크기가 다른 읽기(1바이트)와 일부 이름이 어긋남 | fspec.cc, coreaction.cc ActionPrototypeTypes/ActionInputPrototype | [174][183] |
-| - | known mismatch: RulePieceStructure 스텁, TypePointerRel(downChain 구조체 내부), BlockBasic 커버 시작 주소, forceOutputNum(멀티고토 self edge), DivTermAdd 128비트, guardCallOverlappingInput, LoadGuard(ValueSet), clearDeadVarnodes 스택/destroy, cseElimination 블록 끝 주소 | ruleaction.cc, heritage.cc | |
+| A | ActionDeadCode가 directWrite 아닌 addrforce를 지우지 않음. 지우려면 Heritage::guardLoads/handleNewLoadCopies 선행 필요(단독 적용 시 [195] 회귀) | coreaction.cc ActionDeadCode, heritage.cc | [183] |
+| - | known mismatch: RulePieceStructure 스텁, TypePointerRel(propagateAddIn2Out가 구조체 내부에서 nil -> [142]), BlockBasic 커버 시작 주소, forceOutputNum(멀티고토 self edge), DivTermAdd 128비트, guardCallOverlappingInput, LoadGuard(ValueSet), clearDeadVarnodes 스택/destroy, cseElimination 블록 끝 주소 | ruleaction.cc, heritage.cc | |
