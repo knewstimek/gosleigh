@@ -1934,18 +1934,10 @@ func (s *printCState) emitWhileBlockOverflow(children []*FlowBlock) error {
 	return nil
 }
 
-// renderCondBlockComma renders the condition block of a while-do loop in
-// comma_separate mode. Printable non-CBRANCH ops are rendered as assignments
-// separated by ", " and the final CBRANCH condition is appended last.
-// Falls back to mustRenderCondition when there are no printable non-CBRANCH ops.
-// C++ parity: PrintC::emitBlockBasic in setMod(comma_separate) mode +
-// emitBlockWhileDo (printc.cc ~3186).
-func (s *printCState) renderCondBlockComma(bl *FlowBlock) string {
-	return s.lang.ExprString(s.renderCondBlockCommaFrag(bl), cPrecLowest, ExprPosNone, ExprAssocNone)
-}
-
-// renderCondBlockCommaFrag is renderCondBlockComma as a structured fragment, so
-// the pretty-printer can break inside the statements.
+// renderCondBlockCommaFrag renders a loop condition block in comma_separate
+// mode: printable non-CBRANCH ops become assignments joined by ", " ahead of
+// the branch condition. C++ parity: PrintC::emitBlockBasic under
+// setMod(comma_separate).
 func (s *printCState) renderCondBlockCommaFrag(bl *FlowBlock) ExprFragment {
 	basic, ok := bl.Concrete().(*BlockBasic)
 	if !ok {
@@ -2123,11 +2115,11 @@ func (s *printCState) emitForBlock(wdo *BlockWhileDo, children []*FlowBlock) err
 	iterOp := wdo.IterateOp()
 	initOp := wdo.InitializeOp()
 
-	initStr, err := s.renderForPartOp(initOp)
+	initFrag, err := s.renderForPartFrag(initOp)
 	if err != nil {
 		return err
 	}
-	iterStr, err := s.renderForPartOp(iterOp)
+	iterFrag, err := s.renderForPartFrag(iterOp)
 	if err != nil {
 		return err
 	}
@@ -2136,25 +2128,35 @@ func (s *printCState) emitForBlock(wdo *BlockWhileDo, children []*FlowBlock) err
 	// printc.cc:3106 and that mod is still active when condBlock->emit(this)
 	// runs at printc.cc:3115. Any printable non-implied op that lives in the
 	// condition block is therefore emitted ahead of the branch test, separated
-	// by ", " (emitBlockBasic, printc.cc:2839). Rendering only the branch test
-	// here silently dropped those ops (reverse_bytes_inplace lost
-	// "local_10 = param_2 + -1").
-	condStr := s.renderCondBlockComma(children[0])
+	// by ", " (emitBlockBasic, printc.cc:2839).
+	cond := s.renderCondBlockCommaFrag(children[0])
 
 	s.lang.OpenBlockAfter(func() {
 		s.lang.Token("for")
 		s.lang.Space()
-		s.lang.Token("(")
-		if initStr != "" {
-			s.lang.Token(initStr)
+		// Every clause is emitted structurally inside the paren group so long
+		// headers break after a ';' like PrintC::emitForLoop.
+		ge, grouped := s.lang.Emitter().(GroupEmitter)
+		id := 0
+		if grouped {
+			id = ge.OpenParen("(")
+		} else {
+			s.lang.Token("(")
+		}
+		if initOp != nil && !initOp.IsMarker() {
+			s.lang.EmitFragment(initFrag)
 		}
 		s.lang.Token(";")
 		s.lang.Space()
-		s.lang.Token(condStr)
+		s.lang.EmitFragment(cond)
 		s.lang.Token(";")
 		s.lang.Space()
-		s.lang.Token(iterStr)
-		s.lang.Token(")")
+		s.lang.EmitFragment(iterFrag)
+		if grouped {
+			ge.CloseParen(")", id)
+		} else {
+			s.lang.Token(")")
+		}
 	})
 	if err := s.emitBlock(children[1]); err != nil {
 		return err
@@ -2163,50 +2165,8 @@ func (s *printCState) emitForBlock(wdo *BlockWhileDo, children []*FlowBlock) err
 	return nil
 }
 
-// renderForPartOp renders a single op (iterate or initialize) as a C expression
-// string suitable for use inside a for-loop header clause.
-//
-// Assignment ops render as "lhs = rhs".
-// STORE ops render as "*ptr = rhs".
-// Returns "" for nil ops.
-//
-// C++ parity: PrintC::emitForLoop calls emitExpression(op) for each part.
-func (s *printCState) renderForPartOp(op *PcodeOp) (string, error) {
-	if op == nil {
-		return "", nil
-	}
-	if op.IsMarker() {
-		return "", nil
-	}
-	switch op.Code() {
-	case CPUI_STORE:
-		lhs, err := s.renderStoreLHS(storePointer(op), cPrecAssign)
-		if err != nil {
-			return "", err
-		}
-		rhs, err := s.renderVarnode(storeValue(op), cPrecAssign)
-		if err != nil {
-			return "", err
-		}
-		return lhs + " = " + rhs, nil
-	default:
-		// ActionSetCasts has already inserted any required CPUI_CAST op, including
-		// the for-iterate output cast (e.g. sum_list: the LOAD iterator's output is
-		// cast to int*, and that CAST is the folded iterateOp here). renderOpExpr
-		// renders the cast naturally, so no render-time cast synthesis is needed.
-		rhs, err := s.renderOpExpr(op, cPrecAssign)
-		if err != nil {
-			return "", err
-		}
-		if op.Output() == nil {
-			return rhs, nil
-		}
-		lhs := s.printName(op.Output())
-		return lhs + " = " + rhs, nil
-	}
-}
-
-// renderForPartFrag is renderForPartOp as a structured fragment.
+// renderForPartFrag renders the initializer or iterator op of a for-loop
+// header. C++ parity: PrintC::emitForLoop emitExpression(op).
 func (s *printCState) renderForPartFrag(op *PcodeOp) (ExprFragment, error) {
 	if op == nil || op.IsMarker() {
 		return ExprFragment{}, nil
