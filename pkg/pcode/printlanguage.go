@@ -331,6 +331,23 @@ func (pl *PrintLanguage) EmitAssignFragment(lhs string, rhs ExprFragment) {
 	ge.CloseGroup(id)
 }
 
+// EmitAssignFragments is EmitAssignFragment with a structured left side.
+// C++ parity: PrintC::opStore (assignment over the dereference expression).
+func (pl *PrintLanguage) EmitAssignFragments(lhs, rhs ExprFragment) {
+	ge, ok := pl.emitter.(GroupEmitter)
+	if !ok {
+		pl.EmitAssignFragment(pl.ExprString(lhs, cPrecAssign, ExprPosNone, ExprAssocNone), rhs)
+		return
+	}
+	id := ge.OpenGroup()
+	pl.emitFragmentOperand(ge, lhs, needsExprParens(lhs.Precedence, cPrecAssign, ExprPosLeft, ExprAssocRight))
+	ge.Spaces(binaryOpSpacing, assignOpBump)
+	pl.Token("=")
+	ge.Spaces(binaryOpSpacing, assignOpBump)
+	pl.emitFragmentTree(ge, rhs)
+	ge.CloseGroup(id)
+}
+
 func (pl *PrintLanguage) emitFragmentTree(ge GroupEmitter, expr ExprFragment) {
 	pl.emitFragmentTreeIn(ge, expr, true)
 }

@@ -2705,7 +2705,7 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 	}
 	switch op.Code() {
 	case CPUI_STORE:
-		lhs, err := s.renderStoreLHS(storePointer(op), cPrecAssign)
+		lhsFrag, err := s.renderStoreLHSFrag(storePointer(op))
 		if err != nil {
 			return err
 		}
@@ -2715,7 +2715,11 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 		}
 		rhs := s.lang.ExprString(rhsFrag, cPrecAssign, ExprPosNone, ExprAssocNone)
 		s.lang.Statement(func() {
-			s.emitAssign(lhs, rhsFrag, rhs)
+			if rhs != rhsFrag.Text {
+				s.emitAssign(s.lang.ExprString(lhsFrag, cPrecAssign, ExprPosNone, ExprAssocNone), rhsFrag, rhs)
+				return
+			}
+			s.lang.EmitAssignFragments(lhsFrag, rhsFrag)
 		})
 		return nil
 	case CPUI_RETURN:
@@ -3066,6 +3070,16 @@ func storeValue(op *PcodeOp) *Varnode {
 }
 
 func (s *printCState) renderStoreLHS(ptr *Varnode, parentPrec ExprPrecedence) (string, error) {
+	frag, err := s.renderStoreLHSFrag(ptr)
+	if err != nil {
+		return "", err
+	}
+	return s.lang.ExprString(frag, parentPrec, ExprPosNone, ExprAssocNone), nil
+}
+
+// renderStoreLHSFrag is renderStoreLHS keeping the expression tree, so the
+// statement can break lines inside the stored-to expression.
+func (s *printCState) renderStoreLHSFrag(ptr *Varnode) (ExprFragment, error) {
 	// C++ parity: PrintC::opStore (printc.cc:519-537) is the mirror of opLoad --
 	// when checkArrayDeref accepts the pointer expression the dereference op is
 	// NOT pushed and print_store_value is set instead, which makes opPtradd emit
@@ -3074,17 +3088,16 @@ func (s *printCState) renderStoreLHS(ptr *Varnode, parentPrec ExprPrecedence) (s
 	// scaling and reading as a byte-sized access in C.
 	if checkArrayDeref(ptr) {
 		if frag, ok, err := s.renderDerefValue(ptr); err != nil {
-			return "", err
+			return ExprFragment{}, err
 		} else if ok {
-			return s.lang.ExprString(frag, parentPrec, ExprPosNone, ExprAssocNone), nil
+			return frag, nil
 		}
 	}
 	frag, err := s.renderVarnodeExpr(ptr)
 	if err != nil {
-		return "", err
+		return ExprFragment{}, err
 	}
-	lhs := s.lang.UnaryExpr("*", cPrecUnary, frag)
-	return s.lang.ExprString(lhs, parentPrec, ExprPosNone, ExprAssocNone), nil
+	return s.lang.UnaryExpr("*", cPrecUnary, frag), nil
 }
 
 // renderDerefValue prints the value a LOAD/STORE pointer expression points at
