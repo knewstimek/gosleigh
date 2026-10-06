@@ -1913,6 +1913,18 @@ func isFloatOpcode(code OpCode) bool {
 // deadRemovalAllowedSeen is deadRemovalAllowed that also records that dead
 // code was removed from the space.
 // C++ parity: Heritage::deadRemovalAllowedSeen.
+// seenDeadcode records that dead Varnodes were removed from the space.
+// C++ parity: Heritage::seenDeadCode.
+func (fd *Funcdata) seenDeadcode(sp *address.Space) {
+	if h := fd.heritage; h != nil {
+		for i := range h.infoList {
+			if info := &h.infoList[i]; info.Space == sp {
+				info.DeadRemoved = 1
+			}
+		}
+	}
+}
+
 func (fd *Funcdata) deadRemovalAllowedSeen(sp *address.Space) bool {
 	if !fd.deadRemovalAllowed(sp) {
 		return false
@@ -1932,7 +1944,7 @@ func (fd *Funcdata) deadRemovalAllowedSeen(sp *address.Space) bool {
 // C++ parity: AddrSpace::doesDeadcode.
 func spaceDoesDeadcode(sp *address.Space) bool {
 	switch sp.Kind {
-	case address.SpaceKindConstant, address.SpaceKindIop, address.SpaceKindFspec:
+	case address.SpaceKindConstant, address.SpaceKindIop, address.SpaceKindFspec, address.SpaceKindOther:
 		return false
 	}
 	return true

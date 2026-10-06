@@ -112,68 +112,60 @@ func (a *ActionDeadCode) Apply(data *Funcdata) int {
 	return 0
 }
 
-// applyConsume is the experimental consume-based dead-code path (H7 step 2).
-// It runs the consume-bit analysis (deadcode_consume.go) and removes any op whose
-// output Varnode was never reached by a consume push (not consumeVacuous), i.e.
-// nothing downstream uses its result. Iterated to fixpoint: removing an op makes
-// its inputs' outputs newly unconsumed. Side-effect ops (STORE/CALL/BRANCH/
-// RETURN/INDIRECT) are preserved exactly as in the descendant-based path.
-//
-// The return value stays alive because the return-value wiring (ApplyGuardReturnsLive,
-// the faithful Heritage::guardReturns) has already appended the return-register Varnode
-// to RETURN input[1], which the seed loop marks consumed via gatherConsumedReturn.
-//
-// C++ parity: the deletion loop of ActionDeadCode::apply (coreaction.cc 4036-4068),
-// reduced to the not-consume-vacuous branch (the neverConsumed bit-precise branch
-// and per-space deadRemovalAllowed gating are not modeled; see docs/STATUS.md H7).
+// applyConsume runs the consume-bit analysis (deadcode_consume.go) and then
+// makes one pass over the written Varnodes of every heritaged space: an op
+// whose output was never reached by a consume push is removed (a call only
+// loses its output), and an output reached only vacuously (consume mask 0)
+// has its reads replaced by constant 0 (neverConsumed).
+// C++ parity: ActionDeadCode::apply (coreaction.cc 4035-4068). Like C++ it
+// reports no change to the enclosing action: removing dead code is not a
+// data-flow transform that should repeat the main loop.
 func (a *ActionDeadCode) applyConsume(data *Funcdata) int {
-	total := a.consumePass(data)
-	if total > 0 {
-		return 1
+	ca := newConsumeAnalysis()
+	ca.computeConsumed(data)
+	for _, vn := range data.GetVarnodeBank().AllVarnodes() { // Location order
+		if !vn.IsWritten() {
+			continue
+		}
+		op := vn.Def()
+		if op == nil || op.IsDead() || op.Output() != vn {
+			continue
+		}
+		sp := vn.Space()
+		if sp == nil || !spaceDoesDeadcode(sp) || !data.deadRemovalAllowed(sp) {
+			continue // Don't eliminate if the space has not been heritaged
+		}
+		if !ca.vacuous[vn] { // Not even vacuously consumed
+			if op.IsCall() {
+				data.OpUnsetOutput(op) // For calls just get rid of the output
+			} else {
+				data.OpDestroy(op)
+			}
+			data.seenDeadcode(sp)
+		} else if vn.Consumed() == 0 && a.neverConsumed(vn, data) {
+			data.seenDeadcode(sp) // A value that is never used but bangs around
+		}
 	}
 	return 0
 }
 
-// consumePass removes unconsumed ops to a fixpoint and returns how many.
-func (a *ActionDeadCode) consumePass(data *Funcdata) int {
-	total := 0
-	for {
-		ca := newConsumeAnalysis()
-		ca.computeConsumed(data)
-		count := 0
-		for _, op := range data.allOpsOrdered() {
-			if op.IsDead() {
-				continue
-			}
-			out := op.Output()
-			if out == nil {
-				continue
-			}
-			isCall := op.Code() == CPUI_CALL || op.Code() == CPUI_CALLIND
-			if opHasSideEffects(op.Code()) && !deadIndirectCreationCandidate(op) && !isCall {
-				continue
-			}
-			if ca.vacuous[out] {
-				continue // reached by a consume push -> keep
-			}
-			if out.Space() != nil && !data.deadRemovalAllowed(out.Space()) {
-				continue // C++: no elimination before the space is heritaged
-			}
-			// A call stays; only its unused result goes.
-			// C++ parity: ActionDeadCode::apply (op->isCall() -> opUnsetOutput).
-			if isCall {
-				data.OpUnsetOutput(op)
-			} else {
-				data.OpDestroy(op)
-			}
-			count++
-		}
-		total += count
-		if count == 0 {
-			break
-		}
+// neverConsumed replaces every read of a Varnode whose bits are never used by
+// constant 0 and removes its definition.
+// C++ parity: ActionDeadCode::neverConsumed.
+func (a *ActionDeadCode) neverConsumed(vn *Varnode, data *Funcdata) bool {
+	if vn.Size() > 8 {
+		return false // Not enough precision to really tell
 	}
-	return total
+	for _, op := range append([]*PcodeOp(nil), vn.DescendIter()...) {
+		data.OpSetInput(op, data.NewConstant(vn.Size(), 0), op.GetSlot(vn))
+	}
+	op := vn.Def()
+	if op.IsCall() {
+		data.OpUnsetOutput(op)
+	} else {
+		data.OpDestroy(op)
+	}
+	return true
 }
 
 // deadIndirectCreationCandidate reports an INDIRECT creation (a call killing

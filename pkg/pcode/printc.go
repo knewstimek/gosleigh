@@ -3732,6 +3732,24 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	case CPUI_INT_SREM:
 		return s.renderBinary(op, "%", cPrecMultiply, ExprAssocLeft)
 	case CPUI_BOOL_NEGATE:
+		// An implied comparison input is printed with its negated token instead
+		// of a leading "!". C++ parity: PrintC::opBoolNegate + checkPrintNegation
+		// (negatetoken, OpToken::negate).
+		if in := op.Input(0); in.IsImplied() && in.IsWritten() {
+			def := in.Def()
+			switch def.Code() {
+			case CPUI_BOOL_NEGATE: // The negations cancel
+				return s.renderVarnodeExpr(def.Input(0))
+			case CPUI_INT_EQUAL, CPUI_FLOAT_EQUAL:
+				return s.renderBinary(def, "!=", cPrecEquality, ExprAssocLeft)
+			case CPUI_INT_NOTEQUAL, CPUI_FLOAT_NOTEQUAL:
+				return s.renderBinary(def, "==", cPrecEquality, ExprAssocLeft)
+			case CPUI_INT_LESS, CPUI_INT_SLESS, CPUI_FLOAT_LESS:
+				return s.renderBinary(def, ">=", cPrecRelational, ExprAssocLeft)
+			case CPUI_INT_LESSEQUAL, CPUI_INT_SLESSEQUAL, CPUI_FLOAT_LESSEQUAL:
+				return s.renderBinary(def, ">", cPrecRelational, ExprAssocLeft)
+			}
+		}
 		return s.renderUnary(op, "!", cPrecUnary)
 	case CPUI_BOOL_XOR:
 		return s.renderBinary(op, "!=", cPrecEquality, ExprAssocLeft)
