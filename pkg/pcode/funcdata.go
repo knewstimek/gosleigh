@@ -102,6 +102,8 @@ type Funcdata struct {
 	blockState  funcdataBlockState
 	// laneAccess: laned register records (Funcdata::lanedMap).
 	laneAccess *laneAccessData
+	// merge: Funcdata::covermerge.
+	merge *Merge
 
 	// commentDB accumulates auto-generated warning comments (e.g. jump-table
 	// recovery failures) so PrintC can render them as inline block comments. In

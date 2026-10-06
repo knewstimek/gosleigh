@@ -146,8 +146,17 @@ func (t *HighIntersectTest) Intersection(h1, h2 *HighVariable) bool {
 	if h1 == h2 {
 		return false
 	}
+	// A variable whose cover changed has its cached tests purged first.
+	// C++ parity: HighIntersectTest::intersection -> updateHigh.
+	clean := true
+	for _, h := range []*HighVariable{h1, h2} {
+		if h != nil && h.cover == nil {
+			t.UpdateHigh(h)
+			clean = false
+		}
+	}
 	key := canonicalPair(h1, h2)
-	if v, ok := t.cache[key]; ok {
+	if v, ok := t.cache[key]; ok && clean {
 		return v
 	}
 	result := computeHighIntersection(h1, h2)
@@ -420,11 +429,14 @@ type Merge struct {
 
 // NewMerge creates a Merge engine for the given function.
 // C++ parity: Merge::Merge (constructor)
+// NewMerge returns the function's merge state, which (like C++
+// Funcdata::covermerge) persists across actions: the COPYs recorded by the
+// trimming merges are consumed later by ActionDominantCopy.
 func NewMerge(fd *Funcdata) *Merge {
-	return &Merge{
-		fd:        fd,
-		testCache: newHighIntersectTest(),
+	if fd.merge == nil {
+		fd.merge = &Merge{fd: fd, testCache: newHighIntersectTest()}
 	}
+	return fd.merge
 }
 
 // mergeHighVariables merges the instances of src into dst, updating all
@@ -509,6 +521,7 @@ func (m *Merge) TrimOpInput(op *PcodeOp, slot int) {
 		// Wire the new unique output as the MULTIEQUAL input.
 		m.fd.OpSetInput(op, copyOp.Output(), slot)
 		m.fd.OpInsertEnd(copyOp, bb)
+		m.copyTrims = append(m.copyTrims, copyOp) // C++ allocateCopyTrim records it
 	} else {
 		copyOp := m.fd.NewOp(1, op.Addr())
 		m.fd.OpSetOpcode(copyOp, CPUI_COPY)
@@ -522,6 +535,7 @@ func (m *Merge) TrimOpInput(op *PcodeOp, slot int) {
 		trimHigh.AddInstance(copyOp.Output())
 		m.fd.OpSetInput(op, copyOp.Output(), slot)
 		m.fd.OpInsertBefore(copyOp, op)
+		m.copyTrims = append(m.copyTrims, copyOp)
 	}
 }
 
@@ -814,16 +828,6 @@ func (m *Merge) MergeAdjacent() {
 	m.mergeAdjacentCopies()
 }
 
-// processCopyTrims processes COPY ops inserted by the addr-tied trimming phase.
-// The C++ version tries to consolidate redundant COPYs; here we just clear the list
-// because the COPYs have already been correctly wired by snipReads.
-// C++ parity: merge.cc Merge::processCopyTrims (lines 1415-1436)
-func (m *Merge) processCopyTrims() {
-	// Mark all trimmed COPY output highs for the copyIn tracking pass, then
-	// clear the list. C++ calls processHighDominantCopy for highs with >= 2 COPYs;
-	// that optimization is not yet ported (known mismatch).
-	m.copyTrims = m.copyTrims[:0]
-}
 
 // markInternalCopies marks COPY ops that copy within the same HighVariable as NonPrinting.
 // C++ parity: merge.cc Merge::markInternalCopies (lines 1444-1542)
