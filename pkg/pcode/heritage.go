@@ -1419,6 +1419,19 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 					task = h.disjoint.Get(i)
 				}
 			}
+			// Reads smaller than the range are normalized before any guard: the
+			// SUBPIECE feeding a call's argument then precedes the call's
+			// INDIRECTs and reads the value from before the call.
+			// C++ parity: Heritage::guard (normalizeReadSize ahead of guardCalls).
+			// TODO known mismatch: C++ normalizes the writes here too; Go still
+			// does that after the guards (doing it here breaks the wide global
+			// ranges that the Go-only later refinement path splits).
+			// A range with no reads is only guarded when its addresses are new
+			// (C++ placeMultiequals skips guard otherwise).
+			if r, w, in := h.Collect(task.Addr, task.Size); len(r) > 0 ||
+				((len(w) > 0 || len(in) > 0) && !task.Addr.Space.IsUnique() && task.NewAddresses()) {
+				h.normalizeRange(task.Addr, task.Size, r, nil)
+			}
 			// Insert INDIRECT guards for call-site side-effects on this range BEFORE
 			// Collect so the INDIRECT output varnodes appear as written SSA definitions.
 			// C++ parity: heritage.cc Heritage::heritage -> guard -> guardCalls
