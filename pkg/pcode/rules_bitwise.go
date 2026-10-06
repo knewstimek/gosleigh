@@ -164,20 +164,32 @@ type RuleNegateIdentity struct{ batchRule }
 
 func NewRuleNegateIdentity(group string) *RuleNegateIdentity {
 	r := &RuleNegateIdentity{}
-	r.batchRule = newBatchRule(group, "negateidentity", []OpCode{CPUI_INT_AND, CPUI_INT_OR}, r.apply, func(g string) Rule { return NewRuleNegateIdentity(g) })
+	r.batchRule = newBatchRule(group, "negateidentity", []OpCode{CPUI_INT_NEGATE}, r.apply, func(g string) Rule { return NewRuleNegateIdentity(g) })
 	return r
 }
 
+// apply folds V & ~V to 0 and V | ~V, V ^ ~V to all ones.
+// C++ parity: RuleNegateIdentity::applyOp (triggered on the INT_NEGATE).
 func (r *RuleNegateIdentity) apply(op *PcodeOp, data *Funcdata) int {
-	for slot := 0; slot < 2; slot++ {
-		neg := definedBy(op.Input(slot), CPUI_INT_NEGATE)
-		if neg == nil || !sameValue(neg.Input(0), op.Input(1-slot)) {
+	vn := op.Input(0)
+	outVn := op.Output()
+	for _, logicOp := range outVn.DescendIter() {
+		opc := logicOp.Code()
+		if opc != CPUI_INT_AND && opc != CPUI_INT_OR && opc != CPUI_INT_XOR {
 			continue
 		}
-		if op.Code() == CPUI_INT_AND {
-			return rewriteToConst(data, op, 0)
+		slot := logicOp.GetSlot(outVn)
+		if logicOp.Input(1-slot) != vn {
+			continue
 		}
-		return rewriteToConst(data, op, maskForSize(outputOrInputSize(op)))
+		var value uint64
+		if opc != CPUI_INT_AND {
+			value = maskForSize(vn.Size())
+		}
+		data.OpSetInput(logicOp, data.NewConstant(vn.Size(), value), 0)
+		data.OpRemoveInput(logicOp, 1)
+		data.OpSetOpcode(logicOp, CPUI_COPY)
+		return 1
 	}
 	return 0
 }
@@ -435,21 +447,30 @@ func NewRuleAndZext(group string) *RuleAndZext {
 	return r
 }
 
+// apply turns sext(V) & mask(V) or piece(H,V) & mask(V) into zext(V).
+// C++ parity: RuleAndZext::applyOp.
 func (r *RuleAndZext) apply(op *PcodeOp, data *Funcdata) int {
-	for slot := 0; slot < 2; slot++ {
-		ext := definedBy(op.Input(slot), CPUI_INT_ZEXT)
-		if ext == nil {
-			continue
-		}
-		maskVal, ok := constantValue(op.Input(1 - slot))
-		if !ok {
-			continue
-		}
-		if maskVal == maskForSize(ext.Input(0).Size()) {
-			return rewriteToCopy(data, op, op.Input(slot))
-		}
+	cvn1 := op.Input(1)
+	if !cvn1.IsConstant() || !op.Input(0).IsWritten() {
+		return 0
 	}
-	return 0
+	otherop := op.Input(0).Def()
+	var rootvn *Varnode
+	switch otherop.Code() {
+	case CPUI_INT_SEXT:
+		rootvn = otherop.Input(0)
+	case CPUI_PIECE:
+		rootvn = otherop.Input(1)
+	default:
+		return 0
+	}
+	if maskForSize(rootvn.Size()) != cvn1.Offset() || rootvn.IsFree() || rootvn.Size() > 8 {
+		return 0
+	}
+	data.OpSetOpcode(op, CPUI_INT_ZEXT)
+	data.OpRemoveInput(op, 1)
+	data.OpSetInput(op, rootvn, 0)
+	return 1
 }
 
 // RuleXorIdentity folds the INT_XOR identity/complement elements,

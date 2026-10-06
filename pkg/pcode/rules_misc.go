@@ -1143,19 +1143,31 @@ func NewRuleXorSwap(group string) *RuleXorSwap {
 	return r
 }
 
+// apply simplifies (V ^ W) ^ V to W. C++ parity: RuleXorSwap::applyOp.
 func (r *RuleXorSwap) apply(op *PcodeOp, data *Funcdata) int {
-	for slot := 0; slot < 2; slot++ {
-		xorop := definedBy(op.Input(slot), CPUI_INT_XOR)
-		if xorop == nil {
+	for i := 0; i < 2; i++ {
+		vn := op.Input(i)
+		if !vn.IsWritten() {
 			continue
 		}
-		other := op.Input(1 - slot)
-		if sameValue(xorop.Input(0), other) {
-			return rewriteToCopy(data, op, xorop.Input(1))
+		op2 := vn.Def()
+		if op2.Code() != CPUI_INT_XOR {
+			continue
 		}
-		if sameValue(xorop.Input(1), other) {
-			return rewriteToCopy(data, op, xorop.Input(0))
+		othervn := op.Input(1 - i)
+		vn0, vn1 := op2.Input(0), op2.Input(1)
+		var keep *Varnode
+		if othervn == vn0 && !vn1.IsFree() {
+			keep = vn1
+		} else if othervn == vn1 && !vn0.IsFree() {
+			keep = vn0
+		} else {
+			continue
 		}
+		data.OpRemoveInput(op, 1)
+		data.OpSetOpcode(op, CPUI_COPY)
+		data.OpSetInput(op, keep, 0)
+		return 1
 	}
 	return 0
 }

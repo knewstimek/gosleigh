@@ -32,7 +32,7 @@ func TestRulesBitwise_RewriteAndNonRewrite(t *testing.T) {
 
 	neg := newRuleOp(data, CPUI_INT_NEGATE, 4, x)
 	identity := newRuleOp(data, CPUI_INT_AND, 4, neg.Output(), x)
-	if got := NewRuleNegateIdentity("bitwise").ApplyOp(identity, data); got != 1 {
+	if got := NewRuleNegateIdentity("bitwise").ApplyOp(neg, data); got != 1 { // C++ triggers on the INT_NEGATE
 		t.Fatalf("negateidentity ApplyOp=%d, want 1", got)
 	}
 	if identity.Code() != CPUI_COPY || !isZeroConst(identity.Input(0)) {
