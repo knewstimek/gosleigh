@@ -332,6 +332,13 @@ func (vb *VarnodeBank) MakeFree(vn *Varnode) {
 func (vb *VarnodeBank) Destroy(vn *Varnode) {
 	vb.removeLoc(vn)
 	vb.removeDef(vn)
+	// A destroyed Varnode leaves its HighVariable, or the high keeps a stale
+	// instance whose type still votes in getTypeRepresentative.
+	// C++ parity: Varnode::~Varnode (high->remove(this)).
+	if hv := vn.high; hv != nil {
+		hv.removeInstance(vn)
+		vn.high = nil
+	}
 }
 
 // Replace rewires all descendant PcodeOps from oldVn to newVn.

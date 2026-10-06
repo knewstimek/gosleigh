@@ -993,7 +993,9 @@ func (s *printCState) renderFunctionSignature(retType Datatype) string {
 	realParamNames := make([]string, len(s.params))
 	realParamTypes := make([]Datatype, len(s.params))
 	for i, param := range s.params {
-		realParamTypes[i] = s.normalizeTypeForDecl(param.TypeReadFacing(nil))
+		// The formal type is the merged HighVariable's type.
+		// C++ parity: FuncProto::updateInputTypes (vn->getHigh()->getType()).
+		realParamTypes[i] = s.normalizeTypeForDecl(param.HighTypeDefFacing())
 		existing := s.nameOf(param)
 		if s.ghostParamCount > 0 && strings.HasPrefix(existing, "param_") {
 			// Renumber: real param i becomes param_(ghostParamCount+i+1).
