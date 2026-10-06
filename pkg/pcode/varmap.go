@@ -348,11 +348,8 @@ func signExtendSpaceOffset(off uint64, space *address.Space) int64 {
 // Both spellings appear side by side in the goldens (x64_auto
 // array_init_then_sum: local_58 / local_54 / aiStack_48).
 //
-// C++ parity: varmap.cc ScopeLocal::buildVariableName (L548-581). The 'Y'
-// (unusual region) marker depends on minParamOffset/maxParamOffset, which
-// Gosleigh's ScopeLocal does not track (markNotMapped is unported), so it is
-// never emitted; the 'X' (caller-allocated) marker is reproduced.
-func coreStackName(space *address.Space, offset uint64, growsNegative bool, ct Datatype) string {
+// C++ parity: varmap.cc ScopeLocal::buildVariableName (L548-581).
+func (sl *ScopeLocal) coreStackName(space *address.Space, offset uint64, growsNegative bool, ct Datatype) string {
 	start := signExtendSpaceOffset(offset, space)
 	if growsNegative {
 		start = -start
@@ -367,6 +364,10 @@ func coreStackName(space *address.Space, offset uint64, growsNegative bool, ct D
 	if start <= 0 {
 		marker = "X" // Local stack space allocated by the caller
 		start = -start
+	} else if ext := sl.ext(); ext != nil && ext.minParamOffset < ext.maxParamOffset {
+		if (growsNegative && offset < ext.minParamOffset) || (!growsNegative && offset > ext.maxParamOffset) {
+			marker = "Y" // Unusual region of stack
+		}
 	}
 	return fmt.Sprintf("%s%s%s_%x", prefix, spacename, marker, uint64(start))
 }
@@ -383,7 +384,7 @@ func (sl *ScopeLocal) addrTiedName(addr address.Address, ct Datatype) string {
 		growsNegative = e.stackGrows
 	}
 	if sl.SpaceID() == addr.Space && (sl.model == nil || sl.model.InLocalRange(addr.Offset)) {
-		return coreStackName(addr.Space, addr.Offset, growsNegative, ct)
+		return sl.coreStackName(addr.Space, addr.Offset, growsNegative, ct)
 	}
 	spacename := addr.Space.Name
 	spacename = string(spacename[0]-32) + spacename[1:] // toupper on the first byte

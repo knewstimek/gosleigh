@@ -341,10 +341,14 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			rep = c.uniqVn
 		}
 		irregular := sl != nil && sl.model != nil && (sl.model.EntryPoint || !regParamHigh(c.hv, sl))
+		lockedIrregular := false
 		if fp := data.GetFuncProto(); fp != nil && fp.hostInputLocked && c.inVn != nil {
 			irregular = !fp.selfLockedCovers(c.inVn) // The locked list is the whole signature
+			// Only an argument-register input would otherwise take a param_N
+			// name below; a stack input keeps its local Symbol.
+			lockedIrregular = irregular && sl != nil && regParamHigh(c.hv, sl)
 		}
-		if rep == nil && c.inVn != nil && highHasName(c.hv) && irregular && c.inVn.Space() != nil {
+		if (rep == nil || lockedIrregular) && c.inVn != nil && highHasName(c.hv) && irregular && c.inVn.Space() != nil {
 			// An input that is not a formal parameter: in_<register>.
 			// C++ parity: ScopeInternal::buildVariableName (irregular input,
 			// index < 0).

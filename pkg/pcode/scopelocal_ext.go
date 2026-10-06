@@ -86,6 +86,11 @@ type scopeLocalExt struct {
 	// notMapped are the [first,last] stack offset ranges removed from the
 	// scope's owned range (saved registers, call parameter areas).
 	notMapped [][2]uint64
+	// minParamOffset/maxParamOffset bound the stack parameters passed to
+	// called functions; max < min when there are none.
+	// C++ parity: ScopeLocal::minParamOffset / maxParamOffset.
+	minParamOffset uint64
+	maxParamOffset uint64
 }
 
 func (sl *ScopeLocal) ext() *scopeLocalExt {
@@ -96,7 +101,8 @@ func (sl *ScopeLocal) ext() *scopeLocalExt {
 		return sl.extState
 	}
 	e := &scopeLocalExt{
-		vnMap: make(map[*Varnode]*SymbolEntry),
+		vnMap:          make(map[*Varnode]*SymbolEntry),
+		minParamOffset: ^uint64(0), // C++ parity: ScopeLocal::resetLocalWindow
 	}
 	if sl.model != nil {
 		e.stackSpace = sl.model.StackSpace
@@ -335,11 +341,12 @@ func (sl *ScopeLocal) IsUnmappedUnaliased(vn *Varnode) bool {
 	if sl == nil || sl.model == nil || vn.Space() != sl.model.StackSpace {
 		return false // Must be in the mapped local (stack) space
 	}
-	// minParamOffset/maxParamOffset are only narrowed by markNotMapped, which
-	// is unported, so they keep resetLocalWindow's empty (max < min) state:
-	// C++ answers true for that state.
 	// C++ parity: varmap.cc ScopeLocal::isUnmappedUnaliased (494-502).
-	return true
+	ext := sl.ext()
+	if ext.maxParamOffset < ext.minParamOffset {
+		return true // If no min/max, then we have no known stack parameters
+	}
+	return vn.Offset() < ext.minParamOffset || vn.Offset() > ext.maxParamOffset
 }
 
 // AttachEntryToVarnode records the mapping between a Varnode and a resolved
@@ -713,7 +720,7 @@ func (sl *ScopeLocal) buildVariableName(addr address.Address, pc address.Address
 		if e := sl.ext(); e != nil {
 			growsNegative = e.stackGrows
 		}
-		name = coreStackName(addr.Space, addr.Offset, growsNegative, ct)
+		name = sl.coreStackName(addr.Space, addr.Offset, growsNegative, ct)
 	}
 	return name
 }

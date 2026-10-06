@@ -6,8 +6,6 @@ import "gosleigh/pkg/address"
 // symbols under it are dropped (unless type-locked) and no symbol is created
 // there again, so a Varnode in it is neither mapped nor address-tied. Used for
 // saved-register slots and the parameter area of locked calls.
-// TODO known mismatch: minParamOffset/maxParamOffset (parameter=true) are not
-// tracked; nothing reads them yet.
 // C++ parity: varmap.cc ScopeLocal::markNotMapped.
 func (sl *ScopeLocal) MarkNotMapped(spc *address.Space, first uint64, sz int32, parameter bool) {
 	if sl == nil || spc == nil || spc != sl.SpaceID() || sz <= 0 {
@@ -17,6 +15,15 @@ func (sl *ScopeLocal) MarkNotMapped(spc *address.Space, first uint64, sz int32, 
 	last := first + uint64(sz) - 1
 	if last < first || last > highest {
 		last = highest
+	}
+	ext := sl.ext()
+	if parameter { // Everything above parameter
+		if first < ext.minParamOffset {
+			ext.minParamOffset = first
+		}
+		if last > ext.maxParamOffset {
+			ext.maxParamOffset = last
+		}
 	}
 	addr := address.Address{Space: spc, Offset: first}
 	for {
@@ -30,7 +37,6 @@ func (sl *ScopeLocal) MarkNotMapped(spc *address.Space, first uint64, sz int32, 
 		}
 		sl.RemoveSymbol(sym)
 	}
-	ext := sl.ext()
 	ext.notMapped = append(ext.notMapped, [2]uint64{first, last})
 }
 

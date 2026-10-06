@@ -92,13 +92,19 @@ func (s *printCState) globalSymbolExpr(sym *Symbol) ExprFragment {
 		if depth == 0 {
 			return s.lang.Atom(base)
 		}
-		expr := ExprFragment{Text: base, Precedence: ExprPrecPrimary}
-		for i := len(sym.nsPath) - 1; i >= 0 && i >= len(sym.nsPath)-depth; i-- {
-			scope := ExprFragment{Text: sym.nsPath[i], Precedence: ExprPrecPrimary}
-			expr = ExprFragment{Text: scope.Text + "::" + expr.Text, Precedence: ExprPrecPrimary, node: &fragNode{
-				kind: fragBinary, print1: "::", kids: []ExprFragment{scope, expr}, parens: []bool{false, false}}}
+		// pushOp(&scope) depth times, then the scope atoms outermost
+		// first and the name: the operators nest to the left,
+		// ((A::B)::name).
+		scopeOp := func(l, r ExprFragment) ExprFragment {
+			return ExprFragment{Text: l.Text + "::" + r.Text, Precedence: ExprPrecPrimary, node: &fragNode{
+				kind: fragBinary, print1: "::", kids: []ExprFragment{l, r}, parens: []bool{false, false}}}
 		}
-		return expr
+		scopes := sym.nsPath[len(sym.nsPath)-min(depth, len(sym.nsPath)):]
+		expr := ExprFragment{Text: scopes[0], Precedence: ExprPrecPrimary}
+		for _, sc := range scopes[1:] {
+			expr = scopeOp(expr, ExprFragment{Text: sc, Precedence: ExprPrecPrimary})
+		}
+		return scopeOp(expr, ExprFragment{Text: base, Precedence: ExprPrecPrimary})
 	}
 	q := s.globalSymbolName(sym)
 	base := cppDisplayName(sym.Name())
