@@ -515,11 +515,11 @@ func (t *typeOpIntCmp) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Da
 	}
 	switch t.opcode {
 	case CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL:
-		// reqtype is the more specific of the two operand types. Gosleigh does not
-		// yet model Datatype::typeOrder, so we keep input[0]'s type as the
-		// requirement (the common case where both operands share a metatype).
-		// TODO: port typeOrder to pick the strictly more specified side.
+		// reqtype is the more specific of the two operand types.
 		reqtype := op.Input(0).HighTypeReadFacing(op)
+		if other := op.Input(1).HighTypeReadFacing(op); other != nil && reqtype != nil && TypeOrder(other, reqtype) < 0 {
+			reqtype = other
+		}
 		if cs.checkIntPromotionForCompare(op, slot) {
 			return reqtype
 		}
