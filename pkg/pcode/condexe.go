@@ -1177,13 +1177,3 @@ func (ctx *condConstContext) findConstCompare(points *[]constPoint, boolVn *Varn
 	})
 }
 
-// restrictedByConditional answers the Go counterpart of FlowBlock::
-// restrictedByConditional -- is the incoming edge the only way into out? We
-// approximate with sizeIn()==1.
-// C++ parity: block.cc FlowBlock::restrictedByConditional (simplified)
-func restrictedByConditional(out *FlowBlock, _ *FlowBlock) bool {
-	if out == nil {
-		return false
-	}
-	return out.SizeIn() == 1
-}

@@ -255,7 +255,69 @@ func (sl *ScopeLocal) gatherOpen(fd *Funcdata) []openRangeHint {
 			minItems: minItems,
 		})
 	}
+	if h := fd.heritage; h != nil {
+		for i := range h.loadGuards {
+			hints = addGuardHint(hints, &h.loadGuards[i], CPUI_LOAD, space, types)
+		}
+		for i := range h.storeGuards {
+			hints = addGuardHint(hints, &h.storeGuards[i], CPUI_STORE, space, types)
+		}
+	}
 	return hints
+}
+
+// addGuardHint adds an open range for an indexed LOAD/STORE whose value set
+// analysis found a definite step.
+// C++ parity: varmap.cc MapState::addGuard.
+func addGuardHint(hints []openRangeHint, guard *LoadGuard, opc OpCode, space *address.Space, types *TypeFactory) []openRangeHint {
+	if !guard.IsValid(opc) {
+		return hints
+	}
+	step := guard.Step
+	if step == 0 {
+		return hints // No definitive sign of array access
+	}
+	op := guard.Op
+	ct := op.Input(1).TypeReadFacing(op)
+	if ptr, ok := ct.(*Pointer); ok {
+		ct = ptr.Pointee()
+		for {
+			arr, isArray := ct.(*Array)
+			if !isArray {
+				break
+			}
+			ct = arr.Element()
+		}
+	}
+	var outSize int32
+	if opc == CPUI_STORE {
+		outSize = op.Input(2).Size() // The Varnode being stored
+	} else {
+		outSize = op.Output().Size() // The Varnode being loaded
+	}
+	if outSize != step {
+		// A field in an array of structures or something more unusual
+		if outSize > step || step%outSize != 0 {
+			return hints
+		}
+		step = outSize // Preserve the arrayness with an array of the access size
+	}
+	if ct.AlignSize() != step {
+		if step > 8 {
+			return hints // Don't manufacture primitives bigger than 8 bytes
+		}
+		ct = types.GetBase(step, TYPE_UNKNOWN, "")
+	}
+	minItems := 3
+	if guard.IsRangeLocked() {
+		minItems = int((guard.MaximumOffset-guard.MinimumOffset+1)/uint64(step)) - 1
+	}
+	return append(hints, openRangeHint{
+		start:    guard.MinimumOffset,
+		sstart:   signExtendSpaceOffset(guard.MinimumOffset, space),
+		elem:     ct,
+		minItems: minItems,
+	})
 }
 
 // signExtendSpaceOffset converts a raw space offset into its signed form.

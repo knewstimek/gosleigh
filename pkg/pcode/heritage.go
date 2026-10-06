@@ -25,6 +25,7 @@ type Heritage struct {
 	infoList       []HeritageInfo
 	loadGuards     []LoadGuard
 	storeGuards    []LoadGuard
+	loadCopyOps    []*PcodeOp // COPY guards placed on LOADs this pass
 	// proto is the optional calling-convention model for CALL-site INDIRECT guard
 	// insertion.  nil means no guardCalls pass (leaf-function safe default).
 	// C++ parity: Heritage uses fd->getFuncProto()->getModel() for guardCalls.
@@ -1327,6 +1328,9 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 	// Ranges of every space are placed first, then renamed in one walk.
 	// C++ parity: Heritage::heritage (placeMultiequals(); rename()).
 	var ranges []renameRange
+	reprocessStackCount := 0
+	var stackSpace *address.Space
+	var freeStores []*PcodeOp
 	for idx := range h.infoList {
 		info := &h.infoList[idx]
 		if !info.IsHeritaged() {
@@ -1337,6 +1341,13 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 		}
 		if info.HasCallPlaceholders {
 			h.clearStackPlaceholders(info)
+		}
+		if !info.LoadGuardDone {
+			info.LoadGuardDone = true
+			if h.discoverIndexedStackPointers(info.Space, &freeStores, true) {
+				reprocessStackCount++
+				stackSpace = info.Space
+			}
 		}
 
 		// Scan all varnodes in this space
@@ -1424,6 +1435,7 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			// (highPtrPossible -> guardStores).
 			if task.NewAddresses() && !task.Addr.Space.IsUnique() {
 				h.guardStores(task.Addr, task.Size)
+				h.guardLoads(h.fd.queryPropertyFlags(task.Addr, task.Size), task.Addr, task.Size)
 			}
 			reads, writes, inputs = h.Collect(task.Addr, task.Size)
 			if len(reads) == 0 && len(writes) == 0 && len(inputs) == 0 {
@@ -1456,6 +1468,11 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 		}
 	}
 	h.renameRanges(graph, ranges)
+	if reprocessStackCount > 0 {
+		h.reprocessFreeStores(stackSpace, freeStores)
+	}
+	h.analyzeNewLoadGuards()
+	h.handleNewLoadCopies()
 
 	h.disjoint.Clear()
 	h.pass++

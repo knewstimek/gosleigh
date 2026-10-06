@@ -117,6 +117,9 @@ type Varnode struct {
 	// indirectCause is the op an INDIRECT's iop operand refers to.
 	// C++ parity: PcodeOp::getOpFromConst on the iop address
 	indirectCause *PcodeOp
+	// valueSet is the value set analysis node while a ValueSetSolver runs.
+	// C++ parity: Varnode::temp.valueSet
+	valueSet *valueSet
 }
 
 // NewVarnode creates a Varnode. Initializes flags based on space type.
