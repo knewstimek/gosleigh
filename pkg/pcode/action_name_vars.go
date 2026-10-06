@@ -211,6 +211,7 @@ func regParamSlotOfHigh(hv *HighVariable, sl *ScopeLocal) (int, bool) {
 // Must be called after ActionMergeCopy so all HV merging is complete.
 // C++ parity: ActionNameVars::apply() -> ScopeLocal::assignDefaultNames()
 func (a *ActionNameVars) Apply(data *Funcdata) int {
+	finalizeLocalHighTypes(data)
 	// Collect unique unnamed register-space HighVariables.
 	type hvEntry struct {
 		hv        *HighVariable
@@ -630,4 +631,49 @@ func makeNameUnique(nm string, used map[string]bool) string {
 	}
 	used[res] = true
 	return res
+}
+
+// finalizeLocalHighTypes fixes the data-type of each named, address-tied
+// variable mapped to a local symbol to that symbol's data-type.
+// C++ parity: ActionNameVars::linkSymbols (the finalizeDatatype arm).
+func finalizeLocalHighTypes(data *Funcdata) {
+	sl := data.GetScopeLocal()
+	if sl == nil {
+		return
+	}
+	local := make(map[*SymbolEntry]bool)
+	for _, e := range sl.Entries() {
+		local[e] = true
+	}
+	seen := make(map[*HighVariable]bool)
+	for _, vn := range data.GetVarnodeBank().AllVarnodes() {
+		if vn.IsFree() {
+			continue
+		}
+		high := vn.High()
+		if high == nil || seen[high] {
+			continue
+		}
+		seen[high] = true
+		rep := highNameRepresentative(high)
+		if rep == nil || !highHasName(high) {
+			continue
+		}
+		var entry *SymbolEntry
+		for _, inst := range high.Instances() {
+			if e := inst.GetSymbolEntry(); e != nil {
+				entry = e
+				break
+			}
+		}
+		if entry == nil && !rep.IsPersist() {
+			// Funcdata::linkSymbol: find the entry through the scope
+			entry = sl.QueryContainer(rep.Addr(), 1, address.Address{})
+		}
+		if entry == nil || !rep.IsAddrTied() || !local[entry] {
+			continue
+		}
+		off := int64(rep.Offset()-entry.Addr().Offset) + int64(entry.Offset())
+		high.finalizeDatatype(data.TypeFactory(), entry.Symbol(), off)
+	}
 }

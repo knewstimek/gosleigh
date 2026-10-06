@@ -16,6 +16,7 @@ package pcode
 
 import (
 	"fmt"
+	"gosleigh/pkg/address"
 	"os"
 )
 
@@ -101,9 +102,11 @@ func (a *ActionInferTypes) Apply(data *Funcdata) int {
 	}
 	inferPropagateAcrossReturns(data, tf)
 
-	// C++ also runs propagateSpacebaseRef here (pointer/alias recovery off the
-	// spacebase register). That is out of scope for this slice (like the
-	// AliasChecker path in ScopeLocal::restructure) -- TODO.
+	if sl := data.GetScopeLocal(); sl != nil {
+		if spcvn := data.findSpacebaseInput(sl.SpaceID()); spcvn != nil {
+			inferPropagateSpacebaseRef(data, tf, spcvn, sl.SpaceID())
+		}
+	}
 
 	if inferWriteBack(data) {
 		// count += 1;			// Do not consider this a data-flow change (C++:5423)
@@ -944,6 +947,83 @@ func inferPropagateAcrossReturns(data *Funcdata, tf *TypeFactory) {
 			}
 			vn.SetTempType(ct)
 			inferPropagateOneType(data, tf, vn)
+		}
+	}
+}
+
+// inferPropagateRef pushes the pointed-to type of vn (a likely pointer to
+// addr) onto the unmapped Varnodes stored at addr.
+// C++ parity: ActionInferTypes::propagateRef.
+func inferPropagateRef(data *Funcdata, tf *TypeFactory, vn *Varnode, addr address.Address) {
+	ptr, ok := vn.GetTempType().(*Pointer)
+	if !ok {
+		return
+	}
+	ct := ptr.Pointee()
+	if ct == nil || ct.Metatype() == TYPE_SPACEBASE || ct.Metatype() == TYPE_UNKNOWN {
+		return // Don't bother propagating this
+	}
+	off := addr.Offset
+	endOff := off + uint64(ct.Size())
+	wrapped := endOff < off // Go to the end of the space
+	lastoff := uint64(0)
+	lastsize := ct.Size()
+	lastct := ct
+	for _, curvn := range data.GetVarnodeBank().BySpace(addr.Space) {
+		if curvn.Offset() < off || (!wrapped && curvn.Offset() >= endOff) {
+			continue // beginLoc(addr) .. endLoc(addr + size)
+		}
+		if curvn.IsAnnotation() || (!curvn.IsWritten() && curvn.HasNoDescend()) || curvn.IsTypeLock() {
+			continue
+		}
+		if curvn.symbolEntry != nil {
+			continue
+		}
+		curoff := curvn.Offset() - off
+		cursize := curvn.Size()
+		if curoff+uint64(cursize) > uint64(ct.Size()) {
+			continue
+		}
+		if cursize != lastsize || curoff != lastoff {
+			lastoff = curoff
+			lastsize = cursize
+			lastct = tf.exactPiece(ct, int64(curoff), cursize)
+		}
+		if lastct == nil {
+			continue
+		}
+		// Propagate the reference type into a Varnode it points to
+		if TypeOrder(lastct, curvn.GetTempType()) < 0 {
+			curvn.SetTempType(lastct)
+			inferPropagateOneType(data, tf, curvn) // As far as possible
+		}
+	}
+}
+
+// inferPropagateSpacebaseRef finds constant offsets off the spacebase
+// register and propagates their pointer types to the aliased storage.
+// C++ parity: ActionInferTypes::propagateSpacebaseRef. The address is
+// TypeSpacebase::getAddress for a local frame: the wrapped offset in spc.
+func inferPropagateSpacebaseRef(data *Funcdata, tf *TypeFactory, spcvn *Varnode, spc *address.Space) {
+	spctype, ok := spcvn.Type().(*Pointer) // An absolute property, so not temptype
+	if !ok || spctype.Pointee() == nil || spctype.Pointee().Metatype() != TYPE_SPACEBASE {
+		return
+	}
+	at := func(off uint64) address.Address {
+		return address.Address{Space: spc, Offset: wrapSpaceOffset(spc, off)}
+	}
+	for _, op := range spcvn.DescendIter() {
+		switch op.Code() {
+		case CPUI_COPY:
+			inferPropagateRef(data, tf, op.Output(), at(0))
+		case CPUI_INT_ADD, CPUI_PTRSUB:
+			if vn := op.Input(1); vn.IsConstant() {
+				inferPropagateRef(data, tf, op.Output(), at(vn.Offset()))
+			}
+		case CPUI_PTRADD:
+			if vn := op.Input(1); vn.IsConstant() {
+				inferPropagateRef(data, tf, op.Output(), at(vn.Offset()*op.Input(2).Offset()))
+			}
 		}
 	}
 }

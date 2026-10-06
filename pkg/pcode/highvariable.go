@@ -42,6 +42,10 @@ type HighVariable struct {
 	// claimed by another variable's symbol, so it gets a dynamic symbol
 	// (declared after the mapped ones). C++ parity: Funcdata::handleSymbolConflict.
 	dynamicSym bool
+
+	// finalType, once set, is the variable's data-type regardless of its
+	// members. C++ parity: HighVariable::type with the type_finalized flag.
+	finalType Datatype
 }
 
 // GetSymbol returns the Symbol this high variable maps to, or nil. It walks the
@@ -308,6 +312,9 @@ func (hv *HighVariable) Type() Datatype {
 	if hv == nil {
 		return nil
 	}
+	if hv.finalType != nil {
+		return hv.finalType
+	}
 	var rep *Varnode
 	for _, vn := range hv.instances {
 		if vn == nil || vn.Type() == nil {
@@ -451,4 +458,26 @@ func (hv *HighVariable) numMergeClasses() int {
 		return 1
 	}
 	return hv.mergeClasses
+}
+
+// finalizeDatatype fixes the variable's data-type to its symbol's (piece of)
+// data-type. C++ parity: HighVariable::finalizeDatatype.
+// off is the variable's byte offset within the symbol.
+func (hv *HighVariable) finalizeDatatype(tf *TypeFactory, sym *Symbol, off int64) {
+	if sym == nil || sym.Type() == nil || len(hv.instances) == 0 {
+		return
+	}
+	tp := tf.exactPiece(sym.Type(), off, hv.instances[0].Size())
+	if tp == nil || tp.Metatype() == TYPE_UNKNOWN {
+		return
+	}
+	switch t := tp.(type) { // stripType
+	case *PartialStruct:
+		tp = t.stripped
+	case *Pointer:
+		if t.relStripped != nil {
+			tp = t.relStripped
+		}
+	}
+	hv.finalType = tp
 }

@@ -272,6 +272,14 @@ func (fd *Funcdata) NewTypedOpBefore(before *PcodeOp, opcode OpCode, outSize int
 	return op
 }
 
+// newUntypedOpBefore is Funcdata::newOpBefore: the output is a fresh unique
+// with the default (undefined) data-type.
+func (fd *Funcdata) newUntypedOpBefore(before *PcodeOp, opcode OpCode, outSize int32, inputs ...*Varnode) *PcodeOp {
+	op := fd.NewOpBefore(before, opcode, inputs...)
+	fd.NewUniqueOut(outSize, op)
+	return op
+}
+
 func (fd *Funcdata) OpSetAllInput(op *PcodeOp, inputs []*Varnode) {
 	replaceInputs(fd, op, inputs...)
 }
@@ -533,7 +541,6 @@ type AddTreeState struct {
 	valid               bool
 	isSubtype           bool
 	isDegenerate        bool
-	subType             Datatype
 }
 
 func NewAddTreeState(data *Funcdata, op *PcodeOp, slot int) *AddTreeState {
@@ -581,7 +588,6 @@ func (s *AddTreeState) clear() {
 	s.nonmult = s.nonmult[:0]
 	s.correct = 0
 	s.offset = 0
-	s.subType = nil
 	s.valid = s.ptrType != nil
 	s.isSubtype = false
 }
@@ -742,30 +748,15 @@ func (s *AddTreeState) calcSubtype() {
 		extraUnits := uint64(extra / ws)
 		s.offset = truncateToSize(s.offset-extraUnits, s.ptrSize)
 		s.correct = truncateToSize(s.correct-extraUnits, s.ptrSize)
-		// Gosleigh types the PTRSUB output up front (C++ derives it later in
-		// TypeOpPtrsub): the component starting exactly at the new offset.
-		s.subType = s.baseType
-		if sub, rem := datatypeSubType(s.baseType, signExtendToInt64(s.offset, s.ptrSize)*ws); sub != nil && rem == 0 {
-			s.subType = sub
-		}
 		s.isSubtype = true
 	case TYPE_ARRAY:
 		s.isSubtype = true
 		s.correct = truncateToSize(s.correct-s.offset, s.ptrSize)
 		s.offset = 0
-		s.subType = s.baseType
-		if arr, ok := s.baseType.(*Array); ok && arr.Element() != nil {
-			s.subType = arr.Element()
-		}
 	case TYPE_SPACEBASE:
 		// C++ ruleaction.cc:6306-6317. hasMatchingSubType resolves the mapped
 		// variable containing `offset` (TypeSpacebase::getSubType -- Gosleigh's
 		// Funcdata.ResolveSpacebaseSymbol) and passes back the offset within it.
-		// C++ leaves the PTRSUB output untyped and lets TypeOpPtrsub::propagateType
-		// re-derive it from the same resolution; Gosleigh's buildTree wants the
-		// pointed-to type up front, so it is recorded here. Without it the PTRSUB
-		// output would stay a pointer-to-spacebase and RulePtrArith would rebuild
-		// the same PTRSUB forever.
 		// Known mismatch: the arrayHint (biggestNonMultCoeff) branch of
 		// hasMatchingSubType, which searches nearby arrayed components, is not
 		// ported -- only the plain getSubType lookup is.
@@ -782,12 +773,6 @@ func (s *AddTreeState) calcSubtype() {
 		extra := bytesToAddressUnits(int32(extraBytes), s.wordSize)
 		s.offset = truncateToSize(s.offset-extra, s.ptrSize)
 		s.correct = truncateToSize(s.correct-extra, s.ptrSize)
-		// getTypePointerStripArray: a PTRSUB onto an array symbol points at the
-		// element, matching TypeFactory::getTypePointerStripArray (type.cc:4270).
-		if arr, ok := symType.(*Array); ok && arr.Element() != nil {
-			symType = arr.Element()
-		}
-		s.subType = symType
 		s.isSubtype = true
 	default:
 		s.valid = false
@@ -807,16 +792,14 @@ func (s *AddTreeState) buildMultiples() *Varnode {
 		finalCoeff := term.coeff / int64(s.elemSize)
 		vn := term.vn
 		if finalCoeff != 1 {
-			intType := sharedTypeFactory.GetBase(s.ptrSize, TYPE_INT, "int")
-			mulOp := s.data.NewTypedOpBefore(s.baseOp, CPUI_INT_MULT, s.ptrSize, intType, vn, s.data.NewConstant(s.ptrSize, truncateToSize(uint64(finalCoeff), s.ptrSize)))
+			mulOp := s.data.newUntypedOpBefore(s.baseOp, CPUI_INT_MULT, s.ptrSize, vn, s.data.NewConstant(s.ptrSize, truncateToSize(uint64(finalCoeff), s.ptrSize)))
 			vn = mulOp.Output()
 		}
 		if result == nil {
 			result = vn
 			continue
 		}
-		intType := sharedTypeFactory.GetBase(s.ptrSize, TYPE_INT, "int")
-		addOp := s.data.NewTypedOpBefore(s.baseOp, CPUI_INT_ADD, s.ptrSize, intType, vn, result)
+		addOp := s.data.newUntypedOpBefore(s.baseOp, CPUI_INT_ADD, s.ptrSize, vn, result)
 		result = addOp.Output()
 	}
 	return result
@@ -837,8 +820,7 @@ func (s *AddTreeState) buildExtra() *Varnode {
 			result = vn
 			continue
 		}
-		intType := sharedTypeFactory.GetBase(s.ptrSize, TYPE_INT, "int")
-		addOp := s.data.NewTypedOpBefore(s.baseOp, CPUI_INT_ADD, s.ptrSize, intType, vn, result)
+		addOp := s.data.newUntypedOpBefore(s.baseOp, CPUI_INT_ADD, s.ptrSize, vn, result)
 		result = addOp.Output()
 	}
 	if correct != 0 {
@@ -847,8 +829,7 @@ func (s *AddTreeState) buildExtra() *Varnode {
 		if result == nil {
 			result = correction
 		} else {
-			intType := sharedTypeFactory.GetBase(s.ptrSize, TYPE_INT, "int")
-			addOp := s.data.NewTypedOpBefore(s.baseOp, CPUI_INT_ADD, s.ptrSize, intType, correction, result)
+			addOp := s.data.newUntypedOpBefore(s.baseOp, CPUI_INT_ADD, s.ptrSize, correction, result)
 			result = addOp.Output()
 		}
 	}
@@ -897,12 +878,11 @@ func (s *AddTreeState) buildTree() {
 	current := s.ptr
 	var newop *PcodeOp
 	if multNode != nil {
-		newop = s.data.NewTypedOpBefore(s.baseOp, CPUI_PTRADD, s.ptrSize, s.ptrType, s.ptr, multNode, s.data.NewConstant(s.ptrSize, s.elemSize))
+		newop = s.data.newUntypedOpBefore(s.baseOp, CPUI_PTRADD, s.ptrSize, s.ptr, multNode, s.data.NewConstant(s.ptrSize, s.elemSize))
 		current = newop.Output()
 	}
 	if s.isSubtype {
-		subType := pointerSubtypeType(s.ptrType, s.subType)
-		newop = s.data.NewTypedOpBefore(s.baseOp, CPUI_PTRSUB, s.ptrSize, subType, current, s.data.NewConstant(s.ptrSize, s.offset))
+		newop = s.data.newUntypedOpBefore(s.baseOp, CPUI_PTRSUB, s.ptrSize, current, s.data.NewConstant(s.ptrSize, s.offset))
 		// C++ ruleaction.cc:6531 only stops propagation when the pointed-to
 		// data-type has a size (size != 0). For a spacebase base (size 0) the
 		// PTRSUB output must stay open to TypeOpPtrsub::propagateType so it can
@@ -921,7 +901,6 @@ func (s *AddTreeState) buildTree() {
 	}
 	s.data.OpUnsetOutput(s.baseOp)
 	s.data.OpSetOutput(newop, oldOut)
-	SetVarnodeType(oldOut, current.TypeReadFacing(newop))
 	s.data.OpDestroy(s.baseOp)
 }
 
