@@ -1080,8 +1080,7 @@ func (fd *Funcdata) setVarnodeProperties(vn *Varnode) {
 			if e := fd.resolveGlobal(vn.Addr()); e != nil && e.Symbol() != nil &&
 				e.Symbol().Flags()&VarnodeTypeLock != 0 {
 				if ct := e.GetSizedType(vn.Addr(), vn.Size()); ct != nil && ct.Size() == vn.Size() {
-					SetVarnodeType(vn, ct)
-					vn.SetFlags(VarnodeTypeLock)
+					vn.UpdateTypeLock(ct, true, true) // an unknown type is never locked
 				}
 			}
 		}
