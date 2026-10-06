@@ -572,10 +572,25 @@ func mergeHighVariables(dst, src *HighVariable, cache *HighIntersectTest) {
 			mergeHighVariables(pr[0], pr[1], cache)
 		}
 	}()
+	// Stable merge in address order: HighVariable::mergeInternal
+	// std::merge(..., compareJustLoc), so instance 0 is the lowest address.
+	merged := make([]*Varnode, 0, len(dst.instances)+len(src.instances))
+	i, j := 0, 0
+	for i < len(dst.instances) && j < len(src.instances) {
+		if src.instances[j].Addr().Less(dst.instances[i].Addr()) {
+			merged = append(merged, src.instances[j])
+			j++
+		} else {
+			merged = append(merged, dst.instances[i])
+			i++
+		}
+	}
+	merged = append(merged, dst.instances[i:]...)
+	merged = append(merged, src.instances[j:]...)
 	for _, vn := range src.instances {
 		vn.SetHigh(dst)
-		dst.instances = append(dst.instances, vn)
 	}
+	dst.instances = merged
 	src.instances = nil
 	// Merge covers if available; otherwise mark dst cover as stale.
 	if dst.cover != nil && src.cover != nil {

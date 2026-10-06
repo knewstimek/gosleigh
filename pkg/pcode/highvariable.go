@@ -14,6 +14,8 @@
 
 package pcode
 
+import "sort"
+
 // HighVariable is a high-level variable that may be backed by one or more
 // low-level Varnodes (SSA values). It carries a human-readable name for
 // output in the decompiler.
@@ -148,7 +150,12 @@ func (hv *HighVariable) AddInstance(vn *Varnode) {
 			}
 		}
 	}
-	hv.instances = append(hv.instances, vn)
+	// Keep the instances in address order (after any equal address), the
+	// order HighVariable::mergeInternal maintains with compareJustLoc.
+	at := sort.Search(len(hv.instances), func(i int) bool { return vn.Addr().Less(hv.instances[i].Addr()) })
+	hv.instances = append(hv.instances, nil)
+	copy(hv.instances[at+1:], hv.instances[at:])
+	hv.instances[at] = vn
 	vn.SetHigh(hv)
 }
 
