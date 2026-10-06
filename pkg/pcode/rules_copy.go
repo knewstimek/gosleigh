@@ -68,25 +68,60 @@ type RuleConcatCommute struct{ batchRule }
 
 func NewRuleConcatCommute(group string) *RuleConcatCommute {
 	r := &RuleConcatCommute{}
-	r.batchRule = newBatchRule(group, "concatcommute", []OpCode{CPUI_PIECE, CPUI_SUBPIECE}, r.apply, func(g string) Rule { return NewRuleConcatCommute(g) })
+	r.batchRule = newBatchRule(group, "concatcommute", []OpCode{CPUI_PIECE}, r.apply, func(g string) Rule { return NewRuleConcatCommute(g) })
 	return r
 }
 
+// apply commutes a logical op with a constant out of one PIECE half:
+// CONCAT(V, W & c) => CONCAT(V, W) & (mask(V) << |W| | c), likewise for OR/XOR.
+// C++ parity: ruleaction.cc RuleConcatCommute::applyOp.
 func (r *RuleConcatCommute) apply(op *PcodeOp, data *Funcdata) int {
-	changed := 0
-	for i := 0; i < op.NumInput(); i++ {
-		if i == 1 && op.Code() == CPUI_SUBPIECE && op.Input(i).IsConstant() {
-			continue
-		}
-		copyop := definedBy(op.Input(i), CPUI_COPY)
-		if copyop == nil {
-			continue
-		}
-		data.OpUnsetInput(op, i)
-		data.OpSetInput(op, copyop.Input(0), i)
-		changed = 1
+	outsz := op.Output().Size()
+	if outsz > 8 {
+		return 0 // constant precision
 	}
-	return changed
+	for i := 0; i < 2; i++ {
+		vn := op.Input(i)
+		if !vn.IsWritten() {
+			continue
+		}
+		logicop := vn.Def()
+		opc := logicop.Code()
+		if opc != CPUI_INT_OR && opc != CPUI_INT_XOR && opc != CPUI_INT_AND {
+			continue
+		}
+		if !logicop.Input(1).IsConstant() {
+			continue
+		}
+		val := logicop.Input(1).Offset()
+		var hi, lo *Varnode
+		if i == 0 {
+			hi, lo = logicop.Input(0), op.Input(1)
+			val <<= 8 * uint(lo.Size())
+			if opc == CPUI_INT_AND {
+				val |= maskForSize(lo.Size())
+			}
+		} else {
+			hi, lo = op.Input(0), logicop.Input(0)
+			if opc == CPUI_INT_AND {
+				val |= maskForSize(hi.Size()) << (8 * uint(lo.Size()))
+			}
+		}
+		if hi.IsFree() || lo.IsFree() {
+			continue
+		}
+		newconcat := data.NewOp(2, op.Addr())
+		data.OpSetOpcode(newconcat, CPUI_PIECE)
+		newvn := data.NewUniqueOut(outsz, newconcat)
+		data.OpSetInput(newconcat, hi, 0)
+		data.OpSetInput(newconcat, lo, 1)
+		data.OpInsertBefore(newconcat, op)
+		data.OpSetOpcode(op, opc)
+		data.OpSetInput(op, newvn, 0)
+		data.OpSetInput(op, data.NewConstant(newvn.Size(), val), 1)
+		return 1
+	}
+	return 0
 }
 
 type RuleSubCancel struct{ batchRule }
