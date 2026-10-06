@@ -28,7 +28,7 @@ def run(cmd, env=None, timeout=1800):
 def gate_unit():
 	# go test's cache keeps unchanged packages instant; env reads are part of
 	# the cache key, so cached results are never stale.
-	rc, out = run(["go", "test", "./..."])
+	rc, out = run(["go", "test", "./...", "-timeout", "60s"])
 	bad = [l for l in out.splitlines() if l.startswith(("FAIL", "--- FAIL", "panic"))]
 	lines = ["go test ./...: %s" % ("green" if rc == 0 else "RED")] + ["   " + l for l in bad[:10]]
 	return rc == 0, lines
@@ -38,7 +38,7 @@ def gate_loader():
 	env = dict(os.environ)
 	for g in ENV_GATES:
 		env[g] = "1"
-	rc, out = run(["go", "test", "./pkg/loader/", "-count=1", "-v",
+	rc, out = run(["go", "test", "./pkg/loader/", "-count=1", "-v", "-timeout", "60s",
 		"-run", "GoldenMap|TreeFullGoldenMap"], env=env)
 	seen, lines = set(), []
 	for l in out.splitlines():
