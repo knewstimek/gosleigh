@@ -3705,6 +3705,15 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 		// C++ parity: PrintC::opCallother -- the user op's name applied to
 		// inputs 1..n.
 		if uop := s.fd.UserOps().GetOp(uint32(op.Input(0).Offset())); uop != nil && uop.Name() != "" {
+			if uop.flags&UserOpFlagDisplayString != 0 { // display_string
+				str := "\"badstring\""
+				if ptr, ok := op.Output().Type().(*Pointer); ok && op.NumInput() > 1 {
+					if lit, ok := s.fd.internalStringLiteral(op.Input(1).Offset(), ptr.Pointee()); ok {
+						str = lit
+					}
+				}
+				return s.lang.Atom(str), nil
+			}
 			return s.renderPseudoCall(uop.Name(), op, 1)
 		}
 		return s.renderPseudoCall("CALLOTHER", op, 0)

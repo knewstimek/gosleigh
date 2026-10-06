@@ -65,12 +65,12 @@ const (
 // input 0 equal to Index() dispatches to this description object.
 // C++ parity: class UserPcodeOp in userop.hh.
 type UserPcodeOp struct {
-	name     string
-	opType   UserOpType
-	index    uint32
-	flags    UserOpFlags
-	outType  Datatype
-	inTypes  []Datatype
+	name    string
+	opType  UserOpType
+	index   uint32
+	flags   UserOpFlags
+	outType Datatype
+	inTypes []Datatype
 }
 
 // Name returns the low-level name of the operator.
@@ -89,13 +89,23 @@ func (u *UserPcodeOp) Index() uint32 { return u.index }
 // C++ parity: UserPcodeOp::getDisplay.
 func (u *UserPcodeOp) Flags() UserOpFlags { return u.flags }
 
-// OutputLocal returns the declared output data-type or nil for unspecified.
-// C++ parity: DatatypeUserOp::getOutputLocal.
-func (u *UserPcodeOp) OutputLocal() Datatype { return u.outType }
+// OutputLocal returns the op's output data-type, or nil for unspecified.
+// C++ parity: DatatypeUserOp::getOutputLocal; InternalStringOp::getOutputLocal
+// (the output keeps its own type).
+func (u *UserPcodeOp) OutputLocal(op *PcodeOp) Datatype {
+	if u.opType == UserOpStringData {
+		if op != nil && op.Output() != nil {
+			return op.Output().Type()
+		}
+		return nil
+	}
+	return u.outType
+}
 
-// InputLocal returns the declared input data-type for the given slot or nil.
-// C++ parity: DatatypeUserOp::getInputLocal.
-func (u *UserPcodeOp) InputLocal(slot int) Datatype {
+// InputLocal returns the declared data-type of the CALLOTHER input slot (slot
+// 0 is the op id), or nil. C++ parity: DatatypeUserOp::getInputLocal.
+func (u *UserPcodeOp) InputLocal(op *PcodeOp, slot int) Datatype {
+	slot--
 	if slot < 0 || slot >= len(u.inTypes) {
 		return nil
 	}
@@ -113,6 +123,11 @@ type UserOpManage struct {
 	mu       sync.Mutex
 	byIndex  []*UserPcodeOp
 	builtins map[uint32]*UserPcodeOp
+	// ptrSize/wordSize describe the default data space the builtin pointer
+	// types live in. C++ parity: glb->types->getSizeOfPointer() and
+	// glb->getDefaultDataSpace()->getWordSize().
+	ptrSize  int32
+	wordSize uint32
 }
 
 // NewUserOpManage constructs an empty registry.
@@ -120,6 +135,8 @@ type UserOpManage struct {
 func NewUserOpManage() *UserOpManage {
 	return &UserOpManage{
 		builtins: make(map[uint32]*UserPcodeOp),
+		ptrSize:  4,
+		wordSize: 1,
 	}
 }
 
@@ -159,7 +176,7 @@ func (m *UserOpManage) RegisterBuiltin(id uint32, types *TypeFactory) *UserPcode
 	if existing, ok := m.builtins[id]; ok {
 		return existing
 	}
-	op := buildBuiltinUserOp(id, types)
+	op := buildBuiltinUserOp(id, types, m.ptrSize, m.wordSize)
 	if op != nil {
 		m.builtins[id] = op
 	}
@@ -170,16 +187,7 @@ func (m *UserOpManage) RegisterBuiltin(id uint32, types *TypeFactory) *UserPcode
 // for one of the builtin ids handled by this port. Input/output data-types
 // mirror the C++ factory in userop.cc.
 // C++ parity: UserOpManage::registerBuiltin switch (userop.cc ~L425-L485).
-func buildBuiltinUserOp(id uint32, types *TypeFactory) *UserPcodeOp {
-	// Default pointer size / word size for the common 32-bit case. A full
-	// port threads the architecture's default data space through here; the
-	// minimal helper hard-codes 4/1 so the registry is usable before the
-	// architecture plumbing lands. This is a documented mismatch.
-	// TODO mismatch: builtin user-op data-types ignore the real pointer
-	// size and word size of the owning architecture (C++ reads
-	// glb->types->getSizeOfPointer() and getDefaultDataSpace()->getWordSize()).
-	ptrSize := int32(4)
-	wordSize := uint32(1)
+func buildBuiltinUserOp(id uint32, types *TypeFactory, ptrSize int32, wordSize uint32) *UserPcodeOp {
 
 	switch id {
 	case BUILTIN_STRINGDATA:
@@ -210,7 +218,7 @@ func buildBuiltinUserOp(id uint32, types *TypeFactory) *UserPcodeOp {
 		if types == nil {
 			return nil
 		}
-		charT := types.GetBase(1, TYPE_INT, "char")
+		charT := types.GetChar("char")
 		ptrT := types.GetPointer(ptrSize, charT, wordSize)
 		intT := types.GetBase(4, TYPE_INT, "int")
 		return &UserPcodeOp{

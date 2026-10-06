@@ -490,28 +490,35 @@ func (s *StringSequence) transform() bool {
 // C++ parity: constseq.hh class HeapSequence.
 type HeapSequence struct {
 	arraySequence
-	basePointer  *Varnode
-	baseOffset   uint64
-	storeSpace   *address.Space
-	ptrAddMult   int64
-	nonConstAdds []*Varnode
+	basePointer  *Varnode       // Pointer that sequence is stored to
+	baseOffset   uint64         // Offset relative to pointer to root STORE
+	storeSpace   *address.Space // Address space being STOREd to
+	ptrAddMult   uint64         // Required multiplier for PTRADD ops
+	nonConstAdds []*Varnode     // non-constant Varnodes being added into pointer calculation
 }
 
-// newHeapSequence mirrors constseq.cc HeapSequence::HeapSequence.
-// C++ parity: HeapSequence::HeapSequence.
+// heapIndirectPair is the input/output Varnode pair of the INDIRECT chain one
+// sequence STORE causes. C++ parity: HeapSequence::IndirectPair.
+type heapIndirectPair struct {
+	inVn      *Varnode
+	outVn     *Varnode
+	duplicate bool
+}
+
+// newHeapSequence collects the STOREs of constant characters off the root
+// STORE's base pointer; the result is invalid (isValid false) when they do not
+// form a sequence. C++ parity: HeapSequence::HeapSequence.
 func newHeapSequence(data *Funcdata, ct Datatype, root *PcodeOp) *HeapSequence {
-	h := &HeapSequence{
-		arraySequence: newArraySequence(data, ct, root),
-	}
-	if root.NumInput() < 3 {
+	h := &HeapSequence{arraySequence: newArraySequence(data, ct, root)}
+	h.storeSpace = root.Input(0).GetSpaceFromConst()
+	if h.storeSpace == nil {
 		return h
 	}
-	space := root.Input(0).GetSpaceFromConst()
-	if space == nil {
-		return h
+	ws := uint64(h.storeSpace.WordSize)
+	if ws == 0 {
+		ws = 1
 	}
-	h.storeSpace = space
-	h.ptrAddMult = int64(ct.AlignSize())
+	h.ptrAddMult = uint64(ct.AlignSize()) / ws // byteToAddressInt
 	h.findBasePointer(root.Input(1))
 	if !h.collectStoreOps() {
 		return h
@@ -520,165 +527,403 @@ func newHeapSequence(data *Funcdata, ct Datatype, root *PcodeOp) *HeapSequence {
 		return h
 	}
 	arrSize := len(h.moveOps) * int(ct.AlignSize())
-	bigEndian := space.BigEndian
-	h.numElements = h.formByteArray(arrSize, 2, 0, bigEndian)
+	h.numElements = h.formByteArray(arrSize, 2, 0, h.storeSpace.BigEndian)
 	return h
 }
 
-// findBasePointer back-walks through PTRADDs and COPYs to locate a canonical
-// base Varnode for the sequence.
-// C++ parity: constseq.cc HeapSequence::findBasePointer.
+// findBasePointer backtracks from the root STORE's pointer through PTRADDs
+// and COPYs to a putative root pointer.
+// C++ parity: HeapSequence::findBasePointer.
 func (h *HeapSequence) findBasePointer(initPtr *Varnode) {
 	h.basePointer = initPtr
-	for h.basePointer != nil && h.basePointer.IsWritten() {
+	for h.basePointer.IsWritten() {
 		op := h.basePointer.Def()
-		if op == nil {
-			break
-		}
-		code := op.Code()
-		if code == CPUI_PTRADD {
-			if op.NumInput() < 3 || op.Input(2) == nil || !op.Input(2).IsConstant() {
-				break
+		switch op.Code() {
+		case CPUI_PTRADD:
+			if op.Input(2).Offset() != h.ptrAddMult {
+				return
 			}
-			if int64(op.Input(2).Offset()) != h.ptrAddMult {
-				break
-			}
-		} else if code != CPUI_COPY {
-			break
+		case CPUI_COPY:
+		default:
+			return
 		}
 		h.basePointer = op.Input(0)
 	}
 }
 
-// collectStoreOps gathers candidate STORE ops in the same basic block that
-// share base-pointer derivation with the root.
-// C++ parity: constseq.cc HeapSequence::collectStoreOps (simplified).
-// TODO: the C++ form walks duplicate bases through findDuplicateBases /
-// findInitialStores; without PTRSUB/INT_ADD decomposition available we limit
-// ourselves to STOREs that share the same base pointer varnode directly. The
-// rest of the invariants (block membership, minimum count, byte-array form)
-// still apply.
-func (h *HeapSequence) collectStoreOps() bool {
-	if h.basePointer == nil || h.block == nil {
-		return false
-	}
-	h.baseOffset = 0
-	// Capture root STORE first, at offset 0.
-	h.moveOps = append(h.moveOps, writeNode{offset: 0, op: h.rootOp, slot: 2})
-	for _, op := range h.block.Ops() {
-		if op == h.rootOp || op.Code() != CPUI_STORE {
-			continue
-		}
-		if op.NumInput() < 3 {
-			continue
-		}
-		if op.Input(1) != h.basePointer {
-			// TODO: allow PTRADD/COPY-based aliases once findDuplicateBases is ported.
-			continue
-		}
-		if !h.testValue(op) {
-			return false
-		}
-		// Root is at offset 0; any other base-equal STORE is at offset 0 too
-		// in this narrowed form, which fails the unique-offset invariant.
-		// TODO: recover per-store offsets via calcPtraddOffset.
-		return false
-	}
-	return len(h.moveOps) >= arraySeqMinimumLength
+// isOffsetOp reports a PTRSUB, INT_ADD or PTRADD.
+func isOffsetOp(opc OpCode) bool {
+	return opc == CPUI_PTRSUB || opc == CPUI_INT_ADD || opc == CPUI_PTRADD
 }
 
-// testValue mirrors HeapSequence::testValue.
-// C++ parity: constseq.cc HeapSequence::testValue.
-func (h *HeapSequence) testValue(op *PcodeOp) bool {
-	if op.NumInput() < 3 {
+// offsetOpAmount is the constant offset a PTRSUB/INT_ADD/PTRADD adds.
+func offsetOpAmount(op *PcodeOp) uint64 {
+	off := op.Input(1).Offset()
+	if op.Code() == CPUI_PTRADD {
+		off *= op.Input(2).Offset()
+	}
+	return off
+}
+
+// findDuplicateBases backtracks from basePointer through constant
+// PTRSUB/INT_ADD/PTRADDs to an earlier root, then traces forward through ops
+// matching the same offsets; every Varnode reached (basePointer included) is a
+// duplicate base. C++ parity: HeapSequence::findDuplicateBases.
+func (h *HeapSequence) findDuplicateBases() []*Varnode {
+	if !h.basePointer.IsWritten() {
+		return []*Varnode{h.basePointer}
+	}
+	op := h.basePointer.Def()
+	if !isOffsetOp(op.Code()) || !op.Input(1).IsConstant() {
+		return []*Varnode{h.basePointer}
+	}
+	copyRoot := h.basePointer
+	var offset []uint64
+	for {
+		offset = append(offset, offsetOpAmount(op))
+		copyRoot = op.Input(0)
+		if !copyRoot.IsWritten() {
+			break
+		}
+		op = copyRoot.Def()
+		if !isOffsetOp(op.Code()) || !op.Input(1).IsConstant() {
+			break
+		}
+	}
+	duplist := []*Varnode{copyRoot}
+	for i := len(offset) - 1; i >= 0; i-- {
+		midlist := duplist
+		duplist = nil
+		for _, vn := range midlist {
+			for _, op := range vn.DescendIter() {
+				if !isOffsetOp(op.Code()) || op.Input(0) != vn || !op.Input(1).IsConstant() {
+					continue
+				}
+				if offsetOpAmount(op) != offset[i] {
+					continue
+				}
+				duplist = append(duplist, op.Output())
+			}
+		}
+	}
+	return duplist
+}
+
+// findInitialStores finds the STOREs (root excluded) in the root's block whose
+// pointer derives from a duplicate base through PTRADDs and COPYs.
+// C++ parity: HeapSequence::findInitialStores.
+func (h *HeapSequence) findInitialStores() []*PcodeOp {
+	var stores []*PcodeOp
+	ptradds := h.findDuplicateBases()
+	for pos := 0; pos < len(ptradds); pos++ {
+		vn := ptradds[pos]
+		for _, op := range vn.DescendIter() {
+			switch op.Code() {
+			case CPUI_PTRADD:
+				// Only the element size is checked: different pointer styles
+				// may point to the same element data-type.
+				if op.Input(0) == vn && op.Input(2).Offset() == h.ptrAddMult {
+					ptradds = append(ptradds, op.Output())
+				}
+			case CPUI_COPY:
+				ptradds = append(ptradds, op.Output())
+			case CPUI_STORE:
+				if op.Parent() == h.block && op != h.rootOp && op.Input(1) == vn {
+					stores = append(stores, op)
+				}
+			}
+		}
+	}
+	return stores
+}
+
+// calcAddElements sums the constants of an INT_ADD tree, passing back its
+// non-constant leaves. C++ parity: HeapSequence::calcAddElements.
+func calcAddElements(vn *Varnode, nonConst *[]*Varnode, maxDepth int) uint64 {
+	if vn.IsConstant() {
+		return vn.Offset()
+	}
+	if !vn.IsWritten() || vn.Def().Code() != CPUI_INT_ADD || maxDepth == 0 {
+		*nonConst = append(*nonConst, vn)
+		return 0
+	}
+	res := calcAddElements(vn.Def().Input(0), nonConst, maxDepth-1)
+	return res + calcAddElements(vn.Def().Input(1), nonConst, maxDepth-1)
+}
+
+// calcPtraddOffset is the byte offset from basePointer to vn through PTRADDs
+// and COPYs, passing back the non-constant index terms.
+// C++ parity: HeapSequence::calcPtraddOffset.
+func (h *HeapSequence) calcPtraddOffset(vn *Varnode, nonConst *[]*Varnode) uint64 {
+	var res uint64
+	for vn.IsWritten() {
+		op := vn.Def()
+		if op.Code() == CPUI_PTRADD {
+			mult := op.Input(2).Offset()
+			if mult != h.ptrAddMult {
+				break
+			}
+			res += calcAddElements(op.Input(1), nonConst, 3) * mult
+			vn = op.Input(0)
+		} else if op.Code() == CPUI_COPY {
+			vn = op.Input(0)
+		} else {
+			break
+		}
+	}
+	ws := uint64(h.storeSpace.WordSize)
+	if ws == 0 {
+		ws = 1
+	}
+	return res * ws // addressToByteInt
+}
+
+// heapSetsEqual compares two ordered Varnode lists.
+// C++ parity: HeapSequence::setsEqual.
+func heapSetsEqual(a, b []*Varnode) bool {
+	if len(a) != len(b) {
 		return false
 	}
-	vn := op.Input(2)
-	if vn == nil || !vn.IsConstant() {
-		return false
-	}
-	if int(vn.Size()) != int(h.charType.Size()) {
-		return false
+	for i := range a {
+		if a[i] != b[i] {
+			return false
+		}
 	}
 	return true
 }
 
-// buildStringCopy mirrors constseq.cc HeapSequence::buildStringCopy (L698).
-// The Go port routes the source through Funcdata.GetInternalString and emits a
-// CALLOTHER wiring (destPtr, srcPtr, length). The destination pointer is the
-// detected base pointer; when baseOffset is non-zero we bias it with a PTRADD.
-// Non-constant stride contributions (nonConstAdds) are not tracked by this
-// port (the collect path currently only recognises constant-base STOREs), so
-// the C++ index-Varnode fan-in is omitted.
-// TODO mismatch: nonConstAdds composition + updateType on generated varnodes.
-func (h *HeapSequence) buildStringCopy() *PcodeOp {
-	if len(h.moveOps) == 0 || h.data == nil {
-		return nil
+// testValue: the STOREd value is a constant of the character size.
+// C++ parity: HeapSequence::testValue.
+func (h *HeapSequence) testValue(op *PcodeOp) bool {
+	vn := op.Input(2)
+	return vn.IsConstant() && vn.Size() == h.charType.Size()
+}
+
+// collectStoreOps gathers the STOREs off the base pointer at offsets at or
+// after the root's. C++ parity: HeapSequence::collectStoreOps.
+func (h *HeapSequence) collectStoreOps() bool {
+	initStores := h.findInitialStores()
+	if len(initStores)+1 < arraySeqMinimumLength {
+		return false
 	}
-	insertPoint := h.moveOps[0].op
+	maxSize := uint64(arraySeqMaximumLength) * uint64(h.charType.AlignSize()) // Maximum bytes
+	wrapMask := sizeMask(int32(h.storeSpace.AddrSize))
+	h.baseOffset = h.calcPtraddOffset(h.rootOp.Input(1), &h.nonConstAdds)
+	var nonConstComp []*Varnode
+	for _, op := range initStores {
+		nonConstComp = nonConstComp[:0]
+		curOffset := h.calcPtraddOffset(op.Input(1), &nonConstComp)
+		diff := (curOffset - h.baseOffset) & wrapMask // Allow wrapping relative to base pointer
+		if heapSetsEqual(h.nonConstAdds, nonConstComp) {
+			if diff >= maxSize {
+				return false // Root is not the earliest STORE, or the span is too large
+			}
+			if !h.testValue(op) {
+				return false
+			}
+			h.moveOps = append(h.moveOps, writeNode{offset: diff, op: op, slot: -1})
+		}
+	}
+	h.moveOps = append(h.moveOps, writeNode{offset: 0, op: h.rootOp, slot: -1})
+	return true
+}
+
+// buildStringCopy creates the built-in string copy user-op: destination the
+// base pointer plus the base offset, source an internal string of the bytes,
+// then the length. It goes just before the earliest STORE.
+// C++ parity: HeapSequence::buildStringCopy.
+func (h *HeapSequence) buildStringCopy() *PcodeOp {
+	insertPoint := h.moveOps[0].op // Earliest STORE in the block
+	charPtrType := h.rootOp.Input(1).TypeReadFacing(h.rootOp)
 	numBytes := h.numElements * int(h.charType.Size())
 	types := h.data.TypeFactory()
-	if types == nil || h.basePointer == nil {
-		return nil
-	}
-	charPtrType := types.GetPointer(h.basePointer.Size(), h.charType, 1)
 	srcPtr := h.data.GetInternalString(h.byteArray[:numBytes], charPtrType, insertPoint)
 	if srcPtr == nil {
 		return nil
+	}
+	destPtr := h.basePointer
+	if h.baseOffset != 0 || len(h.nonConstAdds) > 0 { // Create the index Varnode
+		var indexVn *Varnode
+		intType := types.GetBase(h.basePointer.Size(), TYPE_INT, "")
+		addTerm := func(a, b *Varnode) *Varnode {
+			addOp := h.data.NewOp(2, insertPoint.Addr())
+			h.data.OpSetOpcode(addOp, CPUI_INT_ADD)
+			h.data.OpSetInput(addOp, a, 0)
+			h.data.OpSetInput(addOp, b, 1)
+			out := h.data.NewUniqueOut(a.Size(), addOp)
+			out.UpdateType(intType)
+			h.data.OpInsertBefore(addOp, insertPoint)
+			return out
+		}
+		if len(h.nonConstAdds) > 0 { // Add in any non-constant Varnodes
+			indexVn = h.nonConstAdds[0]
+			for _, vn := range h.nonConstAdds[1:] {
+				indexVn = addTerm(indexVn, vn)
+			}
+		}
+		if h.baseOffset != 0 { // Add in any non-zero constant
+			cvn := h.data.NewConstant(h.basePointer.Size(), h.baseOffset/uint64(h.charType.AlignSize()))
+			cvn.UpdateType(intType)
+			if indexVn == nil {
+				indexVn = cvn
+			} else {
+				indexVn = addTerm(indexVn, cvn)
+			}
+		}
+		ptrAdd := h.data.NewOp(3, insertPoint.Addr())
+		h.data.OpSetOpcode(ptrAdd, CPUI_PTRADD)
+		destPtr = h.data.NewUniqueOut(h.basePointer.Size(), ptrAdd)
+		h.data.OpSetInput(ptrAdd, h.basePointer, 0)
+		h.data.OpSetInput(ptrAdd, indexVn, 1)
+		h.data.OpSetInput(ptrAdd, h.data.NewConstant(h.basePointer.Size(), uint64(h.charType.AlignSize())), 2)
+		destPtr.UpdateType(charPtrType)
+		h.data.OpInsertBefore(ptrAdd, insertPoint)
 	}
 	builtInID, index := h.selectStringCopyFunction()
 	if builtInID == 0 {
 		return nil
 	}
 	h.data.UserOps().RegisterBuiltin(builtInID, types)
-	destPtr := h.basePointer
-	if h.baseOffset != 0 {
-		numEl := h.baseOffset / uint64(h.charType.AlignSize())
-		ptrAdd := h.data.NewOp(3, insertPoint.Addr())
-		h.data.OpSetOpcode(ptrAdd, CPUI_PTRADD)
-		newDest := h.data.NewUniqueOut(h.basePointer.Size(), ptrAdd)
-		h.data.OpSetInput(ptrAdd, h.basePointer, 0)
-		h.data.OpSetInput(ptrAdd, h.data.NewConstant(h.basePointer.Size(), numEl), 1)
-		h.data.OpSetInput(ptrAdd, h.data.NewConstant(h.basePointer.Size(), uint64(h.charType.AlignSize())), 2)
-		h.data.OpInsertBefore(ptrAdd, insertPoint)
-		destPtr = newDest
-	}
 	copyOp := h.data.NewOp(4, insertPoint.Addr())
 	h.data.OpSetOpcode(copyOp, CPUI_CALLOTHER)
 	copyOp.ClearFlag(PcodeOpCall)
 	h.data.OpSetInput(copyOp, h.data.NewConstant(4, uint64(builtInID)), 0)
 	h.data.OpSetInput(copyOp, destPtr, 1)
 	h.data.OpSetInput(copyOp, srcPtr, 2)
-	h.data.OpSetInput(copyOp, h.data.NewConstant(4, uint64(index)), 3)
+	lenVn := h.data.NewConstant(4, uint64(index))
+	h.data.OpSetInput(copyOp, lenVn, 3)
+	if to := copyOp.GetOpcode(); to != nil {
+		if ct := to.InputTypeLocal(copyOp, 3, types); ct != nil {
+			lenVn.UpdateType(ct)
+		}
+	}
 	h.data.OpInsertBefore(copyOp, insertPoint)
 	return copyOp
 }
 
-// removeStoreOps tears down the STORE sequence once it has been replaced.
-// C++ parity: HeapSequence::removeStoreOps (L871). The INDIRECT re-wiring that
-// the C++ performs (gatherIndirectPairs + deduplicatePairs) is not reproduced
-// because the Go collectStoreOps currently only accepts a single root STORE
-// without surrounding indirect chains.
-// TODO mismatch: INDIRECT pair preservation for STOREs that shipped with
-// pre-existing INDIRECT side-effects.
-func (h *HeapSequence) removeStoreOps(replaceOp *PcodeOp) {
-	_ = replaceOp
-	for i := range h.moveOps {
-		op := h.moveOps[i].op
-		if op == nil {
+// gatherIndirectPairs collects the INDIRECTs in front of the sequence STOREs
+// and, for each output read by something else, the pair of the chain's
+// initial input and that output.
+// C++ parity: HeapSequence::gatherIndirectPairs.
+func (h *HeapSequence) gatherIndirectPairs() ([]*PcodeOp, []heapIndirectPair) {
+	var indirects []*PcodeOp
+	var pairs []heapIndirectPair
+	for _, mv := range h.moveOps {
+		for op := mv.op.PreviousOp(); op != nil && op.Code() == CPUI_INDIRECT; op = op.PreviousOp() {
+			op.SetFlag(PcodeOpMark)
+			indirects = append(indirects, op)
+		}
+	}
+	for _, op := range indirects {
+		outvn := op.Output()
+		hasUse := false
+		for _, useOp := range outvn.DescendIter() {
+			if !useOp.HasFlag(PcodeOpMark) { // A read that is not by another STORE INDIRECT
+				hasUse = true
+				break
+			}
+		}
+		if hasUse {
+			invn := op.Input(0)
+			for invn.IsWritten() && invn.Def().HasFlag(PcodeOpMark) {
+				invn = invn.Def().Input(0)
+			}
+			pairs = append(pairs, heapIndirectPair{inVn: invn, outVn: outvn})
+		}
+	}
+	for _, op := range indirects {
+		op.ClearFlag(PcodeOpMark)
+	}
+	return indirects, pairs
+}
+
+// deduplicatePairs makes INDIRECT outputs sharing storage read through one
+// representative. C++ parity: HeapSequence::deduplicatePairs.
+func (h *HeapSequence) deduplicatePairs(pairs []heapIndirectPair) bool {
+	if len(pairs) == 0 {
+		return true
+	}
+	order := make([]*heapIndirectPair, len(pairs))
+	for i := range pairs {
+		order[i] = &pairs[i]
+	}
+	sort.SliceStable(order, func(i, j int) bool { // IndirectPair::compareOutput
+		a, b := order[i].outVn, order[j].outVn
+		if a.Space() != b.Space() {
+			return a.Space().Index < b.Space().Index
+		}
+		if a.Offset() != b.Offset() {
+			return a.Offset() < b.Offset()
+		}
+		return a.Size() < b.Size()
+	})
+	head := order[0]
+	dupCount := 0
+	for _, p := range order[1:] {
+		switch head.outVn.CharacterizeOverlap(p.outVn) {
+		case 1:
+			return false // Partial overlap
+		case 2:
+			if p.inVn != head.inVn {
+				return false // Same storage coming from different sources
+			}
+			p.duplicate = true
+			dupCount++
+		default:
+			head = p
+		}
+	}
+	if dupCount > 0 {
+		head = order[0]
+		for _, p := range order[1:] {
+			if p.duplicate {
+				h.data.TotalReplace(p.outVn, head.outVn)
+			} else {
+				head = p
+			}
+		}
+	}
+	return true
+}
+
+// removeStoreOps destroys the STOREs (and the pointer arithmetic only they
+// used) and re-creates the preserved INDIRECT pairs around the user-op.
+// C++ parity: HeapSequence::removeStoreOps.
+func (h *HeapSequence) removeStoreOps(indirects []*PcodeOp, pairs []heapIndirectPair, replaceOp *PcodeOp) {
+	for _, p := range pairs { // Unhook Varnodes we don't want destroyed
+		h.data.OpUnsetOutput(p.outVn.Def())
+	}
+	for _, mv := range h.moveOps {
+		h.data.OpDestroyRecursive(mv.op)
+	}
+	for _, op := range indirects {
+		h.data.OpDestroy(op)
+	}
+	for _, p := range pairs {
+		if p.duplicate {
 			continue
 		}
-		h.data.OpDestroyRecursive(op)
+		newInd := h.data.NewOp(2, replaceOp.Addr())
+		h.data.OpSetOpcode(newInd, CPUI_INDIRECT)
+		h.data.OpSetOutput(newInd, p.outVn)
+		h.data.OpSetInput(newInd, p.inVn, 0)
+		h.data.OpSetInput(newInd, h.data.NewVarnodeIop(replaceOp), 1)
+		h.data.OpInsertBefore(newInd, replaceOp)
 	}
 }
 
-// transform mirrors HeapSequence::transform (L927).
+// transform replaces the STOREs with the string copy user-op.
+// C++ parity: HeapSequence::transform.
 func (h *HeapSequence) transform() bool {
+	indirects, pairs := h.gatherIndirectPairs()
+	if !h.deduplicatePairs(pairs) {
+		return false
+	}
 	memCpyOp := h.buildStringCopy()
 	if memCpyOp == nil {
 		return false
 	}
-	h.removeStoreOps(memCpyOp)
+	h.removeStoreOps(indirects, pairs, memCpyOp)
 	return true
 }
 

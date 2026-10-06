@@ -90,6 +90,48 @@ func (t *typeOpMultiequal) PropagateType(_ *PcodeOp, _ int, inType Datatype, _ *
 // unlocked call sites. InputTypeLocal is consumed both by ActionInferTypes
 // (inferGetLocalType) to seed the target varnode's type and by getInputCast to
 // decide the printed (code *) cast.
+// typeOpCallother asks the user-defined op for its local data-types.
+// C++ parity: TypeOpCallother::getInputLocal / getOutputLocal.
+type typeOpCallother struct{ typeOpBase }
+
+// callotherUserOp is the user-op description a CALLOTHER dispatches to.
+func callotherUserOp(op *PcodeOp) *UserPcodeOp {
+	if op == nil || op.NumInput() == 0 || op.Input(0) == nil || op.Parent() == nil {
+		return nil
+	}
+	fd := op.Parent().GetFuncdata()
+	if fd == nil {
+		return nil
+	}
+	return fd.UserOps().GetOp(uint32(op.Input(0).Offset()))
+}
+
+func (t *typeOpCallother) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) Datatype {
+	if u := callotherUserOp(op); u != nil {
+		if res := u.InputLocal(op, slot); res != nil {
+			return res
+		}
+	}
+	return t.typeOpBase.InputTypeLocal(op, slot, tf)
+}
+
+func (t *typeOpCallother) OutputTypeLocal(op *PcodeOp, tf *TypeFactory) Datatype {
+	if u := callotherUserOp(op); u != nil {
+		if res := u.OutputLocal(op); res != nil {
+			return res
+		}
+	}
+	return t.typeOpBase.OutputTypeLocal(op, tf)
+}
+
+func (t *typeOpCallother) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
+	return baseGetInputCast(t, op, slot, cs)
+}
+
+func (t *typeOpCallother) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	return t.OutputTypeLocal(op, cs.tlst)
+}
+
 type typeOpCallind struct{ typeOpBase }
 
 func (t *typeOpCallind) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) Datatype {
@@ -165,8 +207,9 @@ func (t *typeOpCallind) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) D
 }
 
 // typeOpLoad:
-//   slot=1  (addr input)  -> pointee type propagates to output
-//   slot=-1 (from output) -> pointer-to-outType propagates to input[1]
+//
+//	slot=1  (addr input)  -> pointee type propagates to output
+//	slot=-1 (from output) -> pointer-to-outType propagates to input[1]
 type typeOpLoad struct{ typeOpBase }
 
 func (t *typeOpLoad) PropagateType(op *PcodeOp, slot int, inType Datatype, tf *TypeFactory) Datatype {
@@ -189,8 +232,9 @@ func (t *typeOpLoad) PropagateType(op *PcodeOp, slot int, inType Datatype, tf *T
 }
 
 // typeOpStore:
-//   slot=1 (addr)  -> pointee type propagates to input[2] (value)
-//   slot=2 (value) -> pointer-to-valueType propagates to input[1] (addr)
+//
+//	slot=1 (addr)  -> pointee type propagates to input[2] (value)
+//	slot=2 (value) -> pointer-to-valueType propagates to input[1] (addr)
 type typeOpStore struct{ typeOpBase }
 
 // typeOpIntLeft types its shift amount (C++ TypeOpIntLeft).
@@ -216,8 +260,9 @@ func (t *typeOpStore) PropagateType(op *PcodeOp, slot int, inType Datatype, tf *
 // typeOpIntAdd: if inType is a pointer, propagate it to the output.
 // typeOpIntAdd propagates pointer and signed-integer types.
 // C++ parity: TypeOpIntAdd::propagateType (typeop.cc) --
-//   pointer input -> pointer output (pointer arithmetic)
-//   signed/int input -> signed/int output (preserves signedness)
+//
+//	pointer input -> pointer output (pointer arithmetic)
+//	signed/int input -> signed/int output (preserves signedness)
 type typeOpIntAdd struct{ typeOpBase }
 
 func (t *typeOpIntAdd) PropagateType(_ *PcodeOp, slot int, inType Datatype, tf *TypeFactory) Datatype {
@@ -382,8 +427,9 @@ type typeOpPiece struct{ typeOpBase }
 type typeOpSubpiece struct{ typeOpBase }
 
 // typeOpCast:
-//   slot=0  (input) -> use output varnode size
-//   slot=-1 (reverse from output) -> use input[0] size
+//
+//	slot=0  (input) -> use output varnode size
+//	slot=-1 (reverse from output) -> use input[0] size
 type typeOpCast struct{ typeOpBase }
 
 func (t *typeOpCast) PropagateType(op *PcodeOp, slot int, inType Datatype, tf *TypeFactory) Datatype {
@@ -422,7 +468,7 @@ func RegisterTypeOps() []TypeOp {
 	inst[CPUI_BRANCHIND] = &typeOpBase{CPUI_BRANCHIND, PcodeOpSpecial | PcodeOpBranch | PcodeOpNoCollapse, "BRANCHIND"}
 	inst[CPUI_CALL] = &typeOpCall{typeOpBase{CPUI_CALL, PcodeOpSpecial | PcodeOpCall | PcodeOpHasCallSpec | PcodeOpCodeRef | PcodeOpNoCollapse, "CALL"}}
 	inst[CPUI_CALLIND] = &typeOpCallind{typeOpBase{CPUI_CALLIND, PcodeOpSpecial | PcodeOpCall | PcodeOpHasCallSpec | PcodeOpNoCollapse, "CALLIND"}}
-	inst[CPUI_CALLOTHER] = &typeOpBase{CPUI_CALLOTHER, PcodeOpSpecial | PcodeOpCall | PcodeOpNoCollapse, "CALLOTHER"}
+	inst[CPUI_CALLOTHER] = &typeOpCallother{typeOpBase{CPUI_CALLOTHER, PcodeOpSpecial | PcodeOpCall | PcodeOpNoCollapse, "CALLOTHER"}}
 	inst[CPUI_RETURN] = &typeOpReturn{typeOpBase{CPUI_RETURN, PcodeOpSpecial | PcodeOpReturns | PcodeOpNoCollapse | PcodeOpReturnCopy, "RETURN"}}
 
 	// SSA markers

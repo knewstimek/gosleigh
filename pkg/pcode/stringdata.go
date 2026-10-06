@@ -55,6 +55,12 @@ func (fd *Funcdata) stringDataSized(addr address.Address, charsize int) ([]byte,
 	if numChars < 0 {
 		return nil, false, false // Invalid encoding
 	}
+	return assignStringData(buf, charsize, bigend, numChars)
+}
+
+// assignStringData converts the code units to UTF-8 up to the terminator.
+// C++ parity: StringManagerUnicode::assignStringData.
+func assignStringData(buf []byte, charsize int, bigend bool, numChars int) ([]byte, bool, bool) {
 	var out []byte
 	for i := 0; i < len(buf); {
 		cp, skip := getCodepoint(buf[i:], charsize, bigend)
@@ -68,6 +74,41 @@ func (fd *Funcdata) stringDataSized(addr address.Address, charsize int) ([]byte,
 		return nil, false, false
 	}
 	return out, numChars >= maxStringChars, true
+}
+
+// stringLiteral renders UTF-8 string data as a C literal, with an L prefix
+// for wide characters and a marker when it was cut.
+// C++ parity: PrintC::printCharacterConstant (after getStringData).
+func stringLiteral(data []byte, trunc bool, charType Datatype) string {
+	lit := quoteCString(data)
+	if charType.Size() > 1 {
+		lit = "L" + lit // Wide character
+	}
+	if trunc {
+		lit = lit[:len(lit)-1] + "...\" /* TRUNCATED STRING LITERAL */"
+	}
+	return lit
+}
+
+// internalStringLiteral prints the internal string a BUILTIN_STRINGDATA
+// CALLOTHER names by its hash.
+// C++ parity: StringManager::registerInternalStringData + getStringData of
+// the constant address.
+func (fd *Funcdata) internalStringLiteral(hash uint64, charType Datatype) (string, bool) {
+	data, _, ok := fd.InternalStringData(hash)
+	if !ok || charType == nil {
+		return "", false
+	}
+	charsize := int(charType.Size())
+	numChars := checkCharacters(data, charsize, false)
+	if numChars < 0 {
+		return "", false
+	}
+	out, trunc, ok := assignStringData(data, charsize, false, numChars)
+	if !ok {
+		return "", false
+	}
+	return stringLiteral(out, trunc, charType), true
 }
 
 // hasCharTerminator reports whether a buffer holds an all-zero code unit.
@@ -218,12 +259,5 @@ func (fd *Funcdata) printCharacterConstant(addr address.Address, charType Dataty
 	if !ok {
 		return "", false
 	}
-	lit := quoteCString(data)
-	if charType.Size() > 1 {
-		lit = "L" + lit // Wide character
-	}
-	if trunc {
-		lit = lit[:len(lit)-1] + "...\" /* TRUNCATED STRING LITERAL */"
-	}
-	return lit, true
+	return stringLiteral(data, trunc, charType), true
 }

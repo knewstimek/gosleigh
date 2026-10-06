@@ -1631,6 +1631,14 @@ func (fd *Funcdata) OpInsertBefore(op *PcodeOp, follow *PcodeOp) {
 	if bb == nil {
 		return
 	}
+	// There should not be an INDIRECT immediately preceding op: a non-INDIRECT
+	// goes in front of the INDIRECTs attached to follow.
+	// C++ parity: Funcdata::opInsertBefore.
+	if op.Code() != CPUI_INDIRECT {
+		for prev := follow.PreviousOp(); prev != nil && prev.Code() == CPUI_INDIRECT; prev = prev.PreviousOp() {
+			follow = prev
+		}
+	}
 	fd.OpMarkAlive(op)
 	op.SetParent(bb)
 	bb.InsertOpBefore(op, follow)
@@ -2101,6 +2109,13 @@ func (fd *Funcdata) SetTypeFactory(tf *TypeFactory) { fd.typeFactory = tf }
 func (fd *Funcdata) UserOps() *UserOpManage {
 	if fd.userOps == nil {
 		fd.userOps = NewUserOpManage()
+		// The default data space is the function's own (ram) space.
+		if spc := fd.BaseAddr().Space; spc != nil && spc.AddrSize > 0 {
+			fd.userOps.ptrSize = int32(spc.AddrSize)
+			if spc.WordSize > 0 {
+				fd.userOps.wordSize = uint32(spc.WordSize)
+			}
+		}
 	}
 	return fd.userOps
 }
@@ -2130,6 +2145,9 @@ func (fd *Funcdata) GetInternalString(buf []byte, ptrType Datatype, readOp *Pcod
 		return nil
 	}
 	charType := ptr.Pointee()
+	if checkCharacters(buf, int(charType.Size()), readOp.Addr().Space != nil && readOp.Addr().Space.BigEndian) < 0 {
+		return nil // Not a legal encoding
+	}
 	hash := hashInternalString(readOp.Addr(), buf, charType)
 	if hash == 0 {
 		return nil
@@ -2152,6 +2170,7 @@ func (fd *Funcdata) GetInternalString(buf []byte, ptrType Datatype, readOp *Pcod
 	fd.OpSetInput(stringOp, fd.NewConstant(4, uint64(BUILTIN_STRINGDATA)), 0)
 	fd.OpSetInput(stringOp, fd.NewConstant(8, hash), 1)
 	resVn := fd.NewUniqueOut(ptrType.Size(), stringOp)
+	resVn.UpdateTypeLock(ptrType, true, false)
 	fd.OpInsertBefore(stringOp, readOp)
 	return resVn
 }
