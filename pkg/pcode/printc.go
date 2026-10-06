@@ -1,6 +1,7 @@
 package pcode
 
 import (
+	"strconv"
 	"fmt"
 	"math"
 	"sort"
@@ -3611,35 +3612,61 @@ func (s *printCState) locationIsSigned(ref *Varnode) bool {
 
 // renderFloatLiteral reinterprets raw bits as IEEE 754 float/double and
 // returns the C literal string.
-// C++ parity: PrintC::push_float (simplified)
+// C++ parity: PrintC::push_float (without force_scinote).
 func renderFloatLiteral(bits uint64, size uint32) string {
+	var f float64
+	var neg bool
 	switch size {
 	case 4:
-		f := math.Float32frombits(uint32(bits))
-		if math.IsInf(float64(f), 1) {
-			return "INFINITY"
-		}
-		if math.IsInf(float64(f), -1) {
-			return "-INFINITY"
-		}
-		if math.IsNaN(float64(f)) {
-			return "NAN"
-		}
-		return fmt.Sprintf("%gf", f)
+		f = float64(math.Float32frombits(uint32(bits)))
+		neg = bits&0x80000000 != 0
 	case 8:
-		f := math.Float64frombits(bits)
-		if math.IsInf(f, 1) {
-			return "INFINITY"
-		}
-		if math.IsInf(f, -1) {
+		f = math.Float64frombits(bits)
+		neg = bits>>63 != 0
+	default:
+		return fmt.Sprintf("0x%x", bits) // known mismatch: no FloatFormat for other sizes
+	}
+	switch {
+	case math.IsInf(f, 0):
+		if neg {
 			return "-INFINITY"
 		}
-		if math.IsNaN(f) {
-			return "NAN"
+		return "INFINITY"
+	case math.IsNaN(f):
+		if neg {
+			return "-NAN"
 		}
-		return fmt.Sprintf("%g", f)
-	default:
-		return fmt.Sprintf("0x%x", bits)
+		return "NAN"
+	}
+	token := floatPrintDecimal(f, size)
+	if !strings.ContainsAny(token, ".e") {
+		token += ".0" // Force token to look like a floating-point value
+	}
+	return token
+}
+
+// floatPrintDecimal prints host with the fewest digits that round-trip to the
+// same value in the format, in ostream default notation (printf %g).
+// C++ parity: FloatFormat::printDecimal + calcPrecision.
+func floatPrintDecimal(host float64, size uint32) string {
+	fracSize := 52.0
+	if size <= 4 {
+		fracSize = 23
+	}
+	minPrec := int(math.Floor(fracSize * 0.30103))
+	maxPrec := int(math.Ceil((fracSize+1)*0.30103)) + 1
+	for prec := minPrec; ; prec++ {
+		res := strconv.FormatFloat(host, 'g', prec, 64)
+		if prec == maxPrec {
+			return res
+		}
+		bitSize := 64
+		if size <= 4 {
+			bitSize = 32
+		}
+		if rt, err := strconv.ParseFloat(res, bitSize); err == nil && rt == host {
+			return res
+		}
 	}
 }
 
@@ -4791,15 +4818,26 @@ func (s *printCState) localPieceName(vn *Varnode, name string, castTo Datatype) 
 	// A piece of a VariableGroup prints as part of the group's whole variable
 	// (pt.y). C++ parity: pushSymbolDetail -> pushPartialSymbol with
 	// HighVariable::getSymbolOffset.
+	sl := s.fd.GetScopeLocal()
 	if root := groupRootOf(vn.High()); root != nil {
 		if rvn := root.high.Instances(); len(rvn) > 0 {
 			if rt := root.high.Type(); rt != nil {
 				be := vn.Space() != nil && vn.Space().BigEndian
-				return symbolPieceName(s.nameOf(rvn[0]), rt, int32(vn.High().piece.offset-root.offset), vn.Size(), castTo, be)
+				rname := s.nameOf(rvn[0])
+				off := int32(vn.High().piece.offset - root.offset)
+				// The offset is into the Symbol's data-type, which may be
+				// larger than the group (a structure only partly in it).
+				if sl != nil && sl.SpaceID() != nil && rvn[0].Space() == sl.SpaceID() {
+					if e := sl.QueryContainer(rvn[0].Addr(), rvn[0].Size(), address.Address{}); e != nil && e.Symbol() != nil &&
+						e.Symbol().Type() != nil && e.Symbol().Name() == rname {
+						rt = e.Symbol().Type()
+						off += int32(rvn[0].Offset() - e.Addr().Offset)
+					}
+				}
+				return symbolPieceName(rname, rt, off, vn.Size(), castTo, be)
 			}
 		}
 	}
-	sl := s.fd.GetScopeLocal()
 	if sl == nil || sl.SpaceID() == nil {
 		return name, nil
 	}

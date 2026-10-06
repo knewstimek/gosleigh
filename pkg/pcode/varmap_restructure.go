@@ -389,7 +389,7 @@ func (ms *mapState) gatherVarnodes(fd *Funcdata) {
 		}
 		if !vn.IsWritten() {
 			if mapStateIsReadActive(vn) {
-				ms.addRange(vn.Offset(), hintType(vn), 0, rhFixed, -1)
+				ms.addFixedType(vn.Offset(), hintType(vn), 0)
 			}
 			continue
 		}
@@ -397,7 +397,7 @@ func (ms *mapState) gatherVarnodes(fd *Funcdata) {
 		switch op.Code() {
 		case CPUI_INDIRECT:
 			if vn.Addr() != op.Input(0).Addr() || mapStateIsReadActive(vn) {
-				ms.addRange(vn.Offset(), hintType(vn), 0, rhFixed, -1)
+				ms.addFixedType(vn.Offset(), hintType(vn), 0)
 			}
 		case CPUI_MULTIEQUAL:
 			same := true
@@ -408,7 +408,7 @@ func (ms *mapState) gatherVarnodes(fd *Funcdata) {
 				}
 			}
 			if !same || mapStateIsReadActive(vn) {
-				ms.addRange(vn.Offset(), hintType(vn), 0, rhFixed, -1)
+				ms.addFixedType(vn.Offset(), hintType(vn), 0)
 			}
 		case CPUI_PIECE: // two COPYs
 			addr := vn.Addr()
@@ -418,14 +418,14 @@ func (ms *mapState) gatherVarnodes(fd *Funcdata) {
 			}
 			inFirst := op.Input(slot)
 			if inFirst.Addr() != addr {
-				ms.addRange(addr.Offset, hintType(inFirst), 0, rhFixed, -1)
+				ms.addFixedType(addr.Offset, hintType(inFirst), 0)
 			}
 			addr.Offset += uint64(inFirst.Size())
 			if inSecond := op.Input(1 - slot); inSecond.Addr() != addr {
-				ms.addRange(addr.Offset, hintType(inSecond), 0, rhFixed, -1)
+				ms.addFixedType(addr.Offset, hintType(inSecond), 0)
 			}
 			if mapStateIsReadActive(vn) {
-				ms.addRange(vn.Offset(), hintType(vn), 0, rhFixed, -1)
+				ms.addFixedType(vn.Offset(), hintType(vn), 0)
 			}
 		case CPUI_SUBPIECE:
 			// Not an active write when just copying within the same storage.
@@ -436,17 +436,43 @@ func (ms *mapState) gatherVarnodes(fd *Funcdata) {
 			}
 			addr.Offset += uint64(trunc)
 			if addr != vn.Addr() || mapStateIsReadActive(vn) {
-				ms.addRange(vn.Offset(), hintType(vn), 0, rhFixed, -1)
+				ms.addFixedType(vn.Offset(), hintType(vn), 0)
 			}
 		case CPUI_COPY:
 			var fl uint32
 			if op.Input(0).IsConstant() {
 				fl = rhCopyConstant
 			}
-			ms.addRange(vn.Offset(), hintType(vn), fl, rhFixed, -1)
+			ms.addFixedType(vn.Offset(), hintType(vn), fl)
 		default:
-			ms.addRange(vn.Offset(), hintType(vn), 0, rhFixed, -1)
+			ms.addFixedType(vn.Offset(), hintType(vn), 0)
 		}
+	}
+}
+
+// addFixedType adds the hint for a Varnode of data-type ct. A piece of a
+// structure (array) moved in whole fields is an open reference to its parent
+// (element). C++ parity: MapState::addFixedType. TypePartialUnion is not
+// modelled (known mismatch).
+func (ms *mapState) addFixedType(start uint64, ct Datatype, flags uint32) {
+	tps, ok := ct.(*PartialStruct)
+	if !ok {
+		ms.addRange(start, ct, flags, rhFixed, -1)
+		return
+	}
+	switch parent := tps.Container(); parent.Metatype() {
+	case TYPE_STRUCT:
+		if tps.Offset() == 0 { // If initial fields of TYPE_STRUCT are moved here
+			ms.addRange(start, parent, 0, rhOpen, -1)
+		}
+	case TYPE_ARRAY: // If elements of an array are moved here
+		if el := parent.(*Array).Element(); el.Metatype() != TYPE_UNKNOWN {
+			ms.addRange(start, el, 0, rhOpen, -1)
+		}
+	}
+	// If the Varnode is a constant COPY, generate a fixed reference as well
+	if flags != 0 {
+		ms.addRange(start, ms.types.GetBase(tps.Size(), TYPE_UNKNOWN, ""), flags, rhFixed, -1)
 	}
 }
 

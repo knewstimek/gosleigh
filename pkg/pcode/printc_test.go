@@ -414,12 +414,12 @@ func TestE3FloatLiteralEmit(t *testing.T) {
 		size uint32
 		want string
 	}{
-		{"float_1.0", 0x3f800000, 4, "1f"},
-		{"float_0.0", 0x00000000, 4, "0f"},
-		{"float_neg1", 0xbf800000, 4, "-1f"},
-		{"float_0.5", 0x3f000000, 4, "0.5f"},
-		{"double_1.0", 0x3ff0000000000000, 8, "1"},
-		{"double_0.0", 0x0000000000000000, 8, "0"},
+		{"float_1.0", 0x3f800000, 4, "1.0"},
+		{"float_0.0", 0x00000000, 4, "0.0"},
+		{"float_neg1", 0xbf800000, 4, "-1.0"},
+		{"float_0.5", 0x3f000000, 4, "0.5"},
+		{"double_1.0", 0x3ff0000000000000, 8, "1.0"},
+		{"double_0.0", 0x0000000000000000, 8, "0.0"},
 		{"float_inf", 0x7f800000, 4, "INFINITY"},
 		{"float_neg_inf", 0xff800000, 4, "-INFINITY"},
 		{"float_nan", 0x7fc00000, 4, "NAN"},
