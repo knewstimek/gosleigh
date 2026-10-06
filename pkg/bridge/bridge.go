@@ -332,6 +332,15 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// within-instruction writes are tracked but not propagated across instructions.
 	var instructionDefs map[varKey]*pcode.Varnode
 
+	// splitTail links a block ending in an instruction-internal CBRANCH to the
+	// block holding the rest of that instruction (CMOVcc lowers to
+	// 'goto next if !cond; dst = src').
+	splitTail := make(map[*pcode.BlockBasic]*pcode.BlockBasic)
+	knownAddrs := make(map[address.Address]struct{}, len(records))
+	for _, record := range records {
+		knownAddrs[record.translation.Address] = struct{}{}
+	}
+
 	var current *pcode.BlockBasic
 	for idx, record := range records {
 		addr := record.translation.Address
@@ -349,13 +358,28 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 			return nil, fmt.Errorf("build bridge: missing basic block for instruction %v", addr)
 		}
 		instToBlock[addr] = current
-		lastInBlock[current] = record
 
 		// Fresh defs map per instruction: reads in one instruction must not
 		// resolve to writes from a different instruction.
 		instructionDefs = make(map[varKey]*pcode.Varnode)
-		if err := addInstructionOps(fd, current, record.translation, instructionDefs); err != nil {
-			return nil, err
+		// An op after a branch inside one instruction starts a new block.
+		// C++ parity: FlowInfo marks the op following a branch startbasic.
+		segs := splitAtInnerBranches(record.translation.Ops)
+		for si, seg := range segs {
+			sub, rec := record.translation, record
+			if len(segs) > 1 {
+				sub.Ops = seg
+				rec = instructionRecord{translation: sub, flow: analyzeInstructionFlow(sub, cfg.Entry.Space, knownAddrs)}
+			}
+			if si > 0 {
+				tail := graph.NewBlockBasicInGraph()
+				splitTail[current] = tail
+				current = tail
+			}
+			lastInBlock[current] = rec
+			if err := addInstructionOps(fd, current, sub, instructionDefs); err != nil {
+				return nil, err
+			}
 		}
 	}
 	markNoReturnHalts(fd)
@@ -392,7 +416,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		registerRecoveredTables(fd, recoveredTables)
 	}
 
-	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock, recoveredTables)
+	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock, recoveredTables, splitTail)
 	graph.StructureLoops()
 	fd.SetBasicBlocks(graph)
 	fd.SetFlag(pcode.FuncBlocksGenerated)
@@ -1567,7 +1591,7 @@ func materializeConstantInput(fd *pcode.Funcdata, block *pcode.BlockBasic, addr 
 	return fd.NewUniqueOut(constant.Size(), copyOp)
 }
 
-func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode.BlockBasic, instToBlock map[address.Address]*pcode.BlockBasic, lastInBlock map[*pcode.BlockBasic]instructionRecord, recoveredTables map[uint64]*pcode.JumpTable) {
+func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode.BlockBasic, instToBlock map[address.Address]*pcode.BlockBasic, lastInBlock map[*pcode.BlockBasic]instructionRecord, recoveredTables map[uint64]*pcode.JumpTable, splitTail map[*pcode.BlockBasic]*pcode.BlockBasic) {
 	seen := make(map[edgeKey]struct{})
 	// Visit blocks in ascending source-op-address order. Ghidra builds CFG edges
 	// by walking the dead op list in ascending address order (FlowInfo::collectEdges,
@@ -1583,6 +1607,15 @@ func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode
 	sort.Slice(addrs, func(i, j int) bool { return addrs[i].Less(addrs[j]) })
 	for _, addr := range addrs {
 		block := blockByAddr[addr]
+		// Blocks split inside one instruction: each falls through to the next
+		// piece, and a conditional piece also branches to its target.
+		for tail := splitTail[block]; tail != nil; tail = splitTail[block] {
+			addEdge(graph, seen, block, tail)
+			if rec, ok := lastInBlock[block]; ok && rec.flow.hasDirect {
+				addEdge(graph, seen, block, blockByAddr[rec.flow.directTarget])
+			}
+			block = tail
+		}
 		record, exists := lastInBlock[block]
 		if !exists {
 			continue
@@ -1621,6 +1654,20 @@ func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode
 			addEdge(graph, seen, block, instToBlock[record.flow.fallthroughAddr])
 		}
 	}
+}
+
+// splitAtInnerBranches cuts an instruction's ops after every CBRANCH that is
+// not the last op.
+func splitAtInnerBranches(ops []pcode.RawOp) [][]pcode.RawOp {
+	var segs [][]pcode.RawOp
+	start := 0
+	for i, op := range ops {
+		if op.OpCode == pcode.CPUI_CBRANCH && i+1 < len(ops) {
+			segs = append(segs, ops[start:i+1])
+			start = i + 1
+		}
+	}
+	return append(segs, ops[start:])
 }
 
 func addEdge(graph *pcode.BlockGraph, seen map[edgeKey]struct{}, from *pcode.BlockBasic, to *pcode.BlockBasic) {
