@@ -495,40 +495,7 @@ func NewRuleAddMultCollapse(group string) *RuleAddMultCollapse {
 }
 
 func (r *RuleAddMultCollapse) apply(op *PcodeOp, data *Funcdata) int {
-	if op.Code() == CPUI_INT_ADD && r.applyAddTerms(op, data) {
-		return 1
-	}
 	return r.applyFaithful(op, data)
-}
-
-// applyAddTerms holds Gosleigh's x+x / x*c+x INT_ADD folds, which C++ does
-// in RuleCollectTerms rather than here.
-func (r *RuleAddMultCollapse) applyAddTerms(op *PcodeOp, data *Funcdata) bool {
-	size := outputOrInputSize(op)
-	if sameValue(op.Input(0), op.Input(1)) {
-		rewriteOp(data, op, CPUI_INT_MULT, op.Input(0), data.NewConstant(size, 2))
-		return true
-	}
-	for slot := 0; slot < 2; slot++ {
-		mul := definedBy(op.Input(slot), CPUI_INT_MULT)
-		if mul == nil {
-			continue
-		}
-		other := op.Input(1 - slot)
-		for cslot := 0; cslot < 2; cslot++ {
-			cval, ok := constantValue(mul.Input(cslot))
-			if !ok {
-				continue
-			}
-			base := mul.Input(1 - cslot)
-			if !sameValue(base, other) {
-				continue
-			}
-			rewriteOp(data, op, CPUI_INT_MULT, base, data.NewConstant(size, truncateToSize(cval+1, size)))
-			return true
-		}
-	}
-	return false
 }
 
 // applyFaithful is C++ RuleAddMultCollapse::applyOp over INT_ADD and INT_MULT.

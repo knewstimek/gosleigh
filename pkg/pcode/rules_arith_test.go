@@ -52,16 +52,12 @@ func TestRulesArith_RewriteAndNonRewrite(t *testing.T) {
 		t.Fatalf("trivialarith failed: opcode=%v in0=%v", same.Code(), same.Input(0))
 	}
 
+	// x*3 + x is RuleCollectTerms' job; RuleAddMultCollapse only folds
+	// constants (C++ RuleAddMultCollapse::applyOp).
 	mult := newRuleOp(data, CPUI_INT_MULT, 4, x, data.NewConstant(4, 3))
 	collapse := newRuleOp(data, CPUI_INT_ADD, 4, mult.Output(), x)
-	if got := NewRuleAddMultCollapse("arith").ApplyOp(collapse, data); got != 1 {
-		t.Fatalf("addmultcollapse ApplyOp=%d, want 1", got)
-	}
-	if collapse.Code() != CPUI_INT_MULT {
-		t.Fatalf("expected INT_MULT, got %v", collapse.Code())
-	}
-	if val, ok := constantValue(collapse.Input(1)); !ok || val != 4 {
-		t.Fatalf("expected multiplier 4, got %d ok=%v", val, ok)
+	if got := NewRuleAddMultCollapse("arith").ApplyOp(collapse, data); got != 0 {
+		t.Fatalf("addmultcollapse ApplyOp=%d, want 0", got)
 	}
 
 	noneg := newRuleOp(data, CPUI_INT_ADD, 4, x, data.NewConstant(4, 7))
