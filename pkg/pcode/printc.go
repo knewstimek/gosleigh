@@ -1460,6 +1460,10 @@ func normalizedBaseType(base *Base, longSize int) Datatype {
 			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, fmt.Sprintf("int%d", base.Size()))
 		}
 	case TYPE_UNKNOWN:
+		// The host's DefaultDataType keeps its own name ("undefined").
+		if base.Name() == "undefined" {
+			return base
+		}
 		// Preserve TYPE_UNKNOWN as Ghidra's "undefined%d" type.
 		// C++ parity: Ghidra uses TYPE_UNKNOWN for untyped bytes; prints as undefined1/2/4/8.
 		// normalizeTypeForDecl must NOT coerce this to TYPE_UINT -- that would lose the

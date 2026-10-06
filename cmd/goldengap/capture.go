@@ -285,6 +285,11 @@ func typeDesc(n *xnode, types map[string]*xnode, depth int) *pcode.HostTypeDesc 
 		if t := types[n.attr("name")]; t != nil {
 			return typeDesc(t, types, depth+1)
 		}
+		// Java's DefaultDataType: a 1-byte unknown named plainly "undefined"
+		// (distinct from the core undefined1); it is never listed in the save.
+		if n.attr("name") == "undefined" {
+			return &pcode.HostTypeDesc{Name: "undefined", Meta: "unknown", Size: 1}
+		}
 		return nil
 	case "void":
 		return &pcode.HostTypeDesc{Meta: "void"}
