@@ -13,9 +13,9 @@ type PcodeOpBank struct {
 	deadList  []*PcodeOp          // dead ops (not in CFG)
 	aliveList []*PcodeOp          // alive ops (in CFG)
 	uniqID    uint64              // monotonic sequence counter
-	// sorted caches opTree in SeqNum order (C++ optree is a std::map keyed
-	// by SeqNum); nil when stale. Iterating the Go map directly would make
-	// every caller's order, and so the output, vary from run to run.
+	// sorted holds every op in SeqNum order (C++ optree is a std::map keyed
+	// by SeqNum), maintained on create/destroy. Iterating the Go map would
+	// make the order, and so the output, vary from run to run.
 	sorted []*PcodeOp
 }
 
@@ -51,7 +51,10 @@ func (b *PcodeOpBank) createInternal(numInputs int, seq SeqNum) *PcodeOp {
 	op := NewPcodeOp(numInputs, seq)
 	op.SetFlag(PcodeOpDead)
 	b.opTree[seq] = op
-	b.sorted = nil
+	i := b.searchSeq(seq)
+	b.sorted = append(b.sorted, nil)
+	copy(b.sorted[i+1:], b.sorted[i:])
+	b.sorted[i] = op
 	b.deadList = append(b.deadList, op)
 	return op
 }
@@ -76,7 +79,12 @@ func (b *PcodeOpBank) MarkDead(op *PcodeOp) {
 // C++ parity: PcodeOpBank::destroy
 func (b *PcodeOpBank) Destroy(op *PcodeOp) {
 	delete(b.opTree, op.seq)
-	b.sorted = nil
+	for i := b.searchSeq(op.seq); i < len(b.sorted) && SeqNumEqual(b.sorted[i].seq, op.seq); i++ {
+		if b.sorted[i] == op {
+			b.sorted = append(b.sorted[:i], b.sorted[i+1:]...)
+			break
+		}
+	}
 	if op.IsDead() {
 		b.deadList = removeFromSlice(b.deadList, op)
 	} else {
@@ -92,7 +100,7 @@ func (b *PcodeOpBank) FindOp(seq SeqNum) *PcodeOp {
 // Target returns the first op (in SeqNum order) at addr, or nil.
 // C++ parity: PcodeOpBank::target.
 func (b *PcodeOpBank) Target(addr address.Address) *PcodeOp {
-	for _, op := range b.ordered() {
+	for _, op := range b.sorted {
 		if op.seq.Address == addr {
 			return op
 		}
@@ -115,18 +123,25 @@ func (b *PcodeOpBank) Clear() {
 // AllOps returns a snapshot of all ops in the bank in SeqNum order.
 // C++ parity: PcodeOpBank::beginAll/endAll (optree iteration).
 func (b *PcodeOpBank) AllOps() []*PcodeOp {
-	return append([]*PcodeOp(nil), b.ordered()...)
+	return append([]*PcodeOp(nil), b.sorted...)
 }
 
-func (b *PcodeOpBank) ordered() []*PcodeOp {
-	if b.sorted == nil {
-		b.sorted = make([]*PcodeOp, 0, len(b.opTree))
-		for _, op := range b.opTree {
-			b.sorted = append(b.sorted, op)
-		}
-		sort.Slice(b.sorted, func(i, j int) bool { return SeqNumLess(b.sorted[i].seq, b.sorted[j].seq) })
+// searchSeq is the index of the first op whose SeqNum is not before seq.
+func (b *PcodeOpBank) searchSeq(seq SeqNum) int {
+	return sort.Search(len(b.sorted), func(i int) bool { return !SeqNumLess(b.sorted[i].seq, seq) })
+}
+
+// NextAfter returns the first op at or after seq (strictly after when
+// strict), or nil. C++ parity: optree.lower_bound / upper_bound.
+func (b *PcodeOpBank) NextAfter(seq SeqNum, strict bool) *PcodeOp {
+	i := b.searchSeq(seq)
+	for strict && i < len(b.sorted) && SeqNumEqual(b.sorted[i].seq, seq) {
+		i++ // ops can share a SeqNum (CreateWithSeq); skip them all
 	}
-	return b.sorted
+	if i < len(b.sorted) {
+		return b.sorted[i]
+	}
+	return nil
 }
 
 // AliveOps returns a copy of the alive list.

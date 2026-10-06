@@ -559,9 +559,15 @@ func (vn *Varnode) ClearTempType() {
 
 // SeqNumLess returns true if a < b in the natural SeqNum ordering.
 // Compares address first, then the unique id (Time field).
+// Address equality here is by space index and offset, matching
+// Address.Less, so two Space objects for one space never make the order
+// inconsistent (a binary search over it would otherwise stall).
 func SeqNumLess(a, b SeqNum) bool {
-	if a.Address != b.Address {
-		return a.Address.Less(b.Address)
+	if a.Address.Less(b.Address) {
+		return true
+	}
+	if b.Address.Less(a.Address) {
+		return false
 	}
 	return a.Time < b.Time
 }
@@ -571,8 +577,5 @@ func SeqNumEqual(a, b SeqNum) bool {
 	if a.Time != b.Time {
 		return false
 	}
-	if a.Address.Space != b.Address.Space {
-		return false
-	}
-	return a.Address.Offset == b.Address.Offset
+	return !a.Address.Less(b.Address) && !b.Address.Less(a.Address)
 }

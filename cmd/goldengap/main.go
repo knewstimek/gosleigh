@@ -134,6 +134,7 @@ func main() {
 			time.Sleep(time.Duration(secs) * time.Second)
 			buf := make([]byte, 1<<20)
 			os.Stderr.Write(buf[:runtime.Stack(buf, true)])
+			pprof.StopCPUProfile() // keep a -cpuprofile of the stall
 			os.Exit(4)
 		}()
 	}

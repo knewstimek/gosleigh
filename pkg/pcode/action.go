@@ -17,6 +17,9 @@ import (
 // env-gated diag toggles (GCD_DUMP/TREE_DIAG).
 var ssaDumpAfterActions = os.Getenv("SSA_DUMP_AFTER")
 
+// ruleTrace prints every rule application to stderr (diagnostic RULE_TRACE=1).
+var ruleTrace = os.Getenv("RULE_TRACE") != ""
+
 // maybeDumpSSAAfter prints the SSA after `act` ran, if its name matches an
 // SSA_DUMP_AFTER substring. Called only when ssaDumpAfterActions != "".
 func maybeDumpSSAAfter(act Action, data *Funcdata) {
@@ -712,42 +715,21 @@ func (p *ActionPool) ResetStats() {
 	}
 }
 
-func (p *ActionPool) rescanOps(data *Funcdata) {
-	p.opState = data.allOpsOrdered()
-}
-
+// syncCurrentOp moves to the first op at (includeCurrent) or after the
+// current SeqNum, picking up ops created behind the cursor as C++'s optree
+// iterator does. C++ parity: ActionPool::processOp op_state iteration.
 func (p *ActionPool) syncCurrentOp(data *Funcdata, includeCurrent bool) {
-	p.rescanOps(data)
-	p.currentOp = nil
-	if includeCurrent {
-		for _, op := range p.opState {
-			if SeqNumEqual(op.Seq(), p.currentSeq) {
-				p.currentOp = op
-				return
-			}
-			if SeqNumLess(p.currentSeq, op.Seq()) {
-				p.currentOp = op
-				return
-			}
-		}
-		return
-	}
-	for _, op := range p.opState {
-		if SeqNumLess(p.currentSeq, op.Seq()) {
-			p.currentOp = op
-			return
-		}
-	}
+	p.currentOp = data.GetPcodeOpBank().NextAfter(p.currentSeq, !includeCurrent)
 }
 
 func (p *ActionPool) beginTraversal(data *Funcdata) {
-	p.rescanOps(data)
-	if len(p.opState) == 0 {
+	ops := data.GetPcodeOpBank().sorted
+	if len(ops) == 0 {
 		p.currentOp = nil
 		p.currentSeq = SeqNum{}
 		return
 	}
-	p.currentOp = p.opState[0]
+	p.currentOp = ops[0]
 	p.currentSeq = p.currentOp.Seq()
 }
 
@@ -776,6 +758,9 @@ func (p *ActionPool) processOp(data *Funcdata) int {
 		base.countTests++
 		res := rule.ApplyOp(op, data)
 		if res > 0 {
+			if ruleTrace {
+				fmt.Fprintf(os.Stderr, "RULE %s @%x:%x\n", rule.GetName(), op.Addr().Offset, op.Seq().Time)
+			}
 			base.countApply++
 			p.count += res
 			base.issueWarning(data)
@@ -1108,11 +1093,7 @@ func (data *Funcdata) opDeadAndGone(op *PcodeOp) {
 }
 
 func (data *Funcdata) allOpsOrdered() []*PcodeOp {
-	ops := data.GetPcodeOpBank().AllOps()
-	sort.Slice(ops, func(i int, j int) bool {
-		return SeqNumLess(ops[i].Seq(), ops[j].Seq())
-	})
-	return ops
+	return data.GetPcodeOpBank().AllOps() // already in SeqNum order
 }
 
 // ---------------------------------------------------------------------------
