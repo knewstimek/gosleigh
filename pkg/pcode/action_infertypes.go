@@ -218,6 +218,13 @@ func inferWriteBack(data *Funcdata) bool {
 		if vn.Type() == ct { // No change
 			continue
 		}
+		// A Varnode is created with the undefined type of its size, so
+		// filling a missing type with that is no change either.
+		// C++ parity: Funcdata::newVarnode (getBase(s,TYPE_UNKNOWN)).
+		if _, isBase := ct.(*Base); vn.Type() == nil && isBase && ct.Metatype() == TYPE_UNKNOWN && ct.Size() == vn.Size() {
+			SetVarnodeType(vn, ct)
+			continue
+		}
 		SetVarnodeType(vn, ct)
 		if hv := vn.High(); hv != nil {
 			hv.SetType(ct)
