@@ -273,12 +273,35 @@ func (hv *HighVariable) PhysicalRep() *Varnode {
 	return nil
 }
 
-// Type returns the type annotation for this high variable, or nil if unset.
+// Type returns the data-type of the high variable: that of its most locked,
+// most specific member. The stored annotation is only a fallback for a high
+// whose members carry no type yet. Recomputed on each call instead of cached
+// with a dirty flag, so member type changes are always seen.
+// C++ parity: HighVariable::getType -> updateType / getTypeRepresentative.
 func (hv *HighVariable) Type() Datatype {
 	if hv == nil {
 		return nil
 	}
-	return hv.datatype
+	var rep *Varnode
+	for _, vn := range hv.instances {
+		if vn == nil || vn.Type() == nil {
+			continue
+		}
+		switch {
+		case rep == nil:
+			rep = vn
+		case rep.IsTypeLock() != vn.IsTypeLock():
+			if vn.IsTypeLock() {
+				rep = vn
+			}
+		case typeOrderBool(vn.Type(), rep.Type()) < 0:
+			rep = vn
+		}
+	}
+	if rep == nil {
+		return hv.datatype
+	}
+	return rep.Type()
 }
 
 // SetType sets the type annotation for this high variable.
