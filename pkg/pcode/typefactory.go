@@ -62,6 +62,11 @@ func (f *TypeFactory) Intern(dt Datatype) Datatype {
 }
 
 func (f *TypeFactory) GetBase(size int32, meta metatype, name string) *Base {
+	if size == 1 && meta == TYPE_INT && (name == "" || name == "int" || name == "char") {
+		// C++ parity: TypeFactory::cacheCoreTypes -- the ASCII char is the
+		// preferred size-1 TYPE_INT, so getBase(1,TYPE_INT) yields char.
+		return f.GetChar("char")
+	}
 	value := NewBase(size, meta, name)
 	key := fmt.Sprintf("base:%d:%d:%s", value.Size(), value.Metatype(), value.Name())
 	return f.internBase(key, value)

@@ -3468,15 +3468,6 @@ func renderCharConstant(vn *Varnode, dt Datatype) (string, bool) {
 	}
 	charLike := isCharPrintLike(dt)
 	if !charLike {
-		// A plain int1 is the core char type (getBase(1,TYPE_INT) yields char);
-		// sbyte is the non-character int1 (getBaseNoChar, shift amounts).
-		// TODO known mismatch: type propagation renames 1-byte ints "int", so a
-		// shift-amount constant (0x20 - bVar1) still prints as a character.
-		if base, ok := dt.(*Base); ok && base.Metatype() == TYPE_INT && base.Name() != "sbyte" {
-			charLike = true
-		}
-	}
-	if !charLike {
 		return "", false
 	}
 	val := vn.Offset() & 0xff

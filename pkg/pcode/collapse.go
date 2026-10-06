@@ -318,10 +318,6 @@ func (bb *BlockBasic) isComplexBasic(sizeOut int) bool {
 	return false
 }
 
-func (b *FlowBlock) preferComplement(*Funcdata) bool {
-	return false
-}
-
 func (b *FlowBlock) negateCondition(top bool) bool {
 	if bb, ok := b.Concrete().(*BlockBasic); ok {
 		bb.NegateCondition(top)
