@@ -29,8 +29,9 @@ func TestRulesBool_RewriteAndNonRewrite(t *testing.T) {
 	if got := NewRuleBoolNegate("bool").ApplyOp(neg, data); got != 1 {
 		t.Fatalf("boolnegate ApplyOp=%d, want 1", got)
 	}
-	if neg.Code() != CPUI_INT_NOTEQUAL {
-		t.Fatalf("expected flipped compare, got %v", neg.Code())
+	// C++ flips the defining compare in place and turns the negate into a COPY.
+	if inner.Code() != CPUI_INT_NOTEQUAL || neg.Code() != CPUI_COPY {
+		t.Fatalf("expected flipped compare + COPY, got %v / %v", inner.Code(), neg.Code())
 	}
 
 	xor := newRuleOp(data, CPUI_INT_XOR, 4, x, data.NewConstant(4, 0x55))

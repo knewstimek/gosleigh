@@ -110,25 +110,63 @@ func NewRuleBoolNegate(group string) *RuleBoolNegate {
 	return r
 }
 
+// apply removes BOOL_NEGATEs by flipping the comparison that defines their
+// input in place (all readers of that value must be negates, which become
+// COPYs). C++ parity: RuleBoolNegate::applyOp.
 func (r *RuleBoolNegate) apply(op *PcodeOp, data *Funcdata) int {
-	in := op.Input(0)
-	if neg := definedBy(in, CPUI_BOOL_NEGATE); neg != nil {
-		return rewriteToCopy(data, op, neg.Input(0))
-	}
-	def := in.Def()
-	if def == nil {
+	vn := op.Input(0)
+	if !vn.IsWritten() {
 		return 0
 	}
-	flip, swap, ok := boolFlipOpcode(def.Code())
-	if !ok {
+	flipOp := vn.Def()
+	for _, d := range vn.DescendIter() {
+		if d.Code() != CPUI_BOOL_NEGATE {
+			return 0 // all descendants must be negates
+		}
+	}
+	opc, reorder := getBooleanFlip(flipOp.Code())
+	if opc == CPUI_MAX {
 		return 0
 	}
-	if swap {
-		rewriteOp(data, op, flip, def.Input(1), def.Input(0))
-	} else {
-		rewriteOp(data, op, flip, def.Input(0), def.Input(1))
+	data.OpSetOpcode(flipOp, opc)
+	if reorder {
+		data.OpSwapInput(flipOp, 0, 1)
+	}
+	for _, d := range vn.DescendIter() {
+		data.OpSetOpcode(d, CPUI_COPY) // remove all the negates
 	}
 	return 1
+}
+
+// getBooleanFlip returns the opcode computing the complement of opc's
+// boolean result, and whether the operands must be swapped.
+// C++ parity: opcodes.cc get_booleanflip.
+func getBooleanFlip(opc OpCode) (OpCode, bool) {
+	switch opc {
+	case CPUI_INT_EQUAL:
+		return CPUI_INT_NOTEQUAL, false
+	case CPUI_INT_NOTEQUAL:
+		return CPUI_INT_EQUAL, false
+	case CPUI_INT_SLESS:
+		return CPUI_INT_SLESSEQUAL, true
+	case CPUI_INT_SLESSEQUAL:
+		return CPUI_INT_SLESS, true
+	case CPUI_INT_LESS:
+		return CPUI_INT_LESSEQUAL, true
+	case CPUI_INT_LESSEQUAL:
+		return CPUI_INT_LESS, true
+	case CPUI_BOOL_NEGATE:
+		return CPUI_COPY, false
+	case CPUI_FLOAT_EQUAL:
+		return CPUI_FLOAT_NOTEQUAL, false
+	case CPUI_FLOAT_NOTEQUAL:
+		return CPUI_FLOAT_EQUAL, false
+	case CPUI_FLOAT_LESS:
+		return CPUI_FLOAT_LESSEQUAL, true
+	case CPUI_FLOAT_LESSEQUAL:
+		return CPUI_FLOAT_LESS, true
+	}
+	return CPUI_MAX, false
 }
 
 type RuleBooleanNegate struct{ batchRule }
