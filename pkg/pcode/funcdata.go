@@ -697,10 +697,48 @@ func (fd *Funcdata) MapGlobals() {
 	}
 }
 
-// MarkIndirectOnly marks illegal inputs used only in INDIRECT ops.
-// C++ parity: funcdata.hh Funcdata::markIndirectOnly
+// MarkIndirectOnly flags an illegal input (an input not written directly)
+// whose value only reaches INDIRECTs, so naming can treat it as noise.
+// C++ parity: Funcdata::markIndirectOnly.
 func (fd *Funcdata) MarkIndirectOnly() {
-	_ = fd
+	for _, vn := range fd.GetVarnodeBank().AllVarnodes() {
+		if vn.IsInput() && !vn.IsDirectWrite() && fd.checkIndirectUse(vn) {
+			vn.SetFlags(VarnodeIndirectOnly)
+		}
+	}
+}
+
+// checkIndirectUse reports whether vn flows only into INDIRECTs, following
+// MULTIEQUALs and indirect-store INDIRECTs.
+// C++ parity: Funcdata::checkIndirectUse.
+func (fd *Funcdata) checkIndirectUse(vn *Varnode) bool {
+	vlist := []*Varnode{vn}
+	vn.SetMark()
+	result := true
+	for i := 0; i < len(vlist) && result; i++ {
+		for _, op := range vlist[i].DescendIter() {
+			switch op.Code() {
+			case CPUI_INDIRECT:
+				if !op.IsIndirectStore() {
+					continue
+				}
+			case CPUI_MULTIEQUAL:
+			default:
+				result = false
+			}
+			if !result {
+				break
+			}
+			if out := op.Output(); !out.IsMark() {
+				out.SetMark()
+				vlist = append(vlist, out)
+			}
+		}
+	}
+	for _, v := range vlist {
+		v.ClearMark()
+	}
+	return result
 }
 
 // spacebaseStackSpace returns the function's stack space (the spacebase-kind
