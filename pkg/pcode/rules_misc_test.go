@@ -62,11 +62,13 @@ func TestBatchCMisc(t *testing.T) {
 		x := newRuleInput(data, 4, 0x30)
 		lzc := newRuleOp(data, CPUI_LZCOUNT, 4, x)
 		shift := newRuleOp(data, CPUI_INT_RIGHT, 1, lzc.Output(), data.NewConstant(4, 5))
-		if got := NewRuleLzcountShiftBool("misc").ApplyOp(shift, data); got != 1 {
+		// C++ triggers on the LZCOUNT and rewrites the shift to COPY(x == 0).
+		if got := NewRuleLzcountShiftBool("misc").ApplyOp(lzc, data); got != 1 {
 			t.Fatalf("lzcountshiftbool ApplyOp=%d, want 1", got)
 		}
-		if shift.Code() != CPUI_INT_EQUAL || shift.Input(0) != x || !isZeroConst(shift.Input(1)) {
-			t.Fatalf("lzcountshiftbool rewrite failed opcode=%v in0=%v in1=%v", shift.Code(), shift.Input(0), shift.Input(1))
+		eq := shift.Input(0).Def()
+		if shift.Code() != CPUI_COPY || eq == nil || eq.Code() != CPUI_INT_EQUAL || eq.Input(0) != x || !isZeroConst(eq.Input(1)) {
+			t.Fatalf("lzcountshiftbool rewrite failed opcode=%v", shift.Code())
 		}
 	})
 

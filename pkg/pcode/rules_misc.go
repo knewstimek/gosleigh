@@ -1314,31 +1314,45 @@ type RuleLzcountShiftBool struct{ batchRule }
 
 func NewRuleLzcountShiftBool(group string) *RuleLzcountShiftBool {
 	r := &RuleLzcountShiftBool{}
-	r.batchRule = newBatchRule(group, "lzcountshiftbool", []OpCode{CPUI_INT_RIGHT}, r.apply, func(g string) Rule { return NewRuleLzcountShiftBool(g) })
+	r.batchRule = newBatchRule(group, "lzcountshiftbool", []OpCode{CPUI_LZCOUNT}, r.apply, func(g string) Rule { return NewRuleLzcountShiftBool(g) })
 	return r
 }
 
+// apply turns lzcount(V) >> log2(8*size) into V == 0 (extended back to the
+// shift's size). C++ parity: RuleLzcountShiftBool::applyOp.
 func (r *RuleLzcountShiftBool) apply(op *PcodeOp, data *Funcdata) int {
-	if outputSize(op) != 1 {
-		return 0
+	outVn := op.Output()
+	maxReturn := uint64(8 * op.Input(0).Size())
+	if bits.OnesCount64(maxReturn) != 1 {
+		return 0 // only sizes that are powers of 2 make the check meaningful
 	}
-	lzc := definedBy(op.Input(0), CPUI_LZCOUNT)
-	if lzc == nil || lzc.NumInput() != 1 {
-		return 0
+	for _, baseOp := range outVn.DescendIter() {
+		if baseOp.Code() != CPUI_INT_RIGHT && baseOp.Code() != CPUI_INT_SRIGHT {
+			continue
+		}
+		vn1 := baseOp.Input(1)
+		if !vn1.IsConstant() {
+			continue
+		}
+		if shift := vn1.Offset(); shift >= 64 || maxReturn>>shift != 1 {
+			continue
+		}
+		newOp := data.NewOp(2, baseOp.Addr())
+		data.OpSetOpcode(newOp, CPUI_INT_EQUAL)
+		data.OpSetInput(newOp, op.Input(0), 0)
+		data.OpSetInput(newOp, data.NewConstant(op.Input(0).Size(), 0), 1)
+		eqResVn := data.NewUniqueOut(1, newOp) // a 1-byte boolean
+		data.OpInsertBefore(newOp, baseOp)
+		data.OpRemoveInput(baseOp, 1)
+		if baseOp.Output().Size() == 1 {
+			data.OpSetOpcode(baseOp, CPUI_COPY)
+		} else {
+			data.OpSetOpcode(baseOp, CPUI_INT_ZEXT)
+		}
+		data.OpSetInput(baseOp, eqResVn, 0)
+		return 1
 	}
-	amt, ok := constantValue(op.Input(1))
-	if !ok {
-		return 0
-	}
-	width := uint64(lzc.Input(0).Size() * 8)
-	if width == 0 || width&(width-1) != 0 {
-		return 0
-	}
-	if amt != uint64(bits.TrailingZeros64(width)) {
-		return 0
-	}
-	rewriteOp(data, op, CPUI_INT_EQUAL, lzc.Input(0), data.NewConstant(lzc.Input(0).Size(), 0))
-	return 1
+	return 0
 }
 
 type RuleOrCompare struct{ batchRule }
