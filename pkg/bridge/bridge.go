@@ -453,6 +453,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		registerRecoveredTables(fd, recoveredTables)
 	}
 
+	graph.SetInitialRanges()
 	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock, recoveredTables, splitTail, relTarget)
 	graph.StructureLoops()
 	fd.SetBasicBlocks(graph)

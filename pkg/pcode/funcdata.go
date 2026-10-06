@@ -1793,6 +1793,7 @@ func (fd *Funcdata) NodeJoinCreateBlock(
 
 	newblock := bg.NewBlockBasicInGraph()
 	newblock.SetFlag(BlockFlagJoinedBlock)
+	newblock.SetInitialRange(addr, addr)
 
 	var swapa, swapb *FlowBlock
 
@@ -1887,8 +1888,7 @@ func (fd *Funcdata) nodeSplitBlockEdge(b *BlockBasic, inedge int) *BlockBasic {
 
 	bprime := bg.NewBlockBasicInGraph()
 	bprime.SetFlag(BlockFlagDuplicateBlock)
-	// copyRange(b): Gosleigh's BlockBasic tracks no address cover, so nothing to
-	// copy. Index/numDesc are recomputed by the following structureReset.
+	bprime.copyRange(b) // Index/numDesc are recomputed by the following structureReset
 
 	// switchEdge(a, b, bprime): retarget a's out-edge(s) to b onto bprime,
 	// preserving the out-edge slot on a (so a's true/false ordering is kept) and

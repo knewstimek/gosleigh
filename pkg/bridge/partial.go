@@ -166,6 +166,7 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 	// The partial models pre-jumptable flow only: its BRANCHIND has no out-edges
 	// (Ghidra's partial assumption, flow.cc:937), so no recovered tables feed edge
 	// generation here.
+	graph.SetInitialRanges()
 	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock, nil, nil, nil)
 	graph.StructureLoops()
 	fd.SetBasicBlocks(graph)

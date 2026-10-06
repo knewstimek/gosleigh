@@ -20,6 +20,94 @@ type BlockBasic struct {
 	// srcDelegate, when non-nil, redirects all op reads/writes to this source
 	// block. Set by cloneFlowBlock when creating a structure-graph clone.
 	srcDelegate *BlockBasic
+
+	// cover is the set of instruction address ranges the block was built
+	// from; it survives op removal. C++ parity: BlockBasic::cover.
+	cover []blockRange
+}
+
+// blockRange is one [first,last] instruction address range of a block.
+type blockRange struct {
+	space       *address.Space
+	first, last uint64
+}
+
+// SetInitialRange sets the block's address cover to [beg,end].
+// C++ parity: BlockBasic::setInitialRange.
+func (bb *BlockBasic) SetInitialRange(beg, end address.Address) {
+	bb.cover = []blockRange{{space: beg.Space, first: beg.Offset, last: end.Offset}}
+}
+
+// SetInitialRangeFromOps covers the block's ops: from the first op's address
+// to the highest op address. C++ parity: FlowInfo::splitBasic.
+func (bb *BlockBasic) SetInitialRangeFromOps() {
+	ops := bb.opSlice()
+	if len(ops) == 0 {
+		return
+	}
+	start := ops[0].Addr()
+	stop := start
+	for _, op := range ops[1:] {
+		if a := op.Addr(); a.Space == stop.Space && a.Offset > stop.Offset {
+			stop = a
+		}
+	}
+	bb.SetInitialRange(start, stop)
+}
+
+// SetInitialRanges covers every basic block of a freshly built graph by its
+// ops. C++ parity: FlowInfo::splitBasic (setBasicBlockRange per block).
+func (bg *BlockGraph) SetInitialRanges() {
+	for _, b := range bg.blocks {
+		if bb := asBasic(b); bb != nil {
+			bb.SetInitialRangeFromOps()
+		}
+	}
+}
+
+// copyRange copies another block's cover. C++ parity: BlockBasic::copyRange.
+func (bb *BlockBasic) copyRange(o *BlockBasic) {
+	bb.cover = append([]blockRange(nil), o.cover...)
+}
+
+// mergeRange adds another block's ranges to the cover, joining any that
+// overlap or touch. C++ parity: BlockBasic::mergeRange (RangeList::merge).
+func (bb *BlockBasic) mergeRange(o *BlockBasic) {
+	for _, r := range o.cover {
+		bb.insertRange(r)
+	}
+}
+
+// insertRange is RangeList::insertRange: the new range absorbs every range
+// of the same space it overlaps, and the list stays sorted.
+func (bb *BlockBasic) insertRange(r blockRange) {
+	out := bb.cover[:0:0]
+	for _, c := range bb.cover {
+		if c.space == r.space && c.first <= r.last && r.first <= c.last {
+			r.first = min(r.first, c.first)
+			r.last = max64(r.last, c.last)
+			continue
+		}
+		out = append(out, c)
+	}
+	at := len(out)
+	for i, c := range out {
+		if spaceOrder(r.space) < spaceOrder(c.space) || (c.space == r.space && r.first < c.first) {
+			at = i
+			break
+		}
+	}
+	out = append(out, blockRange{})
+	copy(out[at+1:], out[at:])
+	out[at] = r
+	bb.cover = out
+}
+
+func max64(a, b uint64) uint64 {
+	if a > b {
+		return a
+	}
+	return b
 }
 
 // asBasic recovers the BlockBasic that owns a FlowBlock. In the basic-block
@@ -151,11 +239,16 @@ func (bb *BlockBasic) LastOp() *PcodeOp {
 }
 
 // EmptyOp returns true if there are no ops.
-// startAddr is the address the block starts at.
-// TODO known mismatch: C++ BlockBasic::getStart reads the block's address
-// cover, which is not modelled; the first op's address stands in for it.
-// MULTIEQUALs are skipped: they are placed at the start, not read from it.
+// startAddr is the start of the block's first address range.
+// C++ parity: BlockBasic::getStart. A block built without a cover falls back
+// to its first non-MULTIEQUAL op's address.
 func (bb *BlockBasic) startAddr() address.Address {
+	if bb.srcDelegate != nil {
+		return bb.srcDelegate.startAddr()
+	}
+	if len(bb.cover) != 0 {
+		return address.Address{Space: bb.cover[0].space, Offset: bb.cover[0].first}
+	}
 	ops := bb.opSlice()
 	for _, op := range ops {
 		if op.Code() != CPUI_MULTIEQUAL {
