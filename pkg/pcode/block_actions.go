@@ -14,6 +14,16 @@ func getFuncdataBlockState(data *Funcdata) *funcdataBlockState {
 }
 
 func (fd *Funcdata) SetBasicBlocks(graph *BlockGraph) {
+	if graph != nil {
+		// Blocks built before the graph was handed over learn their owner
+		// here. C++ parity: BlockGraph::newBlockBasic(Funcdata *).
+		graph.data = fd
+		for _, bl := range graph.blocks {
+			if bb, ok := bl.Concrete().(*BlockBasic); ok {
+				bb.data = fd
+			}
+		}
+	}
 	state := getFuncdataBlockState(fd)
 	state.mu.Lock()
 	state.basic = graph

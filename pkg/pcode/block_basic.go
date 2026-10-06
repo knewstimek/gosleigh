@@ -24,6 +24,18 @@ type BlockBasic struct {
 	// cover is the set of instruction address ranges the block was built
 	// from; it survives op removal. C++ parity: BlockBasic::cover.
 	cover []blockRange
+
+	// data is the function owning the block. C++ parity: BlockBasic::data.
+	data *Funcdata
+}
+
+// GetFuncdata returns the function containing this block.
+// C++ parity: BlockBasic::getFuncdata.
+func (bb *BlockBasic) GetFuncdata() *Funcdata {
+	if bb.data == nil && bb.srcDelegate != nil {
+		return bb.srcDelegate.GetFuncdata()
+	}
+	return bb.data
 }
 
 // blockRange is one [first,last] instruction address range of a block.

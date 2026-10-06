@@ -107,6 +107,33 @@ func (t *typeOpCallind) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) D
 	return t.typeOpBase.InputTypeLocal(op, slot, tf)
 }
 
+// typeOpReturn types the returned value by the function's own output type
+// when the sizes agree. C++ parity: typeop.cc TypeOpReturn::getInputLocal.
+type typeOpReturn struct{ typeOpBase }
+
+func (t *typeOpReturn) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) Datatype {
+	if slot == 0 || op.Parent() == nil || op.Parent().GetFuncdata() == nil {
+		return t.typeOpBase.InputTypeLocal(op, slot, tf)
+	}
+	// An unlocked output is void in C++ until ActionOutputPrototype, which runs
+	// after type recovery, and afterwards equals the returned value's own type,
+	// so only a locked output contributes a type.
+	fp := op.Parent().GetFuncdata().GetFuncProto() // Prototype of the function we are in
+	if fp == nil || !fp.IsOutputLocked() || fp.GetOutput() == nil {
+		return t.typeOpBase.InputTypeLocal(op, slot, tf)
+	}
+	ct := fp.GetOutput().Type()
+	if ct == nil || ct.Metatype() == TYPE_VOID || ct.Size() != op.Input(slot).Size() {
+		return t.typeOpBase.InputTypeLocal(op, slot, tf)
+	}
+	return ct
+}
+
+// GetInputCast dispatches to the typeOpReturn InputTypeLocal.
+func (t *typeOpReturn) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
+	return baseGetInputCast(t, op, slot, cs)
+}
+
 // typeOpCbranch types the condition as bool and the target as a code pointer.
 // C++ parity: typeop.cc TypeOpCbranch::getInputLocal.
 type typeOpCbranch struct{ typeOpBase }
@@ -396,7 +423,7 @@ func RegisterTypeOps() []TypeOp {
 	inst[CPUI_CALL] = &typeOpCall{typeOpBase{CPUI_CALL, PcodeOpSpecial | PcodeOpCall | PcodeOpHasCallSpec | PcodeOpCodeRef | PcodeOpNoCollapse, "CALL"}}
 	inst[CPUI_CALLIND] = &typeOpCallind{typeOpBase{CPUI_CALLIND, PcodeOpSpecial | PcodeOpCall | PcodeOpHasCallSpec | PcodeOpNoCollapse, "CALLIND"}}
 	inst[CPUI_CALLOTHER] = &typeOpBase{CPUI_CALLOTHER, PcodeOpSpecial | PcodeOpCall | PcodeOpNoCollapse, "CALLOTHER"}
-	inst[CPUI_RETURN] = &typeOpBase{CPUI_RETURN, PcodeOpSpecial | PcodeOpReturns | PcodeOpNoCollapse | PcodeOpReturnCopy, "RETURN"}
+	inst[CPUI_RETURN] = &typeOpReturn{typeOpBase{CPUI_RETURN, PcodeOpSpecial | PcodeOpReturns | PcodeOpNoCollapse | PcodeOpReturnCopy, "RETURN"}}
 
 	// SSA markers
 	inst[CPUI_MULTIEQUAL] = &typeOpMultiequal{typeOpBase{CPUI_MULTIEQUAL, PcodeOpSpecial | PcodeOpMarker | PcodeOpNoCollapse, "MULTIEQUAL"}}

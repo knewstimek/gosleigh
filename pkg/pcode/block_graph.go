@@ -7,6 +7,7 @@ import "sort"
 type BlockGraph struct {
 	FlowBlock // embedded
 	blocks    []*FlowBlock
+	data      *Funcdata // owner given to new basic blocks
 }
 
 // NewBlockGraph creates a new BlockGraph with BlockGraphType set.
@@ -127,6 +128,7 @@ func (bg *BlockGraph) Clear() {
 // The returned *BlockBasic owns the FlowBlock stored in the blocks slice.
 func (bg *BlockGraph) NewBlockBasicInGraph() *BlockBasic {
 	bb := NewBlockBasic()
+	bb.data = bg.data
 	bb.FlowBlock.parent = &bg.FlowBlock
 	bg.blocks = append(bg.blocks, &bb.FlowBlock)
 	return bb
