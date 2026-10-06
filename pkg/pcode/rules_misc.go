@@ -3992,13 +3992,38 @@ func (r *RuleDoubleIn) Reset(data *Funcdata) {
 }
 
 // C++ parity: RuleDoubleIn::attemptMarking (double.cc:3218)
+// isPrimitiveWhole reports a data-type made up of a single primitive: not
+// piece-structured, or an array/structure whose first component fills it
+// and is itself a primitive whole.
+// C++ parity: Datatype::isPrimitiveWhole (isPieceStructured: metatype <=
+// TYPE_ARRAY).
+func isPrimitiveWhole(dt Datatype) bool {
+	if dt == nil {
+		return true
+	}
+	switch t := dt.(type) {
+	case *Array:
+		if el := t.Element(); el != nil && el.Size() == dt.Size() {
+			return isPrimitiveWhole(el)
+		}
+		return false
+	case *Struct:
+		if len(t.fields) > 0 && t.fields[0].Type != nil && t.fields[0].Type.Size() == dt.Size() {
+			return isPrimitiveWhole(t.fields[0].Type)
+		}
+		return false
+	}
+	return dt.Metatype() > TYPE_ARRAY
+}
+
 func (r *RuleDoubleIn) attemptMarking(vn *Varnode, subpieceOp *PcodeOp) int {
 	whole := subpieceOp.Input(0)
 	if whole == nil {
 		return 0
 	}
-	// TODO(parity): skip when whole is type-locked to a non-primitive type
-	// (Varnode::isTypeLock + Datatype::isPrimitiveWhole). Not yet plumbed.
+	if whole.IsTypeLock() && !isPrimitiveWhole(whole.Type()) {
+		return 0 // Don't mark for double precision if not a primitive type
+	}
 	offset, ok := constantValue(subpieceOp.Input(1))
 	if !ok {
 		return 0
@@ -4087,11 +4112,21 @@ func (r *RuleDoubleOut) attemptMarking(vnhi, vnlo *Varnode, pieceOp *PcodeOp) in
 	if whole == nil {
 		return 0
 	}
-	// TODO(parity): skip non-primitive type-locked wholes.
+	if whole.IsTypeLock() && !isPrimitiveWhole(whole.Type()) {
+		return 0 // Don't mark for double precision if not a primitive type
+	}
 	if vnhi.Size() != vnlo.Size() {
 		return 0
 	}
-	// TODO(parity): symbol-entry compatibility check (double.cc:3306-3313).
+	entryhi, entrylo := vnhi.GetSymbolEntry(), vnlo.GetSymbolEntry()
+	if entryhi != nil || entrylo != nil {
+		if entryhi == nil || entrylo == nil {
+			return 0 // One has a symbol, one doesn't
+		}
+		if entryhi.Symbol() != entrylo.Symbol() {
+			return 0 // Not from the same symbol
+		}
+	}
 	isWhole := false
 	for _, use := range whole.DescendIter() {
 		if isDoublePrecisionArithOp(use.Code()) {
