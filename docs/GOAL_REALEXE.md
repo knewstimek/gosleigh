@@ -18,6 +18,7 @@
 | `be538b3` | 결정성(AllOps SeqNum 순), 상수 단일 reader, guardCalls 모델, 레이블/goto 본문, 부분 전역 심볼, bool 반환 | 139 | - |
 | `929028e` | downChain, BlockSwitch/MultiGoto, DeterminedBranch, 다중 루트 지배자, removeUnreachableBlocks, 규칙 감사(SLess2Zero 등 8종 원본화) | 143 | - |
 | `37a144b` | 캐스트가 HighVariable 타입 사용, arithmeticOutputStandard, getExactPiece, baseExplicit 원본화, PIECE 토큰, 프로토타입 출력형 | 147 | - |
+| `07bedd0` | TraceDAG 원본화, 액션 변경 신호=count, cover의 implied 추적, heritage 단일 rename, mergeByDatatype, CMOV 블록 분할, 루프 조건 우회로 제거 | 160 | - |
 
 ## 도구 (`tools/realexe/`)
 - `realexe.py analyze|sample|measure|capture`, `gaps.py`(불일치 유형 집계), `difffn.py`(인덱스별 diff).
@@ -36,7 +37,8 @@ Ghidra API로 Java와 같은 값을 덤프한다.
 
 | # | 갭 | 근거 | 비고 |
 |---|---|---|---|
-| R | Go 규칙이 C++와 다른 변환을 하는 경우가 남음. `tools/ruleaudit.py`(Go apply 길이 vs C++ applyOp 길이)로 상위부터 대조: expandload, pullsub_multi/indirect, subzext, subcancel, structoffset0, andpiece, highorderand, switchsingle, equal2constant, andcompare 등 | ruleaction.cc | 규칙 하나씩 원본화 |
+| R | Go 규칙이 C++와 다른 변환을 하는 경우가 남음. `tools/ruleaudit.py`(Go apply 길이 vs C++ applyOp 길이)로 상위부터 대조: expandload, conditionalmove, structoffset0, andpiece, highorderand, switchsingle, andcompare 등 | ruleaction.cc | 규칙 하나씩 원본화 |
+| O | 반환값 복원이 C++ 수명과 다름: active output을 guardReturns 직후 지우고, ActionDeadCode가 Go 전용 applyReturnRecovery로 반환 입력을 떼어냄. C++는 ActionReturnRecovery가 여러 pass에 걸쳐 trial을 확정할 때까지 active output 유지. 제거만 하면 45/200으로 붕괴 -- 수명 전체를 같이 원본화해야 함 | coreaction.cc ActionReturnRecovery, Funcdata::initActiveOutput | [160] 간접호출 반환 |
 | A | ActionGuardReturns(Go 전용): 반환 레지스터만 따로 재-rename. C++는 Heritage::guard 안의 guardReturns. 넓은 읽기를 좁은 정의로 잇는 부작용을 RuleSubIdentity가 덮음 | heritage.cc guardReturns | 원본화 시 RuleSubIdentity 제거 |
 | T | 타입 추론 차이: 반환형, 지역 타입(uint vs int) | typeop.cc propagateType, ActionInferTypes | 사례 다수 |
 | N | 변수 번호(iVar1 vs iVar2) 어긋남 -- merge/이름 순서 | merge.cc, ActionNameVars | 5건 이상 |
