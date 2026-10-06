@@ -3809,6 +3809,11 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 		// CastStrategyC::isSubpieceCast via PrintC SUBPIECE emission.
 		// Offset is treated little-endian (offset 0 = low bytes); endian-aware
 		// adjustment (isSubpieceCastEndian) is a future generalization.
+		if op.addlFlags&PcodeOpSpecialPrint != 0 {
+			if expr, ok := s.renderSubpieceField(op); ok {
+				return expr, nil
+			}
+		}
 		if s.subpieceIsCast(op) {
 			return s.renderCast(op)
 		}
@@ -4674,6 +4679,41 @@ func (s *printCState) readExpr(vn *Varnode) ExprFragment {
 		return s.lang.CastExpr(printedTypeString(s.normalizeTypeForDecl(cast)), s.lang.Atom(name))
 	}
 	return s.lang.Atom(name)
+}
+
+// renderSubpieceField prints a SUBPIECE that RuleSubRight marked as a field
+// extraction: a part of an explicit structured variable prints through the
+// variable (auVar1[0x1f], auVar7._14_2_), a formal structure field as v.name.
+// C++ parity: PrintC::opSubpiece special printing.
+func (s *printCState) renderSubpieceField(op *PcodeOp) (ExprFragment, bool) {
+	vn := op.Input(0)
+	ct := vn.HighTypeReadFacing(op)
+	if !isPieceStructured(ct) {
+		return ExprFragment{}, false
+	}
+	sz := op.Output().Size()
+	byteOff := int32(op.Input(1).Offset()) // TypeOpSubpiece::computeByteOffsetForComposite
+	be := vn.Space() != nil && vn.Space().BigEndian
+	if be {
+		byteOff = vn.Size() - sz - byteOff
+	}
+	if vn.IsExplicit() {
+		name, cast := symbolPieceName(s.nameOf(vn), ct, byteOff, sz, nil, be)
+		if cast != nil {
+			return s.lang.CastExpr(printedTypeString(s.normalizeTypeForDecl(cast)), s.lang.Atom(name)), true
+		}
+		return s.lang.Atom(name), true
+	}
+	if st, ok := ct.(*Struct); ok {
+		if field, ok := st.FieldAt(byteOff); ok && field.Offset == byteOff && field.Type.Size() == sz && field.Name != "" {
+			baseExpr, err := s.renderVarnodeExpr(vn)
+			if err != nil {
+				return ExprFragment{}, false
+			}
+			return s.lang.PostfixExpr(baseExpr, "."+field.Name), true
+		}
+	}
+	return ExprFragment{}, false
 }
 
 // localPieceName prints a stack varnode that is only part of its local

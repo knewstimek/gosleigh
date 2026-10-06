@@ -638,10 +638,10 @@ func (r *RuleSubRight) applySubpieceRight(op *PcodeOp, data *Funcdata) int {
 	if op.addlFlags&PcodeOpSpecialPrint != 0 {
 		return 0
 	}
-	// C++ additionally marks the op for field-extraction printing when the
-	// slot-0 data-type isPieceStructured(). Gosleigh models no piece-structured
-	// type yet (RulePieceStructure is a known-mismatch stub), so that guard is
-	// unreachable and intentionally omitted.
+	if isPieceStructured(op.Input(0).TypeReadFacing(op)) {
+		op.SetAdditionalFlag(PcodeOpSpecialPrint) // Print this as a field extraction
+		return 0
+	}
 	c, ok := constantValue(op.Input(1))
 	if !ok || c == 0 {
 		return 0 // SUBPIECE is already least significant
