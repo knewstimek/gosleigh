@@ -76,6 +76,11 @@ type ExprFragment struct {
 	// member is the member-access token ("." or "->") when the fragment
 	// is a member access.
 	member string
+	// hidden marks an operand printed through a hidden operator token (an
+	// implied extension): at equal precedence it is parenthesized even under
+	// the same associative operator. C++ parity: PrintLanguage::parentheses,
+	// OpToken::hiddenfunction case.
+	hidden bool
 }
 
 // fragKind is OpToken::tokentype for the structured fragment forms.
@@ -590,7 +595,7 @@ func (pl *PrintLanguage) binaryChild(child ExprFragment, parentOp string, parent
 	case child.Precedence > parentPrec:
 		paren = false
 	default:
-		paren = !(child.op == parentOp && associativeBinaryOps[parentOp])
+		paren = child.hidden || !(child.op == parentOp && associativeBinaryOps[parentOp])
 	}
 	if paren {
 		return "(" + child.Text + ")", true

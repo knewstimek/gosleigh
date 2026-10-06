@@ -3707,7 +3707,7 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 		// CastStrategyC::isZextCast, TypeOpIntZext::getOperatorName.
 		if s.extensionIsCast(op, false) {
 			if s.extensionCastHidden(op) {
-				return s.renderVarnodeExpr(op.Input(0))
+				return s.renderHiddenFunc(op)
 			}
 			return s.renderCast(op)
 		}
@@ -3718,7 +3718,7 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 		// C++ parity: CastStrategyC::isSextCast, TypeOpIntSext::getOperatorName.
 		if s.extensionIsCast(op, true) {
 			if s.extensionCastHidden(op) {
-				return s.renderVarnodeExpr(op.Input(0))
+				return s.renderHiddenFunc(op)
 			}
 			return s.renderCast(op)
 		}
@@ -3974,6 +3974,17 @@ func (s *printCState) extensionIsCast(op *PcodeOp, signed bool) bool {
 		return sharedCastStrategyC.IsSextCast(outType, inType)
 	}
 	return sharedCastStrategyC.IsZextCast(outType, inType)
+}
+
+// renderHiddenFunc prints only the operand of op, remembering that a hidden
+// operator token stands between it and its parent.
+// C++ parity: PrintC::opHiddenFunc (pushOp(&hidden)).
+func (s *printCState) renderHiddenFunc(op *PcodeOp) (ExprFragment, error) {
+	frag, err := s.renderVarnodeExpr(op.Input(0))
+	if err == nil && frag.Precedence != ExprPrecPrimary {
+		frag.hidden = true
+	}
+	return frag, err
 }
 
 // extensionCastHidden reports whether an INT_ZEXT/INT_SEXT should be rendered as
