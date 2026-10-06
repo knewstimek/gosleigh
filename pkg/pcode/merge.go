@@ -530,6 +530,12 @@ func mergeHighVariables(dst, src *HighVariable, cache *HighIntersectTest) {
 	if cache != nil {
 		cache.MoveIntersectTests(dst, src)
 	}
+	pairs := mergePieces(dst, src)
+	defer func() {
+		for _, pr := range pairs {
+			mergeHighVariables(pr[0], pr[1], cache)
+		}
+	}()
 	for _, vn := range src.instances {
 		vn.SetHigh(dst)
 		dst.instances = append(dst.instances, vn)
@@ -978,14 +984,14 @@ func shadowedVarnode(vn *Varnode) bool {
 // stands in for the group.
 func (m *Merge) markInternalPiece(op *PcodeOp) {
 	v1 := op.Output()
-	e1, p1 := m.fd.pieceEntry(v1)
+	e1, p1 := m.pieceOf(v1)
 	if e1 == nil {
 		return
 	}
 	be := v1.Space().BigEndian
 	if op.Code() == CPUI_SUBPIECE {
 		v2 := op.Input(0)
-		e2, p2 := m.fd.pieceEntry(v2)
+		e2, p2 := m.pieceOf(v2)
 		if e2 != e1 {
 			return
 		}
@@ -1005,8 +1011,8 @@ func (m *Merge) markInternalPiece(op *PcodeOp) {
 		return
 	}
 	v2, v3 := op.Input(0), op.Input(1)
-	e2, p2 := m.fd.pieceEntry(v2)
-	e3, p3 := m.fd.pieceEntry(v3)
+	e2, p2 := m.pieceOf(v2)
+	e3, p3 := m.pieceOf(v3)
 	if e2 != e1 || e3 != e1 {
 		return
 	}
@@ -1024,6 +1030,23 @@ func (m *Merge) markInternalPiece(op *PcodeOp) {
 			v.SetFlags(VarnodeExplicit)
 		}
 	}
+}
+
+// pieceOf identifies the group holding vn's variable and vn's offset in it:
+// the variable's VariableGroup when it has one, else the symbol entry holding
+// its storage (Gosleigh's stand-in for groups C++ forms elsewhere, e.g. in
+// RulePieceStructure / groupPartials).
+func (m *Merge) pieceOf(vn *Varnode) (any, int64) {
+	if vn == nil {
+		return nil, 0
+	}
+	if h := vn.High(); h != nil && h.piece != nil {
+		return h.piece.group, h.piece.offset
+	}
+	if e, off := m.fd.pieceEntry(vn); e != nil {
+		return e, off
+	}
+	return nil, 0
 }
 
 // pieceEntry is the symbol entry holding an address-tied varnode's storage
@@ -1615,8 +1638,9 @@ func (m *Merge) mergeRangeMust(group []*Varnode) {
 func (m *Merge) mergeAddrTied() {
 	allVns := m.fd.GetVarnodeBank().AllVarnodes()
 
-	// Walk locTree groups: consecutive varnodes with the same (space, offset, size)
-	// in processor or stack spaces that contain at least one addr-tied varnode.
+	// Walk runs of overlapping varnodes in processor and stack spaces; a run
+	// holding an addr-tied varnode is unified and merged per storage, and its
+	// different storages are grouped. C++ parity: Merge::mergeAddrTied.
 	i := 0
 	for i < len(allVns) {
 		vn := allVns[i]
@@ -1642,49 +1666,57 @@ func (m *Merge) mergeAddrTied() {
 			continue
 		}
 
-		// Collect all non-free varnodes at the same (space, offset, size).
-		// Also collect any overlapping varnodes (different sizes at overlapping offsets)
-		// because overlapLoc in C++ expands the range.
-		// For simplicity in Go, we group by exact (space, offset, size) only.
-		// The gcd case has exact-match groups, so this is sufficient.
-		off := vn.Offset()
-		sz := vn.Size()
-
-		groupStart := i
-		for i < len(allVns) && allVns[i] != nil &&
-			allVns[i].Space() == spc &&
-			allVns[i].Offset() == off &&
-			allVns[i].Size() == sz {
+		// Collect the maximal run of mutually overlapping varnodes, split into
+		// (offset, size) sets; free varnodes do not take part.
+		// C++ parity: VarnodeBank::overlapLoc.
+		if vn.IsFree() {
 			i++
+			continue
 		}
-		group := allVns[groupStart:i]
-
-		// Check if any varnode in the group is addr-tied.
-		// C++ parity: mergeAddrTied checks (flags & Varnode::addrtied) != 0.
-		hasAddrTied := false
-		for _, gvn := range group {
-			if gvn != nil && !gvn.IsFree() && gvn.IsAddrTied() {
-				hasAddrTied = true
+		maxoff := vn.Offset() + uint64(vn.Size()) - 1
+		var sets [][]*Varnode
+		tied := false
+		for i < len(allVns) {
+			cur := allVns[i]
+			if cur == nil || cur.Space() != spc || cur.Offset() > maxoff {
 				break
 			}
-		}
-		if !hasAddrTied {
-			continue
-		}
-
-		// Build non-free group list for unifyAddress + mergeRangeMust.
-		nonFree := make([]*Varnode, 0, len(group))
-		for _, gvn := range group {
-			if gvn != nil && !gvn.IsFree() {
-				nonFree = append(nonFree, gvn)
+			i++
+			if cur.IsFree() {
+				continue
+			}
+			if end := cur.Offset() + uint64(cur.Size()) - 1; end > maxoff {
+				maxoff = end
+			}
+			tied = tied || cur.IsAddrTied()
+			if n := len(sets); n > 0 && sets[n-1][0].Offset() == cur.Offset() && sets[n-1][0].Size() == cur.Size() {
+				sets[n-1] = append(sets[n-1], cur)
+			} else {
+				sets = append(sets, []*Varnode{cur})
 			}
 		}
-		if len(nonFree) == 0 {
+		if !tied {
 			continue
 		}
-
-		m.unifyAddress(nonFree)
-		m.mergeRangeMust(nonFree)
+		var all []*Varnode
+		for _, set := range sets {
+			all = append(all, set...)
+		}
+		m.unifyAddress(all)
+		for _, set := range sets {
+			m.mergeRangeMust(set)
+		}
+		// Overlapping variables of different storage form one group.
+		// C++ parity: Merge::mergeAddrTied (groupWith).
+		if len(sets) > 1 {
+			vn1 := sets[0][0]
+			for _, set := range sets[1:] {
+				vn2 := set[0]
+				if vn1.High() != nil && vn2.High() != nil && vn1.High() != vn2.High() {
+					vn2.High().groupWith(int64(vn2.Offset())-int64(vn1.Offset()), vn1.High())
+				}
+			}
+		}
 	}
 }
 

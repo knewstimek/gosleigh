@@ -31,6 +31,10 @@ type HighVariable struct {
 	// nil means the cover has not been computed yet (dirty).
 	// C++ parity: HighVariable::internalCover
 	cover *Cover
+
+	// piece places the variable in a group of overlapping variables.
+	// C++ parity: HighVariable::piece.
+	piece *variablePiece
 }
 
 // GetSymbol returns the Symbol this high variable maps to, or nil. It walks the
