@@ -118,6 +118,22 @@ func recoverMissingStackParams(data *Funcdata, fp *FuncProto) {
 		if vn == nil || isAlreadyNamedParam(vn) {
 			continue
 		}
+		// A locked host prototype names and types the parameter at this
+		// storage. C++ parity: updateInputNoTypes keeps the locked
+		// ProtoParameters of an input-locked prototype.
+		if vn.Space().Kind == address.SpaceKindStack {
+			if t, typed := sl.ext().hostLocalTypes[vn.Offset()]; typed {
+				if n := sl.ext().hostLocals[vn.Offset()]; n != "" {
+					name = n
+				}
+				if t.Size() == vn.Size() {
+					SetVarnodeType(vn, t)
+					vn.SetFlags(VarnodeTypeLock)
+				}
+			}
+		} else if pn, nlock, _, found := fp.LockedParamName(vn.Offset()); found && nlock {
+			name = pn
+		}
 		hv := vn.High()
 		if hv != nil {
 			// Reuse the merged HighVariable so the value's SSA instances stay

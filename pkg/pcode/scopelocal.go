@@ -283,6 +283,9 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 			// SymbolEntry is attached to the input Varnode (Funcdata::linkSymbol ->
 			// Varnode::setSymbolEntry).
 			if pname, nlock, isolate, ok := fp.LockedParamName(slot.vn.Offset()); ok {
+				if nlock {
+					hv.SetName(pname)
+				}
 				sym := NewSymbol(pname, slot.vn.Type())
 				sym.SetCategory(SymbolFunctionParameter, slot.idx)
 				if nlock {
@@ -365,6 +368,12 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 	// All SSA versions at the same offset share one HighVariable.
 	for i, g := range paramList {
 		name := GetParamName(regParamCount + i)
+		// The host's locked prototype names (and types) a stack parameter.
+		// C++ parity: a locked ProtoParameter's Symbol.
+		hostType, hostTyped := sl.ext().hostLocalTypes[g.offset]
+		if n, ok := sl.ext().hostLocals[g.offset]; ok && n != "" && hostTyped {
+			name = n
+		}
 		hv := NewHighVariable(name)
 		// Add all SSA versions at this offset as instances of the same HighVariable.
 		// C++ parity: ScopeLocal::restructureHigh merges all versions into one HighVariable.
@@ -385,6 +394,11 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 		// C++ parity: Ghidra assigns signed integer as default type for ABI stack slots;
 		// ActionInferTypes then propagates this through INT_ADD/INT_MULT chains.
 		for _, vn := range g.varnodes {
+			if hostTyped && hostType.Size() == vn.Size() {
+				SetVarnodeType(vn, hostType)
+				vn.SetFlags(VarnodeTypeLock)
+				continue
+			}
 			if vn.Type() == nil {
 				sz := vn.Size()
 				if sz <= 0 {

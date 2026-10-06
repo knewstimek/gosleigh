@@ -641,11 +641,19 @@ func (sl *ScopeLocal) createEntry(a *mapHint) {
 			ct = sharedTypeFactory.GetArray(num, ct)
 		}
 	}
+	// A host symbol fixing this slot's type keeps it (and its lock).
+	locked := false
+	if t, ok := sl.ext().hostLocalTypes[a.start]; ok && t.Size() == a.size {
+		ct, locked = t, true
+	}
 	sym := NewSymbol(sl.buildVariableName(addr, address.Address{}, ct), ct)
 	// Stack slots are address-tied: no usepoint limits them, and the flag has
 	// to reach the Varnodes before the speculative merges.
 	// C++ parity: ScopeInternal::buildFrom (addrtied without a usepoint).
 	sym.SetFlags(VarnodeAddrTied)
+	if locked {
+		sym.SetFlags(VarnodeTypeLock | VarnodeNameLock)
+	}
 	entry := NewSymbolEntry(sym, 0, addr, a.size, 0)
 	sym.attachEntry(entry)
 	sl.ext().entries = append(sl.ext().entries, entry)

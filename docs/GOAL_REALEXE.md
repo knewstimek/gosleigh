@@ -44,5 +44,5 @@ Ghidra API로 Java와 같은 값을 덤프한다.
 | G | 전역 겹침: normalizeWriteSize PIECE 출력이 ram 변수로 남아 `(uint)CONCAT12`가 두 문장으로 갈라짐, coverVarnodes 미포팅 | heritage.cc normalizeWriteSize | [166][184][188][189] |
 | D | 선언이 심볼이 아니라 남은 varnode 기반이라 clearDeadVarnodes 원본화 불가 | printc.cc emitScopeVarDecls | 원본화 시 decl +8 |
 | S | 출력에 `struct X { }` 정의가 찍힘(Ghidra는 함수 출력에 타입 정의 없음) | printc.cc docFunction | [142][177][196] |
-| P | 호스트 잠긴 현재 함수 프로토타입/파라미터 타입(LPCWSTR, errno_t 등) 미적용 | fspec.cc | [124][128][174][183] |
+| P | 현재 함수의 잠긴 호스트 프로토타입: 반환형/레지스터 파라미터 타입/스택 파라미터 이름은 적용(ApplyHostSelfPrototype). 남음: C++처럼 입력 잠금으로 두고 잠긴 저장소에서 입력 varnode 생성(ActionPrototypeTypes locked-input, ActionInputPrototype updateInputNoTypes) -- 지금은 파라미터를 추정한 뒤 덮어써서 크기가 다른 읽기(1바이트)와 일부 이름이 어긋남 | fspec.cc, coreaction.cc ActionPrototypeTypes/ActionInputPrototype | [124][128][129][170][174][183] |
 | - | known mismatch: RulePieceStructure 스텁, TypePointerRel(downChain 구조체 내부), BlockBasic 커버 시작 주소, forceOutputNum(멀티고토 self edge), DivTermAdd 128비트, guardCallOverlappingInput, LoadGuard(ValueSet), clearDeadVarnodes 스택/destroy, cseElimination 블록 끝 주소 | ruleaction.cc, heritage.cc | |

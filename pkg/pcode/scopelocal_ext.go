@@ -81,6 +81,8 @@ type scopeLocalExt struct {
 	stackGrows  bool                          // True if stack grows toward lower offsets
 	rangeLocked bool                          // True if the mapped address range is locked
 	hostLocals  map[uint64]string             // Host name-locked stack symbols by offset
+	// hostLocalTypes are the host's type-locked stack symbol types by offset.
+	hostLocalTypes map[uint64]Datatype
 	// notMapped are the [first,last] stack offset ranges removed from the
 	// scope's owned range (saved registers, call parameter areas).
 	notMapped [][2]uint64

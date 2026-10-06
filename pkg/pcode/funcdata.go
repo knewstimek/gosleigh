@@ -90,6 +90,8 @@ type Funcdata struct {
 	models map[string]*ProtoModel
 	// hostLocals are the host's name-locked stack symbol names by offset.
 	hostLocals map[uint64]string
+	// hostLocalTypes are the host's type-locked stack symbol types by offset.
+	hostLocalTypes map[uint64]Datatype
 	// trackedSet are the register values known at entry (ActionConstbase).
 	trackedSet []constbaseTrackedContext
 
@@ -265,6 +267,9 @@ func (fd *Funcdata) SetScopeLocal(sl *ScopeLocal) {
 	if sl != nil && fd.hostLocals != nil {
 		sl.ext().hostLocals = fd.hostLocals
 	}
+	if sl != nil && fd.hostLocalTypes != nil {
+		sl.ext().hostLocalTypes = fd.hostLocalTypes
+	}
 }
 
 // SetHostLocals installs the host's name-locked stack symbols for this
@@ -275,6 +280,7 @@ func (fd *Funcdata) SetHostLocals(m map[uint64]string) {
 	fd.hostLocals = m
 	if fd.scopeLocal != nil {
 		fd.scopeLocal.ext().hostLocals = m
+		fd.scopeLocal.ext().hostLocalTypes = fd.hostLocalTypes
 	}
 }
 

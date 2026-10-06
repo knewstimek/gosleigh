@@ -544,6 +544,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// is consumed by ActionSpacebase + RuleLoadVarnode/RuleStoreVarnode during the
 	// run. Callers must supply a cspec for stack-frame recovery (see Decompile).
 	installModels(engine, result.CspecData, fd, cfg.EntryPoint)
+	fd.ApplyHostSelfPrototype(fd.DefaultModel())
 	installTrackedSet(engine, fd, cfg.TrackedRegs)
 
 	// Attach an opt-in locked prototype supplied by the analysis environment.

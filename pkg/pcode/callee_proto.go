@@ -189,3 +189,61 @@ func (t *typeOpCall) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 func (t *typeOpCall) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
 	return baseGetInputCast(t, op, slot, cs)
 }
+
+// ApplyHostSelfPrototype locks the function's own prototype as the host
+// stores it: the return value's storage and type, and each parameter's name
+// and type (register parameters through the locked-parameter overlay, stack
+// parameters as name- and type-locked frame symbols).
+// C++ parity: the FunctionSymbol prototype DecompileCallback sends with the
+// function (FuncProto::decode with input/output locks).
+// TODO known mismatch: Go still derives the parameter list rather than
+// creating it from the locked storage (ActionPrototypeTypes locked-input
+// path), so a locked parameter the body never reads is not listed.
+func (fd *Funcdata) ApplyHostSelfPrototype(model *ProtoModel) {
+	if fd.hostScope == nil {
+		return
+	}
+	hf, ok := fd.hostScope.QueryFunction(fd.baseAddr)
+	if !ok || (!hf.InputLocked && !hf.OutputLocked) {
+		return
+	}
+	fp := fd.GetFuncProto()
+	if fp == nil {
+		fp = NewFuncProto(model)
+		fd.SetFuncProto(fp)
+	}
+	if hf.OutputLocked && hf.Output != nil && hf.Output.Type != nil {
+		if sp := fd.spaceByName(hf.Output.Space); sp != nil {
+			fp.SetLockedReturn(address.Address{Space: sp, Offset: hf.Output.Offset}, hf.Output.Size, hf.Output.Type)
+			fp.SetOutputLock(true)
+		}
+	}
+	if !hf.InputLocked {
+		return
+	}
+	for _, p := range hf.Params {
+		sp := fd.spaceByName(p.Space)
+		if sp == nil {
+			continue
+		}
+		if sp.Kind == address.SpaceKindStack {
+			off := wrapSpaceOffset(sp, p.Offset)
+			if fd.hostLocals == nil {
+				fd.hostLocals = map[uint64]string{}
+			}
+			fd.hostLocals[off] = p.Name
+			if p.Type != nil {
+				if fd.hostLocalTypes == nil {
+					fd.hostLocalTypes = map[uint64]Datatype{}
+				}
+				fd.hostLocalTypes[off] = p.Type
+			}
+			continue
+		}
+		if p.Type != nil {
+			fp.SetLockedParamType(p.Offset, p.Type)
+		}
+		fp.SetLockedParamName(p.Offset, p.Name, true, false)
+	}
+	fd.SetHostLocals(fd.hostLocals)
+}

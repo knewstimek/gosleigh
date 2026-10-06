@@ -352,9 +352,26 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		// Entry-point functions are excluded: they run the stack-only processEntry
 		// model, so an argument register carries no parameter index (index<0) and C++
 		// names it in_<reg> (database.cc:2470) -- the renderer handles that case.
+		// A name-locked symbol attached to an instance names the variable.
+		// C++ parity: Funcdata::linkSymbol through Varnode::getSymbolEntry.
+		if nm := lockedSymbolName(c.hv); nm != "" {
+			c.hv.SetName(nm)
+			a.count++
+			continue
+		}
 		if sl != nil && sl.model != nil && !sl.model.EntryPoint {
 			if idx, ok := regParamSlotOfHigh(c.hv, sl); ok {
-				c.hv.SetName(GetParamName(idx))
+				name := GetParamName(idx)
+				// A locked prototype names the parameter at this storage.
+				for _, vn := range c.hv.Instances() {
+					if !vn.IsInput() {
+						continue
+					}
+					if pn, nlock, _, found := data.GetFuncProto().LockedParamName(vn.Offset()); found && nlock {
+						name = pn
+					}
+				}
+				c.hv.SetName(name)
 				a.count++
 				continue
 			}
@@ -455,4 +472,15 @@ func highHasName(hv *HighVariable) bool {
 		}
 	}
 	return true
+}
+
+// lockedSymbolName is the name of a name-locked symbol attached to one of the
+// variable's instances, or "".
+func lockedSymbolName(hv *HighVariable) string {
+	for _, vn := range hv.Instances() {
+		if e := vn.GetSymbolEntry(); e != nil && e.Symbol() != nil && e.Symbol().Flags()&VarnodeNameLock != 0 {
+			return e.Symbol().Name()
+		}
+	}
+	return ""
 }
