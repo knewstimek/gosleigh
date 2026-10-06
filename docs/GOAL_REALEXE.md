@@ -17,11 +17,14 @@
 | `d2f1c0f` | 스텁 규칙 8종 포팅(EarlyRemoval 등), isComplex, 호출/캐스트/선언 줄바꿈 구조, SetCasts 블록 순서, LaneDivide | 137 | - |
 | `be538b3` | 결정성(AllOps SeqNum 순), 상수 단일 reader, guardCalls 모델, 레이블/goto 본문, 부분 전역 심볼, bool 반환 | 139 | - |
 | `929028e` | downChain, BlockSwitch/MultiGoto, DeterminedBranch, 다중 루트 지배자, removeUnreachableBlocks, 규칙 감사(SLess2Zero 등 8종 원본화) | 143 | - |
+| `37a144b` | 캐스트가 HighVariable 타입 사용, arithmeticOutputStandard, getExactPiece, baseExplicit 원본화, PIECE 토큰, 프로토타입 출력형 | 147 | - |
 
 ## 도구 (`tools/realexe/`)
 - `realexe.py analyze|sample|measure|capture`, `gaps.py`(불일치 유형 집계), `difffn.py`(인덱스별 diff).
 - **`capture`가 핵심**: `GenCapture.java`가 Ghidra 디버그 savefile을 만들고, `tools/decomp_dbg.exe`가 그 실바이너리
   맥락 그대로 C++ 코어를 돌린다(골든을 재현함). 갭 원인은 이걸로 실측한다.
+- decomp_dbg는 readonly 데이터를 상수로 접어 Java 골든과 다를 수 있다. 캡처 사본에서 `readonly="true"`를
+  `false`로 바꾸면 골든과 같아진다(전역 문자열/테이블 함수).
 
 ## 원칙 (이번 작업에서 확인)
 Gosleigh의 여러 층이 소형 골든 맞춤 재구현이었다. 실바이너리 갭의 근본은 대부분 (a) C++ 고리 누락(스텁/부분포팅)
