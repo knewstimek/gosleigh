@@ -330,8 +330,12 @@ func (a *ActionSetCasts) castInput(op *PcodeOp, slot int, data *Funcdata, cs *Ca
 		if vn.Type() == ct {
 			return 1
 		}
+	} else if ct.Metatype() == TYPE_PTR && testStructOffset0(ct, vn.HighTypeReadFacing(op), cs) {
+		// Insert a PTRSUB(vn,#0) instead of a CAST
+		insertPtrsubZero(op, slot, ct, data)
+		return 1
 	}
-	// resolveUnion / testStructOffset0 / tryResolutionAdjustment omitted.
+	// resolveUnion / tryResolutionAdjustment omitted.
 	if vnin == nil {
 		return 0
 	}
@@ -374,9 +378,10 @@ func (a *ActionSetCasts) castOutput(op *PcodeOp, data *Funcdata, cs *CastStrateg
 		}
 		// Type-lock force branch omitted (no implied type locks modeled here).
 	}
-	// testStructOffset0 (PTRSUB-as-cast) omitted; always use a plain CAST.
-	ct := cs.CastStandard(outHighResolve, tokenct, false, true)
-	if ct == nil {
+	opc := CPUI_CAST
+	if outHighResolve != nil && outHighResolve.Metatype() == TYPE_PTR && testStructOffset0(outHighResolve, tokenct, cs) {
+		opc = CPUI_PTRSUB
+	} else if cs.CastStandard(outHighResolve, tokenct, false, true) == nil {
 		return 0
 	}
 	// Generate the cast op: op now writes a fresh implied unique, and the CAST
@@ -384,11 +389,69 @@ func (a *ActionSetCasts) castOutput(op *PcodeOp, data *Funcdata, cs *CastStrateg
 	vn := data.NewUnique(outvn.Size())
 	vn.UpdateType(tokenct)
 	vn.SetImplied()
-	newop := data.NewOp(1, op.Addr())
-	data.OpSetOpcode(newop, CPUI_CAST)
+	nin := 1
+	if opc != CPUI_CAST {
+		nin = 2
+	}
+	newop := data.NewOp(nin, op.Addr())
+	data.OpSetOpcode(newop, opc)
 	data.OpSetOutput(newop, outvn)
 	data.OpSetInput(newop, vn, 0)
+	if opc != CPUI_CAST {
+		data.OpSetInput(newop, data.NewConstant(4, 0), 1)
+	}
 	data.OpSetOutput(op, vn)
 	data.OpInsertAfter(newop, op) // cast comes AFTER the operation
 	return 1
+}
+
+// testStructOffset0 reports whether a pointer to a structure (or array) can
+// stand for a pointer to its first field (element) of the required type, so a
+// PTRSUB(vn,#0) replaces the cast.
+// C++ parity: ActionSetCasts::testStructOffset0.
+func testStructOffset0(reqtype, curtype Datatype, cs *CastStrategyC) bool {
+	curPtr, ok := curtype.(*Pointer)
+	reqPtr, rok := reqtype.(*Pointer)
+	if !ok || !rok || curPtr.Pointee() == nil || reqPtr.Pointee() == nil {
+		return false
+	}
+	var req, cur Datatype
+	switch high := curPtr.Pointee().(type) {
+	case *Struct:
+		fields := high.Fields()
+		if len(fields) == 0 || fields[0].Offset != 0 || fields[0].Type == nil {
+			return false
+		}
+		req, cur = reqPtr.Pointee(), fields[0].Type
+		if arr, ok := req.(*Array); ok {
+			req = arr.Element()
+		}
+		if arr, ok := cur.(*Array); ok {
+			cur = arr.Element()
+		}
+	case *Array:
+		req, cur = reqPtr.Pointee(), high.Element()
+	default:
+		return false
+	}
+	if req == nil || cur == nil || req.Metatype() == TYPE_VOID {
+		return false // Don't induce PTRSUB for "void *"
+	}
+	return cs.CastStandard(req, cur, true, true) == nil
+}
+
+// insertPtrsubZero makes input slot of op a PTRSUB(vn,#0) of type ct.
+// C++ parity: ActionSetCasts::insertPtrsubZero.
+func insertPtrsubZero(op *PcodeOp, slot int, ct Datatype, data *Funcdata) *PcodeOp {
+	vn := op.Input(slot)
+	newop := data.NewOp(2, op.Addr())
+	vnout := data.NewUniqueOut(vn.Size(), newop)
+	vnout.UpdateType(ct)
+	vnout.SetImplied()
+	data.OpSetOpcode(newop, CPUI_PTRSUB)
+	data.OpSetInput(newop, vn, 0)
+	data.OpSetInput(newop, data.NewConstant(4, 0), 1)
+	data.OpSetInput(op, vnout, slot)
+	data.OpInsertBefore(newop, op)
+	return newop
 }
