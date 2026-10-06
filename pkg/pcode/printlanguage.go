@@ -86,6 +86,8 @@ const (
 	fragSpace                        // child0 spaces child1
 	fragComma                        // child0 "," spaces child1 (comma_separate)
 	fragParen                        // "(" child0 ")" as a parenthesis group
+	fragCondJoin                     // child0 spaces op spaces child1, no group (emitBlockCondition)
+	fragStatement                    // child0 inside a statement delimiter (begin/endStatement)
 )
 
 // fragNode mirrors one ReversePolish entry: an OpToken with its operands.
@@ -328,6 +330,27 @@ func (pl *PrintLanguage) EmitAssignFragment(lhs string, rhs ExprFragment) {
 
 func (pl *PrintLanguage) emitFragmentTree(ge GroupEmitter, expr ExprFragment) {
 	if n := expr.node; n != nil {
+		if n.kind == fragCondJoin {
+			// A structured &&/|| between condition blocks is emitted without an
+			// operator group. C++ parity: PrintC::emitBlockCondition (emitOp on
+			// a ReversePolish that was never pushed).
+			pl.emitFragmentOperand(ge, n.kids[0], n.parens[0])
+			ge.Spaces(n.spacing, n.bump)
+			pl.Token(n.print1)
+			ge.Spaces(n.spacing, n.bump)
+			pl.emitFragmentOperand(ge, n.kids[1], n.parens[1])
+			return
+		}
+		if n.kind == fragComma {
+			// The comma separating comma_separate statements is plain output,
+			// not an operator: no printing group of its own.
+			// C++ parity: PrintC::emitBlockBasic (print(COMMA); spaces(1)).
+			pl.emitFragmentOperand(ge, n.kids[0], n.parens[0])
+			pl.Token(n.print1)
+			ge.Spaces(n.spacing, n.bump)
+			pl.emitFragmentOperand(ge, n.kids[1], n.parens[1])
+			return
+		}
 		pl.emitFragmentNode(ge, n)
 		return
 	}
@@ -386,6 +409,8 @@ func (pl *PrintLanguage) emitFragmentNode(ge GroupEmitter, n *fragNode) {
 		pl.emitFragmentOperand(ge, n.kids[0], n.parens[0])
 		ge.Spaces(n.spacing, n.bump)
 		pl.emitFragmentOperand(ge, n.kids[1], n.parens[1])
+	case fragStatement:
+		pl.emitFragmentTree(ge, n.kids[0])
 	case fragParen:
 		pl.emitFragmentOperand(ge, n.kids[0], true)
 	case fragComma:
@@ -502,13 +527,30 @@ func (pl *PrintLanguage) binaryChild(child ExprFragment, parentOp string, parent
 	return child.Text, false
 }
 
+// CondJoinExpr is a BinaryExpr between structured condition blocks, emitted
+// without an operator group (see fragCondJoin).
+func (pl *PrintLanguage) CondJoinExpr(left ExprFragment, op string, right ExprFragment, precedence ExprPrecedence, assoc ExprAssociativity) ExprFragment {
+	f := pl.BinaryExpr(left, op, right, precedence, assoc)
+	f.node = &fragNode{kind: fragCondJoin, print1: op, spacing: binaryOpSpacing, bump: binaryOpBump,
+		kids: []ExprFragment{*f.left, *f.right}, parens: []bool{f.leftParen, f.rightParen}}
+	return f
+}
+
 // AssignExpr is "lhs = rhs" with the assignment token's break points.
 // C++ parity: PrintC::assignment (spacing 1, bump 5).
 func (pl *PrintLanguage) AssignExpr(lhs string, rhs ExprFragment) ExprFragment {
+
 	l := ExprFragment{Text: lhs, Precedence: ExprPrecPrimary}
 	return ExprFragment{Text: lhs + " = " + rhs.Text, Precedence: ExprPrecAssign, node: &fragNode{
 		kind: fragBinary, print1: "=", spacing: binaryOpSpacing, bump: assignOpBump,
 		kids: []ExprFragment{l, rhs}, parens: []bool{false, false}}}
+}
+
+// StatementExpr wraps one statement printed inside an expression (comma
+// mode) in its own group. C++ parity: PrintC::emitStatement beginStatement.
+func (pl *PrintLanguage) StatementExpr(stmt ExprFragment) ExprFragment {
+	return ExprFragment{Text: stmt.Text, Precedence: stmt.Precedence, node: &fragNode{
+		kind: fragStatement, kids: []ExprFragment{stmt}, parens: []bool{false}}}
 }
 
 // CommaExpr joins two statements printed under comma_separate: the first, a

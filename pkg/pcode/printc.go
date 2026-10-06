@@ -2082,7 +2082,7 @@ func (s *printCState) renderCondBlockCommaFrag(bl *FlowBlock) ExprFragment {
 		if err != nil || part.Text == "" {
 			continue
 		}
-		parts = append(parts, part)
+		parts = append(parts, s.lang.StatementExpr(part))
 	}
 
 	if cbranch != nil {
@@ -4389,7 +4389,7 @@ func (s *printCState) renderConditionInner(bl *FlowBlock, commaSep bool) (ExprFr
 			op = "&&"
 			prec = cPrecLogicalAnd
 		}
-		return s.lang.BinaryExpr(left, op, right, prec, ExprAssocLeft), nil
+		return s.lang.CondJoinExpr(left, op, right, prec, ExprAssocLeft), nil
 	case BlockBasicType, BlockPlain:
 		if commaSep {
 			// emitBlockBasic under comma_separate joins the block's printable
@@ -4450,7 +4450,9 @@ func (s *printCState) renderCondBlockFrag(bl *FlowBlock, commaSep bool) (ExprFra
 		return ExprFragment{}, err
 	}
 	if commaSep && (bl == nil || bl.Type() != BlockConditionType) {
-		return s.lang.Expr(inner.Text, ExprPrecPrimary), nil
+		// Keep the token structure (line breaking); the block needs no parens.
+		inner.Precedence = ExprPrecPrimary
+		return inner, nil
 	}
 	return s.lang.GroupExpr(inner), nil
 }
