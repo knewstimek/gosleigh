@@ -447,8 +447,13 @@ func (fd *Funcdata) OpHeritage() {
 	// on each pass, which previously forced a heritage-once guard and prevented the
 	// tree from picking up later stack-slot SSA. C++ parity: Funcdata::opHeritage
 	// drives the single persistent Heritage::heritage.
+	if model == nil {
+		model = fd.DefaultModel() // funcProto is attached later in the pipeline
+	}
 	if fd.heritage == nil {
 		fd.heritage = NewHeritage(fd, fd.heritageSpaces).WithProtoModel(model)
+	} else if fd.heritage.proto == nil {
+		fd.heritage.proto = model
 	}
 	// Incremental heritage over every registered space (registers, defaults and the
 	// stack): pass and globalDisjoint persist, so already-resolved varnodes are
