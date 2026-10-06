@@ -242,21 +242,7 @@ func testIterateForm(iterateOp, loopDef *PcodeOp) bool {
 			return true
 		}
 		if vn.IsExplicit() {
-			// C++ truncates at explicit. Go's ActionMergeCopy and
-			// ActionMarkExplicit do not fully merge transient register
-			// holders into the stack-storage HV the way C++ does, so a
-			// legitimate iterator's chain (e.g. CountedLoop:
-			//   unique = COPY(register) where register = INT_ADD(phi, 1))
-			// dead-ends at the single-use register even though the INT_ADD
-			// one step further has the loop variable as input. To recover
-			// parity without rerunning MergeCopy, walk through explicit
-			// varnodes only when they are single-use transient holders
-			// (NumDescend == 1 and not addrTied). Multi-use and addrTied
-			// explicit varnodes (e.g. gcd: register:0x4 used by both the
-			// body-end COPY and INT_SREM) still truncate.
-			if vn.NumDescend() > 1 || vn.IsAddrTied() {
-				continue
-			}
+			continue // truncate at explicit
 		}
 		if !vn.IsWritten() {
 			continue
