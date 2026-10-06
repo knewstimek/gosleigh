@@ -1434,70 +1434,45 @@ func (a *ActionReturnRecovery) Apply(data *Funcdata) int {
 	if fp == nil {
 		return 0
 	}
-
-	active := NewParamActive(false)
-	fp.SetActiveOutput(active)
-
-	for _, op := range data.GetPcodeOpBank().AllOps() {
-		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN || op.HaltType() != 0 {
-			continue
-		}
-		for i := 1; i < op.NumInput(); i++ {
-			vn := op.Input(i)
-			if vn == nil || vn.IsConstant() {
-				continue
-			}
-			trialIdx := active.WhichTrial(vn.Addr(), vn.Size())
-			if trialIdx < 0 {
-				active.RegisterTrial(vn.Addr(), vn.Size())
-				trialIdx = active.NumTrials() - 1
-			}
-			trial := active.Trial(trialIdx)
-			// C++ parity: ActionReturnRecovery::apply marks a trial active only when
-			// AncestorRealistic::execute confirms the storage has realistic ancestors
-			// (rules out unaffected/killedbycall and bare-input pass-through such as a
-			// loop-carried parameter) AND ancestorOpUse confirms active use. A bare
-			// input return (e.g. gcd's loop-carried param) fails execute and stays void.
-			ar := &ancestorRealistic{}
-			if !ar.execute(op, i, trial, false) {
-				continue
-			}
-			if !data.ancestorOpUse(trimRecurseMax, vn, op, trial, 0, 0) {
-				continue
-			}
-			trial.MarkUsed()
-			trial.MarkActive()
-		}
-	}
-
-	active.SortTrials()
-	active.DeleteUnusedTrials()
-	if active.NumTrials() == 0 || active.NumUsed() == 0 {
-		fp.ClearUnlockedOutput()
+	active := fp.GetActiveOutput()
+	if active == nil {
 		return 0
 	}
-
-	changed := false
 	for _, op := range data.GetPcodeOpBank().AllOps() {
 		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN || op.HaltType() != 0 {
 			continue
 		}
-		buildReturnOutput(active, op, data)
-		changed = true
+		for i := 0; i < active.NumTrials(); i++ {
+			trial := active.Trial(i)
+			if trial.IsChecked() {
+				continue
+			}
+			slot := int(trial.GetSlot())
+			if slot >= op.NumInput() {
+				continue
+			}
+			vn := op.Input(slot)
+			ar := &ancestorRealistic{}
+			if ar.execute(op, slot, trial, false) &&
+				data.ancestorOpUse(trimRecurseMax, vn, op, trial, 0, 0) {
+				trial.MarkActive() // this varnode sees active use as a return value
+			}
+			a.count++
+		}
 	}
-
-	// C++ parity: ActionReturnRecovery::apply calls data.clearActiveOutput() once the
-	// output is fully checked and buildReturnOutput has rewired the RETURN ops
-	// (coreaction.cc:1951). Clearing the active output is what lets the subsequent
-	// ActionDeadCode pass narrow the return register via gatherConsumedReturn's NZMask
-	// path instead of treating it as fully consumed: for x86-64 the RETURN holds
-	// RAX(8) = ZEXT(EAX), whose NZMask consumes only the low 4 bytes, so the ZEXT
-	// promotion chain collapses to a plain int. While the active output stays set the
-	// return is force-consumed at full width and the ZEXT artifacts survive (x86-32 is
-	// unaffected because EAX already spans the full register width).
-	fp.ClearActiveOutput()
-
-	if changed {
+	active.FinishPass()
+	if active.NumPasses() > active.MaxPass() {
+		active.MarkFullyChecked()
+	}
+	if active.IsFullyChecked() {
+		fp.deriveOutputMap(active)
+		for _, op := range data.GetPcodeOpBank().AllOps() {
+			if op == nil || op.IsDead() || op.Code() != CPUI_RETURN || op.HaltType() != 0 {
+				continue
+			}
+			buildReturnOutput(active, op, data)
+		}
+		fp.ClearActiveOutput()
 		a.count++
 	}
 	return 0

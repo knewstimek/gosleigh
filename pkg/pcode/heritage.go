@@ -1383,8 +1383,12 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			// Collect so the INDIRECT output varnodes appear as written SSA definitions.
 			// C++ parity: heritage.cc Heritage::heritage -> guard -> guardCalls
 			h.guardCalls(info.Space, task.Addr.Offset, task.Size)
-			if task.NewAddresses() && h.fd.queryPropertyFlags(task.Addr, task.Size)&VarnodePersist != 0 {
-				h.guardReturnsPersist(task.Addr, task.Size)
+			if task.NewAddresses() {
+				// C++ parity: Heritage::guard -> guardReturns.
+				h.guardReturns(0, task.Addr, task.Size)
+				if h.fd.queryPropertyFlags(task.Addr, task.Size)&VarnodePersist != 0 {
+					h.guardReturnsPersist(task.Addr, task.Size)
+				}
 			}
 			// No nohighptr ranges are configured, so a pointer may reach any
 			// non-internal location. C++ parity: Heritage::guard
@@ -1585,20 +1589,27 @@ const (
 // relates to the function's single integer return register (ProtoModel.ReturnReg*).
 // C++ parity: fspec.cc FuncProto::characterizeAsOutput (register subset).
 func (h *Heritage) characterizeReturnOutput(addr address.Address, size int32) int {
-	if h.proto == nil || h.proto.ReturnRegSpaceIndex < 0 || h.proto.ReturnRegSize == 0 {
+	return h.proto.characterizeReturnOutput(addr, size)
+}
+
+// characterizeReturnOutput classifies [addr,addr+size) against the model's
+// integer return register. C++ parity: FuncProto::characterizeAsOutput
+// (register subset).
+func (m *ProtoModel) characterizeReturnOutput(addr address.Address, size int32) int {
+	if m == nil || m.ReturnRegSpaceIndex < 0 || m.ReturnRegSize == 0 {
 		return retOutNoContainment
 	}
-	if addr.Space == nil || int(addr.Space.Index) != h.proto.ReturnRegSpaceIndex {
+	if addr.Space == nil || int(addr.Space.Index) != m.ReturnRegSpaceIndex {
 		return retOutNoContainment
 	}
 	qStart := addr.Offset
 	qEnd := addr.Offset + uint64(size)
-	oStart := h.proto.ReturnRegOffset
-	oEnd := h.proto.ReturnRegOffset + uint64(h.proto.ReturnRegSize)
+	oStart := m.ReturnRegOffset
+	oEnd := m.ReturnRegOffset + uint64(m.ReturnRegSize)
 	if qEnd <= oStart || oEnd <= qStart {
 		return retOutNoContainment
 	}
-	if qStart <= oStart && oEnd <= qEnd && size > h.proto.ReturnRegSize {
+	if qStart <= oStart && oEnd <= qEnd && size > m.ReturnRegSize {
 		return retOutContainedBy
 	}
 	return retOutOther

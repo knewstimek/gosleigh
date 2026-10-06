@@ -128,13 +128,6 @@ func (a *ActionDeadCode) Apply(data *Funcdata) int {
 // and per-space deadRemovalAllowed gating are not modeled; see docs/STATUS.md H7).
 func (a *ActionDeadCode) applyConsume(data *Funcdata) int {
 	total := a.consumePass(data)
-	// Dropping a speculative return input makes its definition (e.g. a call's
-	// EAX creation) unconsumed: sweep again in this same pass, and count the
-	// change, so the main loop does not exit and let ActionActiveReturn take
-	// the now-dead value as the call's output.
-	if applyReturnRecovery(data) {
-		total += 1 + a.consumePass(data)
-	}
 	if total > 0 {
 		return 1
 	}

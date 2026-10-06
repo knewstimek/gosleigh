@@ -967,37 +967,13 @@ func (s *printCState) inferReturnType() Datatype {
 }
 
 func returnValue(op *PcodeOp) *Varnode {
-	if op == nil || op.NumInput() == 0 {
+	// Input 0 is the return-address placeholder (a constant; 1 on an
+	// artificial halt); only input 1 is a return value.
+	// C++ parity: PrintC::opReturn (if numInput()>1 push getIn(1)).
+	if op == nil || op.NumInput() <= 1 {
 		return nil
 	}
-	// C++ parity: PrintC::emitStatement CPUI_RETURN case (printc.cc line 781-784):
-	//   if (op->numInput()>1) { pushVn(op->getIn(1), op, mods); }
-	// input[0] is the return-address reference injected by the SLA (e.g. EIP/LR);
-	// input[1] is the actual C return value wired by the return-value wiring.
-	//
-	// "return-value wiring" is ApplyGuardReturnsLive (Heritage::guardReturns +
-	// dominance rename), which appends the return register to each RETURN as input[1].
-	//
-	// For raw p-code without SLA pre-processing (unit tests, etc.) RETURN may have
-	// only input[0] which directly carries the C return value. In that case use input[0].
-	//
-	// The return-value wiring always appends to the end, so numInput>1 signals the full pipeline.
-	var inp *Varnode
-	if op.NumInput() > 1 {
-		inp = op.Input(1)
-	} else {
-		inp = op.Input(0)
-		// When the full pipeline ran (stripReturnIndirectRef + the return-value wiring),
-		// input[0] is the zero-constant placeholder for the return address.
-		// If the return-value wiring found no valid return value (void function), the RETURN
-		// op has only this one constant input and no real return varnode exists.
-		// Zero-constant specifically: stripReturnIndirectRef always substitutes 0.
-		// Non-zero constants may appear in raw unit tests as legitimate return values.
-		// C++ parity: Ghidra's RETURN has input[0]=retaddr, input[1]=retval when non-void.
-		if inp != nil && inp.IsConstant() && inp.Offset() == 0 {
-			return nil
-		}
-	}
+	inp := op.Input(1)
 	if inp == nil || inp.IsAnnotation() || inp.IsInput() {
 		return nil
 	}

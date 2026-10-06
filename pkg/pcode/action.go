@@ -1176,7 +1176,6 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	// per function, after the first ActionHeritage pass resolved register/stack SSA.
 	// In C++ guardReturns runs inside ActionHeritage every pass; Gosleigh isolates it
 	// here to avoid disturbing the persistent heritage engine's loop snapshots.
-	actmainloop.AddAction(NewActionGuardReturns("protorecovery"))
 	actmainloop.AddAction(NewActionReturnRecovery("protorecovery"))
 	// ActionParamShiftStop: not yet ported (paramshift).
 	actmainloop.AddAction(NewActionRestrictLocal("localrecovery")) // before dead code removed

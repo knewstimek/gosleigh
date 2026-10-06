@@ -309,7 +309,7 @@ func TestPrintCEndToEndRawPcodeToStructuredC(t *testing.T) {
 				Inputs: []VarnodeData{{Space: env.cnst, Offset: 1, Size: 4}, {Space: env.uniq, Offset: 0x100, Size: 1}},
 			},
 		}},
-		{ops: []RawOp{{SeqNum: SeqNum{Address: env.fnAddr.Add(4), Order: 0}, OpCode: CPUI_RETURN, Inputs: []VarnodeData{{Space: env.cnst, Offset: 1, Size: 4}}}}},
+		{ops: []RawOp{{SeqNum: SeqNum{Address: env.fnAddr.Add(4), Order: 0}, OpCode: CPUI_RETURN, Inputs: []VarnodeData{{Space: env.cnst, Offset: 0, Size: 4}, {Space: env.cnst, Offset: 1, Size: 4}}}}},
 		{ops: []RawOp{
 			{
 				SeqNum: SeqNum{Address: env.fnAddr.Add(8), Order: 0},
@@ -323,7 +323,7 @@ func TestPrintCEndToEndRawPcodeToStructuredC(t *testing.T) {
 				Inputs: []VarnodeData{{Space: env.cnst, Offset: 2, Size: 4}},
 			},
 		}},
-		{ops: []RawOp{{SeqNum: SeqNum{Address: env.fnAddr.Add(12), Order: 0}, OpCode: CPUI_RETURN, Inputs: []VarnodeData{{Space: env.uniq, Offset: 0x104, Size: 4}}}}},
+		{ops: []RawOp{{SeqNum: SeqNum{Address: env.fnAddr.Add(12), Order: 0}, OpCode: CPUI_RETURN, Inputs: []VarnodeData{{Space: env.cnst, Offset: 0, Size: 4}, {Space: env.uniq, Offset: 0x104, Size: 4}}}}},
 	}
 	edges := []rawEdgeSpec{{from: 0, to: 2}, {from: 0, to: 1}, {from: 2, to: 3}}
 	graph := buildGraphFromRaw(t, fd, blocks, edges)

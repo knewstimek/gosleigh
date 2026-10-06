@@ -699,6 +699,22 @@ func applyReturnRecovery(fd *Funcdata) bool {
 
 // buildReturnOutput rewires a RETURN op to reflect the active return trials.
 // C++ parity: ActionReturnRecovery::buildReturnOutput
+// deriveOutputMap marks the active output trials that fit the model's return
+// storage as used, everything else as not used.
+// C++ parity: FuncProto::deriveOutputMap -> ParamListStandardOut::fillinMap.
+// TODO known mismatch: only the single integer return register is modelled.
+func (fp *FuncProto) deriveOutputMap(active *ParamActive) {
+	for i := 0; i < active.NumTrials(); i++ {
+		trial := active.Trial(i)
+		if trial.IsActive() && fp.model.characterizeReturnOutput(trial.GetAddress(), trial.GetSize()) == retOutOther {
+			trial.MarkUsed()
+		} else {
+			trial.MarkNoUse()
+		}
+	}
+	active.SortTrials()
+}
+
 func buildReturnOutput(active *ParamActive, retop *PcodeOp, data *Funcdata) {
 	if active == nil || retop == nil || data == nil || retop.NumInput() == 0 {
 		return
