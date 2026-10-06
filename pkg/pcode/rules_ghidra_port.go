@@ -324,10 +324,26 @@ type RuleEarlyRemoval struct{ batchRule }
 
 func NewRuleEarlyRemoval(group string) *RuleEarlyRemoval {
 	r := &RuleEarlyRemoval{}
-	// RuleEarlyRemoval::applyOp -- ruleaction.cc.
-	// known mismatch: doesDeadcode/deadRemovalAllowedSeen space policy is not modeled.
-	r.batchRule = newKnownMismatchBatchRule(group, "earlyremoval", nil, func(g string) Rule { return NewRuleEarlyRemoval(g) })
+	r.batchRule = newBatchRule(group, "earlyremoval", nil, r.apply, func(g string) Rule { return NewRuleEarlyRemoval(g) })
 	return r
+}
+
+// apply destroys an op whose output is never read, once dead-code removal
+// is allowed in the output's space.
+// C++ parity: ruleaction.cc RuleEarlyRemoval::applyOp.
+func (r *RuleEarlyRemoval) apply(op *PcodeOp, data *Funcdata) int {
+	if op.IsCall() || op.IsIndirectSource() {
+		return 0
+	}
+	vn := op.Output()
+	if vn == nil || !vn.HasNoDescend() || vn.IsAutoLive() {
+		return 0
+	}
+	if spc := vn.Space(); spc != nil && spaceDoesDeadcode(spc) && !data.deadRemovalAllowedSeen(spc) {
+		return 0
+	}
+	data.OpDestroy(op)
+	return 1
 }
 
 type RuleCollapseConstants struct{ batchRule }

@@ -253,14 +253,7 @@ func (b *FlowBlock) isInteriorGotoTarget() bool {
 func (b *FlowBlock) isComplex() bool {
 	switch b.Concrete().(type) {
 	case *BlockBasic:
-		// KNOWN GAP: BlockBasic::isComplex faithfully counts statements, but at
-		// CollapseStructure time Gosleigh's basic blocks still carry ops that Ghidra
-		// has already removed via ActionDeadCode / marked implied via
-		// ActionMarkImplied (Gosleigh defers that cleanup to print time). Counting
-		// those inflates the statement total and wrongly forces overflow syntax on
-		// simple loops. Until the pre-structure SSA state is faithful, a leaf block
-		// is treated as non-complex (matching prior behavior).
-		return false
+		return b.Concrete().(*BlockBasic).isComplexBasic(b.SizeOut())
 	case *BlockCondition:
 		// BlockCondition::isComplex -> getBlock(0)->isComplex().
 		children := b.StructuredChildren()
@@ -271,6 +264,58 @@ func (b *FlowBlock) isComplex() bool {
 	default:
 		return true
 	}
+}
+
+// isComplexBasic counts the block's statements; the branch counts as one,
+// and more than two makes the block too complex to fold into a condition.
+// C++ parity: block.cc BlockBasic::isComplex.
+func (bb *BlockBasic) isComplexBasic(sizeOut int) bool {
+	src := bb
+	if bb.srcDelegate != nil {
+		src = bb.srcDelegate
+	}
+	statement := 0
+	if sizeOut >= 2 {
+		statement = 1
+	}
+	for _, inst := range bb.Ops() {
+		if inst.IsMarker() {
+			continue
+		}
+		vn := inst.Output()
+		switch {
+		case inst.IsCall():
+			statement++
+		case vn == nil:
+			if inst.IsFlowBreak() {
+				continue
+			}
+			statement++
+		default:
+			yes := vn.HasNoDescend() || vn.IsAddrTied()
+			if !yes {
+				total := 0
+				for _, d := range vn.DescendIter() {
+					if d.IsMarker() || d.Parent() != src {
+						yes = true
+						break
+					}
+					total++
+					if total > defaultMaxImpliedRef {
+						yes = true
+						break
+					}
+				}
+			}
+			if yes {
+				statement++
+			}
+		}
+		if statement > 2 {
+			return true
+		}
+	}
+	return false
 }
 
 func (b *FlowBlock) preferComplement(*Funcdata) bool {
