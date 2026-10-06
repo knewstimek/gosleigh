@@ -56,8 +56,8 @@ func varnodeStatusOrder(flags uint32) uint32 {
 // C++ parity: VarnodeCompareLocDef::operator()
 func CompareLocDef(a, b *Varnode) int {
 	// 1. Space index
-	if a.loc.Space.Index != b.loc.Space.Index {
-		return cmpUint16(a.loc.Space.Index, b.loc.Space.Index)
+	if ia, ib := spaceOrder(a.loc.Space), spaceOrder(b.loc.Space); ia != ib {
+		return cmpUint16(ia, ib)
 	}
 	// 2. Offset
 	if a.loc.Offset != b.loc.Offset {
@@ -142,8 +142,8 @@ func CompareDefLoc(a, b *Varnode) int {
 		}
 	}
 	// 3. Space index
-	if a.loc.Space.Index != b.loc.Space.Index {
-		return cmpUint16(a.loc.Space.Index, b.loc.Space.Index)
+	if ia, ib := spaceOrder(a.loc.Space), spaceOrder(b.loc.Space); ia != ib {
+		return cmpUint16(ia, ib)
 	}
 	// 4. Offset
 	if a.loc.Offset != b.loc.Offset {
@@ -357,7 +357,7 @@ func (vb *VarnodeBank) FindInput(size int32, loc address.Address) *Varnode {
 	// Build a search key: an input varnode at the given location
 	for _, vn := range vb.locTree {
 		if vn.loc.Space != loc.Space {
-			if vn.loc.Space.Index > loc.Space.Index {
+			if spaceOrder(vn.loc.Space) > spaceOrder(loc.Space) {
 				break
 			}
 			continue
@@ -449,4 +449,14 @@ func (vb *VarnodeBank) BySpace(spc *address.Space) []*Varnode {
 		}
 	}
 	return result
+}
+
+// spaceOrder is the space's position in Varnode location order. The constant
+// space always comes first (Gosleigh gives it a sentinel index).
+// C++ parity: translate.cc -- the constant space is assigned index 0.
+func spaceOrder(sp *address.Space) uint16 {
+	if sp.Kind == address.SpaceKindConstant {
+		return 0
+	}
+	return sp.Index
 }
