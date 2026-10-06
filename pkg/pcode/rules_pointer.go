@@ -658,40 +658,56 @@ func (r *RulePtrsubUndo) apply(op *PcodeOp, data *Funcdata) int {
 	return 1
 }
 
+// apply makes a LOAD/STORE through a pointer to a structure (or array) read
+// its first field (element) explicitly: ptr becomes PTRSUB(ptr, 0).
+// C++ parity: RuleStructOffset0::applyOp. The TypePointerRel branch
+// (evaluateThruParent) is not ported: a relative pointer never matches here.
 func (r *RuleStructOffset0) apply(op *PcodeOp, data *Funcdata) int {
-	if !data.HasTypeRecoveryStarted() || op.NumInput() < 2 {
+	if !data.HasTypeRecoveryStarted() {
 		return 0
 	}
-	moveSize := int32(0)
+	var movesize int32
 	switch op.Code() {
 	case CPUI_LOAD:
-		if op.Output() == nil {
-			return 0
-		}
-		moveSize = op.Output().Size()
+		movesize = op.Output().Size()
 	case CPUI_STORE:
-		if op.NumInput() < 3 {
-			return 0
-		}
-		moveSize = op.Input(2).Size()
+		movesize = op.Input(2).Size()
 	default:
 		return 0
 	}
 	ptrVn := op.Input(1)
 	ptr, _ := ptrVn.TypeReadFacing(op).(*Pointer)
-	if ptr == nil {
+	if ptr == nil || ptr.Pointee() == nil {
 		return 0
 	}
-	st, ok := ptr.Pointee().(*Struct)
-	if !ok {
+	baseType := ptr.Pointee()
+	var subType Datatype
+	switch baseType.Metatype() {
+	case TYPE_STRUCT:
+		if baseType.Size() < movesize {
+			return 0 // moving something bigger than the entire structure
+		}
+		subType, _ = datatypeSubType(baseType, 0)
+		if subType == nil || subType.Size() < movesize {
+			return 0 // the field is too small for the LOAD/STORE
+		}
+	case TYPE_ARRAY:
+		if baseType.Size() < movesize {
+			return 0 // moving something bigger than the entire array
+		}
+		arr, _ := baseType.(*Array)
+		if arr == nil {
+			return 0
+		}
+		if baseType.Size() == movesize && arr.Count() != 1 {
+			return 0
+		}
+		subType = arr.Element()
+	default:
 		return 0
 	}
-	fields := st.Fields()
-	if len(fields) == 0 || fields[0].Offset != 0 || fields[0].Type == nil || fields[0].Type.Size() < moveSize {
-		return 0
-	}
-	subType := pointerSubtypeType(ptr, fields[0].Type)
-	newop := data.NewTypedOpBefore(op, CPUI_PTRSUB, ptrVn.Size(), subType, ptrVn, data.NewConstant(ptrVn.Size(), 0))
+	// The PTRSUB output type is what TypeOpPtrsub::getOutputLocal derives.
+	newop := data.NewTypedOpBefore(op, CPUI_PTRSUB, ptrVn.Size(), pointerSubtypeType(ptr, subType), ptrVn, data.NewConstant(ptrVn.Size(), 0))
 	newop.SetStopTypePropagation()
 	data.OpSetInput(op, newop.Output(), 1)
 	return 1
