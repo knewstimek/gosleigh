@@ -67,8 +67,8 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 	tf := sharedTypeFactory
 	// A typedef of a base type is that base under the typedef's name, which
 	// is what prints (DWORD_PTR, MCIDEVICEID).
-	// TODO known mismatch: typedefs of pointers/aggregates resolve to the
-	// underlying type (TypeFactory::getTypedef not modeled).
+	// TODO known mismatch: typedefs of arrays, unions and enums resolve to the
+	// underlying type.
 	if d.Typedef != "" {
 		under := *d
 		under.Typedef = ""
@@ -77,6 +77,8 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 			return tf.GetTypedefBase(d.Typedef, t)
 		case *Pointer:
 			return tf.GetTypedefPointer(d.Typedef, t)
+		case *Struct:
+			return tf.GetTypedefStruct(d.Typedef, t)
 		default:
 			return t
 		}

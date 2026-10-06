@@ -97,6 +97,23 @@ func (f *TypeFactory) GetTypedefPointer(name string, p *Pointer) *Pointer {
 	return &value
 }
 
+// GetTypedefStruct returns structure s under a typedef name (RECT over
+// tagRECT): same layout, printed by the typedef's name.
+// C++ parity: TypeFactory::getTypedef over a TypeStruct.
+func (f *TypeFactory) GetTypedefStruct(name string, s *Struct) *Struct {
+	key := "typedefstruct:" + name
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if v, ok := f.intern[key].(*Struct); ok {
+		return v
+	}
+	value := *s
+	value.datatypeBase.name = name
+	value.datatypeBase.flags |= datatypeTypedef
+	f.intern[key] = &value
+	return &value
+}
+
 func (f *TypeFactory) GetTypedefBase(name string, base *Base) *Base {
 	value := NewBase(base.Size(), base.Metatype(), name)
 	value.submeta = base.SubMeta()
