@@ -154,9 +154,16 @@ func (bb *BlockBasic) LastOp() *PcodeOp {
 // startAddr is the address the block starts at.
 // TODO known mismatch: C++ BlockBasic::getStart reads the block's address
 // cover, which is not modelled; the first op's address stands in for it.
+// MULTIEQUALs are skipped: they are placed at the start, not read from it.
 func (bb *BlockBasic) startAddr() address.Address {
-	if op := bb.FirstOp(); op != nil {
-		return op.Addr()
+	ops := bb.opSlice()
+	for _, op := range ops {
+		if op.Code() != CPUI_MULTIEQUAL {
+			return op.Addr()
+		}
+	}
+	if len(ops) != 0 {
+		return ops[0].Addr()
 	}
 	return address.Address{}
 }

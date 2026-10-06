@@ -643,8 +643,9 @@ func (h *Heritage) placeMultiequals(graph *BlockGraph, addr address.Address, siz
 			continue
 		}
 
-		// Create MULTIEQUAL op with numPreds inputs
-		op := h.fd.NewOp(numPreds, addr)
+		// The phi sits at the block start, not at the storage address.
+		// C++ parity: Heritage::placeMultiequals (newOp(..., bl->getStart())).
+		op := h.fd.NewOp(numPreds, bb.startAddr())
 		h.fd.OpSetOpcode(op, CPUI_MULTIEQUAL)
 
 		// Create output varnode and mark it for heritage tracking.

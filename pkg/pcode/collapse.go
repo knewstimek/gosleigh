@@ -2,6 +2,7 @@ package pcode
 
 import (
 	"fmt"
+	"os"
 	"sort"
 )
 
@@ -194,30 +195,16 @@ func (b *FlowBlock) isDecisionOut(i int) bool {
 	return true
 }
 
+// loopDAGMask marks edges outside the loop DAG sub-graph. Loop edges stay in.
+// C++ parity: FlowBlock::isLoopDAGOut / isLoopDAGIn.
+const loopDAGMask = EdgeFlagIrreducible | EdgeFlagBack | EdgeFlagLoopExit | EdgeFlagGoto
+
 func (b *FlowBlock) isLoopDAGOut(i int) bool {
-	if i < 0 || i >= b.SizeOut() {
-		return false
-	}
-	if b.isGotoOut(i) {
-		return false
-	}
-	if b.isBackEdgeOut(i) || b.isLoopOut(i) || b.isLoopExitOut(i) {
-		return false
-	}
-	return true
+	return b.outEdges[i].Label&loopDAGMask == 0
 }
 
 func (b *FlowBlock) isLoopDAGIn(i int) bool {
-	if i < 0 || i >= b.SizeIn() {
-		return false
-	}
-	if b.isGotoIn(i) {
-		return false
-	}
-	if b.isBackEdgeIn(i) || b.isLoopIn(i) {
-		return false
-	}
-	return true
+	return b.inEdges[i].Label&loopDAGMask == 0
 }
 
 func (b *FlowBlock) isSwitchOut() bool {
@@ -417,8 +404,13 @@ type edgeRecord struct {
 	label uint32
 }
 
+// collapseEdgeLabel is the label an edge keeps when its endpoint is folded
+// into a structured block. The back-edge flag must survive: the loop-DAG
+// tests exclude loop back edges by it.
+// TODO known mismatch: C++ FlowBlock::replaceOutEdge keeps the whole label;
+// the spanning-tree classes (tree/forward/cross) are still dropped here.
 func collapseEdgeLabel(label uint32) uint32 {
-	return label & (EdgeFlagGoto | EdgeFlagLoop | EdgeFlagDefaultSwitch | EdgeFlagIrreducible | EdgeFlagLoopExit)
+	return label & (EdgeFlagGoto | EdgeFlagLoop | EdgeFlagDefaultSwitch | EdgeFlagIrreducible | EdgeFlagLoopExit | EdgeFlagBack)
 }
 
 func newStructuredFlowBlock(tp BlockType) *FlowBlock {
@@ -1092,6 +1084,9 @@ func (c *CollapseStructure) updateLoopBody() bool {
 	}
 	tracer.Initialize()
 	tracer.PushBranches()
+	if collapseTrace {
+		fmt.Fprintf(os.Stderr, "collapse: trace likely=%d loop=%v"+string(rune(10)), len(c.likelygoto), loopbottom != nil)
+	}
 	c.likelylistfull = true
 	if loopbottom != nil {
 		c.loopbody[c.loopbodyIndex].EmitLikelyEdges(&c.likelygoto, &c.graph.FlowBlock)
@@ -1604,15 +1599,33 @@ func (c *CollapseStructure) collapseConditions() {
 	}
 }
 
+// collapseTrace (COLLAPSE_TRACE=1) logs each goto-selection round.
+var collapseTrace = os.Getenv("COLLAPSE_TRACE") != ""
+
 func (c *CollapseStructure) CollapseAll() {
 	c.finaltrace = false
+	// Edge labels come from the basic blocks (cloneBlockGraph copies them,
+	// as BlockGraph::buildCopy does); visitCount must be clean for TraceDAG.
 	c.graph.ClearVisitCount()
-	c.graph.StructureLoops()
 	c.orderLoopBodies()
 	c.collapseConditions()
+	if collapseTrace {
+		for i := 0; i < c.graph.GetSize(); i++ {
+			bl := c.graph.GetBlock(i)
+			fmt.Fprintf(os.Stderr, "collapse: blk %d idx=%d flags=%#x in=%d out:", i, bl.Index(), bl.flags, bl.SizeIn())
+			for j := 0; j < bl.SizeOut(); j++ {
+				e := bl.OutEdge(j)
+				fmt.Fprintf(os.Stderr, " ->%d/%#x", e.Point.Index(), e.Label)
+			}
+			fmt.Fprintln(os.Stderr)
+		}
+	}
 	isolatedCount := c.collapseInternal(nil)
 	for isolatedCount < c.graph.GetSize() {
 		target := c.selectGoto()
+		if collapseTrace {
+			fmt.Fprintf(os.Stderr, "collapse: isolated=%d size=%d goto=%v\n", isolatedCount, c.graph.GetSize(), target != nil)
+		}
 		if target == nil && !c.clipExtraRoots() {
 			break
 		}
