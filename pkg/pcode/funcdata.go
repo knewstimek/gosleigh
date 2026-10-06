@@ -1140,6 +1140,12 @@ func (fd *Funcdata) setVarnodeProperties(vn *Varnode) {
 			vn.SetFlags(entry.AllFlags() &^ VarnodeTypeLock)
 			return
 		}
+		// Inside the local scope but not covered by a symbol.
+		// C++ parity: Scope::queryProperties (found just a scope).
+		if vn.Space() == sl.SpaceID() && sl.inScopeRange(vn.Offset(), vn.Size()) {
+			vn.SetFlags(VarnodeMapped | VarnodeAddrTied)
+			return
+		}
 	}
 	// Storage inside the global scope is a global variable: mapped, address
 	// tied and persistent even without a symbol. An external-reference symbol

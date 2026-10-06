@@ -371,6 +371,29 @@ func coreStackName(space *address.Space, offset uint64, growsNegative bool, ct D
 	return fmt.Sprintf("%s%s%s_%x", prefix, spacename, marker, uint64(start))
 }
 
+// addrTiedName is the default name of an address-tied, non-persistent
+// variable: inside the function's local stack range the frame-relative
+// "<prefix>Stack[X]_<hex>" form, elsewhere the raw "<prefix><Space><addr>"
+// form ("uStack00000004" for a callee-owned argument slot).
+// C++ parity: ScopeLocal::buildVariableName falling back to the
+// ScopeInternal::buildVariableName addrtied branch.
+func (sl *ScopeLocal) addrTiedName(addr address.Address, ct Datatype) string {
+	growsNegative := true
+	if e := sl.ext(); e != nil {
+		growsNegative = e.stackGrows
+	}
+	if sl.SpaceID() == addr.Space && (sl.model == nil || sl.model.InLocalRange(addr.Offset)) {
+		return coreStackName(addr.Space, addr.Offset, growsNegative, ct)
+	}
+	spacename := addr.Space.Name
+	spacename = string(spacename[0]-32) + spacename[1:] // toupper on the first byte
+	ws := uint64(addr.Space.WordSize)
+	if ws == 0 {
+		ws = 1
+	}
+	return fmt.Sprintf("%s%s%0*x", datatypeNameBase(ct), spacename, 2*addr.Space.AddrSize, addr.Offset/ws)
+}
+
 // datatypeNameBase is the name-prefix a data-type contributes to a default
 // variable name: the first letter of its name, with pointers and arrays
 // prepending 'p' / 'a' and recursing.

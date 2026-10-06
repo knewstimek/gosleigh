@@ -146,6 +146,7 @@ func (a *ActionDeadCode) applyConsume(data *Funcdata) int {
 			data.seenDeadcode(sp) // A value that is never used but bangs around
 		}
 	}
+	data.ClearDeadVarnodes()
 	return 0
 }
 

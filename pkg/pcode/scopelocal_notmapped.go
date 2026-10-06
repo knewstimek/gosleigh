@@ -56,11 +56,10 @@ func (fd *Funcdata) ClearDeadVarnodes() {
 		if vn == nil || !vn.HasNoDescend() {
 			continue
 		}
-		// TODO known mismatch: C++ frees dead stack inputs too and destroys
-		// every free Varnode without descendants; printc's stack declaration
-		// pass still reads such leftovers (entryCoversVarnode), so only dead
-		// register inputs are freed here.
-		if vn.IsInput() && !vn.HasAddlFlags(VarnodeLockedInput) && vn.Space() != nil && vn.Space().Kind != address.SpaceKindStack {
+		// TODO known mismatch: C++ also destroys every free Varnode without
+		// descendants; printc's stack declaration pass still reads such
+		// leftovers (entryCoversVarnode).
+		if vn.IsInput() && !vn.HasAddlFlags(VarnodeLockedInput) {
 			fd.vbank.MakeFree(vn)
 		}
 	}

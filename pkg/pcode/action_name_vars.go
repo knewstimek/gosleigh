@@ -395,7 +395,14 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		if sl != nil {
 			if nr := highNameRepresentative(c.hv); nr != nil {
 				if e := sl.FindOverlap(nr.Addr(), nr.Size()); e != nil && e.Symbol() != nil {
-					c.hv.SetName(e.Symbol().Name())
+					name := e.Symbol().Name()
+					if name == "" && nr.IsAddrTied() && !nr.IsPersist() {
+						// An unnamed symbol gets its default name from its storage.
+						// C++ parity: Scope::buildDefaultName -> buildVariableName.
+						name = makeNameUnique(sl.addrTiedName(nr.Addr(), c.hv.Type()), used)
+						used[name] = true
+					}
+					c.hv.SetName(name)
 					a.count++
 					continue
 				}
@@ -495,6 +502,16 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 				nm = "extraout_" + rn
 			}
 			e.hv.SetName(makeNameUnique(nm, used))
+			a.count++
+			continue
+		}
+		// An address-tied variable is named by its storage and does not
+		// consume an index. C++ parity: ScopeInternal::buildVariableName
+		// (addrtied branch) through ScopeLocal::buildVariableName.
+		if sl != nil && e.key.IsAddrTied() && !e.key.IsPersist() && !e.key.IsInput() {
+			nm := makeNameUnique(sl.addrTiedName(e.key.Addr(), e.hv.Type()), used)
+			used[nm] = true
+			e.hv.SetName(nm)
 			a.count++
 			continue
 		}
