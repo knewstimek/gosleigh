@@ -3290,10 +3290,11 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 	case *Base:
 		switch typed.Metatype() {
 		case TYPE_BOOL:
+			// C++ parity: PrintC::pushBoolConstant.
 			if vn.Offset() == 0 {
-				return "0"
+				return "false"
 			}
-			return "1"
+			return "true"
 		case TYPE_INT:
 			// C++ parity: PrintC::push_integer with sign=true (printc.cc:1376-1408).
 			// Signedness only controls the leading '-'; the radix is still chosen by
