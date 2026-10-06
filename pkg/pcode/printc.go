@@ -4349,7 +4349,7 @@ func (s *printCState) renderPtrSub(op *PcodeOp) (ExprFragment, error) {
 	if symExpr, ok := s.renderPtrSubSpacebaseSymbol(base, off); ok {
 		return symExpr, nil
 	}
-	if fieldExpr, ok := s.renderPtrSubField(base, off, false); ok {
+	if fieldExpr, ok := s.renderPtrSubField(op, false); ok {
 		return fieldExpr, nil
 	}
 	baseExpr, err := s.renderVarnodeExpr(base)
@@ -4443,7 +4443,8 @@ func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode) (ExprFragm
 	return s.lang.UnaryExpr("&", cPrecUnary, name), true
 }
 
-func (s *printCState) renderPtrSubField(base, off *Varnode, valueon bool) (ExprFragment, bool) {
+func (s *printCState) renderPtrSubField(op *PcodeOp, valueon bool) (ExprFragment, bool) {
+	base, off := op.Input(0), op.Input(1)
 	if base == nil || off == nil || !off.IsConstant() {
 		return ExprFragment{}, false
 	}
@@ -4474,11 +4475,25 @@ func (s *printCState) renderPtrSubField(base, off *Varnode, valueon bool) (ExprF
 		}
 		return expr, true
 	}
+	var field TypeField
+	if u, isUnion := ptrType.Pointee().(*Union); isUnion {
+		// The field is the one the PTRSUB resolves to.
+		// C++ parity: opPtrsub TYPE_UNION (getUnionField(ptype,op,-1)).
+		if off.Offset() != 0 {
+			return ExprFragment{}, false
+		}
+		res := s.fd.getUnionField(ptrType, op, -1)
+		if res == nil || res.fieldNum < 0 || res.fieldNum >= len(u.fields) {
+			return ExprFragment{}, false
+		}
+		field = u.fields[res.fieldNum]
+		return s.renderMemberField(base, field, valueon)
+	}
 	structType, ok := ptrType.Pointee().(*Struct)
 	if !ok {
 		return ExprFragment{}, false
 	}
-	field, ok := structType.FieldAt(int32(off.Offset()))
+	field, ok = structType.FieldAt(int32(off.Offset()))
 	if !ok {
 		// No field holds the offset: Ghidra's default name for the gap.
 		// C++ parity: opPtrsub (DataTypeComponent.getDefaultFieldName).
@@ -4490,6 +4505,12 @@ func (s *printCState) renderPtrSubField(base, off *Varnode, valueon bool) (ExprF
 	} else if field.Name == "" {
 		return ExprFragment{}, false
 	}
+	return s.renderMemberField(base, field, valueon)
+}
+
+// renderMemberField prints the member selection of field off the pointer
+// base: '.' on a value-flexible base, '->' otherwise, '&' unless valueon.
+func (s *printCState) renderMemberField(base *Varnode, field TypeField, valueon bool) (ExprFragment, bool) {
 	// An array field is printed without '&'. C++ parity: opPtrsub arrayvalue.
 	if _, isArr := field.Type.(*Array); isArr {
 		valueon = true
@@ -4544,7 +4565,7 @@ func (s *printCState) renderPointerValue(vn *Varnode) (ExprFragment, bool) {
 	case CPUI_PTRSUB:
 		s.opStack = append(s.opStack, def)
 		defer func() { s.opStack = s.opStack[:len(s.opStack)-1] }()
-		return s.renderPtrSubField(def.Input(0), def.Input(1), true)
+		return s.renderPtrSubField(def, true)
 	}
 	return ExprFragment{}, false
 }
