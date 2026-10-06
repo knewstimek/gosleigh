@@ -310,29 +310,156 @@ func NewRuleSLess2Zero(group string) *RuleSLess2Zero {
 	return r
 }
 
+// apply simplifies INT_SLESS against 0 or -1, which only tests a sign bit.
+// C++ parity: RuleSLess2Zero::applyOp.
 func (r *RuleSLess2Zero) apply(op *PcodeOp, data *Funcdata) int {
-	lval, lok := constantValue(op.Input(0))
-	rval, rok := constantValue(op.Input(1))
-	if !lok || !rok {
-		return 0
+	lvn, rvn := op.Input(0), op.Input(1)
+	switch {
+	case lvn.IsConstant():
+		if !rvn.IsWritten() || lvn.Offset() != bitfieldSizeMask(lvn.Size()) {
+			return 0
+		}
+		feedOp := rvn.Def()
+		if hibit := sless2ZeroHiBit(feedOp); hibit != nil { // -1 s< (hi ^ lo)
+			if hibit.IsConstant() {
+				hibit = data.NewConstant(hibit.Size(), hibit.Offset())
+			}
+			data.OpSetInput(op, hibit, 1)
+			data.OpSetOpcode(op, CPUI_INT_EQUAL)
+			data.OpSetInput(op, data.NewConstant(hibit.Size(), 0), 0)
+			return 1
+		}
+		switch feedOp.Code() {
+		case CPUI_SUBPIECE:
+			avn := feedOp.Input(0)
+			if avn.IsFree() || avn.Size() > 8 { // no comparison wider than 8 bytes
+				return 0
+			}
+			if rvn.Size()+int32(feedOp.Input(1).Offset()) == avn.Size() { // -1 s< SUB(avn,#hi)
+				data.OpSetInput(op, avn, 1)
+				data.OpSetInput(op, data.NewConstant(avn.Size(), bitfieldSizeMask(avn.Size())), 0)
+				return 1
+			}
+		case CPUI_INT_NEGATE: // -1 s< ~avn
+			avn := feedOp.Input(0)
+			if avn.IsFree() {
+				return 0
+			}
+			data.OpSetInput(op, avn, 0)
+			data.OpSetInput(op, data.NewConstant(avn.Size(), 0), 1)
+			return 1
+		case CPUI_INT_AND:
+			avn := feedOp.Input(0)
+			if avn.IsFree() || rvn.LoneDescend() == nil {
+				return 0
+			}
+			if maskVn := feedOp.Input(1); maskVn.IsConstant() && (maskVn.Offset()>>(8*uint(avn.Size())-1))&1 != 0 {
+				data.OpSetInput(op, avn, 1) // -1 s< avn & 0x8...
+				return 1
+			}
+		case CPUI_PIECE: // -1 s< CONCAT(V,W)
+			avn := feedOp.Input(0) // most significant piece
+			if avn.IsFree() {
+				return 0
+			}
+			data.OpSetInput(op, avn, 1)
+			data.OpSetInput(op, data.NewConstant(avn.Size(), bitfieldSizeMask(avn.Size())), 0)
+			return 1
+		case CPUI_INT_LEFT:
+			coeff := feedOp.Input(1)
+			if !coeff.IsConstant() || coeff.Offset() != uint64(lvn.Size())*8-1 {
+				return 0
+			}
+			avn := feedOp.Input(0)
+			if !avn.IsWritten() || !avn.Def().IsBoolOutput() {
+				return 0
+			}
+			// -1 s< (bool << #8*sz-1)
+			data.OpSetOpcode(op, CPUI_BOOL_NEGATE)
+			data.OpRemoveInput(op, 1)
+			data.OpSetInput(op, avn, 0)
+			return 1
+		}
+	case rvn.IsConstant():
+		if !lvn.IsWritten() || rvn.Offset() != 0 {
+			return 0
+		}
+		feedOp := lvn.Def()
+		if hibit := sless2ZeroHiBit(feedOp); hibit != nil { // (hi ^ lo) s< 0
+			if hibit.IsConstant() {
+				hibit = data.NewConstant(hibit.Size(), hibit.Offset())
+			}
+			data.OpSetInput(op, hibit, 0)
+			data.OpSetOpcode(op, CPUI_INT_NOTEQUAL)
+			return 1
+		}
+		switch feedOp.Code() {
+		case CPUI_SUBPIECE:
+			avn := feedOp.Input(0)
+			if avn.IsFree() || avn.Size() > 8 {
+				return 0
+			}
+			if lvn.Size()+int32(feedOp.Input(1).Offset()) == avn.Size() { // SUB(avn,#hi) s< 0
+				data.OpSetInput(op, avn, 0)
+				data.OpSetInput(op, data.NewConstant(avn.Size(), 0), 1)
+				return 1
+			}
+		case CPUI_INT_NEGATE: // ~avn s< 0
+			avn := feedOp.Input(0)
+			if avn.IsFree() {
+				return 0
+			}
+			data.OpSetInput(op, avn, 1)
+			data.OpSetInput(op, data.NewConstant(avn.Size(), bitfieldSizeMask(avn.Size())), 0)
+			return 1
+		case CPUI_INT_AND:
+			avn := feedOp.Input(0)
+			if avn.IsFree() || lvn.LoneDescend() == nil {
+				return 0
+			}
+			if maskVn := feedOp.Input(1); maskVn.IsConstant() && (maskVn.Offset()>>(8*uint(avn.Size())-1))&1 != 0 {
+				data.OpSetInput(op, avn, 0) // avn & 0x8... s< 0
+				return 1
+			}
+		case CPUI_PIECE: // CONCAT(V,W) s< 0
+			avn := feedOp.Input(0)
+			if avn.IsFree() {
+				return 0
+			}
+			data.OpSetInput(op, avn, 0)
+			data.OpSetInput(op, data.NewConstant(avn.Size(), 0), 1)
+			return 1
+		}
 	}
-	bits := uint(op.Input(0).Size() * 8)
-	if bits == 0 {
-		return 0
+	return 0
+}
+
+// sless2ZeroHiBit returns the input of an ADD/OR/XOR that supplies the high
+// bit alone, when the other input cannot touch it.
+// C++ parity: RuleSLess2Zero::getHiBit.
+func sless2ZeroHiBit(op *PcodeOp) *Varnode {
+	switch op.Code() {
+	case CPUI_INT_ADD, CPUI_INT_OR, CPUI_INT_XOR:
+	default:
+		return nil
 	}
-	var lhs, rhs int64
-	if bits >= 64 {
-		lhs = int64(lval)
-		rhs = int64(rval)
-	} else {
-		shift := 64 - bits
-		lhs = int64(lval<<shift) >> shift
-		rhs = int64(rval<<shift) >> shift
+	vn1, vn2 := op.Input(0), op.Input(1)
+	mask := bitfieldSizeMask(vn1.Size())
+	mask ^= mask >> 1 // only the high bit
+	nz1, nz2 := vn1.NZMask(), vn2.NZMask()
+	if nz1 != mask && nz1&mask != 0 { // high bit and some other bit
+		return nil
 	}
-	if lhs < rhs {
-		return rewriteToConst(data, op, 1)
+	if nz2 != mask && nz2&mask != 0 {
+		return nil
 	}
-	return rewriteToConst(data, op, 0)
+	if nz1 == mask {
+		return vn1
+	}
+	if nz2 == mask {
+		return vn2
+	}
+	return nil
 }
 
 type RuleEqual2Zero struct{ batchRule }
