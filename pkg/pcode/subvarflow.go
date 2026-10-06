@@ -324,11 +324,17 @@ func (sf *SubvariableFlow) tryCallReturnPush(op *PcodeOp, rvn *subvariableFlowRe
 }
 
 // SubvariableFlow::trySwitchPull -- subflow.cc.
+// A BRANCHIND can switch on the logical value directly.
 func (sf *SubvariableFlow) trySwitchPull(op *PcodeOp, rvn *subvariableFlowReplaceVarnode) bool {
-	// TODO known mismatch: jump-table analysis is not yet ported to Gosleigh.
-	_ = op
-	_ = rvn
-	return false
+	if (rvn.mask & 1) == 0 {
+		return false // The logical value must be justified
+	}
+	if (rvn.vn.Consumed() &^ rvn.mask) != 0 {
+		return false // Something outside the mask is consumed: can't trim
+	}
+	sf.patchlist = append(sf.patchlist, subvariableFlowPatchRecord{kind: subvariableFlowParameterPatch, patchOp: op, in1: rvn, slot: 0})
+	sf.pullcount++ // A true terminal modification
+	return true
 }
 
 // SubvariableFlow::tryInt2FloatPull -- subflow.cc.
