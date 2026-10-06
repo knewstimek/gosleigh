@@ -291,7 +291,7 @@ func (r *CDeclRenderer) enumSpecifier(dt *Enum) string {
 		return "enum"
 	}
 	if dt.Name() != "" {
-		return "enum " + dt.Name()
+		return dt.Name() // C++ parity: PrintC::pushTypeStart prints the name only
 	}
 	return "enum { " + r.enumBody(dt) + " }"
 }

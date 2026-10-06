@@ -342,6 +342,31 @@ func typeDesc(n *xnode, types map[string]*xnode, depth int) *pcode.HostTypeDesc 
 		Char:  n.attr("char") == "true",
 		Utf:   n.attr("utf") == "true",
 	}
+	if d.Meta == "enum_uint" || d.Meta == "enum_int" {
+		d.EnumValues = map[uint64]string{}
+		mask := ^uint64(0)
+		if d.Size > 0 && d.Size < 8 {
+			mask = uint64(1)<<(8*uint(d.Size)) - 1
+		}
+		for i := range n.Kids {
+			v := &n.Kids[i]
+			if v.XMLName.Local != "val" {
+				continue
+			}
+			val, err := strconv.ParseInt(v.attr("value"), 0, 64)
+			if err != nil {
+				u, uerr := strconv.ParseUint(v.attr("value"), 0, 64)
+				if uerr != nil {
+					continue
+				}
+				val = int64(u)
+			}
+			key := uint64(val) & mask // The value might be negative
+			if _, dup := d.EnumValues[key]; !dup {
+				d.EnumValues[key] = v.attr("name")
+			}
+		}
+	}
 	if len(n.Kids) > 0 && (d.Meta == "ptr" || d.Meta == "array") {
 		d.Elem = typeDesc(&n.Kids[0], types, depth+1)
 	}

@@ -1354,7 +1354,7 @@ func (s *printCState) normalizeTypeForDecl(dt Datatype) Datatype {
 		}
 		return sharedTypeFactory.GetUnion(typed.Name(), normalizedFields)
 	case *Enum:
-		return sharedTypeFactory.GetEnum(typed.Size(), typed.Metatype(), typed.Name(), typed.Values())
+		return typed // An enumeration prints by its name
 	case *Base:
 		if typed.Flags()&datatypeTypedef != 0 {
 			return typed // a typedef prints by its name

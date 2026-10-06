@@ -54,6 +54,9 @@ type HostTypeDesc struct {
 	// ID is the host's id of a named type: one structure per id, however
 	// often it is referenced (and from itself).
 	ID string
+	// EnumValues are an enumeration's names by value (the first name of a
+	// value wins). C++ parity: TypeEnum::decode.
+	EnumValues map[uint64]string
 }
 
 // HostFieldDesc is one member of a host structure.
@@ -69,8 +72,7 @@ var hostMetatypes = map[string]metatype{
 }
 
 // ResolveHostType builds the Datatype a host description names.
-// TODO known mismatch: host unions and enums resolve to an undefined blob of
-// their size.
+// TODO known mismatch: host unions resolve to an undefined blob of their size.
 func ResolveHostType(d *HostTypeDesc) Datatype {
 	if d == nil {
 		return nil
@@ -109,6 +111,12 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 		return tf.GetArray(d.Count, elem)
 	case "void":
 		return tf.GetVoid()
+	case "enum_uint", "enum_int":
+		meta := TYPE_ENUM_UINT
+		if d.Meta == "enum_int" {
+			meta = TYPE_ENUM_INT
+		}
+		return tf.GetEnum(d.Size, meta, d.Name, d.EnumValues)
 	case "struct":
 		if d.ID != "" {
 			st, created := tf.HostStructStub(d.ID, d.Name, d.Size)
