@@ -1594,6 +1594,9 @@ func normalizedBaseType(base *Base, longSize int) Datatype {
 			// C++ parity: TypeFactory::cacheCoreTypes (type.cc:3645-3646, the
 			// "Char is preferred over other int types" branch) plus the
 			// setCoreType("char",1,TYPE_INT,true) registration (ghidra_arch.cc:340).
+			if base.Name() == "sbyte" {
+				return base // the non-character int1 (getBaseNoChar)
+			}
 			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "char")
 		case 2:
 			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "short")
@@ -3466,7 +3469,11 @@ func renderCharConstant(vn *Varnode, dt Datatype) (string, bool) {
 	}
 	charLike := isCharPrintLike(dt)
 	if !charLike {
-		if base, ok := dt.(*Base); ok && base.Metatype() == TYPE_INT {
+		// A plain int1 is the core char type (getBase(1,TYPE_INT) yields char);
+		// sbyte is the non-character int1 (getBaseNoChar, shift amounts).
+		// TODO known mismatch: type propagation renames 1-byte ints "int", so a
+		// shift-amount constant (0x20 - bVar1) still prints as a character.
+		if base, ok := dt.(*Base); ok && base.Metatype() == TYPE_INT && base.Name() != "sbyte" {
 			charLike = true
 		}
 	}

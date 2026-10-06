@@ -620,3 +620,39 @@ func (t *typeOpPtrsub) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Da
 	}
 	return baseGetInputCast(t, op, slot, cs)
 }
+
+// shiftAmountType is the local type of a shift amount: a signed integer
+// that is never a character (an 8-bit amount is sbyte, not char).
+// C++ parity: TypeOpIntLeft/Right/Sright::getInputLocal (getBaseNoChar).
+func shiftAmountType(op *PcodeOp, tf *TypeFactory) Datatype {
+	sz := op.Input(1).Size()
+	if sz == 1 {
+		return tf.GetBase(1, TYPE_INT, "sbyte")
+	}
+	return tf.GetBase(sz, TYPE_INT, "")
+}
+
+func (t *typeOpIntLeft) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) Datatype {
+	if slot == 1 && op != nil && op.NumInput() > 1 {
+		return shiftAmountType(op, tf)
+	}
+	return t.typeOpBase.InputTypeLocal(op, slot, tf)
+}
+
+func (t *typeOpIntLeft) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
+	return baseGetInputCast(t, op, slot, cs)
+}
+
+func (t *typeOpIntRight) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) Datatype {
+	if slot == 1 && op != nil && op.NumInput() > 1 {
+		return shiftAmountType(op, tf)
+	}
+	return t.typeOpBase.InputTypeLocal(op, slot, tf)
+}
+
+func (t *typeOpIntSright) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) Datatype {
+	if slot == 1 && op != nil && op.NumInput() > 1 {
+		return shiftAmountType(op, tf)
+	}
+	return t.typeOpBase.InputTypeLocal(op, slot, tf)
+}

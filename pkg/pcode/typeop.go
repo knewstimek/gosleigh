@@ -143,6 +143,9 @@ func (t *typeOpLoad) PropagateType(op *PcodeOp, slot int, inType Datatype, tf *T
 //   slot=2 (value) -> pointer-to-valueType propagates to input[1] (addr)
 type typeOpStore struct{ typeOpBase }
 
+// typeOpIntLeft types its shift amount (C++ TypeOpIntLeft).
+type typeOpIntLeft struct{ typeOpBase }
+
 func (t *typeOpStore) PropagateType(op *PcodeOp, slot int, inType Datatype, tf *TypeFactory) Datatype {
 	if slot == 1 {
 		if ptr, ok := inType.(*Pointer); ok {
@@ -395,7 +398,7 @@ func RegisterTypeOps() []TypeOp {
 	inst[CPUI_INT_XOR] = &typeOpBase{CPUI_INT_XOR, PcodeOpBinary | PcodeOpCommutative, "^"}
 	inst[CPUI_INT_AND] = &typeOpBase{CPUI_INT_AND, PcodeOpBinary | PcodeOpCommutative, "&"}
 	inst[CPUI_INT_OR] = &typeOpBase{CPUI_INT_OR, PcodeOpBinary | PcodeOpCommutative, "|"}
-	inst[CPUI_INT_LEFT] = &typeOpBase{CPUI_INT_LEFT, PcodeOpBinary, "<<"}
+	inst[CPUI_INT_LEFT] = &typeOpIntLeft{typeOpBase{CPUI_INT_LEFT, PcodeOpBinary, "<<"}}
 	inst[CPUI_INT_RIGHT] = &typeOpIntRight{typeOpBase{CPUI_INT_RIGHT, PcodeOpBinary, ">>"}}
 	inst[CPUI_INT_SRIGHT] = &typeOpIntSright{typeOpBase{CPUI_INT_SRIGHT, PcodeOpBinary, ">>"}}
 	inst[CPUI_INT_MULT] = &typeOpIntMult{typeOpBase{CPUI_INT_MULT, PcodeOpBinary | PcodeOpCommutative, "*"}}
