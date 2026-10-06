@@ -954,118 +954,14 @@ func (s *printCState) shouldInline(op *PcodeOp) bool {
 }
 
 func (s *printCState) inferReturnType() Datatype {
-	if s.fd == nil {
-		return sharedTypeFactory.GetVoid()
-	}
 	// The signature prints the output type ActionOutputPrototype fixed
 	// before ActionSetCasts. C++ parity: FuncProto::updateOutputTypes.
-	if fp := s.fd.GetFuncProto(); fp != nil && fp.GetOutput() != nil {
-		if dt := fp.GetOutput().Type(); dt != nil && dt.Metatype() != TYPE_VOID {
-			return dt
-		}
-	}
-	for _, op := range s.fd.GetPcodeOpBank().AllOps() {
-		if op == nil || op.Code() != CPUI_RETURN || op.HaltType() != 0 {
-			continue
-		}
-		vn := returnValue(op)
-		if vn == nil {
-			continue
-		}
-		// If vn is a free (stale) varnode (ActionDeadCode freed it after the return-value wiring),
-		// recover the type from the live defining op or live varnode at the same location.
-		if vn.IsFree() && !vn.IsConstant() && vn.Space() != nil {
-			if defOp := s.findDefiningOpForFreeVarnode(vn); defOp != nil && defOp.Output() != nil {
-				live := defOp.Output()
-				if s.returnOnlyLocs[varnodeLocKey(live)] {
-					dt := live.TypeReadFacing(op)
-					if dt == nil || dt.Metatype() == TYPE_UINT || dt.Metatype() == TYPE_UNKNOWN {
-						return sharedTypeFactory.GetBase(int32(live.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", live.Size()))
-					}
-				}
-				return live.TypeReadFacing(op)
-			}
-			if live := s.findLiveReturnVarnode(vn); live != nil {
-				if s.returnOnlyLocs[varnodeLocKey(live)] {
-					dt := live.TypeReadFacing(op)
-					if dt == nil || dt.Metatype() == TYPE_UINT || dt.Metatype() == TYPE_UNKNOWN {
-						return sharedTypeFactory.GetBase(int32(live.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", live.Size()))
-					}
-				}
-				return live.TypeReadFacing(op)
-			}
-			continue // could not recover type; skip this RETURN
-		}
-		// If the return varnode's location was identified as return-only by
-		// renameReturnOnlyLocals AND its committed type is untyped (TYPE_UINT
-		// from constant propagation, or TYPE_UNKNOWN), render the return type
-		// as undefined%d. TYPE_INT (signed) and TYPE_FLOAT are kept as-is --
-		// they were inferred from a typed op (e.g. IMUL/FADD) and should
-		// propagate to the C return type.
-		// C++ parity: Ghidra's ActionReturnSplit uses TYPE_UNKNOWN for the
-		// return-value carrier only when no specific type could be recovered.
-		if vn.Space() != nil && !vn.IsConstant() && s.returnOnlyLocs[varnodeLocKey(vn)] {
-			dt := vn.TypeReadFacing(op)
-			// Only a genuinely untyped (TYPE_UNKNOWN) carrier degrades to
-			// undefined%d. A carrier typed by a real op (e.g. INT_AND -> TYPE_UINT)
-			// keeps that type so the return type follows (e.g. ulonglong), matching
-			// Ghidra, which infers the return type from the carrier's real type.
-			if dt == nil || dt.Metatype() == TYPE_UNKNOWN {
-				return sharedTypeFactory.GetBase(int32(vn.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", vn.Size()))
+	if s.fd != nil {
+		if fp := s.fd.GetFuncProto(); fp != nil && fp.GetOutput() != nil {
+			if dt := fp.GetOutput().Type(); dt != nil {
+				return dt
 			}
 		}
-		dt := vn.TypeReadFacing(op)
-		// Signature output type keeps the pre-cast signedness. In Ghidra the
-		// function return type is fixed by ActionOutputPrototype
-		// (coreaction.cc:4776 -> FuncProto::updateOutputTypes) from the return
-		// Varnode's HighVariable type BEFORE ActionSetCasts runs
-		// (universalAction order: outputprototype at coreaction.cc:5747, casts at
-		// :5752). ActionSetCasts::castOutput may then promote the return Varnode's
-		// display type from signed (TYPE_INT, e.g. an INT_ADD/INT_MULT
-		// output-local) to unsigned (TYPE_UINT) so the body reads cast-free when
-		// the value feeds an unsigned consumer -- but the signature is already
-		// committed and does not follow that promotion. Measured on umulhi (Ghidra
-		// 12.0.4): return Varnode high type is longlong at outputprototype and
-		// ulonglong at end; signature stays `longlong`. Gosleigh derives the
-		// signature at print time from the post-cast read-facing type, so undo the
-		// SetCasts signedness promotion here by preferring the type captured on the
-		// FuncProto output (ActionOutputPrototype, coreaction.go). Only the
-		// signed->unsigned same-size case is corrected; a genuinely unsigned return
-		// (e.g. INT_AND output-local TYPE_UINT) has an unsigned FuncProto output and
-		// is left untouched.
-		if dt != nil && dt.Metatype() == TYPE_UINT {
-			if fp := s.fd.GetFuncProto(); fp != nil && fp.GetOutput() != nil {
-				if fpOut := fp.GetOutput().Type(); fpOut != nil &&
-					fpOut.Metatype() == TYPE_INT && fpOut.Size() == dt.Size() {
-					dt = fpOut
-				}
-			}
-		}
-		// For unique-space varnodes (SSA intermediates), TypeReadFacing returns
-		// TYPE_UNKNOWN when the committed type was never set (e.g. ActionInferTypes
-		// ran in a different iteration order). In that case, follow the defining op
-		// to get the semantically correct type.
-		// C++ parity: Ghidra's type propagation ensures unique varnodes always carry
-		// a committed type; our iterative propagation is order-dependent, so we fall
-		// back to the def op's output type when the committed type is generic.
-		if dt != nil && dt.Metatype() == TYPE_UNKNOWN && vn.Space() != nil && vn.Space().IsUnique() && vn.Def() != nil {
-			if defOut := vn.Def().Output(); defOut != nil && defOut == vn {
-				// The defining op's output IS vn; try to determine type from opcode.
-				switch vn.Def().Code() {
-				case CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_MULT, CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR,
-					CPUI_INT_LEFT, CPUI_INT_RIGHT:
-					// Arithmetic ops produce unsigned output by convention.
-					dt = sharedTypeFactory.GetBase(vn.Size(), TYPE_UINT, "")
-				}
-			}
-		}
-		// An untyped return value stays undefined%d: C++ takes the return type
-		// from the HighVariable type (FuncProto::updateOutputTypes) with no
-		// arithmetic-implies-int default.
-		if dt == nil || dt.Metatype() == TYPE_UNKNOWN {
-			return sharedTypeFactory.GetBase(int32(vn.Size()), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", vn.Size()))
-		}
-		return dt
 	}
 	return sharedTypeFactory.GetVoid()
 }
