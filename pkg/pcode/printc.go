@@ -209,6 +209,11 @@ func (s *printCState) emit() (string, error) {
 		s.collectTypeDefs(local.TypeDefFacing())
 	}
 
+	// Ghidra's function output carries no type definitions.
+	// C++ parity: PrintC::docFunction (types print only via docTypeDefinitions).
+	if s.ghidraFormat {
+		s.typeDefs = nil
+	}
 	for i, dt := range s.typeDefs {
 		s.lang.Line(func() {
 			s.lang.Token(CTypeDefinitionString(s.normalizeTypeForDecl(dt)))
