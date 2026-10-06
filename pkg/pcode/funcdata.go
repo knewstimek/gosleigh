@@ -1,6 +1,7 @@
 package pcode
 
 import (
+	"fmt"
 	"hash/fnv"
 
 	"gosleigh/pkg/address"
@@ -933,10 +934,65 @@ func (fd *Funcdata) syncVarnodeFlags(vn *Varnode, fl uint32, ct Datatype) bool {
 	return updated
 }
 
-// RemoveUnreachableBlocks removes unreachable blocks.
-// C++ parity: funcdata.hh Funcdata::removeUnreachableBlocks
-func (fd *Funcdata) RemoveUnreachableBlocks(bool, bool) bool {
-	return false
+// RemoveUnreachableBlocks removes every block the entry cannot reach,
+// optionally warning about each. checkexistence tests the dominators instead
+// of trusting the cached unreachable flag.
+// C++ parity: funcdata_block.cc Funcdata::removeUnreachableBlocks.
+func (fd *Funcdata) RemoveUnreachableBlocks(issuewarning, checkexistence bool) bool {
+	graph := fd.GetBasicBlocks()
+	if checkexistence {
+		found := false
+		for i := 0; i < graph.GetSize(); i++ {
+			blk := graph.GetBlock(i)
+			if !blk.IsEntryPoint() && blk.ImmedDom() == nil {
+				found = true
+				break
+			}
+		}
+		if !found {
+			return false
+		}
+	} else if !fd.HasFlag(FuncBlocksUnreachable) {
+		return false
+	}
+	var entry *FlowBlock
+	for i := 0; i < graph.GetSize(); i++ {
+		if graph.GetBlock(i).IsEntryPoint() {
+			entry = graph.GetBlock(i)
+			break
+		}
+	}
+	if entry == nil {
+		return false
+	}
+	list := graph.collectReachable(entry, true)
+	for _, bl := range list {
+		bl.SetDead()
+		if issuewarning {
+			fd.warningHeader("Removing unreachable block (" + blockStartText(asBasic(bl)) + ")")
+		}
+	}
+	for _, bl := range list {
+		bb := asBasic(bl)
+		for bb.SizeOut() > 0 {
+			fd.branchRemoveInternal(bb, 0)
+		}
+	}
+	for _, bl := range list {
+		fd.blockRemoveInternal(asBasic(bl), true)
+	}
+	fd.StructureReset()
+	return true
+}
+
+// blockStartText prints a block's start address as "space,0x...".
+// C++ parity: BlockBasic::getStart + Address::printRaw.
+func blockStartText(bb *BlockBasic) string {
+	a := bb.startAddr()
+	if a.Space == nil {
+		return ""
+	}
+	return fmt.Sprintf("%s,0x%0*x", a.Space.Name, 2*int(a.Space.AddrSize), a.Offset)
 }
 
 // RemoveDoNothingBlock is implemented in funcdata_donothing.go.
@@ -1590,7 +1646,20 @@ func (fd *Funcdata) StructureReset() {
 	if bg == nil {
 		return
 	}
-	bg.StructureLoops()
+	fd.ClearFlag(FuncBlocksUnreachable)
+	if roots := bg.StructureLoops(); len(roots) > 1 {
+		fd.SetFlag(FuncBlocksUnreachable)
+	}
+	// Drop jump-tables whose BRANCHIND died with its block.
+	alive := fd.jumpTables[:0]
+	for _, jt := range fd.jumpTables {
+		if op := jt.IndirectOp(); op != nil && op.IsDead() {
+			fd.warningHeader("Recovered jumptable eliminated as dead code")
+			continue
+		}
+		alive = append(alive, jt)
+	}
+	fd.jumpTables = alive
 	// Clear the sblocks (structured hierarchy) so it rebuilds from scratch.
 	fd.SetStructureGraph(NewBlockGraph())
 	// The dominator tree heritage keeps is stale once blocks changed.

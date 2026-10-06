@@ -238,12 +238,54 @@ func NewRuleLess2Zero(group string) *RuleLess2Zero {
 	return r
 }
 
+// apply simplifies INT_LESS against an extremal constant.
+// C++ parity: RuleLess2Zero::applyOp.
 func (r *RuleLess2Zero) apply(op *PcodeOp, data *Funcdata) int {
-	_, _, val, ok := normalizeCompareConst(op)
-	if ok && val == 0 {
-		return rewriteToConst(data, op, 0)
+	return extremalCompare(op, data, CPUI_INT_NOTEQUAL, 0)
+}
+
+// extremalCompare rewrites an unsigned compare with 0 or all-ones on one
+// side: the side where the compare degenerates to a constant becomes COPY
+// of always, the other becomes opc. For INT_LESS: 0 < V and V < ffff become
+// V != c, V < 0 and ffff < V become false; INT_LESSEQUAL mirrors it with
+// INT_EQUAL and true.
+// C++ parity: RuleLess2Zero / RuleLessEqual2Zero::applyOp.
+func extremalCompare(op *PcodeOp, data *Funcdata, opc OpCode, always uint64) int {
+	lvn, rvn := op.Input(0), op.Input(1)
+	var vn *Varnode
+	var keep bool // true: rewrite to opc, false: rewrite to the constant
+	switch {
+	case lvn.IsConstant():
+		vn = lvn
+		switch vn.Offset() {
+		case 0:
+			keep = always == 0
+		case bitfieldSizeMask(vn.Size()):
+			keep = always != 0
+		default:
+			return 0
+		}
+	case rvn.IsConstant():
+		vn = rvn
+		switch vn.Offset() {
+		case 0:
+			keep = always != 0
+		case bitfieldSizeMask(vn.Size()):
+			keep = always == 0
+		default:
+			return 0
+		}
+	default:
+		return 0
 	}
-	return 0
+	if keep {
+		data.OpSetOpcode(op, opc)
+		return 1
+	}
+	data.OpSetOpcode(op, CPUI_COPY)
+	data.OpRemoveInput(op, 1)
+	data.OpSetInput(op, data.NewConstant(1, always), 0)
+	return 1
 }
 
 type RuleLessEqual2Zero struct{ batchRule }
@@ -254,13 +296,10 @@ func NewRuleLessEqual2Zero(group string) *RuleLessEqual2Zero {
 	return r
 }
 
+// apply simplifies INT_LESSEQUAL against an extremal constant.
+// C++ parity: RuleLessEqual2Zero::applyOp.
 func (r *RuleLessEqual2Zero) apply(op *PcodeOp, data *Funcdata) int {
-	lhs, _, val, ok := normalizeCompareConst(op)
-	if !ok || val != 0 {
-		return 0
-	}
-	rewriteOp(data, op, CPUI_INT_EQUAL, lhs, data.NewConstant(lhs.Size(), 0))
-	return 1
+	return extremalCompare(op, data, CPUI_INT_EQUAL, 1)
 }
 
 type RuleSLess2Zero struct{ batchRule }

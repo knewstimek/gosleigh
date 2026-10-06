@@ -468,3 +468,35 @@ func (bg *BlockGraph) FinalTransform(data *Funcdata) {
 	_ = bg
 	_ = data
 }
+
+// collectReachable lists the blocks reachable from bl, or with un set every
+// block that is not.
+// C++ parity: block.cc BlockGraph::collectReachable.
+func (bg *BlockGraph) collectReachable(bl *FlowBlock, un bool) []*FlowBlock {
+	bl.SetFlag(BlockFlagMark)
+	res := []*FlowBlock{bl}
+	for total := 0; total < len(res); total++ {
+		for _, e := range res[total].outEdges {
+			if e.Point.HasFlag(BlockFlagMark) {
+				continue
+			}
+			e.Point.SetFlag(BlockFlagMark)
+			res = append(res, e.Point)
+		}
+	}
+	if !un {
+		for _, b := range res {
+			b.ClearFlag(BlockFlagMark)
+		}
+		return res
+	}
+	res = res[:0]
+	for _, b := range bg.blocks {
+		if b.HasFlag(BlockFlagMark) {
+			b.ClearFlag(BlockFlagMark)
+		} else {
+			res = append(res, b)
+		}
+	}
+	return res
+}

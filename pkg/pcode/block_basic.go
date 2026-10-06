@@ -1,5 +1,7 @@
 package pcode
 
+import "gosleigh/pkg/address"
+
 // BlockBasic is a basic block containing PcodeOps.
 // C++ parity: block.hh BlockBasic
 //
@@ -149,6 +151,16 @@ func (bb *BlockBasic) LastOp() *PcodeOp {
 }
 
 // EmptyOp returns true if there are no ops.
+// startAddr is the address the block starts at.
+// TODO known mismatch: C++ BlockBasic::getStart reads the block's address
+// cover, which is not modelled; the first op's address stands in for it.
+func (bb *BlockBasic) startAddr() address.Address {
+	if op := bb.FirstOp(); op != nil {
+		return op.Addr()
+	}
+	return address.Address{}
+}
+
 func (bb *BlockBasic) EmptyOp() bool { return len(bb.opSlice()) == 0 }
 
 // NoInterveningStatement reports whether this block creates no value usable
@@ -295,7 +307,7 @@ func (bb *BlockBasic) UnblockedMulti(outslot int) bool {
 			continue
 		}
 		for _, bl := range redundlist {
-			vnredund := multiop.Input(blout.GetInIndex(bl))       // a redundant varnode
+			vnredund := multiop.Input(blout.GetInIndex(bl)) // a redundant varnode
 			vnremove := multiop.Input(blout.GetInIndex(&bb.FlowBlock))
 			if vnremove.IsWritten() {
 				othermulti := vnremove.Def()

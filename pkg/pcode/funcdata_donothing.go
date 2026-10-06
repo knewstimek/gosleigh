@@ -138,12 +138,10 @@ func (fd *Funcdata) descendantsOutside(vn *Varnode) bool {
 // MULTIEQUAL ops and other references to Varnodes flowing through bb.
 // C++ parity: Funcdata::blockRemoveInternal (funcdata_block.cc:254)
 func (fd *Funcdata) blockRemoveInternal(bb *BlockBasic, unreachable bool) {
-	last := bb.LastOp()
-	if last != nil && last.Code() == CPUI_BRANCHIND {
-		// C++ removes the associated jump table here. Not reachable from
-		// removeDoNothingBlock (do-nothing blocks never end in BRANCHIND); jump
-		// table removal is left unimplemented until the unreachable path is wired.
-		_ = fd.FindJumpTable(last)
+	if last := bb.LastOp(); last != nil && last.Code() == CPUI_BRANCHIND {
+		if jt := fd.FindJumpTable(last); jt != nil {
+			fd.removeJumpTable(jt)
+		}
 	}
 
 	if !unreachable {
@@ -182,18 +180,21 @@ func (fd *Funcdata) blockRemoveInternal(bb *BlockBasic, unreachable bool) {
 
 	// Finally destroy every op in bb. Snapshot first: OpDestroy removes each op
 	// from bb's op list.
+	descWarning := false
 	for _, op := range bb.Ops() {
 		if op.IsAssignment() { // op still owns an output Varnode
 			deadvn := op.Output()
-			// The unreachable path would mark stranded descendants undefined
-			// (descend2Undef); not wired here since removeDoNothingBlock passes
-			// unreachable=false.
-			if fd.descendantsOutside(deadvn) { // descendants outside bb -> invariant break
+			if unreachable && fd.descend2Undef(deadvn) && !descWarning {
+				fd.warningHeader("Creating undefined varnodes in (possibly) reachable block")
+				descWarning = true
+			}
+			if fd.descendantsOutside(deadvn) {
 				panic("Deleting op with descendants")
 			}
 		}
-		// C++ deletes call specs for call ops here; do-nothing blocks contain
-		// only marker/branch ops, so no call ever reaches this point.
+		if op.IsCall() {
+			fd.deleteCallSpecs(op)
+		}
 		fd.OpDestroy(op)
 	}
 	fd.GetBasicBlocks().RemoveBlock(&bb.FlowBlock) // remove the block altogether
@@ -210,4 +211,69 @@ func (fd *Funcdata) RemoveDoNothingBlock(bb *BlockBasic) {
 	bb.SetDead()
 	fd.blockRemoveInternal(bb, false)
 	fd.StructureReset() // delete any structure we had before
+}
+
+// removeJumpTable forgets jt; its switch block is no longer a switch out.
+// C++ parity: funcdata_block.cc Funcdata::removeJumpTable.
+func (fd *Funcdata) removeJumpTable(jt *JumpTable) {
+	remain := fd.jumpTables[:0]
+	for _, t := range fd.jumpTables {
+		if t != jt {
+			remain = append(remain, t)
+		}
+	}
+	fd.jumpTables = remain
+	if op := jt.IndirectOp(); op != nil && op.Parent() != nil {
+		op.Parent().ClearFlag(BlockFlagSwitchOut)
+	}
+}
+
+// deleteCallSpecs drops the call specification attached to op.
+// C++ parity: funcdata.cc Funcdata::deleteCallSpecs.
+func (fd *Funcdata) deleteCallSpecs(op *PcodeOp) {
+	for i, fc := range fd.callSpecs {
+		if fc.GetOp() == op {
+			fd.callSpecs = append(fd.callSpecs[:i], fd.callSpecs[i+1:]...)
+			return
+		}
+	}
+}
+
+// descend2Undef replaces every read of vn outside dead blocks with the
+// constant 0xBADDEF, routing it through a COPY where the reader cannot hold
+// a constant. Returns true if a reader sits in a block with in-edges.
+// C++ parity: funcdata_varnode.cc Funcdata::descend2Undef.
+func (fd *Funcdata) descend2Undef(vn *Varnode) bool {
+	res := false
+	sz := vn.Size()
+	for _, op := range vn.DescendIter() {
+		if op.Parent().IsDead() {
+			continue
+		}
+		if op.Parent().SizeIn() != 0 {
+			res = true
+		}
+		i := op.GetSlot(vn)
+		badconst := fd.NewConstant(sz, 0xBADDEF)
+		switch op.Code() {
+		case CPUI_MULTIEQUAL: // a MULTIEQUAL cannot take a constant
+			inbl := asBasic(op.Parent().InEdge(i).Point)
+			copyop := fd.NewOp(1, inbl.startAddr())
+			inputvn := fd.NewUniqueOut(sz, copyop)
+			fd.OpSetOpcode(copyop, CPUI_COPY)
+			fd.OpSetInput(copyop, badconst, 0)
+			fd.OpInsertEnd(copyop, inbl)
+			fd.OpSetInput(op, inputvn, i)
+		case CPUI_INDIRECT: // neither can an INDIRECT
+			copyop := fd.NewOp(1, op.Addr())
+			inputvn := fd.NewUniqueOut(sz, copyop)
+			fd.OpSetOpcode(copyop, CPUI_COPY)
+			fd.OpSetInput(copyop, badconst, 0)
+			fd.OpInsertBefore(copyop, op)
+			fd.OpSetInput(op, inputvn, i)
+		default:
+			fd.OpSetInput(op, badconst, i)
+		}
+	}
+	return res
 }
