@@ -17,6 +17,7 @@ package pcode
 import (
 	"fmt"
 	"sort"
+	"strings"
 )
 
 // ActionNameVars assigns human-readable Ghidra-style names to unnamed register-space
@@ -33,8 +34,9 @@ import (
 // (local_c, local_8) from ScopeLocal::BuildFromVarnodes and are skipped here.
 //
 // C++ parity: coreaction.cc ActionNameVars::apply(),
-//   database.cc ScopeInternal::assignDefaultNames(),
-//   database.cc Scope::buildDefaultName() / ScopeInternal::buildVariableName()
+//
+//	database.cc ScopeInternal::assignDefaultNames(),
+//	database.cc Scope::buildDefaultName() / ScopeInternal::buildVariableName()
 type ActionNameVars struct {
 	ActionBase
 }
@@ -306,6 +308,14 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 	// (variable.cc:456), which prefers input/addr-tied/non-unique members.
 	sl := data.GetScopeLocal()
 
+	recmap := lookForFuncParamNames(data)
+	used := make(map[string]bool)
+	for _, c := range hvMap {
+		if c.hv.Name() != "" {
+			used[c.hv.Name()] = true
+		}
+	}
+
 	var toName []hvEntry
 	for _, c := range hvMap {
 		rep := c.bestVn
@@ -384,6 +394,13 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 					continue
 				}
 			}
+		}
+		// A variable passed to a locked callee parameter inherits its name.
+		// C++ parity: ActionNameVars::lookForFuncParamNames.
+		if nm, ok := recmap[c.hv]; ok && !highHasInput(c.hv) {
+			c.hv.SetName(makeNameUnique(nm, used))
+			a.count++
+			continue
 		}
 		prefix := hvTypePrefix(c.hv)
 		key := rep
@@ -483,4 +500,78 @@ func lockedSymbolName(hv *HighVariable) string {
 		}
 	}
 	return ""
+}
+
+// lookForFuncParamNames maps each variable passed to a name-locked parameter
+// of a locked callee prototype to that parameter's name, preferring the
+// most specific parameter type and uncast arguments.
+// C++ parity: ActionNameVars::lookForFuncParamNames / makeRec.
+func lookForFuncParamNames(data *Funcdata) map[*HighVariable]string {
+	type rec struct {
+		ct   Datatype
+		name string
+	}
+	recs := make(map[*HighVariable]*rec)
+	for i := 0; i < data.NumCalls(); i++ {
+		fc := data.GetCallSpecs(i)
+		if fc == nil || !fc.IsInputLocked() || fc.op == nil {
+			continue
+		}
+		for j := 0; j+1 < fc.op.NumInput(); j++ {
+			param, ok := fc.LockedParam(j)
+			if !ok {
+				break
+			}
+			vn := fc.op.Input(j + 1)
+			if param.Name == "" || vn.Size() != param.Size {
+				continue
+			}
+			ct := param.Type
+			if vn.IsImplied() && vn.IsWritten() && vn.Def().Code() == CPUI_CAST {
+				vn = vn.Def().Input(0) // skip a cast into the function
+				ct = nil               // a less preferred name
+			}
+			high := vn.High()
+			if high == nil || high.IsAddrTied() || strings.HasPrefix(param.Name, "param_") {
+				continue
+			}
+			if old, seen := recs[high]; seen {
+				if ct == nil {
+					continue
+				}
+				if old.ct != nil && TypeOrder(old.ct, ct) <= 0 {
+					continue
+				}
+				old.ct, old.name = ct, param.Name
+				continue
+			}
+			recs[high] = &rec{ct, param.Name}
+		}
+	}
+	res := make(map[*HighVariable]string, len(recs))
+	for h, r := range recs {
+		res[h] = r.name
+	}
+	return res
+}
+
+// highHasInput reports whether the variable holds an input Varnode.
+func highHasInput(hv *HighVariable) bool {
+	for _, vn := range hv.Instances() {
+		if vn.IsInput() {
+			return true
+		}
+	}
+	return false
+}
+
+// makeNameUnique returns nm, or nm with a _NN suffix if nm is taken, and
+// records the result. C++ parity: ScopeInternal::makeNameUnique.
+func makeNameUnique(nm string, used map[string]bool) string {
+	res := nm
+	for i := 0; used[res]; i++ {
+		res = fmt.Sprintf("%s_%02x", nm, i)
+	}
+	used[res] = true
+	return res
 }
