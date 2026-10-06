@@ -14,7 +14,11 @@
 
 package pcode
 
-import "gosleigh/pkg/address"
+import (
+	"sort"
+
+	"gosleigh/pkg/address"
+)
 
 // This file collects the small helpers that Actions upgraded from A1
 // scaffold to A15 REAL depend on. The helpers are deliberately kept on
@@ -734,14 +738,17 @@ type LaneAccessEntry struct {
 	Laned *LanedRegister
 }
 
-// laneAccessState is held in a side map because Funcdata's declaration list
-// is frozen for this slice. A nil map is equivalent to "no lane access was
-// ever recorded", which is the baseline for the Go port.
+// laneAccessState is held in a side map keyed by function.
 var laneAccessState = map[*Funcdata]*laneAccessData{}
 
 type laneAccessData struct {
-	entries      []LaneAccessEntry
-	generated    bool
+	// records are the architecture's laned registers sorted by whole size.
+	// C++ parity: Architecture::lanerecords.
+	records []LanedRegister
+	// lanedMap holds storage created at a laned register size.
+	// C++ parity: Funcdata::lanedMap.
+	lanedMap  map[VarnodeData]*LanedRegister
+	generated bool
 }
 
 func laneState(fd *Funcdata) *laneAccessData {
@@ -750,10 +757,48 @@ func laneState(fd *Funcdata) *laneAccessData {
 	}
 	s, ok := laneAccessState[fd]
 	if !ok {
-		s = &laneAccessData{}
+		s = &laneAccessData{lanedMap: map[VarnodeData]*LanedRegister{}}
 		laneAccessState[fd] = s
 	}
 	return s
+}
+
+// SetLanedRegisters installs the architecture's laned register records,
+// merging lane-size masks per whole size.
+// C++ parity: Architecture::decodeProcessorSpec (lanerecords build).
+func (fd *Funcdata) SetLanedRegisters(recs []LanedRegister) {
+	s := laneState(fd)
+	if s == nil {
+		return
+	}
+	masks := map[int32]uint32{}
+	for i := range recs {
+		masks[recs[i].GetWholeSize()] |= recs[i].GetSizeBitMask()
+	}
+	s.records = s.records[:0]
+	for sz, m := range masks {
+		s.records = append(s.records, NewLanedRegisterWithMask(sz, m))
+	}
+	sort.Slice(s.records, func(i, j int) bool { return s.records[i].GetWholeSize() < s.records[j].GetWholeSize() })
+	if len(s.records) > 0 {
+		fd.minLanedSize = uint32(s.records[0].GetWholeSize())
+	}
+}
+
+// checkForLanedRegister records storage whose size matches a laned
+// register (the record is keyed by size only, as in C++).
+// C++ parity: Funcdata::checkForLanedRegister / Architecture::getLanedRegister.
+func (fd *Funcdata) checkForLanedRegister(sz int32, addr address.Address) {
+	if fd.minLanedSize == 0 || uint32(sz) < fd.minLanedSize {
+		return
+	}
+	s := laneState(fd)
+	for i := range s.records {
+		if s.records[i].GetWholeSize() == sz {
+			s.lanedMap[VarnodeData{Space: addr.Space, Offset: addr.Offset, Size: uint32(sz)}] = &s.records[i]
+			return
+		}
+	}
 }
 
 // BeginLaneAccess returns the currently recorded lane-access entries.
@@ -768,7 +813,22 @@ func (fd *Funcdata) BeginLaneAccess() []LaneAccessEntry {
 	if s == nil {
 		return nil
 	}
-	return s.entries
+	entries := make([]LaneAccessEntry, 0, len(s.lanedMap))
+	for loc, lr := range s.lanedMap {
+		entries = append(entries, LaneAccessEntry{Loc: loc, Laned: lr})
+	}
+	// std::map order over VarnodeData: space index, offset, then size.
+	sort.Slice(entries, func(i, j int) bool {
+		a, b := entries[i].Loc, entries[j].Loc
+		if a.Space.Index != b.Space.Index {
+			return a.Space.Index < b.Space.Index
+		}
+		if a.Offset != b.Offset {
+			return a.Offset < b.Offset
+		}
+		return a.Size > b.Size
+	})
+	return entries
 }
 
 // ClearLanedAccessMap drops any recorded lane entries.
@@ -778,7 +838,7 @@ func (fd *Funcdata) ClearLanedAccessMap() {
 	if s == nil {
 		return
 	}
-	s.entries = nil
+	s.lanedMap = map[VarnodeData]*LanedRegister{}
 }
 
 // SetLanedRegGenerated records that LaneDivide has run at least once.
@@ -877,9 +937,15 @@ func processLaneVarnode(data *Funcdata, vn *Varnode, lanedRegister *LanedRegiste
 		}
 		checkLanes.AddLaneSize(defaultSize)
 	}
-	// LaneDivide.doTrace() / apply() would consume checkLanes here; without
-	// the subflow port we exit so the outer walker advances cleanly.
-	_ = checkLanes
+	allowDowncast := mode > 0
+	for it, end := checkLanes.Begin(), checkLanes.End(); it.NotEqual(end); it.Next() {
+		description := NewLaneDescriptionUniform(lanedRegister.GetWholeSize(), it.Value())
+		laneDivide := NewLaneDivide(data, vn, description, allowDowncast)
+		if laneDivide.DoTrace() {
+			laneDivide.Apply()
+			return true
+		}
+	}
 	return false
 }
 

@@ -68,6 +68,45 @@ type Engine struct {
 	// xrefs is the optional runtime cross-reference table (BuildXrefs output).
 	// nil means no xref data is available; callers must not panic on nil.
 	xrefs *XRefs
+	// lanedRegisters are the pspec vector registers with their register
+	// size resolved; consumers turn them into LanedRegister records.
+	lanedRegisters []LanedRegisterSpec
+}
+
+// LanedRegisterSpec is a vector register's whole size and its pspec lane
+// size list. C++ parity: the input to LanedRegister::parseSizes.
+type LanedRegisterSpec struct {
+	Size      int32
+	LaneSizes string
+}
+
+// SetLanedRegisters resolves pspec laned registers to their sizes through
+// the SLA symbol table; unknown register names are skipped.
+func (e *Engine) SetLanedRegisters(regs []PspecLanedRegister) {
+	if e == nil || e.symbols == nil {
+		return
+	}
+	size := make(map[string]int32)
+	for i := range e.symbols.Symbols {
+		sym := &e.symbols.Symbols[i]
+		if sym.Body.Varnode != nil {
+			size[sym.Name] = int32(sym.Body.Varnode.Size)
+		}
+	}
+	e.lanedRegisters = e.lanedRegisters[:0]
+	for _, r := range regs {
+		if sz, ok := size[r.Name]; ok {
+			e.lanedRegisters = append(e.lanedRegisters, LanedRegisterSpec{Size: sz, LaneSizes: r.LaneSizes})
+		}
+	}
+}
+
+// LanedRegisters returns the resolved pspec laned registers.
+func (e *Engine) LanedRegisters() []LanedRegisterSpec {
+	if e == nil {
+		return nil
+	}
+	return e.lanedRegisters
 }
 
 // LoadImageBytes reads size raw image bytes at addr through the backend adapter

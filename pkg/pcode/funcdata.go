@@ -621,6 +621,12 @@ func (fd *Funcdata) MapGlobals() {
 		return
 	}
 	all := fd.vbank.AllVarnodes()
+	inconsistentuse := false
+	defer func() {
+		if inconsistentuse {
+			fd.warningHeader("Globals starting with '_' overlap smaller symbols at the same address")
+		}
+	}()
 	for i := 0; i < len(all); {
 		vn := all[i]
 		i++
@@ -664,6 +670,10 @@ func (fd *Funcdata) MapGlobals() {
 		entry := fd.resolveGlobal(addr)
 		if entry == nil {
 			entry = fd.globalScope.AddSymbol(defaultGlobalName(addr, ct), ct, addr, ct.Size(), 0)
+		} else if addr.Offset+uint64(ct.Size())-1 > entry.Addr().Offset+uint64(entry.Size())-1 {
+			// TODO known mismatch: C++ coverVarnodes gives the uncovered
+			// interior Varnodes their own Symbols here.
+			inconsistentuse = true
 		}
 		for _, g := range group {
 			if e := fd.resolveGlobal(g.Addr()); e != nil {
@@ -1051,6 +1061,7 @@ func (fd *Funcdata) inGlobalScope(addr address.Address, size int32) bool {
 func (fd *Funcdata) NewVarnode(size int32, loc address.Address) *Varnode {
 	vn := fd.vbank.Create(size, loc)
 	fd.setVarnodeProperties(vn)
+	fd.checkForLanedRegister(size, loc)
 	return vn
 }
 
@@ -1060,6 +1071,7 @@ func (fd *Funcdata) NewVarnodeOut(size int32, loc address.Address, op *PcodeOp) 
 	vn := fd.vbank.CreateDef(size, loc, op)
 	op.SetOutput(vn)
 	fd.setVarnodeProperties(vn)
+	fd.checkForLanedRegister(size, loc)
 	return vn
 }
 
@@ -1068,6 +1080,7 @@ func (fd *Funcdata) NewVarnodeOut(size int32, loc address.Address, op *PcodeOp) 
 func (fd *Funcdata) NewUniqueOut(size int32, op *PcodeOp) *Varnode {
 	vn := fd.vbank.CreateDefUnique(size, op)
 	op.SetOutput(vn)
+	fd.checkForLanedRegister(size, vn.Addr())
 	return vn
 }
 
@@ -1081,7 +1094,9 @@ func (fd *Funcdata) NewConstant(size int32, val uint64) *Varnode {
 // NewUnique creates a free temp Varnode in unique space, not attached as any
 // op's output. C++ parity: Funcdata::newUnique.
 func (fd *Funcdata) NewUnique(size int32) *Varnode {
-	return fd.vbank.CreateUnique(size)
+	vn := fd.vbank.CreateUnique(size)
+	fd.checkForLanedRegister(size, vn.Addr())
+	return vn
 }
 
 // SetInputVarnode promotes a free Varnode to SSA function input.

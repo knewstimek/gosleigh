@@ -174,6 +174,11 @@ var constFoldableOpcodes = []OpCode{
 // COPY(const) forwarding) and the opcode is supported.
 // The result is NOT yet masked to output size; callers must mask.
 func evalConstOp(op *PcodeOp) (uint64, bool) {
+	// A result wider than a uintb is never collapsed.
+	// C++ parity: PcodeOp::isCollapsible (getOut()->getSize() > sizeof(uintb)).
+	if out := op.Output(); out != nil && out.Size() > 8 {
+		return 0, false
+	}
 	switch op.Code() {
 	// --- binary ops ---
 	case CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_MULT,

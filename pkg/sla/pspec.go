@@ -34,6 +34,24 @@ type PspecContextEntry struct {
 // defaults in Ghidra and must not be passed to SetVariableDefault.
 type PspecData struct {
 	ContextSet []PspecContextEntry
+	// LanedRegisters lists the registers carrying vector_lane_sizes.
+	// C++ parity: Architecture::decodeProcessorSpec register_data.
+	LanedRegisters []PspecLanedRegister
+}
+
+// PspecLanedRegister is a register_data entry with preferred lane sizes.
+type PspecLanedRegister struct {
+	Name      string
+	LaneSizes string
+}
+
+type pspecXMLRegister struct {
+	Name      string `xml:"name,attr"`
+	LaneSizes string `xml:"vector_lane_sizes,attr"`
+}
+
+type pspecXMLRegisterData struct {
+	Registers []pspecXMLRegister `xml:"register"`
 }
 
 // pspecXMLSet is the XML shape of a <set> element inside context_set or tracked_set.
@@ -55,7 +73,8 @@ type pspecXMLContextData struct {
 
 // pspecXMLRoot is the XML shape of the top-level <processor_spec> element.
 type pspecXMLRoot struct {
-	ContextData pspecXMLContextData `xml:"context_data"`
+	ContextData  pspecXMLContextData  `xml:"context_data"`
+	RegisterData pspecXMLRegisterData `xml:"register_data"`
 }
 
 // ParsePspec reads a .pspec XML file and returns the context_set defaults.
@@ -80,6 +99,11 @@ func ParsePspec(path string) (PspecData, error) {
 				return PspecData{}, fmt.Errorf("ParsePspec: invalid val %q for %q: %w", s.Val, s.Name, err)
 			}
 			result.ContextSet = append(result.ContextSet, PspecContextEntry{Name: s.Name, Value: v})
+		}
+	}
+	for _, r := range root.RegisterData.Registers {
+		if r.LaneSizes != "" {
+			result.LanedRegisters = append(result.LanedRegisters, PspecLanedRegister{Name: r.Name, LaneSizes: r.LaneSizes})
 		}
 	}
 	return result, nil

@@ -771,11 +771,17 @@ func (m *Merge) mergeIndirect(indop *PcodeOp) {
 		return
 	}
 	invn0 := indop.Input(0)
-	if mergeTestRequired(outvn.High(), invn0.High()) && m.mergePair(invn0.High(), outvn.High()) {
+	// A constant input (a lane of a split constant) has no HighVariable in
+	// Gosleigh and never merges; it takes the COPY path below.
+	canMerge := func() bool {
+		return invn0.High() != nil && outvn.High() != nil &&
+			mergeTestRequired(outvn.High(), invn0.High()) && m.mergePair(invn0.High(), outvn.High())
+	}
+	if canMerge() {
 		return
 	}
 	if m.snipOutputInterference(indop) {
-		if mergeTestRequired(outvn.High(), invn0.High()) && m.mergePair(invn0.High(), outvn.High()) {
+		if canMerge() {
 			return
 		}
 	}

@@ -140,8 +140,10 @@ func (b *EngineBuilder) Build() (*sla.Engine, address.Address, error) {
 	// --- Step 5: apply pspec context defaults ---
 	// Mirrors SleighLanguage.setContextForProcessor: only context_set entries
 	// are applied as SetVariableDefault; tracked_set is not.
+	var pspecData sla.PspecData
 	if b.PspecPath != "" {
-		pspecData, pspecErr := sla.ParsePspec(b.PspecPath)
+		var pspecErr error
+		pspecData, pspecErr = sla.ParsePspec(b.PspecPath)
 		if pspecErr != nil {
 			return nil, address.Address{}, fmt.Errorf("loader: ParsePspec(%q): %w", b.PspecPath, pspecErr)
 		}
@@ -243,5 +245,6 @@ func (b *EngineBuilder) Build() (*sla.Engine, address.Address, error) {
 	if err != nil {
 		return nil, address.Address{}, fmt.Errorf("loader: NewEngineFromBoundaries: %w", err)
 	}
+	engine.SetLanedRegisters(pspecData.LanedRegisters)
 	return engine, entryAddr, nil
 }

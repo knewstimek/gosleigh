@@ -279,6 +279,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	if err := attachEnvironment(fd, cfg); err != nil {
 		return nil, err
 	}
+	installLanedRegisters(engine, fd)
 
 	// Install the load-image read hook so downstream jump-table address
 	// emulation (pcode.EmulateFunction.getLoadImageValue) can read section-mapped
@@ -683,6 +684,20 @@ func buildDefaultModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Fun
 
 // installTrackedSet resolves the tracked register values (name -> value) to
 // register storage, in register-name order for determinism.
+// installLanedRegisters hands the pspec vector registers to the function so
+// storage of a laned size is recorded for ActionLaneDivide.
+// C++ parity: Architecture::lanerecords consulted by Funcdata::checkForLanedRegister.
+func installLanedRegisters(engine *sla.Engine, fd *pcode.Funcdata) {
+	var recs []pcode.LanedRegister
+	for _, spec := range engine.LanedRegisters() {
+		var lr pcode.LanedRegister
+		if lr.ParseSizes(spec.Size, spec.LaneSizes) == nil {
+			recs = append(recs, lr)
+		}
+	}
+	fd.SetLanedRegisters(recs)
+}
+
 func installTrackedSet(engine *sla.Engine, fd *pcode.Funcdata, regs map[string]uint64) {
 	if len(regs) == 0 {
 		return

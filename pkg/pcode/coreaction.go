@@ -14,7 +14,11 @@
 
 package pcode
 
-import "gosleigh/pkg/address"
+import (
+	"sort"
+
+	"gosleigh/pkg/address"
+)
 
 // ActionStart gathers raw p-code for a function.
 // C++ parity: coreaction.hh ActionStart
@@ -2307,27 +2311,21 @@ func (a *ActionLaneDivide) Apply(data *Funcdata) int {
 			}
 			addr := entry.Loc.Address()
 			sz := int32(entry.Loc.Size)
-			// Walk every varnode at (addr, sz). When processLaneVarnode
-			// reports a rewrite we rescan from the beginning because the
-			// iteration bounds may have shifted.
+			// Walk the varnodes at (addr, sz) in location order; a successful
+			// split rewrites the set, so the walk restarts from the beginning.
 			allVarnodesProcessed := true
-			for _, vn := range data.GetVarnodeBank().AllVarnodes() {
-				if vn == nil || vn.Space() != addr.Space || vn.Offset() != addr.Offset {
-					continue
-				}
-				if vn.Size() != sz {
-					continue
-				}
-				if vn.HasNoDescend() {
-					continue
-				}
-				if processLaneVarnode(data, vn, laned, mode) {
-					allVarnodesProcessed = true
-					a.count++
-					// C++: viter = data.beginLoc(...); we let the range
-					// iteration continue because processLaneVarnode is a
-					// stub that never returns true in this port.
-				} else {
+			for restart := true; restart; {
+				restart = false
+				for _, vn := range data.varnodesAtLoc(addr, sz) {
+					if vn.HasNoDescend() {
+						continue
+					}
+					if processLaneVarnode(data, vn, laned, mode) {
+						a.count++
+						allVarnodesProcessed = true
+						restart = true
+						break
+					}
 					allVarnodesProcessed = false
 				}
 			}
@@ -2341,6 +2339,19 @@ func (a *ActionLaneDivide) Apply(data *Funcdata) int {
 	}
 	data.ClearLanedAccessMap()
 	return 0
+}
+
+// varnodesAtLoc lists the live Varnodes of exactly (addr, sz) in
+// VarnodeLocSet order. C++ parity: Funcdata::beginLoc(sz,addr)/endLoc.
+func (fd *Funcdata) varnodesAtLoc(addr address.Address, sz int32) []*Varnode {
+	var res []*Varnode
+	for _, vn := range fd.vbank.AllVarnodes() {
+		if vn != nil && vn.Space() == addr.Space && vn.Offset() == addr.Offset && vn.Size() == sz {
+			res = append(res, vn)
+		}
+	}
+	sort.SliceStable(res, func(i, j int) bool { return CompareLocDef(res[i], res[j]) < 0 })
+	return res
 }
 
 // ActionLikelyTrash zeroes out reads of register locations that the compiler

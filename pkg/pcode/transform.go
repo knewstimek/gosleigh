@@ -361,6 +361,11 @@ type TransformVar struct {
 	bitSize     int32
 	val         uint64
 	def         *TransformOp
+	// spaceID / iopOp carry the side-table binding a space-id constant or an
+	// INDIRECT cause reference needs; Gosleigh does not encode either in the
+	// constant's offset (see BindSpaceConstant / BindIndirectCause).
+	spaceID *address.Space
+	iopOp   *PcodeOp
 }
 
 const (
@@ -401,6 +406,9 @@ func (tv *TransformVar) createReplacement(fd *Funcdata) {
 		tv.replacement = tv.vn
 	case TVarConstant:
 		tv.replacement = fd.NewConstant(tv.byteSize, tv.val)
+		if tv.spaceID != nil {
+			BindSpaceConstant(tv.replacement, tv.spaceID)
+		}
 	case TVarNormalTemp, TVarPieceTemp:
 		if tv.def == nil {
 			tv.replacement = fd.GetVarnodeBank().CreateUnique(tv.byteSize)
@@ -425,10 +433,11 @@ func (tv *TransformVar) createReplacement(fd *Funcdata) {
 		}
 		fd.TransferVarnodeProperties(tv.vn, tv.replacement, bytePos)
 	case TVarConstantIOP:
-		// TODO known mismatch: Go repo has no IopSpace-backed pointer encoding yet.
-		// Preserve the encoded offset as a constant placeholder so later batches can
-		// still recover the reference value if needed.
-		tv.replacement = fd.NewConstant(tv.byteSize, tv.val)
+		if tv.iopOp != nil {
+			tv.replacement = fd.NewVarnodeIop(tv.iopOp)
+		} else {
+			tv.replacement = fd.NewConstant(tv.byteSize, tv.val)
+		}
 	default:
 		panic("bad TransformVar type")
 	}
@@ -633,6 +642,16 @@ func (tm *TransformManager) NewIop(vn *Varnode) *TransformVar {
 	tv := &TransformVar{}
 	tm.newVarnodes = append(tm.newVarnodes, tv)
 	tv.initialize(TVarConstantIOP, nil, vn.Size()*8, vn.Size(), vn.Offset())
+	tv.iopOp = vn.GetIndirectCause()
+	return tv
+}
+
+// NewSpaceConstant copies a space-id constant (LOAD/STORE input 0) keeping
+// its address-space binding.
+// C++ parity: TransformManager::newConstant on the space-id offset.
+func (tm *TransformManager) NewSpaceConstant(vn *Varnode) *TransformVar {
+	tv := tm.NewConstant(vn.Size(), 0, vn.Offset())
+	tv.spaceID = vn.GetSpaceFromConst()
 	return tv
 }
 
