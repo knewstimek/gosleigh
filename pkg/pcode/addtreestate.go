@@ -21,11 +21,15 @@ func (vn *Varnode) Type() Datatype {
 	return vn.typ
 }
 
-func (vn *Varnode) TypeReadFacing(*PcodeOp) Datatype {
+func (vn *Varnode) TypeReadFacing(op *PcodeOp) Datatype {
 	if vn == nil {
 		return nil
 	}
 	if dt := vn.Type(); dt != nil {
+		// C++ parity: Varnode::getTypeReadFacing (findResolve of the read).
+		if dt.NeedsResolution() && op != nil {
+			return findResolve(dt, op, op.GetSlot(vn))
+		}
 		return dt
 	}
 	if vn.IsConstant() {
@@ -41,6 +45,10 @@ func (vn *Varnode) TypeReadFacing(*PcodeOp) Datatype {
 func (vn *Varnode) HighTypeReadFacing(op *PcodeOp) Datatype {
 	if h := vn.High(); h != nil {
 		if dt := h.Type(); dt != nil {
+			// C++ parity: Varnode::getHighTypeReadFacing.
+			if dt.NeedsResolution() && op != nil {
+				return findResolve(dt, op, op.GetSlot(vn))
+			}
 			return dt
 		}
 	}
@@ -50,11 +58,22 @@ func (vn *Varnode) HighTypeReadFacing(op *PcodeOp) Datatype {
 // HighTypeDefFacing is the data-type of vn's HighVariable at its definition.
 // C++ parity: Varnode::getHighTypeDefFacing.
 func (vn *Varnode) HighTypeDefFacing() Datatype {
-	return vn.HighTypeReadFacing(nil)
+	ct := vn.HighTypeReadFacing(nil)
+	// C++ parity: Varnode::getHighTypeDefFacing (findResolve of the write).
+	if ct != nil && ct.NeedsResolution() && vn.Def() != nil {
+		return findResolve(ct, vn.Def(), -1)
+	}
+	return ct
 }
 
+// TypeDefFacing is vn's data-type as written by its defining op.
+// C++ parity: Varnode::getTypeDefFacing.
 func (vn *Varnode) TypeDefFacing() Datatype {
-	return vn.TypeReadFacing(nil)
+	ct := vn.TypeReadFacing(nil)
+	if ct != nil && ct.NeedsResolution() && vn.Def() != nil {
+		return findResolve(ct, vn.Def(), -1)
+	}
+	return ct
 }
 
 func (vn *Varnode) UpdateType(dt Datatype) {

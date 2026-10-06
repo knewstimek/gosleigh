@@ -122,7 +122,7 @@ func (s *printCState) globalSymbolExpr(sym *Symbol) ExprFragment {
 // pushMismatchSymbol.
 // castTo is the read type when a truncating cast may stand in for the
 // last piece step (allowCast); the cast type is returned when it is used.
-func (s *printCState) globalVarnodeName(vn *Varnode, e *SymbolEntry, castTo Datatype) (string, Datatype) {
+func (s *printCState) globalVarnodeName(vn *Varnode, e *SymbolEntry, castTo Datatype, rop *PcodeOp, rslot int) (string, Datatype) {
 	sym := e.Symbol()
 	name := s.globalSymbolName(sym)
 	ct := sym.Type()
@@ -148,7 +148,7 @@ func (s *printCState) globalVarnodeName(vn *Varnode, e *SymbolEntry, castTo Data
 		return name, nil
 	}
 	off := int32(at.Offset() - e.Addr().Offset)
-	return symbolPieceName(name, ct, off, vn.Size(), castTo, e.Addr().Space.BigEndian)
+	return symbolPieceName(name, ct, off, vn.Size(), castTo, e.Addr().Space.BigEndian, rop, rslot)
 }
 
 // symbolPieceName prints sz bytes at off within a symbol of type ct: the
@@ -158,8 +158,13 @@ func (s *printCState) globalVarnodeName(vn *Varnode, e *SymbolEntry, castTo Data
 // cast to castTo instead, which is returned.
 // C++ parity: PrintC::pushSymbolDetail -> pushPartialSymbol /
 // pushMismatchSymbol.
-func symbolPieceName(name string, ct Datatype, off, sz int32, castTo Datatype, bigEndian bool) (string, Datatype) {
-	if off == 0 && sz == ct.Size() {
+//
+// rop/rslot is the op reading the Varnode (rslot >= 0) or writing it (-1): a
+// structure whose single field fills it prints through the field when that
+// use resolves to it.
+func symbolPieceName(name string, ct Datatype, off, sz int32, castTo Datatype, bigEndian bool, rop *PcodeOp, rslot int) (string, Datatype) {
+	// Without a use to resolve against, a whole symbol is its name.
+	if off == 0 && sz == ct.Size() && (!ct.NeedsResolution() || rop == nil) {
 		return name, nil
 	}
 	if off+sz > ct.Size() {
@@ -173,11 +178,16 @@ func symbolPieceName(name string, ct Datatype, off, sz int32, castTo Datatype, b
 	sb.WriteString(name)
 	for ct != nil {
 		if off == 0 && sz == ct.Size() {
-			break
+			if !ct.NeedsResolution() || ct.Metatype() == TYPE_PTR {
+				break
+			}
 		}
 		ok := false
 		switch t := ct.(type) {
 		case *Struct:
+			if ct.NeedsResolution() && ct.Size() == sz && (rop == nil || findResolve(ct, rop, rslot) == ct) {
+				break // Turns out we don't resolve to the field
+			}
 			for _, f := range t.Fields() {
 				if f.Type != nil && f.Offset <= off && off+sz <= f.Offset+f.Type.Size() {
 					sb.WriteString("." + f.Name)
@@ -198,6 +208,9 @@ func symbolPieceName(name string, ct Datatype, off, sz int32, castTo Datatype, b
 					ok = true
 				}
 			}
+		}
+		if !ok && off == 0 && sz == ct.Size() {
+			break // A whole value that does not resolve to its component
 		}
 		if !ok && castTo != nil {
 			if _, isStruct := ct.(*Struct); !isStruct {

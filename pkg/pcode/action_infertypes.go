@@ -335,8 +335,11 @@ func inferPropagateTypeEdge(data *Funcdata, tf *TypeFactory, op *PcodeOp, inslot
 	if alttype == nil {
 		return false
 	}
-	// C++ gives a needsResolution() incoming type a chance to resolveInFlow here
-	// (union field resolution). Unions are out of scope for this slice (TODO).
+	if alttype.NeedsResolution() {
+		// Always give the incoming data-type a chance to resolve, even if it
+		// would not otherwise propagate. C++ parity: propagateTypeEdge.
+		alttype = resolveInFlow(alttype, op, inslot)
+	}
 	if inslot == outslot {
 		return false // don't backtrack
 	}

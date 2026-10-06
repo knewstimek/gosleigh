@@ -106,6 +106,9 @@ type Funcdata struct {
 	models map[string]*ProtoModel
 	// hostLocals are the host's name-locked stack symbol names by offset.
 	hostLocals map[uint64]string
+	// unionMap holds the resolution of each edge reading or writing a
+	// data-type that needs resolution. C++ parity: Funcdata::unionMap.
+	unionMap map[resolveEdge]*ResolvedUnion
 	// hostLocalTypes are the host's type-locked stack symbol types by offset.
 	hostLocalTypes map[uint64]Datatype
 	// registerNames maps "spaceIdx:offset:size" to a register name.
