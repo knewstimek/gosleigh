@@ -1191,7 +1191,24 @@ func (fd *Funcdata) OpSetOutput(op *PcodeOp, vn *Varnode) {
 // Then the new varnode's descend list is updated to include op.
 // C++ parity: Funcdata::opSetInput (funcdata_op.cc:104)
 func (fd *Funcdata) OpSetInput(op *PcodeOp, vn *Varnode, slot int) {
-	// Debug: trace mutations to the op that produces unique:0xae41f (joinblock phi #128).
+	if vn == op.Input(slot) {
+		return // Already set to this vn
+	}
+	// A constant has at most one reader (unless it is a spacebase): a shared
+	// constant would carry one type for every use.
+	if vn.IsConstant() && !vn.HasNoDescend() && !vn.IsSpaceBase() {
+		cvn := fd.NewConstant(vn.Size(), vn.Offset())
+		cvn.copySymbol(vn)
+		// Gosleigh keeps space-id and INDIRECT-cause references in side
+		// tables rather than in the constant's offset; carry them over.
+		if spc := vn.GetSpaceFromConst(); spc != nil {
+			BindSpaceConstant(cvn, spc)
+		}
+		if cause := vn.GetIndirectCause(); cause != nil {
+			BindIndirectCause(cvn, cause)
+		}
+		vn = cvn
+	}
 	// Identical to C++: unset the old input before setting the new one.
 	if old := op.Input(slot); old != nil {
 		fd.OpUnsetInput(op, slot)

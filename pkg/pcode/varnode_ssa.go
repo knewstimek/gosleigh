@@ -178,6 +178,17 @@ func (vn *Varnode) GetSymbolEntry() *SymbolEntry {
 	return vn.symbolEntry
 }
 
+// copySymbol copies the data-type, symbol mapping and its locks from vn.
+// C++ parity: Varnode::copySymbol.
+func (v *Varnode) copySymbol(vn *Varnode) {
+	if dt := vn.Type(); dt != nil {
+		SetVarnodeType(v, dt)
+	}
+	v.symbolEntry = vn.symbolEntry
+	v.ClearFlags(VarnodeTypeLock | VarnodeNameLock)
+	v.SetFlags(vn.flags & (VarnodeTypeLock | VarnodeNameLock))
+}
+
 // SetSymbolEntry attaches a Symbol mapping to this Varnode. The Varnode is
 // marked mapped (and namelocked when the Symbol is namelocked); the data-type
 // is not changed. The owning HighVariable resolves the Symbol lazily through
