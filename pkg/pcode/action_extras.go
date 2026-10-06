@@ -1255,7 +1255,7 @@ func (fd *Funcdata) ResolveSpacebaseSymbol(spc *address.Space, off int64) (Datat
 		ws = 1
 	}
 	addrOff := off / ws // byteToAddress
-	probe := address.Address{Space: spc, Offset: uint64(addrOff)}
+	probe := address.Address{Space: spc, Offset: wrapSpaceOffset(spc, uint64(addrOff))} // resolveConstant wraps
 	var entry *SymbolEntry
 	if g := fd.GetGlobalScope(); g != nil {
 		entry = g.QueryContainer(probe, 1, address.Address{})
