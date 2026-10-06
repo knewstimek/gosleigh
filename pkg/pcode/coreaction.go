@@ -15,6 +15,7 @@
 package pcode
 
 import (
+	"fmt"
 	"sort"
 
 	"gosleigh/pkg/address"
@@ -2038,7 +2039,16 @@ func (a *ActionDeindirect) Apply(data *Funcdata) int {
 			// before querying; the alignment helper is not ported so we use
 			// the raw offset in the varnode's current space.
 			// C++ parity: coreaction.cc ActionDeindirect::apply lines 1242-1258.
-			sp := vn.Space()
+			// Assume the function is in the same space as the caller.
+			sp := data.BaseAddr().Space
+			if h := data.HostScope(); h != nil && sp != nil {
+				codeaddr := address.Address{Space: sp, Offset: vn.Offset()}
+				if hf, ok := h.QueryFunction(codeaddr); ok {
+					fc.deindirectExternal(data, hf.Name, codeaddr)
+					a.count++
+					continue
+				}
+			}
 			if sp != nil && scope != nil {
 				codeaddr := address.Address{Space: sp, Offset: vn.Offset()}
 				if newfd := scope.FindFunctionByAddress(codeaddr); newfd != nil {
@@ -3289,6 +3299,14 @@ func (a *ActionVarnodeProps) Apply(data *Funcdata) int {
 		if vn == nil || vn.IsAnnotation() || vn.IsConstant() {
 			continue
 		}
+		if vn.IsReadOnly() || vn.IsVolatile() { // Varnode::hasActionProperty
+			// Gosleigh always runs with the readonly option on, as the golden
+			// pipeline does. TODO known mismatch: Funcdata::replaceVolatile.
+			if vn.IsReadOnly() && data.fillinReadOnly(vn) {
+				a.count++
+			}
+			continue
+		}
 		if vn.Size() <= 0 || vn.Size() > 8 {
 			continue
 		}
@@ -4111,4 +4129,70 @@ type internalStorageEntry struct {
 // C++ parity: FuncProto::internalBegin / internalEnd
 func internalStorageList(_ *FuncProto) []internalStorageEntry {
 	return nil
+}
+
+// fillinReadOnly replaces every read of a read-only Varnode with its value
+// from the load image. A write to read-only storage only gets a warning.
+// C++ parity: Funcdata::fillinReadOnly.
+func (fd *Funcdata) fillinReadOnly(vn *Varnode) bool {
+	if vn.IsWritten() { // Can't replace an output with a constant
+		defop := vn.Def()
+		if defop.IsMarker() {
+			defop.SetAdditionalFlag(PcodeOpWarning) // Not a true write, ignore it
+		} else if defop.addlFlags&PcodeOpWarning == 0 { // No warning generated before
+			defop.SetAdditionalFlag(PcodeOpWarning)
+			if !vn.IsAddrForce() || !vn.HasNoDescend() {
+				fd.warning(fmt.Sprintf("Read-only address (%s,0x%0*x) is written", vn.Space().Name,
+					2*vn.Space().AddrSize, vn.Offset()), defop.Addr())
+			}
+		}
+		return false // No change was made
+	}
+	if vn.Size() > 8 {
+		return false // The constant would exceed the precision
+	}
+	rd := fd.ImageReader()
+	var res uint64
+	var err error
+	if rd == nil {
+		err = fmt.Errorf("no load image")
+	} else {
+		res, err = rd(vn.Addr(), int(vn.Size())) // Little-endian value
+	}
+	if err != nil { // The value is not available from the load image
+		vn.ClearFlags(VarnodeReadOnly) // Treat it as writeable
+		return true
+	}
+	if vn.Space().BigEndian {
+		swapped := uint64(0)
+		for i := int32(0); i < vn.Size(); i++ {
+			swapped = swapped<<8 | (res>>(8*uint(i)))&0xff
+		}
+		res = swapped
+	}
+	var locktype Datatype
+	if vn.IsTypeLock() {
+		locktype = vn.Type()
+	}
+	changemade := false
+	for _, op := range vn.DescendIter() {
+		i := op.GetSlot(vn)
+		if op.IsMarker() { // Careful putting constants in here
+			if op.Code() != CPUI_INDIRECT || i != 0 {
+				continue
+			}
+			if out := op.Output(); out.Addr() == vn.Addr() {
+				continue // Ignore an indirect to itself
+			}
+			fd.OpRemoveInput(op, 1) // Change the indirect to a COPY
+			fd.OpSetOpcode(op, CPUI_COPY)
+		}
+		cvn := fd.NewConstant(vn.Size(), res)
+		if locktype != nil {
+			cvn.UpdateTypeLock(locktype, true, true) // Pass on the locked data-type
+		}
+		fd.OpSetInput(op, cvn, i)
+		changemade = true
+	}
+	return changemade
 }

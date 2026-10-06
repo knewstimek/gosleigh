@@ -301,56 +301,50 @@ type StringSequence struct {
 	arraySequence
 	rootAddr  address.Address
 	startAddr address.Address
-	entry     symbolEntryStub
+	entry     *SymbolEntry
 }
 
-// symbolEntryStub is a placeholder for the still-unported SymbolEntry type.
-// TODO: replace with a real SymbolEntry once ScopeLocal::queryContainer lands.
-// C++ parity: database.hh SymbolEntry.
-type symbolEntryStub struct {
-	first uint64
-	size  int32
-	space *address.Space
-}
-
-// newStringSequence mirrors constseq.cc StringSequence::StringSequence.
+// newStringSequence finds the character array, inside the symbol holding the
+// root COPY's storage, whose element type is the copied character type.
 // C++ parity: StringSequence::StringSequence.
-func newStringSequence(data *Funcdata, ct Datatype, ent symbolEntryStub, root *PcodeOp, addr address.Address) *StringSequence {
+func newStringSequence(data *Funcdata, ct Datatype, ent *SymbolEntry, root *PcodeOp, addr address.Address) *StringSequence {
 	s := &StringSequence{
 		arraySequence: newArraySequence(data, ct, root),
 		rootAddr:      addr,
 		entry:         ent,
 	}
-	if ent.space != nil && ent.space != addr.Space {
+	if ent.Addr().Space != addr.Space {
 		return s
 	}
-	// Require the root COPY source constant to be non-zero; zero-only sequences
-	// are ignored by the C++ path.
-	if root.NumInput() == 0 || root.Input(0) == nil || !root.Input(0).IsConstant() || root.Input(0).Offset() == 0 {
+	off := int64(s.rootAddr.Offset - ent.First())
+	if off >= int64(ent.Size()) {
 		return s
 	}
-	// The Ghidra version walks the containing Symbol type to locate the array
-	// subcomponent. Without the Datatype::getSubType walk we instead treat the
-	// whole entry region as the candidate array when the element datatype
-	// matches. This is a narrower precondition than the C++ form but the
-	// downstream invariants are the same.
-	// TODO: port Datatype::getSubType array descent when TypeArray lands.
-	arraySize := int(ent.size)
-	if ent.size == 0 {
-		arraySize = int(ct.Size()) * arraySeqMinimumLength
+	if root.Input(0).Offset() == 0 {
+		return s
 	}
-	s.startAddr = address.Address{Space: addr.Space, Offset: ent.first}
-	if !s.collectCopyOps(arraySize) {
+	parentType := ent.Symbol().Type()
+	var arrayType Datatype
+	lastOff := int64(0)
+	for parentType != nil {
+		if parentType == ct {
+			break
+		}
+		arrayType = parentType
+		lastOff = off
+		parentType, off = datatypeSubType(parentType, off)
+	}
+	if parentType != ct || arrayType == nil || arrayType.Metatype() != TYPE_ARRAY {
+		return s
+	}
+	s.startAddr = address.Address{Space: addr.Space, Offset: s.rootAddr.Offset - uint64(lastOff)}
+	if !s.collectCopyOps(int(arrayType.Size())) {
 		return s
 	}
 	if !s.checkInterference() {
 		return s
 	}
-	diff := int(s.rootAddr.Offset - s.startAddr.Offset)
-	arrSize := arraySize - diff
-	if arrSize <= 0 {
-		return s
-	}
+	arrSize := int(arrayType.Size()) - int(s.rootAddr.Offset-s.startAddr.Offset)
 	s.numElements = s.formByteArray(arrSize, 0, s.rootAddr.Offset, s.rootAddr.Space.BigEndian)
 	return s
 }
@@ -688,15 +682,18 @@ func (h *HeapSequence) transform() bool {
 	return true
 }
 
-// queryContainerStub is a local stand-in for ScopeLocal::queryContainer.
-// C++ parity: database.cc Scope::queryContainer.
-// TODO: return a real SymbolEntry once Scope lookup lands; for now we
-// approximate by returning a stub rooted at the varnode address so the rule
-// body still exercises the collection path.
-func queryContainerStub(data *Funcdata, addr address.Address, sz int32) symbolEntryStub {
-	return symbolEntryStub{
-		first: addr.Offset,
-		size:  sz * arraySeqMinimumLength,
-		space: addr.Space,
+// queryContainer finds the symbol whose storage holds the given range, in
+// the local scope for stack storage and the global scope otherwise.
+// C++ parity: Scope::queryContainer (through Database::mapScope).
+func (fd *Funcdata) queryContainer(addr address.Address, sz int32, usepoint address.Address) *SymbolEntry {
+	if sl := fd.GetScopeLocal(); sl != nil && addr.Space == sl.SpaceID() {
+		return sl.QueryContainer(addr, sz, usepoint)
 	}
+	if e := fd.resolveGlobal(addr); e != nil && containsRange(e, addr.Offset, sz) {
+		return e
+	}
+	if gs := fd.GetGlobalScope(); gs != nil {
+		return gs.QueryContainer(addr, sz, usepoint)
+	}
+	return nil
 }

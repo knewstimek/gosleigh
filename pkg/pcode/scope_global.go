@@ -58,10 +58,8 @@ func (g *GlobalScope) EntryFor(vn *Varnode) *SymbolEntry {
 }
 
 // globalSymbolName is how a global symbol is referenced from the current
-// function: qualified by its namespace unless that is the function's own.
+// function: qualified only as far as needed from the function's scope.
 // C++ parity: PrintC::pushSymbolScope (minimal namespace strategy).
-// TODO known mismatch: only the exact-namespace case is elided; C++ also
-// elides a common prefix with the function's scope.
 func (s *printCState) globalSymbolName(sym *Symbol) string {
 	// The symbol name is a variable/function token (cleaned by the Java
 	// PrettyPrinter); the scope is syntax and stays raw.
@@ -70,10 +68,11 @@ func (s *printCState) globalSymbolName(sym *Symbol) string {
 	if ns == "" {
 		return name
 	}
-	if fn := s.fd.Name(); strings.HasPrefix(fn, ns+"::") && !strings.Contains(fn[len(ns)+2:], "::") {
-		return name
+	q := s.minimalScopedName(ns + "::" + sym.Name())
+	if i := strings.LastIndex(q, "::"); i >= 0 && strings.HasSuffix(q, "::"+sym.Name()) {
+		return q[:i+2] + name
 	}
-	return ns + "::" + name
+	return name
 }
 
 // globalVarnodeName names vn through the global symbol entry it maps to:

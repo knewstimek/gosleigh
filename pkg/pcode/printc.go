@@ -4158,7 +4158,7 @@ func (s *printCState) renderCallTarget(op *PcodeOp, indirect bool) (ExprFragment
 	if !indirect && s.fd != nil {
 		if fc := s.fd.callSpecsForOp(op); fc != nil && fc.GetEntryAddress().Space != nil {
 			if name := fc.GetName(); name != "" {
-				return s.lang.Atom(name), nil
+				return s.lang.Atom(s.minimalScopedName(name)), nil
 			}
 			return s.lang.Atom(genericFunctionName(fc.GetEntryAddress())), nil
 		}
@@ -4683,6 +4683,12 @@ func (s *printCState) nameOf(vn *Varnode) string {
 // printName is how a variable prints in an expression: its name, through
 // its symbol's type when it is only part of a local symbol.
 func (s *printCState) printName(vn *Varnode) string {
+	// A global prints through its own symbol (a piece with a symbol of its
+	// own prints through that one). C++ parity: pushSymbolDetail with the
+	// HighVariable's own symbol.
+	if s.fd.globalEntryOf(vn) != nil {
+		return s.nameOf(vn)
+	}
 	name, _ := s.localPieceName(vn, s.nameOf(vn), nil)
 	return name
 }

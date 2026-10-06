@@ -757,3 +757,101 @@ func mostNaturalBase(val uint64) int {
 	}
 	return 16
 }
+
+// splitScopePath splits a qualified name at its top-level "::" separators
+// (template and call-operator brackets stay whole).
+func splitScopePath(name string) []string {
+	var parts []string
+	depth, start := 0, 0
+	for i := 0; i+1 < len(name); i++ {
+		switch name[i] {
+		case '<', '(':
+			depth++
+		case '>', ')':
+			depth--
+		case ':':
+			if depth == 0 && name[i+1] == ':' {
+				parts = append(parts, name[start:i])
+				start = i + 2
+				i++
+			}
+		}
+	}
+	return append(parts, name[start:])
+}
+
+// minimalScopedName qualifies a symbol name only as far as needed to resolve
+// it from the current function's scope: a callee in the caller's own class
+// prints bare. The scope path of each name is its qualification; the global
+// scope is the root of both.
+// C++ parity: PrintC::pushSymbolScope (MINIMAL_NAMESPACES) ->
+// Symbol::getResolutionDepth + Scope::findDistinguishingScope.
+// TODO known mismatch: Scope::isNameUsed needs every name the host knows in
+// the intermediate scopes; it is taken as false.
+func (s *printCState) minimalScopedName(qualified string) string {
+	parts := splitScopePath(qualified)
+	symScope := parts[:len(parts)-1] // Path of the symbol's scope (global excluded)
+	var useScope []string
+	if s.fd != nil {
+		fn := s.fd.DisplayName()
+		if fn == "" {
+			fn = s.fd.Name()
+		}
+		if up := splitScopePath(fn); len(up) > 1 {
+			useScope = up[:len(up)-1]
+		}
+	}
+	depth := resolutionDepth(symScope, useScope)
+	if depth == 0 {
+		return parts[len(parts)-1]
+	}
+	if depth > len(symScope) { // Up to the global scope, whose display name is empty
+		return "::" + strings.Join(parts, "::")
+	}
+	return strings.Join(parts[len(parts)-1-depth:], "::")
+}
+
+// resolutionDepth is the number of scope names needed to reach a symbol in
+// scope sym from scope use (paths from the global scope, global excluded).
+// C++ parity: Symbol::getResolutionDepth with isNameUsed false.
+func resolutionDepth(sym, use []string) int {
+	same := func(a, b []string) bool {
+		if len(a) != len(b) {
+			return false
+		}
+		for i := range a {
+			if a[i] != b[i] {
+				return false
+			}
+		}
+		return true
+	}
+	if same(sym, use) {
+		return 0 // Symbol is in the scope where it is used
+	}
+	// findDistinguishingScope: the first scope on sym's path not shared
+	// with use's path, or none when sym's scope is an ancestor of use.
+	min := len(sym)
+	if len(use) < min {
+		min = len(use)
+	}
+	dist := -1 // Index into sym of the distinguishing scope
+	for i := 0; i < min; i++ {
+		if sym[i] != use[i] {
+			dist = i
+			break
+		}
+	}
+	if dist < 0 {
+		if min < len(sym) {
+			dist = min // sym's path matches use's but is longer
+		} else if min < len(use) {
+			return 0 // sym's scope is an ancestor of use
+		} else {
+			dist = len(sym) - 1 // Identical paths: unreachable after same()
+		}
+	}
+	// Print every scope from sym's own up to and including the
+	// distinguishing scope.
+	return len(sym) - dist
+}

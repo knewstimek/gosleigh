@@ -728,15 +728,48 @@ func (fd *Funcdata) MapGlobals() {
 		if entry == nil {
 			entry = fd.globalScope.AddSymbol(defaultGlobalName(addr, ct), ct, addr, ct.Size(), 0)
 		} else if addr.Offset+uint64(ct.Size())-1 > entry.Addr().Offset+uint64(entry.Size())-1 {
-			// TODO known mismatch: C++ coverVarnodes gives the uncovered
-			// interior Varnodes their own Symbols here.
 			inconsistentuse = true
+			// Interior Varnodes with no Symbol of their own get one.
+			var uncovered []*Varnode
+			for _, g := range group[1:] {
+				if g.Offset() != addr.Offset && fd.globalScope.EntryFor(g) == nil {
+					uncovered = append(uncovered, g)
+				}
+			}
+			fd.coverVarnodes(entry, uncovered)
 		}
 		for _, g := range group {
 			if e := fd.resolveGlobal(g.Addr()); e != nil {
 				fd.globalScope.Attach(g, e)
 			}
 		}
+	}
+}
+
+// coverVarnodes gives each interior Varnode of an over-wide global access a
+// Symbol named after the overlapped one (DAT_00c0a010_1), unless some Symbol
+// already holds it. Of the Varnodes at one address the biggest is used.
+// C++ parity: Funcdata::coverVarnodes.
+func (fd *Funcdata) coverVarnodes(entry *SymbolEntry, list []*Varnode) {
+	for i, vn := range list {
+		if i+1 < len(list) && list[i+1].Addr() == vn.Addr() {
+			continue
+		}
+		if e := fd.resolveGlobal(vn.Addr()); e != nil && containsRange(e, vn.Offset(), vn.Size()) {
+			continue
+		}
+		if fd.globalScope.QueryContainer(vn.Addr(), vn.Size(), address.Address{}) != nil {
+			continue
+		}
+		diff := int64(vn.Offset() - entry.Addr().Offset)
+		ct := vn.Type()
+		if hv := vn.High(); hv != nil && hv.Type() != nil {
+			ct = hv.Type()
+		}
+		if ct == nil {
+			ct = sharedTypeFactory.GetBase(vn.Size(), TYPE_UNKNOWN, "")
+		}
+		fd.globalScope.AddSymbol(fmt.Sprintf("%s_%d", entry.Symbol().Name(), diff), ct, vn.Addr(), vn.Size(), 0)
 	}
 }
 
@@ -1157,6 +1190,12 @@ func (fd *Funcdata) setVarnodeProperties(vn *Varnode) {
 		if fd.hostScope != nil {
 			if _, ok := fd.hostScope.QueryExternalRef(vn.Addr()); ok {
 				fl |= VarnodeExternRef
+			}
+			// A symbol's storage properties carry over to the Varnode.
+			// C++ parity: Scope::queryProperties (res->getAllFlags()).
+			if e := fd.resolveGlobal(vn.Addr()); e != nil && e.Symbol() != nil &&
+				vn.Offset() >= e.Addr().Offset && vn.Offset()+uint64(vn.Size()) <= e.Addr().Offset+uint64(e.Size()) {
+				fl |= e.Symbol().Flags() & (VarnodeReadOnly | VarnodeVolatile)
 			}
 		}
 		vn.SetFlags(fl)

@@ -4404,8 +4404,10 @@ func (r *RuleStringCopy) apply(op *PcodeOp, data *Funcdata) int {
 	if !outvn.IsAddrTied() {
 		return 0
 	}
-	// TODO: replace the stub with a real ScopeLocal.queryContainer lookup.
-	entry := queryContainerStub(data, outvn.Addr(), outvn.Size())
+	entry := data.queryContainer(outvn.Addr(), outvn.Size(), op.Addr())
+	if entry == nil || entry.Symbol() == nil {
+		return 0
+	}
 	seq := newStringSequence(data, ct, entry, op, outvn.Addr())
 	if !seq.isValid() {
 		return 0
