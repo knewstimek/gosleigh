@@ -328,25 +328,48 @@ func NewRuleSubExtComm(group string) *RuleSubExtComm {
 	return r
 }
 
+// apply commutes a SUBPIECE with the extension it truncates:
+// sub(ext(V),c) => sub(V,c) when no extended bit survives, else ext(sub(V,c)).
+// C++ parity: RuleSubExtComm::applyOp.
 func (r *RuleSubExtComm) apply(op *PcodeOp, data *Funcdata) int {
-	if !isZeroConst(op.Input(1)) {
+	base := op.Input(0)
+	if !base.IsWritten() {
 		return 0
 	}
-	for _, opc := range []OpCode{CPUI_INT_ZEXT, CPUI_INT_SEXT} {
-		ext := definedBy(op.Input(0), opc)
-		if ext == nil {
-			continue
-		}
-		base := ext.Input(0)
-		if outputSize(op) == base.Size() {
-			return rewriteToCopy(data, op, base)
-		}
-		if outputSize(op) < base.Size() {
-			rewriteOp(data, op, CPUI_SUBPIECE, base, data.NewConstant(op.Input(1).Size(), 0))
-			return 1
-		}
+	extop := base.Def()
+	if extop.Code() != CPUI_INT_ZEXT && extop.Code() != CPUI_INT_SEXT {
+		return 0
 	}
-	return 0
+	invn := extop.Input(0)
+	if invn.IsFree() {
+		return 0
+	}
+	subcut := int32(op.Input(1).Offset())
+	if op.Output().Size()+subcut <= invn.Size() {
+		// The SUBPIECE does not reach the extended bits.
+		data.OpSetInput(op, invn, 0)
+		if invn.Size() == op.Output().Size() {
+			data.OpRemoveInput(op, 1)
+			data.OpSetOpcode(op, CPUI_COPY)
+		}
+		return 1
+	}
+	if subcut >= invn.Size() {
+		return 0
+	}
+	newvn := invn
+	if subcut != 0 {
+		newop := data.NewOp(2, op.Addr())
+		data.OpSetOpcode(newop, CPUI_SUBPIECE)
+		newvn = data.NewUniqueOut(invn.Size()-subcut, newop)
+		data.OpSetInput(newop, data.NewConstant(op.Input(1).Size(), uint64(subcut)), 1)
+		data.OpSetInput(newop, invn, 0)
+		data.OpInsertBefore(newop, op)
+	}
+	data.OpRemoveInput(op, 1)
+	data.OpSetOpcode(op, extop.Code())
+	data.OpSetInput(op, newvn, 0)
+	return 1
 }
 
 // RuleSubCommute pushes SUBPIECE earlier into arithmetic/bitwise expressions,
