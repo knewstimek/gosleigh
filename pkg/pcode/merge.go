@@ -51,11 +51,64 @@ func canonicalPair(h1, h2 *HighVariable) highPair {
 // C++ parity: variable.hh HighIntersectTest
 type HighIntersectTest struct {
 	cache map[highPair]bool
+	// fd supplies the ops that may write a stack variable indirectly
+	// (affectingOps, built lazily). C++ parity: HighIntersectTest::affectingOps.
+	fd           *Funcdata
+	affectingOps []*PcodeOp
+	affectingPop bool
 }
 
 // newHighIntersectTest allocates an empty cache.
 func newHighIntersectTest() *HighIntersectTest {
 	return &HighIntersectTest{cache: make(map[highPair]bool)}
+}
+
+// stackAffectingOps lists the CALLs of the function: each may write a local
+// whose address escaped. C++ parity: StackAffectingOps::populate.
+// Known mismatch: store guards (LoadGuard on STORE) are not collected, so
+// guarded STOREs are not part of the set.
+func (t *HighIntersectTest) stackAffectingOps() []*PcodeOp {
+	if !t.affectingPop {
+		t.affectingPop = true
+		if t.fd != nil {
+			for i := 0; i < t.fd.NumCalls(); i++ {
+				if fc := t.fd.GetCallSpecs(i); fc != nil && fc.op != nil && !fc.op.IsDead() {
+					t.affectingOps = append(t.affectingOps, fc.op)
+				}
+			}
+		}
+	}
+	return t.affectingOps
+}
+
+// untiedCallIntersection reports whether the untied variable is live across an
+// op that may change the address-tied local (so the two cannot share storage).
+// C++ parity: HighIntersectTest::testUntiedCallIntersection with
+// Cover::intersect(PcodeOpSet) and StackAffectingOps::affectsTest (a CALL
+// always affects).
+func (t *HighIntersectTest) untiedCallIntersection(tied, untied *HighVariable) bool {
+	if tied.IsPersist() {
+		return false // the address-forcing mechanism covers globals across calls
+	}
+	vn := tied.TiedVarnode()
+	if vn == nil || vn.HasNoLocalAlias() {
+		return false // a local is only in scope across a call if it has aliases
+	}
+	cov := untied.getCover()
+	if cov == nil {
+		return false
+	}
+	for _, op := range t.stackAffectingOps() {
+		bl := op.Parent()
+		if bl == nil {
+			continue
+		}
+		cb := cov.GetCoverBlock(bl.Index())
+		if cb.Contain(op) && cb.Boundary(op) == 0 {
+			return true
+		}
+	}
+	return false
 }
 
 // UpdateHigh rebuilds the Cover for a HighVariable and purges any stale cached
@@ -160,6 +213,15 @@ func (t *HighIntersectTest) Intersection(h1, h2 *HighVariable) bool {
 		return v
 	}
 	result := computeHighIntersection(h1, h2)
+	if !result {
+		if t1, t2 := h1.IsAddrTied(), h2.IsAddrTied(); t1 != t2 {
+			if t1 {
+				result = t.untiedCallIntersection(h1, h2)
+			} else {
+				result = t.untiedCallIntersection(h2, h1)
+			}
+		}
+	}
 	t.cache[key] = result
 	return result
 }
@@ -237,7 +299,6 @@ func highBlockIntersection(h1, h2 *HighVariable, blk int32) bool {
 // Phase 1 uses union covers to find candidate blocks; phase 2 uses individual
 // varnode covers and copy-shadow filtering to eliminate false positives.
 // C++ parity: HighIntersectTest::intersection (variable.cc:1166), base algorithm only.
-// Known mismatch: testUntiedCallIntersection (variable.cc:1188-1196) is not ported.
 func computeHighIntersection(h1, h2 *HighVariable) bool {
 	c1 := h1.getCover()
 	c2 := h2.getCover()
@@ -439,7 +500,9 @@ type Merge struct {
 // trimming merges are consumed later by ActionDominantCopy.
 func NewMerge(fd *Funcdata) *Merge {
 	if fd.merge == nil {
-		fd.merge = &Merge{fd: fd, testCache: newHighIntersectTest()}
+		cache := newHighIntersectTest()
+		cache.fd = fd
+		fd.merge = &Merge{fd: fd, testCache: cache}
 	}
 	return fd.merge
 }
