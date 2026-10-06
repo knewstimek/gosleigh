@@ -679,3 +679,51 @@ func (sl *ScopeLocal) restructureMap(ms *mapState) bool {
 	// The last hint is the artificial endpoint: no Symbol for it.
 	return overlapProblems
 }
+
+// fakeInputSymbols gives each run of overlapping stack inputs in the
+// parameter range an unnamed undefined Symbol, so references into the
+// parameter area resolve (&param_1).
+// C++ parity: ScopeLocal::fakeInputSymbols. Symbols of a locked prototype
+// (function_parameter) are not modelled, so lockedinputs is always 0.
+func (sl *ScopeLocal) fakeInputSymbols(fd *Funcdata) {
+	space := sl.SpaceID()
+	var inputs []*Varnode
+	for _, vn := range fd.GetVarnodeBank().AllVarnodes() {
+		if vn.IsInput() && vn.Space() == space {
+			inputs = append(inputs, vn)
+		}
+	}
+	sort.Slice(inputs, func(i, j int) bool {
+		if inputs[i].Offset() != inputs[j].Offset() {
+			return inputs[i].Offset() < inputs[j].Offset()
+		}
+		return inputs[i].Size() < inputs[j].Size()
+	})
+	for i := 0; i < len(inputs); {
+		vn := inputs[i]
+		i++
+		if !sl.inParamRange(vn.Offset(), 1) {
+			continue // only offsets that can be parameters
+		}
+		locked := vn.IsTypeLock()
+		start := vn.Offset()
+		endpoint := start + uint64(vn.Size()) - 1
+		for ; i < len(inputs) && inputs[i].Offset() <= endpoint; i++ {
+			if e := inputs[i].Offset() + uint64(inputs[i].Size()) - 1; e > endpoint {
+				endpoint = e
+			}
+			locked = locked || inputs[i].IsTypeLock()
+		}
+		if locked {
+			continue
+		}
+		size := int32(endpoint-start) + 1
+		addr := address.Address{Space: space, Offset: start}
+		sym := NewSymbol("", sharedTypeFactory.GetBase(size, TYPE_UNKNOWN, ""))
+		sym.SetFlags(VarnodeAddrTied)
+		sym.SetCategory(SymbolFakeInput, -1)
+		entry := NewSymbolEntry(sym, 0, addr, size, 0)
+		sym.attachEntry(entry)
+		sl.ext().entries = append(sl.ext().entries, entry)
+	}
+}

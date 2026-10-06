@@ -562,6 +562,7 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 			ms.addRange(h.start, h.elem, 0, rhOpen, h.minItems)
 		}
 		sl.restructureMap(ms)
+		sl.fakeInputSymbols(fd)
 	}
 
 	if aliasyes {

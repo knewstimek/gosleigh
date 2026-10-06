@@ -4214,6 +4214,15 @@ func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode) (ExprFragm
 		return ExprFragment{}, false
 	}
 	name := s.lang.Atom(s.globalSymbolName(sym))
+	if sym.Category() == SymbolFakeInput {
+		// An unnamed stack-input Symbol prints as its parameter.
+		for _, vn := range s.fd.GetVarnodeBank().AllVarnodes() {
+			if vn.IsInput() && vn.Space() == spc && vn.Offset() == entry.Addr().Offset {
+				name = s.lang.Atom(s.nameOf(vn))
+				break
+			}
+		}
+	}
 	// Drop the '&' when the symbol is a code or array type (its name already
 	// denotes the address). C++ parity: opPtrsub sets valueon for TYPE_CODE /
 	// TYPE_ARRAY.
