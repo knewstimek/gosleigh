@@ -852,32 +852,39 @@ func (h *Heritage) renameRecurse(bl *BlockBasic, graph *BlockGraph,
 			if op.Code() != CPUI_MULTIEQUAL {
 				break // MULTIEQUALs are at the start
 			}
-			out := op.Output()
-			if out == nil {
+			if revIdx >= op.NumInput() {
 				continue
 			}
-			if !inRenameRanges(out, ranges) {
+			// Only a placeholder slot is filled: an input already in SSA (e.g.
+			// a MULTIEQUAL built by ConditionalJoin) keeps its value. A new
+			// Gosleigh phi leaves the slot nil; it stands for the output's
+			// storage. C++ parity: Heritage::renameRecurse (!vnin->isHeritageKnown()).
+			vnin := op.Input(revIdx)
+			ref := vnin
+			if ref == nil {
+				ref = op.Output()
+			} else if vnin.IsHeritageKnown() {
+				continue
+			}
+			if ref == nil || !inRenameRanges(ref, ranges) {
 				continue
 			}
 
-			key := makeAddressKey(out.Addr())
+			key := makeAddressKey(ref.Addr())
 			stk := varStack[key]
 			if len(stk) == 0 {
 				// No reaching definition: reuse pre-existing input if present (same
 				// dedup logic as the read-slot path above).
-				if existing := h.fd.FindVarnodeInput(out.Size(), out.Addr()); existing != nil {
+				if existing := h.fd.FindVarnodeInput(ref.Size(), ref.Addr()); existing != nil {
 					varStack[key] = append(varStack[key], existing)
 				} else {
-					newVn := h.fd.NewVarnode(out.Size(), out.Addr())
+					newVn := h.fd.NewVarnode(ref.Size(), ref.Addr())
 					h.fd.SetInputVarnode(newVn)
 					varStack[key] = append(varStack[key], newVn)
 				}
 				stk = varStack[key]
 			}
-			top := stk[len(stk)-1]
-			if revIdx < op.NumInput() {
-				h.fd.OpSetInput(op, top, revIdx)
-			}
+			h.fd.OpSetInput(op, stk[len(stk)-1], revIdx)
 		}
 	}
 
