@@ -350,12 +350,19 @@ func (b *FlowBlock) negateCondition(top bool) bool {
 		}
 		return res1 || res2
 	}
-	for _, child := range b.StructuredChildren() {
-		if child.negateCondition(top) {
-			return true
+	res := false
+	if b.Type() == BlockListType {
+		// C++ parity: BlockList::negateCondition -- only the last block
+		// computes the condition.
+		if children := b.StructuredChildren(); len(children) > 0 {
+			res = children[len(children)-1].negateCondition(false)
 		}
 	}
-	return false
+	// C++ parity: FlowBlock::negateCondition -- swap edges at top/bottom.
+	if top && b.SizeOut() == 2 {
+		b.SwapEdges()
+	}
+	return res
 }
 
 // BlockWhileDo is a while-do structured loop block.
