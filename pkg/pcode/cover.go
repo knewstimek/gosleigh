@@ -510,12 +510,20 @@ func (c *Cover) AddRefPoint(ref *PcodeOp, vn *Varnode) {
 	}
 }
 
-// Rebuild rebuilds this Cover from the def-use range of a single Varnode.
+// Rebuild rebuilds this Cover from the def-use range of a single Varnode,
+// extended through implied readers: an expression folded into its use keeps
+// its inputs live up to that use.
 // C++ parity: Cover::rebuild
 func (c *Cover) Rebuild(vn *Varnode) {
 	c.AddDefPoint(vn)
-	for _, op := range vn.DescendIter() {
-		c.AddRefPoint(op, vn)
+	path := []*Varnode{vn}
+	for pos := 0; pos < len(path); pos++ {
+		for _, op := range path[pos].DescendIter() {
+			c.AddRefPoint(op, vn)
+			if out := op.Output(); out != nil && out.IsImplied() {
+				path = append(path, out)
+			}
+		}
 	}
 }
 
