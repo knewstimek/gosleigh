@@ -1560,7 +1560,7 @@ func (m *Merge) eliminateIntersect(vn *Varnode, blocksort []blockVarnodeEntry) {
 						}
 					} else {
 						if vn.Def() != nil {
-							if vn2.Def().Seq().Order < vn.Def().Seq().Order {
+							if opBlockUIndex(vn2.Def()) < opBlockUIndex(vn.Def()) {
 								continue // vn2 defined before vn: no conflict from vn's perspective
 							}
 						}

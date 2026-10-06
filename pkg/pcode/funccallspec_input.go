@@ -385,7 +385,7 @@ func (fd *Funcdata) checkCallDoubleUse(opmatch, op *PcodeOp, vn *Varnode, fl uin
 			if curtrial := fc.GetActiveInput().TrialForInputVarnode(j); curtrial != nil {
 				if curtrial.GetAddress() == trial.GetAddress() {
 					if op.Parent() == opmatch.Parent() {
-						if opmatch.Seq().Order < op.Seq().Order {
+						if opBlockUIndex(opmatch) < opBlockUIndex(op) {
 							return true // opmatch has dibs, don't reject
 						}
 					} else {

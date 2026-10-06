@@ -1936,7 +1936,7 @@ func (fd *Funcdata) CseFindInBlock(op *PcodeOp, vn *Varnode, bl *BlockBasic, ear
 		if res.Parent() != bl {
 			continue
 		}
-		if earliest != nil && earliest.Seq().Order <= res.Seq().Order {
+		if earliest != nil && opBlockUIndex(earliest) <= opBlockUIndex(res) {
 			continue
 		}
 		out1 := op.Output()

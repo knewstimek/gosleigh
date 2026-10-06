@@ -80,7 +80,7 @@ func (fd *Funcdata) cseElimination(op1, op2 *PcodeOp) *PcodeOp {
 	var replace *PcodeOp
 	if op1.Parent() == op2.Parent() {
 		replace = op2
-		if op1.Seq().Order < op2.Seq().Order {
+		if opBlockUIndex(op1) < opBlockUIndex(op2) {
 			replace = op1
 		}
 	} else {

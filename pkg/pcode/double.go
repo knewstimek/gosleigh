@@ -415,7 +415,7 @@ func (s *SplitVarnode) findDefinitionPoint() bool {
 			s.defblock = nil
 			return false
 		}
-		if lastop2.Seq().Order > lastop.Seq().Order {
+		if opBlockUIndex(lastop2) > opBlockUIndex(lastop) {
 			lastop = lastop2
 		}
 		s.defpoint = lastop
@@ -459,7 +459,7 @@ func (s *SplitVarnode) findEarliestSplitPoint() *PcodeOp {
 	if loop.Parent() != hiop.Parent() {
 		return nil
 	}
-	if loop.Seq().Order < hiop.Seq().Order {
+	if opBlockUIndex(loop) < opBlockUIndex(hiop) {
 		return loop
 	}
 	return hiop
@@ -495,7 +495,7 @@ func (s *SplitVarnode) findWholeBuiltFromPieces() bool {
 				continue
 			}
 		}
-		if res == nil || op.Seq().Order < res.Seq().Order {
+		if res == nil || opBlockUIndex(op) < opBlockUIndex(res) {
 			res = op
 		}
 	}
@@ -540,7 +540,7 @@ func (s *SplitVarnode) IsWholeFeasible(existop *PcodeOp) bool {
 	}
 	curbl := existop.Parent()
 	if curbl == s.defblock {
-		return s.defpoint.Seq().Order <= existop.Seq().Order
+		return opBlockUIndex(s.defpoint) <= opBlockUIndex(existop)
 	}
 	return blockDominatedBy(curbl, s.defblock)
 }

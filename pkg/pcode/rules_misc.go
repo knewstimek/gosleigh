@@ -1695,7 +1695,7 @@ func condMoveConstructBool(vn *Varnode, insertop *PcodeOp, ops []*PcodeOp, data 
 	if len(ops) == 0 {
 		return vn
 	}
-	sort.SliceStable(ops, func(i, j int) bool { return ops[i].Seq().Order < ops[j].Seq().Order })
+	sort.SliceStable(ops, func(i, j int) bool { return opBlockUIndex(ops[i]) < opBlockUIndex(ops[j]) })
 	return newCloneBlockOps(data).cloneExpression(ops, insertop)
 }
 
@@ -4162,14 +4162,14 @@ func doubleLoadNoWriteConflict(op1, op2 *PcodeOp, spc *address.Space, indirects 
 	if bb != op2.Parent() {
 		return nil
 	}
-	if op2.Seq().Order < op1.Seq().Order {
+	if opBlockUIndex(op2) < opBlockUIndex(op1) {
 		op1, op2 = op2, op1
 	}
 	for _, curop := range bb.Ops() {
-		if curop.Seq().Order <= op1.Seq().Order {
+		if opBlockUIndex(curop) <= opBlockUIndex(op1) {
 			continue
 		}
-		if curop.Seq().Order >= op2.Seq().Order {
+		if opBlockUIndex(curop) >= opBlockUIndex(op2) {
 			break
 		}
 		switch curop.Code() {

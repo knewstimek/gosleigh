@@ -204,7 +204,7 @@ func seqLess(a, b *PcodeOp) bool {
 	if a.Addr() != b.Addr() {
 		return addrLess(a.Addr(), b.Addr())
 	}
-	return a.Seq().Order < b.Seq().Order
+	return opBlockUIndex(a) < opBlockUIndex(b)
 }
 
 // blockContainsAddr reports whether ad falls within the address span of bb's

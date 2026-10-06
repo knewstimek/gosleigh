@@ -189,7 +189,7 @@ func pieceFindRoot(vn *Varnode) *Varnode {
 // C++ parity: PcodeOp::compareOrder.
 func opCompareOrder(a, b *PcodeOp) int {
 	if a.Parent() == b.Parent() {
-		if a.Seq().Order < b.Seq().Order {
+		if opBlockUIndex(a) < opBlockUIndex(b) {
 			return -1
 		}
 		return 1
