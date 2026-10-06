@@ -315,8 +315,7 @@ type RuleSelectCse struct{ batchRule }
 func NewRuleSelectCse(group string) *RuleSelectCse {
 	r := &RuleSelectCse{}
 	// RuleSelectCse::applyOp -- ruleaction.cc.
-	// known mismatch: getCseHash/cseEliminateList are not ported.
-	r.batchRule = newKnownMismatchBatchRule(group, "selectcse", []OpCode{CPUI_SUBPIECE, CPUI_INT_SRIGHT}, func(g string) Rule { return NewRuleSelectCse(g) })
+	r.batchRule = newBatchRule(group, "selectcse", []OpCode{CPUI_SUBPIECE, CPUI_INT_SRIGHT}, r.apply, func(g string) Rule { return NewRuleSelectCse(g) })
 	return r
 }
 
