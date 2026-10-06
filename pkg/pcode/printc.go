@@ -3292,6 +3292,9 @@ func (s *printCState) renderVarnodeExpr(vn *Varnode) (ExprFragment, error) {
 		return s.lang.Atom("0"), nil
 	}
 	if vn.IsConstant() {
+		if frag, ok := s.renderEnumConstant(vn); ok {
+			return frag, nil
+		}
 		return s.lang.Atom(s.renderConstant(vn)), nil
 	}
 	if op := vn.Def(); op != nil && s.inline[op] {
@@ -3303,6 +3306,31 @@ func (s *printCState) renderVarnodeExpr(vn *Varnode) (ExprFragment, error) {
 		return s.renderOpExprFrag(op)
 	}
 	return s.readExpr(vn), nil
+}
+
+// renderEnumConstant prints an enum constant as its named components joined
+// by the enum concatenation token, under a ~ for a complement.
+// C++ parity: PrintC::pushEnumConstant (enum_cat: "|" with no spacing, a
+// token distinct from the bitwise or).
+func (s *printCState) renderEnumConstant(vn *Varnode) (ExprFragment, bool) {
+	e, ok := vn.TypeReadFacing(nil).(*Enum)
+	if !ok {
+		return ExprFragment{}, false
+	}
+	names, complement := e.Matches(vn.Offset())
+	if len(names) < 2 && !complement {
+		return ExprFragment{}, false // a single name prints as before
+	}
+	expr := s.lang.Atom(names[0])
+	for _, nm := range names[1:] {
+		right := s.lang.Atom(nm)
+		expr = ExprFragment{Text: expr.Text + "|" + nm, Precedence: cPrecBitOr, op: "enum|", node: &fragNode{
+			kind: fragBinary, print1: "|", kids: []ExprFragment{expr, right}, parens: []bool{false, false}}}
+	}
+	if complement {
+		expr = s.lang.UnaryExpr("~", cPrecUnary, expr)
+	}
+	return expr, true
 }
 
 func (s *printCState) renderConstant(vn *Varnode) string {

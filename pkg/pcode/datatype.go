@@ -2,6 +2,7 @@ package pcode
 
 import (
 	"hash/fnv"
+	"sort"
 )
 
 // metatype mirrors Ghidra's type_metatype values exactly.
@@ -450,6 +451,62 @@ func NewEnum(size int32, enumMeta metatype, name string, values map[uint64]strin
 		datatypeBase: base,
 		values:       cloneEnumValues(values),
 	}
+}
+
+// Matches returns the names whose OR represents val, and whether they
+// represent its complement instead. No names means no representation. Each
+// step takes the biggest named value matching the most significant
+// remaining bits.
+// C++ parity: TypeEnum::getMatches.
+func (e *Enum) Matches(val uint64) ([]string, bool) {
+	keys := make([]uint64, 0, len(e.values))
+	for k := range e.values {
+		keys = append(keys, k)
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	full := ^uint64(0)
+	if e.size < 8 {
+		full = uint64(1)<<uint(8*e.size) - 1
+	}
+	for count := 0; count < 2; count++ {
+		var names []string
+		allmatch := true
+		if val == 0 { // Zero handled specially
+			if nm, ok := e.values[val]; ok {
+				names = append(names, nm)
+			} else {
+				allmatch = false
+			}
+		} else {
+			bitsleft, target := val, val
+			for target != 0 {
+				// The biggest named value less than or equal to target
+				idx := sort.Search(len(keys), func(i int) bool { return keys[i] > target })
+				if idx == 0 {
+					break // All named values are greater than target
+				}
+				curval := keys[idx-1]
+				diff := coveringMask(bitsleft ^ curval)
+				if diff >= bitsleft {
+					break // Could not match the most significant bit of bitsleft
+				}
+				if curval&diff == 0 {
+					names = append(names, e.values[curval]) // Accept the name
+					bitsleft ^= curval
+					target = bitsleft
+				} else {
+					// Bits above diff are the most one named value can match
+					target = curval &^ diff
+				}
+			}
+			allmatch = bitsleft == 0
+		}
+		if allmatch {
+			return names, count == 1
+		}
+		val ^= full // Try the complement
+	}
+	return nil, false
 }
 
 func (e *Enum) Values() map[uint64]string { return cloneEnumValues(e.values) }
