@@ -60,7 +60,9 @@ func TestRulesCopy_RewriteAndRegistration(t *testing.T) {
 		t.Fatal("expected registered rules to be addressable from ActionPool")
 	}
 
-	none := newRuleOp(data, CPUI_SUBPIECE, 1, piece.Output(), data.NewConstant(4, 1))
+	// A SEXT keeps a non-zero high byte: nothing cancels at offset 1.
+	sext := newRuleOp(data, CPUI_INT_SEXT, 4, newRuleInput(data, 2, 0x40))
+	none := newRuleOp(data, CPUI_SUBPIECE, 1, sext.Output(), data.NewConstant(4, 1))
 	if got := NewRuleSubCancel("copy").ApplyOp(none, data); got != 0 {
 		t.Fatalf("subcancel non-rewrite=%d, want 0", got)
 	}
