@@ -98,7 +98,16 @@ func declExpr(typeText, ident string) ExprFragment {
 	flat := ExprFragment{Text: typeText + ident, Precedence: ExprPrecPrimary}
 	stars := len(typeText) - len(strings.TrimRight(typeText, "*"))
 	base := typeText[:len(typeText)-stars]
-	if !strings.HasSuffix(base, " ") || strings.ContainsAny(base, "()[]") || (stars == 0 && ident == "") {
+	if stars == 0 && ident == "" && !strings.ContainsAny(base, "()[]") {
+		// A bare type name: type_expr_nospace over the type and a blank
+		// identifier, which is its own printing group.
+		// C++ parity: PrintC::pushType -> pushTypeStart(ct,true).
+		return ExprFragment{Text: flat.Text, Precedence: ExprPrecPrimary, node: &fragNode{
+			kind: fragSpace, spacing: 0,
+			kids:   []ExprFragment{{Text: base, Precedence: ExprPrecPrimary}, blankExpr},
+			parens: []bool{false, false}}}
+	}
+	if !strings.HasSuffix(base, " ") || strings.ContainsAny(base, "()[]") {
 		return flat
 	}
 	base = base[:len(base)-1]

@@ -96,7 +96,12 @@ const (
 	fragParen                        // "(" child0 ")" as a parenthesis group
 	fragCondJoin                     // child0 spaces op spaces child1, no group (emitBlockCondition)
 	fragStatement                    // child0 inside a statement delimiter (begin/endStatement)
+	fragBlank                        // an atom that emits nothing (blanktoken)
 )
+
+// blankExpr is the empty identifier of a type expression with no name.
+// C++ parity: Atom(EMPTY_STRING,blanktoken) (emitAtom prints nothing).
+var blankExpr = ExprFragment{Precedence: ExprPrecPrimary, node: &fragNode{kind: fragBlank}}
 
 // fragNode mirrors one ReversePolish entry: an OpToken with its operands.
 // parens[i] records whether operand i is wrapped in an openParen group.
@@ -417,6 +422,9 @@ func (pl *PrintLanguage) emitFragmentTree(ge GroupEmitter, expr ExprFragment) {
 // opens either openParen or openGroup for an operator, never both.
 func (pl *PrintLanguage) emitFragmentTreeIn(ge GroupEmitter, expr ExprFragment, ownGroup bool) {
 	if n := expr.node; n != nil {
+		if n.kind == fragBlank {
+			return
+		}
 		if n.kind == fragParen {
 			// Structural parentheses (emitBlockCondition's openParen) are the
 			// group themselves.
