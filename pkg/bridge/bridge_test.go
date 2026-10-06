@@ -150,8 +150,12 @@ func validateBridgeResult(result *bridge.Result) error {
 	if result.Graph.GetSize() == 0 {
 		return fmt.Errorf("bridge graph is empty")
 	}
-	if result.Graph.GetBlock(0).ImmedDom() == nil {
-		return fmt.Errorf("graph dominator state was not prepared")
+	// Roots (the entry, unreachable blocks) have no dominator (C++
+	// calcForwardDominator); every other block is dominated by something.
+	for i := 0; i < result.Graph.GetSize(); i++ {
+		if bl := result.Graph.GetBlock(i); bl.SizeIn() != 0 && bl.ImmedDom() == nil {
+			return fmt.Errorf("graph dominator state was not prepared")
+		}
 	}
 
 	alive := result.Funcdata.GetPcodeOpBank().AliveOps()

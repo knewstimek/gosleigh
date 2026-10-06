@@ -394,8 +394,7 @@ func buildGraphFromRaw(t *testing.T, fd *Funcdata, blocks []rawBlockSpec, edges 
 		}
 	}
 
-	graph.FindSpanningTree()
-	graph.CalcForwardDominator()
+	graph.StructureLoops()
 	return graph
 }
 

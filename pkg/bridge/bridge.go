@@ -393,9 +393,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	}
 
 	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock, recoveredTables)
-	graph.FindSpanningTree()
-	assignUnreachableIndices(graph)
-	graph.CalcForwardDominator()
+	graph.StructureLoops()
 	fd.SetBasicBlocks(graph)
 	fd.SetFlag(pcode.FuncBlocksGenerated)
 
@@ -1635,27 +1633,6 @@ func addEdge(graph *pcode.BlockGraph, seen map[edgeKey]struct{}, from *pcode.Blo
 	}
 	seen[key] = struct{}{}
 	graph.AddEdge(&from.FlowBlock, &to.FlowBlock, 0)
-}
-
-func assignUnreachableIndices(graph *pcode.BlockGraph) {
-	if graph == nil {
-		return
-	}
-	maxIndex := int32(-1)
-	for idx := 0; idx < graph.GetSize(); idx++ {
-		block := graph.GetBlock(idx)
-		if block.Index() > maxIndex {
-			maxIndex = block.Index()
-		}
-	}
-	for idx := 0; idx < graph.GetSize(); idx++ {
-		block := graph.GetBlock(idx)
-		if block.Index() >= 0 {
-			continue
-		}
-		maxIndex++
-		block.SetIndex(maxIndex)
-	}
 }
 
 func analyzeInstructionFlow(translation sla.InstructionTranslation, entrySpace *address.Space, known map[address.Address]struct{}) instructionFlow {

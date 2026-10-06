@@ -711,7 +711,23 @@ func (a *ActionDeterminedBranch) Clone(groups ActionGroupList) Action {
 // Apply removes determined branches.
 // C++ parity: coreaction.cc ActionDeterminedBranch::apply
 func (a *ActionDeterminedBranch) Apply(data *Funcdata) int {
-	_ = data
+	graph := data.GetBasicBlocks()
+	for i := 0; i < graph.GetSize(); i++ {
+		bb, ok := graph.GetBlock(i).Concrete().(*BlockBasic)
+		if !ok || bb.EmptyOp() {
+			continue
+		}
+		cbranch := bb.LastOp()
+		if cbranch.Code() != CPUI_CBRANCH || !cbranch.Input(1).IsConstant() {
+			continue
+		}
+		num := 1
+		if (cbranch.Input(1).Offset() != 0) != cbranch.HasFlag(PcodeOpBooleanFlip) {
+			num = 0
+		}
+		data.RemoveBranch(bb, num)
+		a.count++
+	}
 	return 0
 }
 

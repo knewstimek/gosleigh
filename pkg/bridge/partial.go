@@ -167,9 +167,7 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 	// (Ghidra's partial assumption, flow.cc:937), so no recovered tables feed edge
 	// generation here.
 	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock, nil)
-	graph.FindSpanningTree()
-	assignUnreachableIndices(graph)
-	graph.CalcForwardDominator()
+	graph.StructureLoops()
 	fd.SetBasicBlocks(graph)
 	fd.SetFlag(pcode.FuncBlocksGenerated)
 

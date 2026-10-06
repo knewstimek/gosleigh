@@ -220,8 +220,7 @@ func buildDiamondCFG() (*BlockGraph, []*BlockBasic) {
 	bg.AddEdge(&b.FlowBlock, &d.FlowBlock, 0)
 	bg.AddEdge(&c.FlowBlock, &d.FlowBlock, 0)
 
-	bg.FindSpanningTree()
-	bg.CalcForwardDominator()
+	bg.StructureLoops()
 
 	return bg, []*BlockBasic{a, b, c, d}
 }
@@ -300,8 +299,7 @@ func TestHeritage_IntegrationLinearChain(t *testing.T) {
 	a := bg.NewBlockBasicInGraph()
 	b := bg.NewBlockBasicInGraph()
 	bg.AddEdge(&a.FlowBlock, &b.FlowBlock, 0)
-	bg.FindSpanningTree()
-	bg.CalcForwardDominator()
+	bg.StructureLoops()
 
 	addr := address.Address{Space: spc, Offset: 0x100}
 

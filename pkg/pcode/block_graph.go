@@ -139,174 +139,247 @@ func (bg *BlockGraph) ClearVisitCount() {
 	}
 }
 
-// FindSpanningTree performs a DFS from blocks[0] and assigns RPO indices.
-// Edges are labeled as tree, forward, cross, or back.
-// C++ parity: block.cc BlockGraph::findSpanningTree
-func (bg *BlockGraph) FindSpanningTree() {
-	if len(bg.blocks) == 0 {
-		return
-	}
-
+// FindSpanningTree labels the edges of a depth-first spanning tree and puts
+// the blocks in reverse post-order. Every block without in-edges is a root,
+// and so is any block left unvisited; the entry block is traversed last so it
+// gets index 0. Returns the roots, entry first.
+// C++ parity: block.cc BlockGraph::findSpanningTree. Irreducible edges are not
+// modelled, and only the tree/forward/cross/back labels are cleared (C++
+// clears every edge flag).
+func (bg *BlockGraph) FindSpanningTree() []*FlowBlock {
 	n := len(bg.blocks)
-	// Clear all visit counts and edge labels.
+	if n == 0 {
+		return nil
+	}
+	reset := func() {
+		for _, bl := range bg.blocks {
+			bl.index = -1
+			bl.visitCount = -1
+		}
+	}
+	reset()
+	var rootlist []*FlowBlock
 	for _, bl := range bg.blocks {
-		bl.visitCount = 0
-		bl.index = -1
-		for i := range bl.outEdges {
-			bl.outEdges[i].Label &^= (EdgeFlagTree | EdgeFlagForward | EdgeFlagCross | EdgeFlagBack)
-		}
-		for i := range bl.inEdges {
-			bl.inEdges[i].Label &^= (EdgeFlagTree | EdgeFlagForward | EdgeFlagCross | EdgeFlagBack)
+		if bl.SizeIn() == 0 {
+			rootlist = append(rootlist, bl)
 		}
 	}
-
-	var timestamp int32 = 1
-	rpoCounter := int32(n - 1)
-
-	// finished[block] = true when DFS post-visit is done.
-	type stackEntry struct {
-		block   *FlowBlock
-		edgeIdx int // next outEdge to visit
+	if len(rootlist) > 1 { // visit the original head last
+		last := len(rootlist) - 1
+		rootlist[0], rootlist[last] = rootlist[last], rootlist[0]
+	} else if len(rootlist) == 0 {
+		rootlist = append(rootlist, bg.blocks[0]) // assume the first block is the entry
 	}
+	origrootpos := len(rootlist) - 1
 
-	stack := []stackEntry{{block: bg.blocks[0], edgeIdx: 0}}
-	bg.blocks[0].visitCount = timestamp
-	timestamp++
-
-	for len(stack) > 0 {
-		top := &stack[len(stack)-1]
-		bl := top.block
-
-		if top.edgeIdx >= bl.SizeOut() {
-			// Post-visit: assign RPO index.
-			bl.index = rpoCounter
-			rpoCounter--
-			stack = stack[:len(stack)-1]
-			continue
-		}
-
-		edgeIdx := top.edgeIdx
-		top.edgeIdx++
-		target := bl.outEdges[edgeIdx].Point
-
-		if target.visitCount == 0 {
-			// Tree edge.
-			bl.SetOutEdgeFlag(edgeIdx, EdgeFlagTree)
-			target.visitCount = timestamp
-			timestamp++
-			stack = append(stack, stackEntry{block: target, edgeIdx: 0})
-		} else if target.index == -1 {
-			// Target is on stack (ancestor) -- back edge.
-			bl.SetOutEdgeFlag(edgeIdx, EdgeFlagBack)
-		} else if target.visitCount > bl.visitCount {
-			// Target was discovered after bl -- forward edge.
-			bl.SetOutEdgeFlag(edgeIdx, EdgeFlagForward)
-		} else {
-			// Cross edge.
-			bl.SetOutEdgeFlag(edgeIdx, EdgeFlagCross)
-		}
-	}
-
-	// Re-order bg.blocks to match RPO indices, mirroring C++ findSpanningTree's
-	// "list = rpostorder" assignment. This ensures GetBlock(i) returns the block
-	// with RPO index i, which Heritage and CalcForwardDominator rely on.
-	// Unreachable blocks (index == -1) are placed at the end.
-	// C++ parity: block.cc BlockGraph::findSpanningTree (list = rpostorder, line 1135)
 	rpostorder := make([]*FlowBlock, n)
-	for _, bl := range bg.blocks {
-		if bl.index >= 0 && int(bl.index) < n {
-			rpostorder[bl.index] = bl
-		}
+	type frame struct {
+		bl   *FlowBlock
+		edge int
 	}
-	// Compact: put nil slots (unreachable) after reachable blocks.
-	j := 0
-	for _, bl := range rpostorder {
-		if bl != nil {
-			rpostorder[j] = bl
-			j++
-		}
-	}
-	// Append unreachable blocks at the end.
-	for _, bl := range bg.blocks {
-		if bl.index < 0 {
-			rpostorder[j] = bl
-			j++
-		}
-	}
-	bg.blocks = rpostorder
-}
-
-// CalcForwardDominator computes immediate dominators using the
-// Cooper-Harvey-Kennedy iterative algorithm. Blocks must have RPO indices
-// set (from FindSpanningTree).
-// C++ parity: block.cc BlockGraph::calcForwardDominator
-func (bg *BlockGraph) CalcForwardDominator() {
-	if len(bg.blocks) == 0 {
-		return
-	}
-
-	// Sort blocks by RPO index for iteration.
-	sorted := make([]*FlowBlock, len(bg.blocks))
-	copy(sorted, bg.blocks)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sorted[i].index < sorted[j].index
-	})
-
-	// Clear every dominator field first: a value left from an earlier
-	// calculation (before blocks were removed) can point at a block whose
-	// index no longer fits the ordering, and intersectDom then never meets.
-	// C++ parity: BlockGraph::calcForwardDominator ("Clear the dominator field").
-	for _, bl := range sorted {
-		bl.immedDom = nil
-	}
-	start := sorted[0]
-	start.immedDom = start
-
-	changed := true
-	for changed {
-		changed = false
-		for _, bl := range sorted {
-			if bl == start {
-				continue
+	const spanFlags = EdgeFlagTree | EdgeFlagForward | EdgeFlagCross | EdgeFlagBack
+	for repeat := 0; repeat < 2; repeat++ {
+		extraroots := false
+		rpostcount := n
+		rootindex := 0
+		preorder := 0
+		for _, bl := range bg.blocks {
+			for i := range bl.outEdges {
+				bl.outEdges[i].Label &^= spanFlags
 			}
-			var newIdom *FlowBlock
-			for i := 0; i < bl.SizeIn(); i++ {
-				pred := bl.inEdges[i].Point
-				if pred.immedDom == nil {
+			for i := range bl.inEdges {
+				bl.inEdges[i].Label &^= spanFlags
+			}
+		}
+		for preorder < n {
+			var startbl *FlowBlock
+			for rootindex < len(rootlist) {
+				startbl = rootlist[rootindex]
+				rootindex++
+				if startbl.visitCount == -1 {
+					break
+				}
+				// Not really a root any more (a root from the previous pass).
+				rootlist = append(rootlist[:rootindex-1], rootlist[rootindex:]...)
+				rootindex--
+				startbl = nil
+			}
+			if startbl == nil { // no obvious root left: take the next unvisited block
+				extraroots = true
+				for _, bl := range bg.blocks {
+					if bl.visitCount == -1 {
+						startbl = bl
+						break
+					}
+				}
+				rootlist = append(rootlist, startbl)
+				rootindex++
+			}
+			startbl.visitCount = int32(preorder)
+			preorder++
+			startbl.numDesc = 1
+			stack := []frame{{bl: startbl}}
+			for len(stack) > 0 {
+				top := &stack[len(stack)-1]
+				cur := top.bl
+				if top.edge >= cur.SizeOut() { // all children visited
+					stack = stack[:len(stack)-1]
+					rpostcount--
+					cur.index = int32(rpostcount)
+					rpostorder[rpostcount] = cur
+					if len(stack) > 0 {
+						stack[len(stack)-1].bl.numDesc += cur.numDesc
+					}
 					continue
 				}
-				if newIdom == nil {
-					newIdom = pred
-				} else {
-					newIdom = intersectDom(newIdom, pred)
+				edge := top.edge
+				top.edge++
+				child := cur.outEdges[edge].Point
+				switch {
+				case child.visitCount == -1:
+					cur.SetOutEdgeFlag(edge, EdgeFlagTree)
+					child.visitCount = int32(preorder)
+					preorder++
+					child.numDesc = 1
+					stack = append(stack, frame{bl: child})
+				case child.index == -1: // child is on the stack
+					cur.SetOutEdgeFlag(edge, EdgeFlagBack)
+				case cur.visitCount < child.visitCount:
+					cur.SetOutEdgeFlag(edge, EdgeFlagForward)
+				default:
+					cur.SetOutEdgeFlag(edge, EdgeFlagCross)
 				}
 			}
-			if newIdom != nil && bl.immedDom != newIdom {
-				bl.immedDom = newIdom
+		}
+		if !extraroots || repeat == 1 {
+			break
+		}
+		// Extra roots appeared: redo the order so the entry block comes first.
+		last := len(rootlist) - 1
+		rootlist[last], rootlist[origrootpos] = rootlist[origrootpos], rootlist[last]
+		reset()
+	}
+	if len(rootlist) > 1 { // the original head goes to the front of the list
+		last := len(rootlist) - 1
+		rootlist[0], rootlist[last] = rootlist[last], rootlist[0]
+	}
+	bg.blocks = rpostorder
+	return rootlist
+}
+
+// CalcForwardDominator computes immediate dominators with the
+// Cooper-Harvey-Kennedy iteration over the reverse post-order. Several roots
+// hang off a virtual root, which is dropped again afterward; roots end with a
+// nil dominator.
+// C++ parity: block.cc BlockGraph::calcForwardDominator.
+func (bg *BlockGraph) CalcForwardDominator(rootlist []*FlowBlock) {
+	n := len(bg.blocks)
+	if n == 0 {
+		return
+	}
+	numnodes := n - 1
+	postorder := make([]*FlowBlock, n, n+1)
+	for i, bl := range bg.blocks {
+		bl.immedDom = nil
+		postorder[numnodes-i] = bl
+	}
+	// The virtual root keeps the zero index of a fresh C++ FlowBlock, which
+	// the finger walk below relies on.
+	var virtualroot *FlowBlock
+	if len(rootlist) > 1 {
+		virtualroot = &FlowBlock{}
+		postorder = append(postorder, virtualroot)
+	}
+	b := postorder[len(postorder)-1]
+	if b.SizeIn() != 0 { // the root must have no in-edges
+		virtualroot = &FlowBlock{}
+		postorder = append(postorder, virtualroot)
+		b = virtualroot
+	}
+	// preds lists the in-edges of x plus the virtual root's edge into each
+	// root (C++ createVirtualRoot appends it with addInEdge).
+	preds := func(x *FlowBlock) []*FlowBlock {
+		res := make([]*FlowBlock, 0, x.SizeIn()+1)
+		for _, e := range x.inEdges {
+			res = append(res, e.Point)
+		}
+		if virtualroot != nil {
+			for _, r := range rootlist {
+				if r == x {
+					res = append(res, virtualroot)
+				}
+			}
+		}
+		return res
+	}
+	b.immedDom = b
+	if b == virtualroot {
+		for _, r := range rootlist {
+			r.immedDom = b
+		}
+	} else {
+		for _, e := range b.outEdges {
+			e.Point.immedDom = b
+		}
+	}
+	top := b
+	for changed := true; changed; {
+		changed = false
+		for i := len(postorder) - 2; i >= 0; i-- {
+			b := postorder[i]
+			if b.immedDom == top {
+				continue
+			}
+			in := preds(b)
+			var newIdom *FlowBlock
+			j := 0
+			for ; j < len(in); j++ { // first processed predecessor
+				newIdom = in[j]
+				if newIdom.immedDom != nil {
+					break
+				}
+			}
+			for j++; j < len(in); j++ {
+				rho := in[j]
+				if rho.immedDom == nil {
+					continue
+				}
+				f1, f2 := numnodes-int(rho.index), numnodes-int(newIdom.index)
+				for f1 != f2 {
+					for f1 < f2 {
+						f1 = numnodes - int(postorder[f1].immedDom.index)
+					}
+					for f2 < f1 {
+						f2 = numnodes - int(postorder[f2].immedDom.index)
+					}
+				}
+				newIdom = postorder[f1]
+			}
+			if b.immedDom != newIdom {
+				b.immedDom = newIdom
 				changed = true
 			}
 		}
 	}
-}
-
-// intersectDom walks both sides toward the root using RPO index comparison.
-func intersectDom(b1, b2 *FlowBlock) *FlowBlock {
-	for b1 != b2 {
-		for b1.index > b2.index {
-			b1 = b1.immedDom
+	if virtualroot != nil {
+		for _, bl := range bg.blocks {
+			if bl.immedDom == virtualroot {
+				bl.immedDom = nil
+			}
 		}
-		for b2.index > b1.index {
-			b2 = b2.immedDom
-		}
+	} else {
+		top.immedDom = nil
 	}
-	return b1
 }
 
-// StructureLoops calls FindSpanningTree then CalcForwardDominator.
-// C++ parity: block.cc BlockGraph::structureLoops
-func (bg *BlockGraph) StructureLoops() {
-	bg.FindSpanningTree()
-	bg.CalcForwardDominator()
+// StructureLoops builds the spanning tree and dominators and returns the
+// roots of the graph, entry first.
+// C++ parity: block.cc BlockGraph::structureLoops (irreducible-edge
+// detection is not ported) followed by calcForwardDominator.
+func (bg *BlockGraph) StructureLoops() []*FlowBlock {
+	rootlist := bg.FindSpanningTree()
+	bg.CalcForwardDominator(rootlist)
+	return rootlist
 }
 
 // OrderBlocks sorts the blocks into their final printing order.
