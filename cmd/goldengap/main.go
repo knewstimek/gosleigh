@@ -34,6 +34,7 @@
 package main
 
 import (
+	"bufio"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
@@ -41,7 +42,9 @@ import (
 	"os"
 	"runtime"
 	"runtime/debug"
+	"runtime/pprof"
 	"strconv"
+	"strings"
 	"time"
 
 	"gosleigh/pkg/address"
@@ -110,7 +113,15 @@ func main() {
 	flag.StringVar(&captureDir, "host-captures", "", "directory of per-function decompiler savefiles (<entry %08x>.xml, tools/realexe capture): their global data symbols extend the HostScope")
 	index := flag.Int("index", -1, "decompile only the golden at this index (-1 = all); lets a driver isolate each function in its own process")
 	memLimitMB := flag.Uint64("mem-limit-mb", 0, "exit with status 3 once the Go heap exceeds this many MB (0 = no limit)")
+	cpuProfile := flag.String("cpuprofile", "", "write a CPU profile to this file")
+	indices := flag.String("indices", "", "comma-separated golden indices; streams one JSON line per function to stdout as each finishes (a driver shards work across processes and recovers from a hang)")
 	flag.Parse()
+	if *cpuProfile != "" {
+		if f, err := os.Create(*cpuProfile); err == nil {
+			pprof.StartCPUProfile(f)
+			defer pprof.StopCPUProfile()
+		}
+	}
 
 	if *memLimitMB > 0 {
 		go memWatchdog(*memLimitMB << 20)
@@ -168,6 +179,31 @@ func main() {
 			os.Exit(1)
 		}
 		host = h
+	}
+
+	if *indices != "" {
+		w := bufio.NewWriter(os.Stdout)
+		for _, f := range strings.Split(*indices, ",") {
+			i, err := strconv.Atoi(f)
+			if err != nil || i < 0 || i >= len(gf.Functions) {
+				continue
+			}
+			fn := gf.Functions[i]
+			b := &loader.EngineBuilder{SLAPath: *slaPath, PspecPath: *pspecPath}
+			if sections != nil {
+				b.BaseAddr, b.Sections = uint64(fn.Entry), sections
+			}
+			start := time.Now()
+			res := decompileOne(fn, b, *cspecPath, *maxInstr, host)
+			line, _ := json.Marshal(struct {
+				Index int     `json:"index"`
+				Secs  float64 `json:"secs"`
+				funcResult
+			}{i, time.Since(start).Seconds(), res})
+			w.Write(append(line, '\n'))
+			w.Flush()
+		}
+		return
 	}
 
 	out := resultFile{Functions: make([]funcResult, 0, len(fns))}

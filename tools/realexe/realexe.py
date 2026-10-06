@@ -31,7 +31,10 @@ import json
 import shutil
 import os
 import struct
+import concurrent.futures
+import queue
 import subprocess
+import threading
 import sys
 import time
 from collections import Counter, defaultdict
@@ -202,6 +205,42 @@ def run_one(binary, base_args, idx, name, timeout_s):
 	return json.loads(r.stdout)["functions"][0], dt
 
 
+def run_shard(binary, base_args, idxs, fns, timeout_s, emit):
+	"""Decompile idxs in one process that streams a JSON line per function.
+	A function that produces no line within timeout_s, or kills the process,
+	is recorded as failed and the process restarts on the rest."""
+	remaining = list(idxs)
+	while remaining:
+		p = subprocess.Popen([binary] + base_args + ["-indices", ",".join(map(str, remaining))],
+			stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding="utf-8")
+		q = queue.Queue()
+		def pump():
+			for line in p.stdout:
+				q.put(line)
+			q.put(None)
+		threading.Thread(target=pump, daemon=True).start()
+		while remaining:
+			try:
+				line = q.get(timeout=timeout_s)
+			except queue.Empty:
+				p.kill()
+				i = remaining.pop(0)
+				emit({"index": i, "secs": timeout_s, "name": fns[i]["name"], "output": "",
+					"error": "TIMEOUT: exceeded %ds" % timeout_s})
+				break
+			if line is None:
+				rc = p.wait()
+				i = remaining.pop(0)
+				err = "MEMLIMIT: heap limit exceeded" if rc == 3 else \
+					"CRASH: rc=%d %s" % (rc, ((p.stderr.read() or "").strip().splitlines() or ["no stderr"])[-1])
+				emit({"index": i, "secs": 0, "name": fns[i]["name"], "output": "", "error": err})
+				break
+			rec = json.loads(line)
+			remaining.remove(rec["index"])
+			emit(rec)
+		p.wait()
+
+
 def do_run(work, timeout_s, mem_mb, fresh):
 	meta = load_meta(work)
 	want = meta.get("sha256", {}).get(os.path.basename(meta["exe"]))
@@ -234,17 +273,24 @@ def do_run(work, timeout_s, mem_mb, fresh):
 	captures = os.path.join(work, "captures")
 	if os.path.isdir(captures):
 		args += ["-host-captures", captures] # per-function host data symbols
-	with open(jsonl, "a", encoding="utf-8") as f:
-		for i, fn in enumerate(fns):
-			if i in done:
-				continue
-			res, dt = run_one(binary, args, i, fn["name"], timeout_s)
-			rec = {"index": i, "secs": round(dt, 2), **res}
-			f.write(json.dumps(rec) + "\n")
-			f.flush()
-			done[i] = rec
-			status = rec.get("error", "").split(":")[0] or "ok"
-			print("[%d/%d] %s %s %.1fs" % (i + 1, len(fns), fn["name"], status, dt), flush=True)
+	# Shard the functions over one process per core: each process decodes the
+	# .sla and loads the image once, then streams a result line per function.
+	todo = [i for i in range(len(fns)) if i not in done]
+	workers = max(1, min(len(todo), (os.cpu_count() or 4) - 2))
+	shards = [todo[k::workers] for k in range(workers)]
+	lock = threading.Lock()
+	with open(jsonl, "a", encoding="utf-8") as f, \
+			concurrent.futures.ThreadPoolExecutor(max_workers=workers) as pool:
+		def emit(rec):
+			rec["secs"] = round(rec.get("secs", 0), 2)
+			with lock:
+				f.write(json.dumps(rec) + "\n")
+				f.flush()
+				done[rec["index"]] = rec
+				status = rec.get("error", "").split(":")[0]
+				if status:
+					print("[%d] %s %s %.1fs" % (rec["index"], rec["name"], status, rec["secs"]), flush=True)
+		list(pool.map(lambda sh: run_shard(binary, args, sh, fns, timeout_s, emit), shards))
 
 	out = {"functions": [{k: done[i][k] for k in ("name", "output", "error") if k in done[i]} for i in range(len(fns))]}
 	with open(os.path.join(work, "gosleigh_out.json"), "w", encoding="utf-8") as f:
@@ -316,7 +362,7 @@ def main():
 	ps.add_argument("--max-bytes", type=int, default=4096)
 	pr = sub.add_parser("run")
 	pr.add_argument("--work")
-	pr.add_argument("--timeout", type=int, default=30, help="per-function seconds")
+	pr.add_argument("--timeout", type=int, default=10, help="per-function seconds")
 	pr.add_argument("--mem-mb", type=int, default=2048, help="per-function Go heap limit")
 	pr.add_argument("--fresh", action="store_true", help="discard results.jsonl instead of resuming")
 	pp = sub.add_parser("report")
@@ -326,7 +372,7 @@ def main():
 	pc.add_argument("entries", nargs="+", help="entry addresses (0x... or decimal)")
 	pm = sub.add_parser("measure", help="run --fresh + report (the progress metric)")
 	pm.add_argument("--work")
-	pm.add_argument("--timeout", type=int, default=30)
+	pm.add_argument("--timeout", type=int, default=10)
 	pm.add_argument("--mem-mb", type=int, default=2048)
 	args = p.parse_args()
 

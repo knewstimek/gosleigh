@@ -158,14 +158,15 @@ def do_run(goldens_path, out_path):
 	if not os.path.isfile(goldens_path):
 		print("run: ERROR -- golden file not found: %s" % goldens_path)
 		return False
-	cmd = [
-		"go", "run", "./cmd/goldengap",
-		"-goldens", goldens_path,
-		"-sla", DEFAULT_SLA,
-		"-pspec", DEFAULT_PSPEC,
-		"-cspec", DEFAULT_CSPEC,
-		"-out", out_path,
-	]
+	# One process decodes the .sla once (loader cache) and runs every golden;
+	# that beats one process per golden on Windows process start-up cost.
+	binary = os.path.join(REPO_ROOT, "local", "goldengap_gate.exe")
+	rc, _, _ = run_cmd(["go", "build", "-o", binary, "./cmd/goldengap"], cwd=REPO_ROOT, timeout=600, label="build")
+	if rc != 0:
+		print("run: FAILED (build returncode %d)" % rc)
+		return False
+	cmd = [binary, "-goldens", goldens_path, "-sla", DEFAULT_SLA, "-pspec", DEFAULT_PSPEC,
+		"-cspec", DEFAULT_CSPEC, "-out", out_path]
 	rc, _, _ = run_cmd(cmd, cwd=REPO_ROOT, timeout=240, label="cmd/goldengap")
 	if rc != 0:
 		print("run: FAILED (cmd/goldengap returncode %d)" % rc)

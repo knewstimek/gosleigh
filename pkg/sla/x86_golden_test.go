@@ -22,6 +22,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"testing"
 
 	"gosleigh/pkg/address"
@@ -49,21 +50,9 @@ func goldenEngineX86(program []byte) (*sla.Engine, address.Address, error) {
 	// x86_golden_test.go lives at pkg/sla/; x86-packed.sla is at pkg/sla/testdata/x86-packed.sla
 	slaPath := filepath.Join(filepath.Dir(file), "testdata", "x86-packed.sla")
 
-	data, err := os.ReadFile(slaPath)
+	boundaries, xrefs, err := decodeX86Once(slaPath)
 	if err != nil {
-		return nil, address.Address{}, fmt.Errorf("read sla file: %w", err)
-	}
-	container, err := sla.Read(bytes.NewReader(data))
-	if err != nil {
-		return nil, address.Address{}, fmt.Errorf("sla.Read: %w", err)
-	}
-	boundaries, err := sla.DecodeBoundariesPayload(container.Payload)
-	if err != nil {
-		return nil, address.Address{}, fmt.Errorf("DecodeBoundariesPayload: %w", err)
-	}
-	xrefs, err := boundaries.BuildXrefs()
-	if err != nil {
-		return nil, address.Address{}, fmt.Errorf("BuildXrefs: %w", err)
+		return nil, address.Address{}, err
 	}
 
 	var ram *address.Space
@@ -140,123 +129,123 @@ func TestGoldenX86(t *testing.T) {
 		name string
 		prog []byte
 	}{
-		{"x86_NOP",           []byte{0x90}},
-		{"x86_RET",           []byte{0xC3}},
-		{"x86_PUSH_EBP",      []byte{0x55}},
-		{"x86_MOV_EBX_EAX",   []byte{0x89, 0xC3}},
+		{"x86_NOP", []byte{0x90}},
+		{"x86_RET", []byte{0xC3}},
+		{"x86_PUSH_EBP", []byte{0x55}},
+		{"x86_MOV_EBX_EAX", []byte{0x89, 0xC3}},
 		{"x86_MOV_EAX_imm32", []byte{0xB8, 0x01, 0x00, 0x00, 0x00}},
-		{"x86_ADD_EAX_EBX",   []byte{0x01, 0xD8}},
-		{"x86_SUB_EAX_EBX",   []byte{0x29, 0xD8}},
-		{"x86_XOR_EAX_EAX",   []byte{0x31, 0xC0}},
-		{"x86_POP_EBP",       []byte{0x5D}},
-		{"x86_JMP_short",     []byte{0xEB, 0x00}},
-		{"x86_DEC_ECX",       []byte{0x49}},
-		{"x86_JNE_back",      []byte{0x75, 0xFE}},
-		{"x86_CALL_rel32",    []byte{0xE8, 0x10, 0x00, 0x00, 0x00}},
-		{"x86_JE_fwd",        []byte{0x74, 0x02}},
-		{"x86_TEST_EAX_EAX",  []byte{0x85, 0xC0}},
-		{"x86_JNS_fwd",       []byte{0x79, 0x04}},
-		{"x86_NEG_EAX",       []byte{0xF7, 0xD8}},
-		{"x86_IMUL_EAX_EBX",  []byte{0x0F, 0xAF, 0xC3}},
-		{"x86_MUL_EBX",       []byte{0xF7, 0xE3}},
-		{"x86_CDQ",           []byte{0x99}},
-		{"x86_IDIV_ECX",      []byte{0xF7, 0xF9}},
-		{"x86_DIV_ECX",       []byte{0xF7, 0xF1}},
-		{"x86_SHL_EAX_imm8",  []byte{0xC1, 0xE0, 0x02}},
-		{"x86_SHR_EAX_imm8",  []byte{0xC1, 0xE8, 0x02}},
-		{"x86_SAR_EAX_imm8",  []byte{0xC1, 0xF8, 0x02}},
-		{"x86_OR_EAX_EBX",   []byte{0x09, 0xD8}},
-		{"x86_AND_EAX_EBX",  []byte{0x21, 0xD8}},
-		{"x86_INC_EAX",      []byte{0x40}},
-		{"x86_CMP_EAX_EBX",  []byte{0x39, 0xD8}},
+		{"x86_ADD_EAX_EBX", []byte{0x01, 0xD8}},
+		{"x86_SUB_EAX_EBX", []byte{0x29, 0xD8}},
+		{"x86_XOR_EAX_EAX", []byte{0x31, 0xC0}},
+		{"x86_POP_EBP", []byte{0x5D}},
+		{"x86_JMP_short", []byte{0xEB, 0x00}},
+		{"x86_DEC_ECX", []byte{0x49}},
+		{"x86_JNE_back", []byte{0x75, 0xFE}},
+		{"x86_CALL_rel32", []byte{0xE8, 0x10, 0x00, 0x00, 0x00}},
+		{"x86_JE_fwd", []byte{0x74, 0x02}},
+		{"x86_TEST_EAX_EAX", []byte{0x85, 0xC0}},
+		{"x86_JNS_fwd", []byte{0x79, 0x04}},
+		{"x86_NEG_EAX", []byte{0xF7, 0xD8}},
+		{"x86_IMUL_EAX_EBX", []byte{0x0F, 0xAF, 0xC3}},
+		{"x86_MUL_EBX", []byte{0xF7, 0xE3}},
+		{"x86_CDQ", []byte{0x99}},
+		{"x86_IDIV_ECX", []byte{0xF7, 0xF9}},
+		{"x86_DIV_ECX", []byte{0xF7, 0xF1}},
+		{"x86_SHL_EAX_imm8", []byte{0xC1, 0xE0, 0x02}},
+		{"x86_SHR_EAX_imm8", []byte{0xC1, 0xE8, 0x02}},
+		{"x86_SAR_EAX_imm8", []byte{0xC1, 0xF8, 0x02}},
+		{"x86_OR_EAX_EBX", []byte{0x09, 0xD8}},
+		{"x86_AND_EAX_EBX", []byte{0x21, 0xD8}},
+		{"x86_INC_EAX", []byte{0x40}},
+		{"x86_CMP_EAX_EBX", []byte{0x39, 0xD8}},
 		{"x86_MOVZX_EAX_AL", []byte{0x0F, 0xB6, 0xC0}},
 		{"x86_MOVSX_EAX_AL", []byte{0x0F, 0xBE, 0xC0}},
 		{"x86_LEA_EAX_disp8", []byte{0x8D, 0x43, 0x04}},
-		{"x86_JGE_fwd",      []byte{0x7D, 0x02, 0x90}},
-		{"x86_PUSH_EBX",     []byte{0x53}},
-		{"x86_PUSH_ECX",     []byte{0x51}},
-		{"x86_POP_EBX",      []byte{0x5B}},
-		{"x86_DEC_EAX",      []byte{0x48}},
+		{"x86_JGE_fwd", []byte{0x7D, 0x02, 0x90}},
+		{"x86_PUSH_EBX", []byte{0x53}},
+		{"x86_PUSH_ECX", []byte{0x51}},
+		{"x86_POP_EBX", []byte{0x5B}},
+		{"x86_DEC_EAX", []byte{0x48}},
 		{"x86_XCHG_EAX_ECX", []byte{0x91}},
-		{"x86_JL_fwd",       []byte{0x7C, 0x02}},
-		{"x86_JLE_fwd",      []byte{0x7E, 0x02}},
-		{"x86_JG_fwd",       []byte{0x7F, 0x02}},
-		{"x86_JB_fwd",       []byte{0x72, 0x02}},
-		{"x86_JA_fwd",       []byte{0x77, 0x02}},
-		{"x86_PUSH_imm8",          []byte{0x6A, 0x05}},
-		{"x86_PUSH_imm32",         []byte{0x68, 0x78, 0x56, 0x34, 0x12}},
-		{"x86_NOT_EAX",            []byte{0xF7, 0xD0}},
+		{"x86_JL_fwd", []byte{0x7C, 0x02}},
+		{"x86_JLE_fwd", []byte{0x7E, 0x02}},
+		{"x86_JG_fwd", []byte{0x7F, 0x02}},
+		{"x86_JB_fwd", []byte{0x72, 0x02}},
+		{"x86_JA_fwd", []byte{0x77, 0x02}},
+		{"x86_PUSH_imm8", []byte{0x6A, 0x05}},
+		{"x86_PUSH_imm32", []byte{0x68, 0x78, 0x56, 0x34, 0x12}},
+		{"x86_NOT_EAX", []byte{0xF7, 0xD0}},
 		{"x86_MOV_EBP_minus4_EAX", []byte{0x89, 0x45, 0xFC}},
 		{"x86_MOV_EAX_EBP_minus4", []byte{0x8B, 0x45, 0xFC}},
-		{"x86_SUB_ESP_imm8",       []byte{0x83, 0xEC, 0x04}},
-		{"x86_SHL_EAX_1",          []byte{0xD1, 0xE0}},
-		{"x86_CALL_EAX",      []byte{0xFF, 0xD0}},
-		{"x86_CALL_mem_EAX",  []byte{0xFF, 0x10}},
-		{"x86_SETE_AL",       []byte{0x0F, 0x94, 0xC0}},
-		{"x86_SETNE_AL",      []byte{0x0F, 0x95, 0xC0}},
-		{"x86_SETL_AL",       []byte{0x0F, 0x9C, 0xC0}},
-		{"x86_SETGE_AL",      []byte{0x0F, 0x9D, 0xC0}},
-		{"x86_MOVZX_EAX_AX",  []byte{0x0F, 0xB7, 0xC0}},
-		{"x86_ADC_EAX_EBX",   []byte{0x11, 0xD8}},
-		{"x86_SBB_EAX_EBX",   []byte{0x19, 0xD8}},
-		{"x86_ROR_EAX_imm8",  []byte{0xC1, 0xC8, 0x03}},
-		{"x86_ROL_EAX_imm8",  []byte{0xC1, 0xC0, 0x03}},
-		{"x86_LEAVE",          []byte{0xC9}},
-		{"x86_CWDE",           []byte{0x98}},
-		{"x86_CMOVE_EAX_EBX",  []byte{0x0F, 0x44, 0xC3}},
+		{"x86_SUB_ESP_imm8", []byte{0x83, 0xEC, 0x04}},
+		{"x86_SHL_EAX_1", []byte{0xD1, 0xE0}},
+		{"x86_CALL_EAX", []byte{0xFF, 0xD0}},
+		{"x86_CALL_mem_EAX", []byte{0xFF, 0x10}},
+		{"x86_SETE_AL", []byte{0x0F, 0x94, 0xC0}},
+		{"x86_SETNE_AL", []byte{0x0F, 0x95, 0xC0}},
+		{"x86_SETL_AL", []byte{0x0F, 0x9C, 0xC0}},
+		{"x86_SETGE_AL", []byte{0x0F, 0x9D, 0xC0}},
+		{"x86_MOVZX_EAX_AX", []byte{0x0F, 0xB7, 0xC0}},
+		{"x86_ADC_EAX_EBX", []byte{0x11, 0xD8}},
+		{"x86_SBB_EAX_EBX", []byte{0x19, 0xD8}},
+		{"x86_ROR_EAX_imm8", []byte{0xC1, 0xC8, 0x03}},
+		{"x86_ROL_EAX_imm8", []byte{0xC1, 0xC0, 0x03}},
+		{"x86_LEAVE", []byte{0xC9}},
+		{"x86_CWDE", []byte{0x98}},
+		{"x86_CMOVE_EAX_EBX", []byte{0x0F, 0x44, 0xC3}},
 		{"x86_CMOVNE_EAX_EBX", []byte{0x0F, 0x45, 0xC3}},
 		{"x86_CMOVGE_EAX_EBX", []byte{0x0F, 0x4D, 0xC3}},
-		{"x86_CMOVL_EAX_EBX",  []byte{0x0F, 0x4C, 0xC3}},
-		{"x86_CMOVG_EAX_EBX",  []byte{0x0F, 0x4F, 0xC3}},
-		{"x86_BSWAP_EAX",      []byte{0x0F, 0xC8}},
-		{"x86_OR_EAX_imm8",       []byte{0x83, 0xC8, 0x05}},
-		{"x86_AND_EAX_imm8",      []byte{0x83, 0xE0, 0x0F}},
-		{"x86_XOR_EAX_imm8",      []byte{0x83, 0xF0, 0x0F}},
-		{"x86_CMP_EAX_imm8",      []byte{0x83, 0xF8, 0x05}},
+		{"x86_CMOVL_EAX_EBX", []byte{0x0F, 0x4C, 0xC3}},
+		{"x86_CMOVG_EAX_EBX", []byte{0x0F, 0x4F, 0xC3}},
+		{"x86_BSWAP_EAX", []byte{0x0F, 0xC8}},
+		{"x86_OR_EAX_imm8", []byte{0x83, 0xC8, 0x05}},
+		{"x86_AND_EAX_imm8", []byte{0x83, 0xE0, 0x0F}},
+		{"x86_XOR_EAX_imm8", []byte{0x83, 0xF0, 0x0F}},
+		{"x86_CMP_EAX_imm8", []byte{0x83, 0xF8, 0x05}},
 		{"x86_IMUL_EAX_EBX_imm8", []byte{0x6B, 0xC3, 0x05}},
-		{"x86_JMP_EAX",           []byte{0xFF, 0xE0}},
-		{"x86_JMP_mem_EAX",       []byte{0xFF, 0x20}},
-		{"x86_REP_MOVSB",         []byte{0xF3, 0xA4}},
-		{"x86_REP_MOVSD",         []byte{0xF3, 0xA5}},
-		{"x86_REP_STOSD",         []byte{0xF3, 0xAB}},
-		{"x86_REPNE_SCASB",       []byte{0xF2, 0xAE}},
-		{"x86_SCASB",             []byte{0xAE}},
-		{"x86_ENTER_8",           []byte{0xC8, 0x08, 0x00, 0x00}},
-		{"x86_MOV_EAX_EBX_disp8",    []byte{0x8B, 0x43, 0x08}},
-		{"x86_MOV_EBX_disp8_EAX",    []byte{0x89, 0x43, 0x08}},
+		{"x86_JMP_EAX", []byte{0xFF, 0xE0}},
+		{"x86_JMP_mem_EAX", []byte{0xFF, 0x20}},
+		{"x86_REP_MOVSB", []byte{0xF3, 0xA4}},
+		{"x86_REP_MOVSD", []byte{0xF3, 0xA5}},
+		{"x86_REP_STOSD", []byte{0xF3, 0xAB}},
+		{"x86_REPNE_SCASB", []byte{0xF2, 0xAE}},
+		{"x86_SCASB", []byte{0xAE}},
+		{"x86_ENTER_8", []byte{0xC8, 0x08, 0x00, 0x00}},
+		{"x86_MOV_EAX_EBX_disp8", []byte{0x8B, 0x43, 0x08}},
+		{"x86_MOV_EBX_disp8_EAX", []byte{0x89, 0x43, 0x08}},
 		{"x86_MOV_EAX_SIB_ECX_EAX4", []byte{0x8B, 0x04, 0x81}},
-		{"x86_LEA_EAX_SIB",          []byte{0x8D, 0x04, 0x8B}},
-		{"x86_MOV_EAX_SIB_disp8",    []byte{0x8B, 0x44, 0x8D, 0x08}},
-		{"x86_MOV_EAX_EAX_EBX",      []byte{0x8B, 0x04, 0x03}},
+		{"x86_LEA_EAX_SIB", []byte{0x8D, 0x04, 0x8B}},
+		{"x86_MOV_EAX_SIB_disp8", []byte{0x8B, 0x44, 0x8D, 0x08}},
+		{"x86_MOV_EAX_EAX_EBX", []byte{0x8B, 0x04, 0x03}},
 		// D17: disp32 memory + global var access + ESI/EDI
 		{"x86_MOV_EAX_EBX_disp32", []byte{0x8B, 0x83, 0x00, 0x01, 0x00, 0x00}},
 		{"x86_MOV_EBX_disp32_EAX", []byte{0x89, 0x83, 0x00, 0x01, 0x00, 0x00}},
-		{"x86_MOV_EAX_abs32",      []byte{0xA1, 0x78, 0x56, 0x34, 0x12}},
-		{"x86_MOV_abs32_EAX",      []byte{0xA3, 0x78, 0x56, 0x34, 0x12}},
-		{"x86_PUSH_ESI",            []byte{0x56}},
-		{"x86_POP_ESI",             []byte{0x5E}},
-		{"x86_PUSH_EDI",            []byte{0x57}},
-		{"x86_POP_EDI",             []byte{0x5F}},
-		{"x86_MOV_ESI_EAX",         []byte{0x89, 0xC6}},
+		{"x86_MOV_EAX_abs32", []byte{0xA1, 0x78, 0x56, 0x34, 0x12}},
+		{"x86_MOV_abs32_EAX", []byte{0xA3, 0x78, 0x56, 0x34, 0x12}},
+		{"x86_PUSH_ESI", []byte{0x56}},
+		{"x86_POP_ESI", []byte{0x5E}},
+		{"x86_PUSH_EDI", []byte{0x57}},
+		{"x86_POP_EDI", []byte{0x5F}},
+		{"x86_MOV_ESI_EAX", []byte{0x89, 0xC6}},
 		// D18: misc opcode gaps -- MOVSX 16-bit reg, MOVSX/MOVZX memory, TEST imm32, 66h-prefix MOV
-		{"x86_MOVSX_EAX_AX",      []byte{0x0F, 0xBF, 0xC0}},
-		{"x86_MOVSX_EAX_mem",     []byte{0x0F, 0xBE, 0x00}},
-		{"x86_MOVZX_EAX_mem",     []byte{0x0F, 0xB6, 0x00}},
-		{"x86_TEST_EAX_imm32",    []byte{0xA9, 0xFF, 0xFF, 0xFF, 0xFF}},
-		{"x86_MOV_AX_EBP_disp8",  []byte{0x66, 0x8B, 0x45, 0x08}},
+		{"x86_MOVSX_EAX_AX", []byte{0x0F, 0xBF, 0xC0}},
+		{"x86_MOVSX_EAX_mem", []byte{0x0F, 0xBE, 0x00}},
+		{"x86_MOVZX_EAX_mem", []byte{0x0F, 0xB6, 0x00}},
+		{"x86_TEST_EAX_imm32", []byte{0xA9, 0xFF, 0xFF, 0xFF, 0xFF}},
+		{"x86_MOV_AX_EBP_disp8", []byte{0x66, 0x8B, 0x45, 0x08}},
 		// D19: JMP rel32, PUSH/POP short form, JO
 		{"x86_JMP_rel32", []byte{0xE9, 0x00, 0x01, 0x00, 0x00}},
-		{"x86_PUSH_EAX",  []byte{0x50}},
-		{"x86_POP_EAX",   []byte{0x58}},
-		{"x86_PUSH_EDX",  []byte{0x52}},
-		{"x86_POP_EDX",   []byte{0x5A}},
-		{"x86_JO_fwd",    []byte{0x70, 0x08}},
+		{"x86_PUSH_EAX", []byte{0x50}},
+		{"x86_POP_EAX", []byte{0x58}},
+		{"x86_PUSH_EDX", []byte{0x52}},
+		{"x86_POP_EDX", []byte{0x5A}},
+		{"x86_JO_fwd", []byte{0x70, 0x08}},
 		// D20: missing integer opcodes + FP decode probes
-		{"x86_JNO_fwd",           []byte{0x71, 0x08}},
-		{"x86_XCHG_mem_EBX_EAX",  []byte{0x87, 0x03}},
-		{"x86_FLD1",               []byte{0xD9, 0xE8}},
-		{"x86_FLDZ",               []byte{0xD9, 0xEE}},
-		{"x86_FSTP_m32",           []byte{0xD9, 0x1B}},
+		{"x86_JNO_fwd", []byte{0x71, 0x08}},
+		{"x86_XCHG_mem_EBX_EAX", []byte{0x87, 0x03}},
+		{"x86_FLD1", []byte{0xD9, 0xE8}},
+		{"x86_FLDZ", []byte{0xD9, 0xEE}},
+		{"x86_FSTP_m32", []byte{0xD9, 0x1B}},
 	}
 
 	update := os.Getenv("GOSLEIGH_UPDATE_GOLDEN") == "1"
@@ -322,4 +311,35 @@ func TestGoldenX86(t *testing.T) {
 			compareGolden(t, want, got)
 		})
 	}
+}
+
+// The decoded .sla is read-only once built; decode it once for all cases.
+var x86Decode struct {
+	once       sync.Once
+	boundaries *sla.Boundaries
+	xrefs      *sla.XRefs
+	err        error
+}
+
+func decodeX86Once(slaPath string) (*sla.Boundaries, *sla.XRefs, error) {
+	x86Decode.once.Do(func() {
+		data, err := os.ReadFile(slaPath)
+		if err != nil {
+			x86Decode.err = fmt.Errorf("read sla file: %w", err)
+			return
+		}
+		container, err := sla.Read(bytes.NewReader(data))
+		if err != nil {
+			x86Decode.err = fmt.Errorf("sla.Read: %w", err)
+			return
+		}
+		if x86Decode.boundaries, err = sla.DecodeBoundariesPayload(container.Payload); err != nil {
+			x86Decode.err = fmt.Errorf("DecodeBoundariesPayload: %w", err)
+			return
+		}
+		if x86Decode.xrefs, err = x86Decode.boundaries.BuildXrefs(); err != nil {
+			x86Decode.err = fmt.Errorf("BuildXrefs: %w", err)
+		}
+	})
+	return x86Decode.boundaries, x86Decode.xrefs, x86Decode.err
 }

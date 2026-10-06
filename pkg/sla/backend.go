@@ -58,7 +58,7 @@ type Backend struct {
 	mu sync.RWMutex
 
 	// image stores byte-addressable instruction data, keyed by absolute address.
-	image map[address.Address]byte
+	image []imageChunk
 
 	// rawImage mirrors RawLoadImage file-backed bytes for standalone instruction fetch.
 	rawImage *backendRawInstructionImage
@@ -89,7 +89,6 @@ type Backend struct {
 // NewBackend creates an empty in-memory backend.
 func NewBackend() *Backend {
 	return &Backend{
-		image:            make(map[address.Address]byte),
 		contextVariables: make(map[string]backendContextVariable),
 		allowSet:         true,
 	}
@@ -254,11 +253,28 @@ func (b *Backend) SetInstructionBytes(addr address.Address, data []byte) error {
 	}
 
 	b.mu.Lock()
-	for i := range data {
-		b.image[address.Address{Space: addr.Space, Offset: addr.Offset + uint64(i)}] = data[i]
-	}
+	b.image = append(b.image, imageChunk{space: addr.Space, start: addr.Offset, data: append([]byte(nil), data...)})
 	b.mu.Unlock()
 	return nil
+}
+
+// imageChunk is one contiguous run of image bytes; later chunks override
+// earlier ones where they overlap.
+type imageChunk struct {
+	space *address.Space
+	start uint64
+	data  []byte
+}
+
+// imageByte returns the image byte at addr from the latest chunk covering it.
+func (b *Backend) imageByte(addr address.Address) (byte, bool) {
+	for i := len(b.image) - 1; i >= 0; i-- {
+		c := &b.image[i]
+		if c.space == addr.Space && addr.Offset >= c.start && addr.Offset-c.start < uint64(len(c.data)) {
+			return c.data[addr.Offset-c.start], true
+		}
+	}
+	return 0, false
 }
 
 // SetDefaultContextWords defines the default context blob for addresses without overlays.
@@ -432,7 +448,7 @@ func (b *Backend) LoadInstructionBytes(addr address.Address, size int) ([]byte, 
 	out := make([]byte, size)
 
 	b.mu.RLock()
-	first, ok := b.image[addr]
+	first, ok := b.imageByte(addr)
 	if ok {
 		out[0] = first
 
@@ -443,7 +459,7 @@ func (b *Backend) LoadInstructionBytes(addr address.Address, size int) ([]byte, 
 				return nil, false, fmt.Errorf("load instruction bytes: address overflow at index %d", i)
 			}
 			key := address.Address{Space: addr.Space, Offset: off}
-			val, found := b.image[key]
+			val, found := b.imageByte(key)
 			if !found {
 				// RawLoadImage::loadFill() behavior: once the read starts, trailing unavailable
 				// bytes are zero-filled instead of treated as a hard miss.

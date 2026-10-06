@@ -15,14 +15,14 @@
 // Package loader provides a high-level pipeline for building a translation
 // Engine from .sla and optional .pspec files plus a raw binary image.
 // It consolidates the steps that every caller must perform:
-//   1. Read + decode the .sla container
-//   2. Decode boundaries payload
-//   3. Build cross-references (xrefs)
-//   4. Locate the RAM/default address space
-//   5. Create and configure the backend (context vars, pspec defaults)
-//   6. Load binary bytes into the backend
-//   7. Build the lowering context with the SpacesByIndex[0]=ConstantSpace fix
-//   8. Create the Engine
+//  1. Read + decode the .sla container
+//  2. Decode boundaries payload
+//  3. Build cross-references (xrefs)
+//  4. Locate the RAM/default address space
+//  5. Create and configure the backend (context vars, pspec defaults)
+//  6. Load binary bytes into the backend
+//  7. Build the lowering context with the SpacesByIndex[0]=ConstantSpace fix
+//  8. Create the Engine
 package loader
 
 import (
@@ -30,6 +30,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"sync"
 
 	"gosleigh/pkg/address"
 	"gosleigh/pkg/sla"
@@ -97,24 +98,10 @@ func (b *EngineBuilder) Build() (*sla.Engine, address.Address, error) {
 		return nil, address.Address{}, fmt.Errorf("loader: SLAPath is required")
 	}
 
-	// --- Step 1: read and decode the .sla file ---
-	rawData, err := os.ReadFile(b.SLAPath)
+	// --- Steps 1-2: decode the .sla and build cross-references (cached) ---
+	boundaries, xrefs, err := decodeSLA(b.SLAPath)
 	if err != nil {
-		return nil, address.Address{}, fmt.Errorf("loader: read sla %q: %w", b.SLAPath, err)
-	}
-	container, err := sla.Read(bytes.NewReader(rawData))
-	if err != nil {
-		return nil, address.Address{}, fmt.Errorf("loader: sla.Read: %w", err)
-	}
-	boundaries, err := sla.DecodeBoundariesPayload(container.Payload)
-	if err != nil {
-		return nil, address.Address{}, fmt.Errorf("loader: DecodeBoundariesPayload: %w", err)
-	}
-
-	// --- Step 2: build cross-references ---
-	xrefs, err := boundaries.BuildXrefs()
-	if err != nil {
-		return nil, address.Address{}, fmt.Errorf("loader: BuildXrefs: %w", err)
+		return nil, address.Address{}, err
 	}
 
 	// --- Step 3: locate default address space ---
@@ -247,4 +234,41 @@ func (b *EngineBuilder) Build() (*sla.Engine, address.Address, error) {
 	}
 	engine.SetLanedRegisters(pspecData.LanedRegisters)
 	return engine, entryAddr, nil
+}
+
+// slaCache holds decoded .sla files by path. The decoded boundaries and
+// cross-references are read-only after BuildXrefs, so one process decoding
+// many functions decodes each .sla once.
+var slaCache sync.Map // path -> *slaEntry
+
+type slaEntry struct {
+	once       sync.Once
+	boundaries *sla.Boundaries
+	xrefs      *sla.XRefs
+	err        error
+}
+
+func decodeSLA(path string) (*sla.Boundaries, *sla.XRefs, error) {
+	v, _ := slaCache.LoadOrStore(path, &slaEntry{})
+	e := v.(*slaEntry)
+	e.once.Do(func() {
+		rawData, err := os.ReadFile(path)
+		if err != nil {
+			e.err = fmt.Errorf("loader: read sla %q: %w", path, err)
+			return
+		}
+		container, err := sla.Read(bytes.NewReader(rawData))
+		if err != nil {
+			e.err = fmt.Errorf("loader: sla.Read: %w", err)
+			return
+		}
+		if e.boundaries, err = sla.DecodeBoundariesPayload(container.Payload); err != nil {
+			e.err = fmt.Errorf("loader: DecodeBoundariesPayload: %w", err)
+			return
+		}
+		if e.xrefs, err = e.boundaries.BuildXrefs(); err != nil {
+			e.err = fmt.Errorf("loader: BuildXrefs: %w", err)
+		}
+	})
+	return e.boundaries, e.xrefs, e.err
 }
