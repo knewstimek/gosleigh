@@ -133,6 +133,9 @@ type printCState struct {
 	// ghidraFormat mirrors PrintC.ghidraFormat for use during emit.
 	// Controls function brace placement, else newline style, and comma spacing.
 	ghidraFormat bool
+	// sigLayout splits the rendered signature into the pieces
+	// emitFunctionDeclaration emits separately; nil when it cannot.
+	sigLayout *sigLayout
 
 	// commentPos maps a basic block index to the warning comments PrintC must
 	// emit within that block, ordered by the intra-block position they precede.
@@ -235,7 +238,7 @@ func (s *printCState) emit() (string, error) {
 			}
 			s.lang.Newline()
 		}
-		s.lang.Token(s.renderFunctionSignature(retType))
+		s.emitSignature(s.renderFunctionSignature(retType))
 		s.lang.Newline()
 		s.lang.Newline()
 		s.lang.Token("{")
@@ -1165,6 +1168,10 @@ func (s *printCState) renderFunctionSignature(retType Datatype) string {
 	// C++ parity: printc.cc PrintC::emitPrototypeOutput + emit->spaces(1).
 	if s.printer.ghidraFormat {
 		sig = strings.Replace(sig, "*"+displayName+"(", "* "+displayName+"(", 1)
+	}
+	s.sigLayout = nil
+	if s.printer.ghidraFormat {
+		s.sigLayout = newSigLayout(s.decls, sig, name, strings.TrimSuffix(displayName, name), allTypes, allNames)
 	}
 	return sig
 }

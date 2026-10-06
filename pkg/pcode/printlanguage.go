@@ -427,28 +427,6 @@ func scopedNameExpr(name string) ExprFragment {
 		kind: fragBinary, print1: "::", kids: []ExprFragment{left, right}, parens: []bool{false, false}}}
 }
 
-// typeExpr splits a "base **" type name into the type_expr_space and
-// ptr_expr operators Ghidra pushes for it; other shapes stay flat.
-// C++ parity: PrintC::pushTypeStart / pushTypeEnd with a blank identifier.
-func typeExpr(typeName string) ExprFragment {
-	flat := ExprFragment{Text: typeName, Precedence: ExprPrecPrimary}
-	stars := len(typeName) - len(strings.TrimRight(typeName, "*"))
-	base := typeName[:len(typeName)-stars]
-	if stars == 0 || !strings.HasSuffix(base, " ") || strings.ContainsAny(base, "()[]") {
-		return flat
-	}
-	base = base[:len(base)-1]
-	ptr := ExprFragment{Text: "", Precedence: ExprPrecPrimary}
-	for i := 0; i < stars; i++ {
-		ptr = ExprFragment{Text: "*" + ptr.Text, Precedence: ExprPrecPrimary, node: &fragNode{
-			kind: fragUnaryPrefix, print1: "*", kids: []ExprFragment{ptr}, parens: []bool{false}}}
-	}
-	return ExprFragment{Text: typeName, Precedence: ExprPrecPrimary, node: &fragNode{
-		kind: fragSpace, spacing: 1,
-		kids:   []ExprFragment{{Text: base, Precedence: ExprPrecPrimary}, ptr},
-		parens: []bool{false, false}}}
-}
-
 func (pl *PrintLanguage) EmitChildExpr(expr ExprFragment, parent ExprPrecedence, pos ExprPosition, assoc ExprAssociativity) {
 	pl.Token(pl.ExprString(expr, parent, pos, assoc))
 }
@@ -568,7 +546,7 @@ func (pl *PrintLanguage) CastExpr(typeName string, expr ExprFragment) ExprFragme
 		Text:       "(" + typeName + ")" + parenText(expr.Text, paren),
 		Precedence: ExprPrecCast,
 		node: &fragNode{kind: fragPreSurround, print1: "(", print2: ")",
-			kids: []ExprFragment{typeExpr(typeName), expr}, parens: []bool{false, paren}},
+			kids: []ExprFragment{declExpr(typeName, ""), expr}, parens: []bool{false, paren}},
 	}
 }
 
