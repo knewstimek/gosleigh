@@ -29,6 +29,8 @@
 - `realexe.py analyze|sample|measure|capture`, `gaps.py`(불일치 유형 집계), `difffn.py`(인덱스별 diff).
 - **`capture`가 핵심**: `GenCapture.java`가 Ghidra 디버그 savefile을 만들고, `tools/decomp_dbg.exe`가 그 실바이너리
   맥락 그대로 C++ 코어를 돌린다(골든을 재현함). 갭 원인은 이걸로 실측한다.
+- GenCapture는 `setOptions` 없이 openProgram이 프로그램 옵션을 쓰게 한다(protoeval=cspec 병합 모델). 예전 캡처의
+  `<protoeval>default</protoeval>`은 thiscall 골든을 재현 못하므로 병합 모델 이름으로 바꿔 쓴다.
 - decomp_dbg는 readonly 데이터를 상수로 접어 Java 골든과 다를 수 있다. 캡처 사본에서 `readonly="true"`를
   `false`로 바꾸면 골든과 같아진다(전역 문자열/테이블 함수).
 
@@ -50,6 +52,5 @@ Ghidra API로 Java와 같은 값을 덤프한다.
 | S | 출력에 `struct X { }` 정의가 찍힘(Ghidra는 함수 출력에 타입 정의 없음) | printc.cc docFunction | [142][177][196] |
 | P | 현재 함수의 잠긴 호스트 프로토타입: 반환형/레지스터 파라미터 타입/스택 파라미터 이름은 적용(ApplyHostSelfPrototype). 남음: C++처럼 입력 잠금으로 두고 잠긴 저장소에서 입력 varnode 생성(ActionPrototypeTypes locked-input, ActionInputPrototype updateInputNoTypes) -- 지금은 파라미터를 추정한 뒤 덮어써서 크기가 다른 읽기(1바이트)와 일부 이름이 어긋남 | fspec.cc, coreaction.cc ActionPrototypeTypes/ActionInputPrototype | [174][183] |
 | U | unique 공간을 heritage하지 않음(C++ UniqueSpace는 heritaged). 16바이트 unique 쓰기의 4바이트 조각 읽기가 SUBPIECE로 연결되지 않아 SIMD 값이 tmp_/0으로 샘([188][190]). 켜면 nodejoin이 만든 unique phi 뒤에 나중 heritage가 자기참조 phi를 만들어 회귀(181) -- heritage 재방문(prev==2)과 rename 경로 대조 필요 | heritage.cc heritage/rename, space.cc UniqueSpace | [188][190] |
-| E | 캡처 savefile은 protoeval=default라 하네스의 현재 함수 평가 모델이 __stdcall. Java 실실행은 cspec eval_current(병합 모델)라 thiscall 함수는 하네스가 골든을 재현 못함. ECX 오인([118][199])은 하네스 근거로 판단 금지 | GenCapture.java, options.cc OptionProtoEval | [118][199] |
 | A | ActionDeadCode가 directWrite 아닌 addrforce를 지우지 않음. 지우려면 Heritage::guardLoads/handleNewLoadCopies 선행 필요(단독 적용 시 [195] 회귀) | coreaction.cc ActionDeadCode, heritage.cc | [183] |
 | - | known mismatch: RulePieceStructure 스텁, TypePointerRel(propagateAddIn2Out가 구조체 내부에서 nil -> [142]), BlockBasic 커버 시작 주소, forceOutputNum(멀티고토 self edge), DivTermAdd 128비트, guardCallOverlappingInput, LoadGuard(ValueSet), clearDeadVarnodes 스택/destroy, cseElimination 블록 끝 주소 | ruleaction.cc, heritage.cc | |

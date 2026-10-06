@@ -35,7 +35,9 @@ public class GenCapture extends GhidraScript {
 			}
 			File out = new File(outDir, String.format("%08x.xml", off));
 			DecompInterface iface = new DecompInterface();
-			iface.setOptions(new ghidra.app.decompiler.DecompileOptions());
+			// No setOptions: openProgram then installs the program's options
+			// (grabFromProgram), as for the goldens -- e.g. protoeval is the
+			// cspec eval_current_prototype, not "default".
 			iface.enableDebug(out);
 			iface.openProgram(currentProgram);
 			iface.decompileFunction(f, 60, monitor);
