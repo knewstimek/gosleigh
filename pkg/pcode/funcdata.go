@@ -1948,6 +1948,21 @@ func (fd *Funcdata) AddJumpTable(jt *JumpTable) {
 	fd.jumpTables = append(fd.jumpTables, jt)
 }
 
+// RemoveJumpTable drops jt and clears the switch-out flag of its block.
+// C++ parity: Funcdata::removeJumpTable.
+func (fd *Funcdata) RemoveJumpTable(jt *JumpTable) {
+	remain := fd.jumpTables[:0]
+	for _, t := range fd.jumpTables {
+		if t != jt {
+			remain = append(remain, t)
+		}
+	}
+	fd.jumpTables = remain
+	if op := jt.IndirectOp(); op != nil && op.Parent() != nil {
+		op.Parent().ClearFlag(BlockFlagSwitchOut)
+	}
+}
+
 // FindJumpTable locates a jump table by the BRANCHIND PcodeOp it models.
 // C++ parity: funcdata.hh Funcdata::findJumpTable
 func (fd *Funcdata) FindJumpTable(op *PcodeOp) *JumpTable {

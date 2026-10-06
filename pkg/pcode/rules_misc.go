@@ -1,6 +1,7 @@
 package pcode
 
 import (
+	"fmt"
 	"sort"
 	"math/bits"
 
@@ -15,21 +16,43 @@ func NewRuleSwitchSingle(group string) *RuleSwitchSingle {
 	return r
 }
 
+// apply turns a BRANCHIND whose block has a single successor into a BRANCH
+// to its one jump-table destination, warning when the table disagrees.
+// C++ parity: RuleSwitchSingle::applyOp.
 func (r *RuleSwitchSingle) apply(op *PcodeOp, data *Funcdata) int {
-	if op.NumInput() != 1 {
+	bb := op.Parent()
+	if bb.SizeOut() != 1 {
 		return 0
 	}
-	phi := definedBy(op.Input(0), CPUI_MULTIEQUAL)
-	if phi == nil || phi.NumInput() == 0 {
-		return 0
+	jt := data.FindJumpTable(op)
+	if jt == nil || jt.NumEntries() == 0 || !jt.IsLabelled() {
+		return 0 // labels must be recovered (this discovers multistage issues)
 	}
-	base := phi.Input(0)
-	for i := 1; i < phi.NumInput(); i++ {
-		if !sameValue(base, phi.Input(i)) {
-			return 0
+	addr := jt.AddressByIndex(0)
+	needwarning, allcasesmatch := false, false
+	if jt.NumEntries() != 1 {
+		needwarning, allcasesmatch = true, true
+		for i := 1; i < jt.NumEntries(); i++ {
+			if jt.AddressByIndex(i) != addr {
+				allcasesmatch = false
+				break
+			}
 		}
 	}
-	replaceInputSlot(data, op, 0, base)
+	if !op.Input(0).IsConstant() {
+		needwarning = true
+	}
+	if needwarning {
+		msg := "Switch with 1 destination removed at " + PrintRawAddr(op.Addr())
+		if allcasesmatch {
+			msg += fmt.Sprintf(" : %d cases all go to same destination", jt.NumEntries())
+		}
+		data.WarningHeader(msg)
+	}
+	data.OpSetOpcode(op, CPUI_BRANCH)
+	data.OpSetInput(op, data.NewCodeRef(addr), 0)
+	data.RemoveJumpTable(jt)
+	data.SetStructureGraph(NewBlockGraph()) // drop any switch block structure
 	return 1
 }
 
