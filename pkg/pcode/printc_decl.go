@@ -61,6 +61,12 @@ func (r *CDeclRenderer) TypeString(dt Datatype) string {
 
 func (r *CDeclRenderer) Declaration(dt Datatype, name string) string {
 	spec, decl := r.renderDeclaration(dt, name)
+	// The type name is a type token the Java PrettyPrinter cleans of
+	// characters illegal in C++ (EResult.conflict -> EResult_conflict).
+	// C++ (Java) parity: PrettyPrinter.getText (ClangTypeToken).
+	if spec != "" && !strings.Contains(spec, " ") {
+		spec = cppDisplayName(spec)
+	}
 	if decl == "" {
 		return spec
 	}
