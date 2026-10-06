@@ -471,13 +471,18 @@ func (p *ParamActive) TrialForInputVarnode(slot int) *ParamTrial {
 	if p == nil {
 		return nil
 	}
-	target := int32(slot + 1)
-	for i := range p.trial {
-		if p.trial[i].slot == target {
-			return &p.trial[i]
-		}
+	// The trials follow the op's inputs (after the fspec input and, when
+	// present, the stack placeholder).
+	// C++ parity: ParamActive::getTrialForInputVarnode.
+	if p.stackplaceholder < 0 || int32(slot) < p.stackplaceholder {
+		slot--
+	} else {
+		slot -= 2
 	}
-	return nil
+	if slot < 0 || slot >= len(p.trial) {
+		return nil
+	}
+	return &p.trial[slot]
 }
 
 // WhichTrial finds the first overlapping trial index.
