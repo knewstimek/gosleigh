@@ -69,6 +69,32 @@ type ExprFragment struct {
 	right      *ExprFragment
 	leftParen  bool
 	rightParen bool
+	// node carries the operator structure of a non-binary fragment (call,
+	// cast, unary prefix, scope, comma) for EmitFragment; nil for atoms and
+	// for fragments only known as flat text.
+	node *fragNode
+}
+
+// fragKind is OpToken::tokentype for the structured fragment forms.
+type fragKind int
+
+const (
+	fragBinary       fragKind = iota // child0 spaces op spaces child1
+	fragUnaryPrefix                  // op spaces child0
+	fragPostSurround                 // child0 spaces open spaces child1 close
+	fragPreSurround                  // open child0 close spaces child1
+	fragSpace                        // child0 spaces child1
+)
+
+// fragNode mirrors one ReversePolish entry: an OpToken with its operands.
+// parens[i] records whether operand i is wrapped in an openParen group.
+// C++ parity: printlanguage.cc PrintLanguage::emitOp / pushOp.
+type fragNode struct {
+	kind           fragKind
+	print1, print2 string
+	spacing, bump  int
+	kids           []ExprFragment
+	parens         []bool
 }
 
 // associativeBinaryOps are the binary operators Ghidra marks associative in its
@@ -298,6 +324,10 @@ func (pl *PrintLanguage) EmitAssignFragment(lhs string, rhs ExprFragment) {
 }
 
 func (pl *PrintLanguage) emitFragmentTree(ge GroupEmitter, expr ExprFragment) {
+	if n := expr.node; n != nil {
+		pl.emitFragmentNode(ge, n)
+		return
+	}
 	if expr.op == "" || expr.left == nil || expr.right == nil {
 		pl.Token(expr.Text)
 		return
@@ -321,14 +351,115 @@ func (pl *PrintLanguage) emitFragmentOperand(ge GroupEmitter, child ExprFragment
 	ge.CloseParen(")", id)
 }
 
+// emitFragmentNode replays one operator node as Ghidra's emitOp sequence
+// inside its own printing group. C++ parity: PrintLanguage::emitOp.
+func (pl *PrintLanguage) emitFragmentNode(ge GroupEmitter, n *fragNode) {
+	id := ge.OpenGroup()
+	switch n.kind {
+	case fragBinary:
+		pl.emitFragmentOperand(ge, n.kids[0], n.parens[0])
+		ge.Spaces(n.spacing, n.bump)
+		pl.Token(n.print1)
+		ge.Spaces(n.spacing, n.bump)
+		pl.emitFragmentOperand(ge, n.kids[1], n.parens[1])
+	case fragUnaryPrefix:
+		pl.Token(n.print1)
+		ge.Spaces(n.spacing, n.bump)
+		pl.emitFragmentOperand(ge, n.kids[0], n.parens[0])
+	case fragPostSurround:
+		pl.emitFragmentOperand(ge, n.kids[0], n.parens[0])
+		ge.Spaces(n.spacing, n.bump)
+		pid := ge.OpenParen(n.print1)
+		ge.Spaces(0, n.bump)
+		pl.emitFragmentOperand(ge, n.kids[1], n.parens[1])
+		ge.CloseParen(n.print2, pid)
+	case fragPreSurround:
+		pid := ge.OpenParen(n.print1)
+		pl.emitFragmentOperand(ge, n.kids[0], n.parens[0])
+		ge.CloseParen(n.print2, pid)
+		ge.Spaces(n.spacing, n.bump)
+		pl.emitFragmentOperand(ge, n.kids[1], n.parens[1])
+	case fragSpace:
+		pl.emitFragmentOperand(ge, n.kids[0], n.parens[0])
+		ge.Spaces(n.spacing, n.bump)
+		pl.emitFragmentOperand(ge, n.kids[1], n.parens[1])
+	}
+	ge.CloseGroup(id)
+}
+
+// parenText wraps text in parentheses when paren is set.
+func parenText(text string, paren bool) string {
+	if paren {
+		return "(" + text + ")"
+	}
+	return text
+}
+
+// scopedNameExpr splits a namespace-qualified name at its top-level "::"
+// into left-nested scope operators (template arguments stay whole).
+// C++ parity: PrintC::pushSymbolScope with PrintC::scope (spacing 0).
+func scopedNameExpr(name string) ExprFragment {
+	depth := 0
+	cut := -1
+	for i := 0; i+1 < len(name); i++ {
+		switch name[i] {
+		case '<':
+			depth++
+		case '>':
+			depth--
+		case '(', ' ':
+			if depth == 0 {
+				return ExprFragment{Text: name, Precedence: ExprPrecPrimary}
+			}
+		case ':':
+			if depth == 0 && name[i+1] == ':' {
+				cut = i
+				i++
+			}
+		}
+	}
+	if cut <= 0 || cut+2 >= len(name) {
+		return ExprFragment{Text: name, Precedence: ExprPrecPrimary}
+	}
+	left := scopedNameExpr(name[:cut])
+	right := ExprFragment{Text: name[cut+2:], Precedence: ExprPrecPrimary}
+	return ExprFragment{Text: name, Precedence: ExprPrecPrimary, node: &fragNode{
+		kind: fragBinary, print1: "::", kids: []ExprFragment{left, right}, parens: []bool{false, false}}}
+}
+
+// typeExpr splits a "base **" type name into the type_expr_space and
+// ptr_expr operators Ghidra pushes for it; other shapes stay flat.
+// C++ parity: PrintC::pushTypeStart / pushTypeEnd with a blank identifier.
+func typeExpr(typeName string) ExprFragment {
+	flat := ExprFragment{Text: typeName, Precedence: ExprPrecPrimary}
+	stars := len(typeName) - len(strings.TrimRight(typeName, "*"))
+	base := typeName[:len(typeName)-stars]
+	if stars == 0 || !strings.HasSuffix(base, " ") || strings.ContainsAny(base, "()[]") {
+		return flat
+	}
+	base = base[:len(base)-1]
+	ptr := ExprFragment{Text: "", Precedence: ExprPrecPrimary}
+	for i := 0; i < stars; i++ {
+		ptr = ExprFragment{Text: "*" + ptr.Text, Precedence: ExprPrecPrimary, node: &fragNode{
+			kind: fragUnaryPrefix, print1: "*", kids: []ExprFragment{ptr}, parens: []bool{false}}}
+	}
+	return ExprFragment{Text: typeName, Precedence: ExprPrecPrimary, node: &fragNode{
+		kind: fragSpace, spacing: 1,
+		kids:   []ExprFragment{{Text: base, Precedence: ExprPrecPrimary}, ptr},
+		parens: []bool{false, false}}}
+}
+
 func (pl *PrintLanguage) EmitChildExpr(expr ExprFragment, parent ExprPrecedence, pos ExprPosition, assoc ExprAssociativity) {
 	pl.Token(pl.ExprString(expr, parent, pos, assoc))
 }
 
 func (pl *PrintLanguage) UnaryExpr(op string, precedence ExprPrecedence, expr ExprFragment) ExprFragment {
+	paren := expr.Text != "" && needsExprParens(expr.Precedence, precedence, ExprPosRight, ExprAssocRight)
 	return ExprFragment{
-		Text:       op + pl.ExprString(expr, precedence, ExprPosRight, ExprAssocRight),
+		Text:       op + parenText(expr.Text, paren),
 		Precedence: precedence,
+		node: &fragNode{kind: fragUnaryPrefix, print1: op,
+			kids: []ExprFragment{expr}, parens: []bool{paren}},
 	}
 }
 
@@ -397,21 +528,47 @@ func (pl *PrintLanguage) argSep() string {
 	return ", "
 }
 
+// CallExpr builds name(args): a function_call postsurround (spacing 0,
+// bump 10) over the callee and a left-nested comma chain (spacing 0).
+// C++ parity: PrintC::opCall / opFunc pushing function_call and comma.
 func (pl *PrintLanguage) CallExpr(callee ExprFragment, args ...ExprFragment) ExprFragment {
 	parts := make([]string, len(args))
 	for i, arg := range args {
 		parts[i] = arg.Text
 	}
-	return ExprFragment{
-		Text:       pl.ExprString(callee, ExprPrecPostfix, ExprPosLeft, ExprAssocLeft) + "(" + strings.Join(parts, pl.argSep()) + ")",
+	calleeParen := callee.Text != "" && needsExprParens(callee.Precedence, ExprPrecPostfix, ExprPosLeft, ExprAssocLeft)
+	frag := ExprFragment{
+		Text:       parenText(callee.Text, calleeParen) + "(" + strings.Join(parts, pl.argSep()) + ")",
 		Precedence: ExprPrecPostfix,
 	}
+	if pl.noCommaSpace {
+		if callee.node == nil && callee.op == "" && !calleeParen {
+			callee = scopedNameExpr(callee.Text)
+		}
+		list := ExprFragment{Text: "", Precedence: ExprPrecPrimary}
+		for i, arg := range args {
+			if i == 0 {
+				list = arg
+				continue
+			}
+			list = ExprFragment{Text: list.Text + "," + arg.Text, Precedence: ExprPrecLowest, node: &fragNode{
+				kind: fragBinary, print1: ",", kids: []ExprFragment{list, arg}, parens: []bool{false, false}}}
+		}
+		frag.node = &fragNode{kind: fragPostSurround, print1: "(", print2: ")", bump: 10,
+			kids: []ExprFragment{callee, list}, parens: []bool{calleeParen, false}}
+	}
+	return frag
 }
 
+// CastExpr builds (type)expr: a typecast presurround over the type
+// expression and the operand. C++ parity: PrintC::opTypeCast.
 func (pl *PrintLanguage) CastExpr(typeName string, expr ExprFragment) ExprFragment {
+	paren := expr.Text != "" && needsExprParens(expr.Precedence, ExprPrecCast, ExprPosRight, ExprAssocRight)
 	return ExprFragment{
-		Text:       "(" + typeName + ")" + pl.ExprString(expr, ExprPrecCast, ExprPosRight, ExprAssocRight),
+		Text:       "(" + typeName + ")" + parenText(expr.Text, paren),
 		Precedence: ExprPrecCast,
+		node: &fragNode{kind: fragPreSurround, print1: "(", print2: ")",
+			kids: []ExprFragment{typeExpr(typeName), expr}, parens: []bool{false, paren}},
 	}
 }
 

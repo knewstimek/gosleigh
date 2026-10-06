@@ -2847,7 +2847,11 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 		expr := s.lang.ExprString(frag, cPrecAssign, ExprPosNone, ExprAssocNone)
 		if op.Output() == nil {
 			s.lang.Statement(func() {
-				s.lang.Token(expr)
+				if expr != frag.Text {
+					s.lang.Token(expr)
+					return
+				}
+				s.lang.EmitFragment(frag)
 			})
 			return nil
 		}
