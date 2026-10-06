@@ -26,6 +26,9 @@ import (
 // C++ parity: varnode.hh HighVariable (partial)
 type HighVariable struct {
 	serial uint64 // creation order (see highSerial)
+	// irregularInput marks an input named as a non-parameter (in_<reg> or
+	// its stack name), which printc declares as a local.
+	irregularInput bool
 
 	// mergeClasses counts speculatively merged groups (0 means 1).
 	// C++ parity: HighVariable::numMergeClasses.

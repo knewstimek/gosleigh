@@ -356,9 +356,17 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			if rn := data.registerName(c.inVn); rn != "" {
 				nm = "in_" + rn
 			}
+			// An address-tied input in the local frame takes the stack name
+			// even though it is an input.
+			// C++ parity: ScopeLocal::buildVariableName (addrtied branch first).
+			if c.inVn.IsAddrTied() && !c.inVn.IsPersist() && c.inVn.Space() == sl.SpaceID() &&
+				(sl.model == nil || sl.model.InLocalRange(c.inVn.Offset())) {
+				nm = sl.addrTiedName(c.inVn.Addr(), c.hv.Type())
+			}
 			nm = makeNameUnique(nm, used)
 			used[nm] = true
 			c.hv.SetName(nm)
+			c.hv.irregularInput = true
 			a.count++
 			continue
 		}

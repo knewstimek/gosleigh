@@ -359,7 +359,7 @@ func (s *printCState) collectSymbols() {
 			// An irregular input (named in_<reg> by ActionNameVars) is a local
 			// symbol, declared once. C++ parity: ScopeInternal::buildVariableName
 			// (input with index < 0) + PrintC::emitScopeVarDecls.
-			if hv := vn.High(); vn.IsInput() && hv != nil && strings.HasPrefix(hv.Name(), "in_") {
+			if hv := vn.High(); vn.IsInput() && hv != nil && (hv.irregularInput || strings.HasPrefix(hv.Name(), "in_")) {
 				s.names[vn] = hv.Name()
 				if !seenHV[hv] {
 					seenHV[hv] = true
@@ -1094,8 +1094,26 @@ func (s *printCState) emitLocalDeclarations() bool {
 			continue
 		}
 		// A piece of a grouped variable is printed through the whole variable,
-		// which carries the declaration. C++ parity: the group shares one Symbol.
+		// which carries the declaration: the stack Symbol holding it.
+		// C++ parity: the group shares one Symbol; emitScopeVarDecls declares it.
 		if groupRootOf(vn.High()) != nil {
+			if sl == nil || vn.Space() != sl.SpaceID() {
+				continue
+			}
+			e := sl.QueryContainer(vn.Addr(), vn.Size(), address.Address{})
+			if e == nil || e.Offset() != 0 || e.Symbol() == nil || e.Symbol().Name() == "" || e.Symbol().Type() == nil {
+				continue
+			}
+			name := e.Symbol().Name()
+			if _, seen := declared[name]; seen || s.isParamName(name) {
+				continue
+			}
+			declared[name] = struct{}{}
+			decls = append(decls, localDecl{
+				text:      localDeclString(s.normalizeTypeForDecl(e.Symbol().Type()), name),
+				hasOffset: true,
+				offset:    e.Addr().Offset,
+			})
 			continue
 		}
 		name := s.nameOf(vn)
