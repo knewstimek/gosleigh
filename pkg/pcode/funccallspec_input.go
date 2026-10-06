@@ -146,8 +146,7 @@ func (fc *FuncCallSpecs) checkInputTrialUse(data *Funcdata, aliascheck *aliasChe
 			switch {
 			case aliascheck != nil && aliascheck.hasLocalAlias(vn):
 				trial.MarkNoUse()
-			case fp == nil || fp.Model() == nil ||
-				(!fp.Model().IsLocalOffset(vn.Offset()) && !fp.Model().IsParamOffset(vn.Offset())):
+			case fp == nil || fp.Model() == nil || !fp.Model().InLocalRange(vn.Offset()):
 				trial.MarkNoUse()
 			case calleePop:
 				if int64(trial.GetAddress().Offset+uint64(trial.GetSize()-1)) < int64(expop) {

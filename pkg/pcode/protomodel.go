@@ -151,6 +151,32 @@ func (pm *ProtoModel) StackRanges() [][2]uint64 {
 	return ranges
 }
 
+// InLocalRange reports whether a stack offset lies in the model's local
+// range (the cspec <localrange>, or the C++ default below the stack pointer).
+// C++ parity: FuncProto::getLocalRange().inRange(addr,1).
+func (pm *ProtoModel) InLocalRange(off uint64) bool {
+	if pm == nil || pm.StackSpace == nil {
+		return false
+	}
+	ranges := pm.LocalRanges
+	if len(ranges) == 0 {
+		highest := wrapSpaceOffset(pm.StackSpace, ^uint64(0))
+		localSpan := uint64(99)
+		if sz := pm.StackSpace.AddrSize; sz >= 4 {
+			localSpan = 999999
+		} else if sz >= 2 {
+			localSpan = 9999
+		}
+		ranges = [][2]uint64{{highest - localSpan, highest}}
+	}
+	for _, r := range ranges {
+		if off >= r[0] && off <= r[1] {
+			return true
+		}
+	}
+	return false
+}
+
 // HasEffect returns the model's effect on the given storage.
 // C++ parity: ProtoModel::hasEffect.
 func (pm *ProtoModel) HasEffect(addr address.Address, size int32) EffectKind {
