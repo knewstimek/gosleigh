@@ -82,6 +82,9 @@ func (p *PrintC) Emit(fd *Funcdata) (string, error) {
 type printCState struct {
 	printer *PrintC
 	fd      *Funcdata
+	// opStack holds the ops whose expressions are being rendered, innermost
+	// last; the one below an op is its reader (PrintC's readOp).
+	opStack []*PcodeOp
 	graph   *BlockGraph
 
 	emitter TokenEmitter
@@ -3593,6 +3596,8 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	if op == nil {
 		return s.lang.Atom("0"), nil
 	}
+	s.opStack = append(s.opStack, op)
+	defer func() { s.opStack = s.opStack[:len(s.opStack)-1] }()
 	switch op.Code() {
 	case CPUI_COPY:
 		return s.renderVarnodeExpr(op.Input(0))
@@ -3894,15 +3899,20 @@ func (s *printCState) extensionIsCast(op *PcodeOp, signed bool) bool {
 // extension output, matching the readOp Ghidra passes to opIntZext/opIntSext.
 // C++ parity: PrintC::opIntZext gate (option_hide_exts && isExtensionCastImplied).
 func (s *printCState) extensionCastHidden(op *PcodeOp) bool {
-	out := op.Output()
-	if out == nil {
+	if op.Output() == nil {
 		return false
 	}
-	readOp := out.LoneDescend()
-	if readOp == nil {
-		return false
+	return sharedCastStrategyC.IsExtensionCastImplied(op, s.readOpOf(op))
+}
+
+// readOpOf is the op whose expression is being printed around op (the reader
+// PrintC passes down as readOp), or nil when op is the statement root.
+func (s *printCState) readOpOf(op *PcodeOp) *PcodeOp {
+	n := len(s.opStack)
+	if n >= 2 && s.opStack[n-1] == op {
+		return s.opStack[n-2]
 	}
-	return sharedCastStrategyC.IsExtensionCastImplied(op, readOp)
+	return nil
 }
 
 // subpieceIsCast reports whether a SUBPIECE op should render as a plain cast
@@ -3982,6 +3992,9 @@ func (s *printCState) tryRenderSubscript(addrVn *Varnode) (ExprFragment, bool, e
 	// renders as base[index]. The index input is already in element units (the
 	// scale is divided out by RulePtrArith), so it maps straight to the subscript.
 	if def.Code() == CPUI_PTRADD && def.NumInput() >= 2 {
+		// The PTRADD is the reader of its base and index expressions.
+		s.opStack = append(s.opStack, def)
+		defer func() { s.opStack = s.opStack[:len(s.opStack)-1] }()
 		baseVn := def.Input(0)
 		idxVn := def.Input(1)
 		if _, ok := baseVn.TypeReadFacing(nil).(*Pointer); !ok {
