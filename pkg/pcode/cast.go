@@ -89,9 +89,7 @@ func opcodeInheritsSignFirstParamOnly(opc OpCode) bool {
 // (as a source token) into being explicitly unsigned, and if so marks the Varnode
 // so push_integer renders it with a trailing 'U'. Returns true if it marked the
 // Varnode. C++ parity: cast.cc CastStrategy::markExplicitUnsigned (38-71).
-//
-// Simplification vs C++: Gosleigh has no HighVariable read-facing resolution, so
-// getHighTypeReadFacing collapses to Varnode.TypeReadFacing(op).
+
 func (cs *CastStrategyC) markExplicitUnsigned(op *PcodeOp, slot int) bool {
 	opc := op.Code()
 	if !opcodeInheritsSign(opc) {
@@ -105,7 +103,7 @@ func (cs *CastStrategyC) markExplicitUnsigned(op *PcodeOp, slot int) bool {
 	if vn == nil || !vn.IsConstant() {
 		return false
 	}
-	dt := vn.TypeReadFacing(op)
+	dt := vn.HighTypeReadFacing(op)
 	if dt == nil {
 		return false
 	}
@@ -122,7 +120,7 @@ func (cs *CastStrategyC) markExplicitUnsigned(op *PcodeOp, slot int) bool {
 	if op.NumInput() == 2 && !inheritsFirstParamOnly {
 		firstvn := op.Input(1 - slot)
 		if firstvn != nil {
-			if ft := firstvn.TypeReadFacing(op); ft != nil {
+			if ft := firstvn.HighTypeReadFacing(op); ft != nil {
 				fmeta := ft.Metatype()
 				if fmeta == TYPE_UINT || fmeta == TYPE_UNKNOWN ||
 					fmeta == TYPE_PARTIALSTRUCT || fmeta == TYPE_PARTIALUNION {
@@ -160,14 +158,12 @@ func signbitNegative(val uint64, size int32) bool {
 // promoted to int, for the purpose of deciding whether an explicit
 // extension/comparison needs a cast.
 // C++ parity: cast.cc CastStrategyC::localExtensionType (140-176).
-//
-// Simplification vs C++: Gosleigh has no HighVariable, so getHighTypeReadFacing
-// collapses to vn.TypeReadFacing(op).
+
 func (cs *CastStrategyC) localExtensionType(vn *Varnode, op *PcodeOp) int {
 	if vn == nil {
 		return unknownPromotion
 	}
-	rt := vn.TypeReadFacing(op)
+	rt := vn.HighTypeReadFacing(op)
 	if rt == nil {
 		return unknownPromotion
 	}
@@ -333,12 +329,12 @@ func (cs *CastStrategyC) arithmeticOutputStandard(op *PcodeOp) Datatype {
 	if op == nil || op.NumInput() == 0 || op.Input(0) == nil {
 		return nil
 	}
-	res1 := op.Input(0).TypeReadFacing(op)
+	res1 := op.Input(0).HighTypeReadFacing(op)
 	if res1.Metatype() == TYPE_BOOL { // treat a boolean as cast to an integer
 		res1 = baseForMeta(cs.tlst, res1.Size(), TYPE_INT)
 	}
 	for i := 1; i < op.NumInput(); i++ {
-		res2 := op.Input(i).TypeReadFacing(op)
+		res2 := op.Input(i).HighTypeReadFacing(op)
 		if res2.Metatype() == TYPE_BOOL {
 			continue
 		}
@@ -541,7 +537,7 @@ func (cs *CastStrategyC) IsExtensionCastImplied(op *PcodeOp, readOp *PcodeOp) bo
 	if readOp == nil {
 		return false
 	}
-	rt := outVn.TypeReadFacing(readOp)
+	rt := outVn.HighTypeReadFacing(readOp)
 	if rt == nil {
 		return false
 	}
@@ -569,7 +565,7 @@ func (cs *CastStrategyC) IsExtensionCastImplied(op *PcodeOp, readOp *PcodeOp) bo
 		} else if !otherVn.IsExplicit() {
 			return false
 		}
-		ot := otherVn.TypeReadFacing(readOp)
+		ot := otherVn.HighTypeReadFacing(readOp)
 		if ot == nil || ot.Metatype() != metatype {
 			return false
 		}

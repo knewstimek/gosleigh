@@ -355,6 +355,12 @@ func (op *PcodeOp) UsesSpacebasePtr() bool { return op.flags&PcodeOpSpacebasePtr
 // C++ parity: PcodeOp::noIndirectCollapse.
 func (op *PcodeOp) NoIndirectCollapse() bool { return op.addlFlags&PcodeOpNoIndirectCollapse != 0 }
 func (op *PcodeOp) IsMarker() bool           { return op.flags&PcodeOpMarker != 0 }
+
+// NotPrinted reports an op that produces no C (markers, non-printing ops,
+// a noreturn call's tail). C++ parity: PcodeOp::notPrinted.
+func (op *PcodeOp) NotPrinted() bool {
+	return op.flags&(PcodeOpMarker|PcodeOpNonPrinting|PcodeOpNoReturn) != 0
+}
 func (op *PcodeOp) IsBranch() bool           { return op.flags&PcodeOpBranch != 0 }
 func (op *PcodeOp) IsBoolOutput() bool       { return op.flags&PcodeOpBoolOutput != 0 }
 func (op *PcodeOp) IsCommutative() bool      { return op.flags&PcodeOpCommutative != 0 }

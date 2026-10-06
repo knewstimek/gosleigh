@@ -34,6 +34,25 @@ func (vn *Varnode) TypeReadFacing(*PcodeOp) Datatype {
 	return sharedTypeFactory.GetBase(vn.Size(), TYPE_UNKNOWN, "unknown")
 }
 
+// HighTypeReadFacing is the data-type of vn's HighVariable when read by op,
+// falling back to vn's own type before highs are assigned (unions are not
+// modelled, so there is no field resolution).
+// C++ parity: Varnode::getHighTypeReadFacing.
+func (vn *Varnode) HighTypeReadFacing(op *PcodeOp) Datatype {
+	if h := vn.High(); h != nil {
+		if dt := h.Type(); dt != nil {
+			return dt
+		}
+	}
+	return vn.TypeReadFacing(op)
+}
+
+// HighTypeDefFacing is the data-type of vn's HighVariable at its definition.
+// C++ parity: Varnode::getHighTypeDefFacing.
+func (vn *Varnode) HighTypeDefFacing() Datatype {
+	return vn.HighTypeReadFacing(nil)
+}
+
 func (vn *Varnode) TypeDefFacing() Datatype {
 	return vn.TypeReadFacing(nil)
 }

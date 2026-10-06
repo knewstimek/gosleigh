@@ -25,12 +25,6 @@ package pcode
 // file only supplies the "what type does op expect at input slot N, and does the
 // actual input need a cast" query that castInput consumes.
 //
-// Gosleigh simplification: there is no HighVariable, so the C++ distinction
-// between getHighTypeReadFacing(op) (read-facing) and getTypeReadFacing(op)
-// (varnode's own type) collapses to vn.TypeReadFacing(op). Where the C++ code
-// relies on that distinction (PTRADD/PTRSUB slot-0 cast tests) the comparison
-// becomes trivially equal, so those paths return "no cast" -- documented inline.
-
 // opInputMeta holds the metain (TypeOpBinary/Unary/Func input metatype) for each
 // opcode. Opcodes whose C++ TypeOp derives directly from TypeOp (COPY, LOAD,
 // STORE, branches, calls, markers, CAST, ...) keep the base behavior, modelled
@@ -251,7 +245,7 @@ func baseGetInputCast(t TypeOp, op *PcodeOp, slot int, cs *CastStrategyC) Dataty
 		return nil
 	}
 	reqtype := t.InputTypeLocal(op, slot, cs.tlst)
-	curtype := vn.TypeReadFacing(op)
+	curtype := vn.HighTypeReadFacing(op)
 	return cs.CastStandard(reqtype, curtype, false, true)
 }
 
@@ -278,7 +272,7 @@ func (t *typeOpCopy) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 	if op == nil || op.NumInput() == 0 || op.Input(0) == nil {
 		return nil
 	}
-	return op.Input(0).TypeReadFacing(op)
+	return op.Input(0).HighTypeReadFacing(op)
 }
 
 // LOAD output token: the pointee of the address pointer if it matches the output
@@ -288,11 +282,11 @@ func (t *typeOpLoad) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 	if op == nil || op.NumInput() < 2 || op.Output() == nil || op.Input(1) == nil {
 		return nil
 	}
-	ct := op.Input(1).TypeReadFacing(op)
+	ct := op.Input(1).HighTypeReadFacing(op)
 	if ptr, ok := ct.(*Pointer); ok && ptr.Pointee() != nil && ptr.Pointee().Size() == op.Output().Size() {
 		return ptr.Pointee()
 	}
-	return op.Output().TypeDefFacing()
+	return op.Output().HighTypeDefFacing()
 }
 
 // INT_ADD output token uses the arithmetic typing rules. C++ parity:
@@ -327,7 +321,7 @@ func (t *typeOpPtradd) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 	if op == nil || op.NumInput() == 0 || op.Input(0) == nil {
 		return nil
 	}
-	return op.Input(0).TypeReadFacing(op)
+	return op.Input(0).HighTypeReadFacing(op)
 }
 
 // PTRSUB output token: C++ takes the input-0 pointer type and walks one level
@@ -342,7 +336,7 @@ func (t *typeOpPtrsub) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 	if op == nil || op.NumInput() < 2 || op.Input(0) == nil || op.Input(1) == nil || op.Output() == nil {
 		return t.OutputTypeLocal(op, cs.tlst)
 	}
-	ptr, ok := op.Input(0).TypeReadFacing(op).(*Pointer)
+	ptr, ok := op.Input(0).HighTypeReadFacing(op).(*Pointer)
 	if !ok || ptr.Pointee() == nil {
 		return t.OutputTypeLocal(op, cs.tlst)
 	}
@@ -384,7 +378,7 @@ func (t *typeOpSubpiece) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype
 		return t.OutputTypeLocal(op, cs.tlst)
 	}
 	outvn := op.Output()
-	dt := outvn.TypeDefFacing()
+	dt := outvn.HighTypeDefFacing()
 	if dt != nil && dt.Metatype() != TYPE_UNKNOWN {
 		return dt // SUBPIECE prints as cast to whatever its output is
 	}
@@ -400,8 +394,8 @@ func (t *typeOpCopy) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Data
 	if op == nil || op.Output() == nil || op.NumInput() == 0 || op.Input(0) == nil {
 		return nil
 	}
-	reqtype := op.Output().TypeDefFacing()
-	curtype := op.Input(0).TypeReadFacing(op)
+	reqtype := op.Output().HighTypeDefFacing()
+	curtype := op.Input(0).HighTypeReadFacing(op)
 	return cs.CastStandard(reqtype, curtype, false, true)
 }
 
@@ -412,12 +406,12 @@ func (t *typeOpLoad) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Data
 	if slot != 1 || op == nil || op.Output() == nil || op.NumInput() < 2 {
 		return nil
 	}
-	reqtype := op.Output().TypeDefFacing()
+	reqtype := op.Output().HighTypeDefFacing()
 	invn := op.Input(1)
 	if invn == nil {
 		return nil
 	}
-	curtype := invn.TypeReadFacing(op)
+	curtype := invn.HighTypeReadFacing(op)
 	spc := op.Input(0).GetSpaceFromConst()
 	wordSize := uint32(1)
 	if spc != nil {
@@ -460,9 +454,9 @@ func (t *typeOpStore) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Dat
 	if pointerVn == nil || valueVn == nil {
 		return nil
 	}
-	pointerType := pointerVn.TypeReadFacing(op)
+	pointerType := pointerVn.HighTypeReadFacing(op)
 	pointedToType := pointerType
-	valueType := valueVn.TypeReadFacing(op)
+	valueType := valueVn.HighTypeReadFacing(op)
 	spc := op.Input(0).GetSpaceFromConst()
 	wordSize := uint32(1)
 	if spc != nil {
@@ -514,25 +508,25 @@ func (t *typeOpIntCmp) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Da
 		// yet model Datatype::typeOrder, so we keep input[0]'s type as the
 		// requirement (the common case where both operands share a metatype).
 		// TODO: port typeOrder to pick the strictly more specified side.
-		reqtype := op.Input(0).TypeReadFacing(op)
+		reqtype := op.Input(0).HighTypeReadFacing(op)
 		if cs.checkIntPromotionForCompare(op, slot) {
 			return reqtype
 		}
-		othertype := op.Input(slot).TypeReadFacing(op)
+		othertype := op.Input(slot).HighTypeReadFacing(op)
 		return cs.CastStandard(reqtype, othertype, false, false)
 	case CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL:
 		reqtype := t.InputTypeLocal(op, slot, cs.tlst)
 		if cs.checkIntPromotionForCompare(op, slot) {
 			return reqtype
 		}
-		curtype := op.Input(slot).TypeReadFacing(op)
+		curtype := op.Input(slot).HighTypeReadFacing(op)
 		return cs.CastStandard(reqtype, curtype, true, true)
 	case CPUI_INT_LESS, CPUI_INT_LESSEQUAL:
 		reqtype := t.InputTypeLocal(op, slot, cs.tlst)
 		if cs.checkIntPromotionForCompare(op, slot) {
 			return reqtype
 		}
-		curtype := op.Input(slot).TypeReadFacing(op)
+		curtype := op.Input(slot).HighTypeReadFacing(op)
 		return cs.CastStandard(reqtype, curtype, true, false)
 	default:
 		// Float comparisons and others fall back to the base behavior.
@@ -550,7 +544,7 @@ func (t *typeOpZext) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Data
 	if cs.checkIntPromotionForExtension(op) {
 		return reqtype
 	}
-	curtype := op.Input(slot).TypeReadFacing(op)
+	curtype := op.Input(slot).HighTypeReadFacing(op)
 	return cs.CastStandard(reqtype, curtype, true, false)
 }
 
@@ -564,7 +558,7 @@ func (t *typeOpSext) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Data
 	if cs.checkIntPromotionForExtension(op) {
 		return reqtype
 	}
-	curtype := op.Input(slot).TypeReadFacing(op)
+	curtype := op.Input(slot).HighTypeReadFacing(op)
 	return cs.CastStandard(reqtype, curtype, true, false)
 }
 
@@ -597,28 +591,58 @@ func shiftValueInputCast(t TypeOp, op *PcodeOp, slot int, cs *CastStrategyC, wan
 	if promoType != noPromotion && (promoType&wantExt) == 0 {
 		return reqtype
 	}
-	curtype := vn.TypeReadFacing(op)
+	curtype := vn.HighTypeReadFacing(op)
 	return cs.CastStandard(reqtype, curtype, true, true)
 }
 
-// PTRADD/PTRSUB slot-0 getInputCast in C++ compares the varnode's own type
-// (getTypeReadFacing) against its HighVariable type (getHighTypeReadFacing). In
-// Gosleigh those collapse to vn.TypeReadFacing(op), so the slot-0 cast test is
-// always "no cast". Non-zero slots fall through to the base behavior (the index
-// operands, treated as INT via opInputMeta). C++ parity: TypeOpPtradd::getInputCast
-// (2252-2268) / TypeOpPtrsub::getInputCast (2322-2349).
+// GetInputCast slot 0 of a PTRADD expects the type of the Varnode, not the
+// (possibly different) type of its HighVariable: cast only when the two
+// pointers do not step over the same element size.
+// C++ parity: TypeOpPtradd::getInputCast.
 func (t *typeOpPtradd) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
-	if slot == 0 {
+	if slot != 0 {
+		return baseGetInputCast(t, op, slot, cs)
+	}
+	reqtype := op.Input(0).TypeReadFacing(op)
+	curtype := op.Input(0).HighTypeReadFacing(op)
+	reqptr, ok1 := reqtype.(*Pointer)
+	curptr, ok2 := curtype.(*Pointer)
+	if !ok1 || !ok2 {
+		return reqtype
+	}
+	if reqptr.Pointee().AlignSize() == curptr.Pointee().AlignSize() {
 		return nil
 	}
-	return baseGetInputCast(t, op, slot, cs)
+	return reqtype
 }
 
+// GetInputCast slot 0 of a PTRSUB, as for PTRADD but the pointed-to types
+// (arrays by element) must be the same.
+// C++ parity: TypeOpPtrsub::getInputCast. Typedefs are not modelled.
 func (t *typeOpPtrsub) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
-	if slot == 0 {
+	if slot != 0 {
+		return baseGetInputCast(t, op, slot, cs)
+	}
+	reqtype := op.Input(0).TypeReadFacing(op)
+	curtype := op.Input(0).HighTypeReadFacing(op)
+	if curtype == reqtype {
 		return nil
 	}
-	return baseGetInputCast(t, op, slot, cs)
+	reqptr, ok1 := reqtype.(*Pointer)
+	curptr, ok2 := curtype.(*Pointer)
+	if !ok1 || !ok2 {
+		return reqtype
+	}
+	reqbase, curbase := reqptr.Pointee(), curptr.Pointee()
+	if ra, ok := reqbase.(*Array); ok {
+		if ca, ok := curbase.(*Array); ok {
+			reqbase, curbase = ra.Element(), ca.Element()
+		}
+	}
+	if curbase == reqbase {
+		return nil
+	}
+	return reqtype
 }
 
 // shiftAmountType is the local type of a shift amount: a signed integer

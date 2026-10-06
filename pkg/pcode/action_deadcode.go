@@ -279,7 +279,7 @@ func (a *ActionSetCasts) Apply(data *Funcdata) int {
 		// inserted CAST (e.g. sum_list: param_3 = (int *)param_3[1] is an output cast on
 		// the LOAD iterator). That CAST is what ActionForLoops then folds into the
 		// for-header, replacing the old render-time assignCastStr fallback.
-		if op.IsDead() || op.HasFlag(PcodeOpNonPrinting) {
+		if op.IsDead() || op.NotPrinted() {
 			continue
 		}
 		if op.Code() == CPUI_CAST {
@@ -365,24 +365,9 @@ func (a *ActionSetCasts) castInput(op *PcodeOp, slot int, data *Funcdata, cs *Ca
 // op's output expression differs from the output Varnode's type. C++ parity:
 // ActionSetCasts::castOutput (coreaction.cc 2534-2618).
 func (a *ActionSetCasts) castOutput(op *PcodeOp, data *Funcdata, cs *CastStrategyC) int {
-	// Markers (MULTIEQUAL/INDIRECT) are SSA merge / indirect-effect ops, not C
-	// expressions: a C compiler assigns no distinct token type to a phi, so its
-	// output must not be split by a cast. In C++ this falls out of the
-	// tokenct==outHighType short-circuit (coreaction.cc:2546): the phi output's
-	// HighVariable type equals its outputTypeLocal token. Gosleigh's InferTypes
-	// propagates the merged pointer type onto the phi output high while the base
-	// token stays TYPE_UNKNOWN, so the short-circuit would miss and castOutput would
-	// wrongly split the phi output into a High-less unique + CAST -- which then
-	// breaks ActionForLoops (findLoopVariable lands on the phi whose output now has
-	// no HighVariable). The cast belongs on the actual computation feeding the phi
-	// (e.g. sum_list's LOAD iterator), which is cast normally. C++ parity: the
-	// effective no-op for markers in ActionSetCasts::castOutput.
-	if op.IsMarker() {
-		return 0
-	}
 	tokenct := op.GetOpcode().GetOutputToken(op, cs)
 	outvn := op.Output()
-	outHighType := outvn.Type()
+	outHighType := outvn.HighTypeDefFacing()
 	if tokenct == outHighType {
 		return 0 // same type, no cast
 	}
@@ -392,13 +377,13 @@ func (a *ActionSetCasts) castOutput(op *PcodeOp, data *Funcdata, cs *CastStrateg
 		// or for pointers that do not point to a composite.
 		if outHighResolve == nil || outHighResolve.Metatype() != TYPE_PTR {
 			outvn.UpdateType(tokenct)
-			outHighResolve = outvn.Type()
+			outHighResolve = outvn.HighTypeDefFacing()
 		} else if tokenct != nil && tokenct.Metatype() == TYPE_PTR {
 			if ptr, ok := outHighResolve.(*Pointer); ok && ptr.Pointee() != nil {
 				meta := ptr.Pointee().Metatype()
 				if meta != TYPE_ARRAY && meta != TYPE_STRUCT && meta != TYPE_UNION {
 					outvn.UpdateType(tokenct)
-					outHighResolve = outvn.Type()
+					outHighResolve = outvn.HighTypeDefFacing()
 				}
 			}
 		}
