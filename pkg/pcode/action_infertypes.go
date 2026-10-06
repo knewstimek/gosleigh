@@ -520,9 +520,77 @@ func inferPropagateEdge(data *Funcdata, tf *TypeFactory, op *PcodeOp, invn, outv
 		return inferPropagateAcrossCompare(tf, invn, outvn, inslot, outslot, alttype)
 	case CPUI_INT_ADD:
 		return inferPropagateIntAdd(data, tf, op, invn, outvn, inslot, outslot, alttype)
+	case CPUI_INT_AND, CPUI_INT_XOR:
+		// C++ parity: TypeOpIntAnd/TypeOpIntXor::propagateType -- an enum,
+		// or a float under a sign-bit manipulation.
+		if !alttype.IsEnumType() {
+			if alttype.Metatype() != TYPE_FLOAT || typeOpFloatSignManipulation(op) == CPUI_MAX {
+				return nil
+			}
+		}
+		if invn.IsSpaceBase() {
+			return tf.GetPointer(alttype.Size(), tf.GetBase(1, TYPE_UNKNOWN, ""), 1)
+		}
+		return alttype
+	case CPUI_INT_OR:
+		// Only propagate enums. C++ parity: TypeOpIntOr::propagateType.
+		if !alttype.IsEnumType() {
+			return nil
+		}
+		if invn.IsSpaceBase() {
+			return tf.GetPointer(alttype.Size(), tf.GetBase(1, TYPE_UNKNOWN, ""), 1)
+		}
+		return alttype
+	case CPUI_SUBPIECE:
+		// From the input to the output: the component the truncation selects.
+		// C++ parity: TypeOpSubpiece::propagateType. Known mismatch: the
+		// union branch (resolveTruncation) and near/far pointers.
+		if inslot != 0 || outslot != -1 {
+			return nil
+		}
+		byteOff := subpieceByteOffsetForComposite(op)
+		for alttype != nil && (byteOff != 0 || alttype.Size() != outvn.Size()) {
+			alttype, byteOff = datatypeSubType(alttype, byteOff)
+		}
+		return alttype
 	default:
 		return nil
 	}
+}
+
+// typeOpFloatSignManipulation recognizes an AND clearing, or an XOR flipping,
+// the sign bit of a floating-point value held as an integer.
+// C++ parity: TypeOp::floatSignManipulation.
+func typeOpFloatSignManipulation(op *PcodeOp) OpCode {
+	cvn := op.Input(1)
+	if cvn == nil || !cvn.IsConstant() {
+		return CPUI_MAX
+	}
+	mask := sizeMask(cvn.Size())
+	switch op.Code() {
+	case CPUI_INT_AND:
+		if mask>>1 == cvn.Offset() {
+			return CPUI_FLOAT_ABS
+		}
+	case CPUI_INT_XOR:
+		if mask^(mask>>1) == cvn.Offset() {
+			return CPUI_FLOAT_NEG
+		}
+	}
+	return CPUI_MAX
+}
+
+// subpieceByteOffsetForComposite is the byte offset, within a composite
+// input, of the bytes a SUBPIECE extracts.
+// C++ parity: TypeOpSubpiece::computeByteOffsetForComposite.
+func subpieceByteOffsetForComposite(op *PcodeOp) int64 {
+	outSize := int64(op.Output().Size())
+	lsb := int64(op.Input(1).Offset())
+	vn := op.Input(0)
+	if vn.Space() != nil && vn.Space().BigEndian {
+		return int64(vn.Size()) - outSize - lsb
+	}
+	return lsb
 }
 
 // inferPropagateAcrossCompare handles the input<->input propagation shared by the

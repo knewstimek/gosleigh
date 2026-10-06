@@ -1132,7 +1132,7 @@ func blockStartText(bb *BlockBasic) string {
 	if a.Space == nil {
 		return ""
 	}
-	return fmt.Sprintf("%s,0x%0*x", a.Space.Name, 2*int(a.Space.AddrSize), a.Offset)
+	return a.Space.Name + "," + PrintRawAddr(a) // C++ parity: Address::printRaw
 }
 
 // RemoveDoNothingBlock is implemented in funcdata_donothing.go.
