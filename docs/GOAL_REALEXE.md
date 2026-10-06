@@ -16,6 +16,7 @@
 | `5ee1024` | callee/외부 잠긴 프로토타입, typedef, callfixup 인젝션, RulePiecePathology, deadcode 공간 게이트, unaff_ | 123 | 0.903 |
 | `d2f1c0f` | 스텁 규칙 8종 포팅(EarlyRemoval 등), isComplex, 호출/캐스트/선언 줄바꿈 구조, SetCasts 블록 순서, LaneDivide | 137 | - |
 | `be538b3` | 결정성(AllOps SeqNum 순), 상수 단일 reader, guardCalls 모델, 레이블/goto 본문, 부분 전역 심볼, bool 반환 | 139 | - |
+| `929028e` | downChain, BlockSwitch/MultiGoto, DeterminedBranch, 다중 루트 지배자, removeUnreachableBlocks, 규칙 감사(SLess2Zero 등 8종 원본화) | 143 | - |
 
 ## 도구 (`tools/realexe/`)
 - `realexe.py analyze|sample|measure|capture`, `gaps.py`(불일치 유형 집계), `difffn.py`(인덱스별 diff).
@@ -32,11 +33,12 @@ Ghidra API로 Java와 같은 값을 덤프한다.
 
 | # | 갭 | 근거 | 비고 |
 |---|---|---|---|
-| T | 타입 추론 차이: 반환형, 지역 타입(uint vs int), 1바이트 시프트 상수가 char로 출력([119]) | typeop.cc propagateType, ActionInferTypes | 사례 다수 |
+| R | Go 규칙이 C++와 다른 변환을 하는 경우가 남음. `scratchpad ruleaudit.py` 방식(Go apply 길이 vs C++ applyOp 길이)으로 상위부터 대조: expandload, pullsub_multi/indirect, subzext, subcancel, structoffset0, andpiece, highorderand, switchsingle, equal2constant, andcompare 등 | ruleaction.cc | 규칙 하나씩 원본화 |
+| A | ActionGuardReturns(Go 전용): 반환 레지스터만 따로 재-rename. C++는 Heritage::guard 안의 guardReturns. 넓은 읽기를 좁은 정의로 잇는 부작용을 RuleSubIdentity가 덮음 | heritage.cc guardReturns | 원본화 시 RuleSubIdentity 제거 |
+| T | 타입 추론 차이: 반환형, 지역 타입(uint vs int) | typeop.cc propagateType, ActionInferTypes | 사례 다수 |
 | N | 변수 번호(iVar1 vs iVar2) 어긋남 -- merge/이름 순서 | merge.cc, ActionNameVars | 5건 이상 |
 | G | 전역 겹침: normalizeWriteSize PIECE 출력이 ram 변수로 남아 `(uint)CONCAT12`가 두 문장으로 갈라짐, coverVarnodes 미포팅 | heritage.cc normalizeWriteSize | [166][184][188][189] |
-| J | 다단 점프테이블: 1단계 모델 범위로 라벨 계산(case 0..N), 가드가 `if (0)`로 남음 | jumptable.cc recoverLabels/markFoldableGuards | [194] |
 | D | 선언이 심볼이 아니라 남은 varnode 기반이라 clearDeadVarnodes 원본화 불가 | printc.cc emitScopeVarDecls | 원본화 시 decl +8 |
 | S | 출력에 `struct X { }` 정의가 찍힘(Ghidra는 함수 출력에 타입 정의 없음) | printc.cc docFunction | [142][177][196] |
 | P | 호스트 잠긴 현재 함수 프로토타입/파라미터 타입(LPCWSTR, errno_t 등) 미적용 | fspec.cc | [124][128][174][183] |
-| - | known mismatch: RulePieceStructure 스텁, DivTermAdd 128비트, guardCallOverlappingInput, LoadGuard(ValueSet), clearDeadVarnodes 스택/destroy, cseElimination 블록 끝 주소 | ruleaction.cc, heritage.cc | |
+| - | known mismatch: RulePieceStructure 스텁, TypePointerRel(downChain 구조체 내부), BlockBasic 커버 시작 주소, forceOutputNum(멀티고토 self edge), DivTermAdd 128비트, guardCallOverlappingInput, LoadGuard(ValueSet), clearDeadVarnodes 스택/destroy, cseElimination 블록 끝 주소 | ruleaction.cc, heritage.cc | |
