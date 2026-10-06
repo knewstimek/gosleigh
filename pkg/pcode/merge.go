@@ -832,6 +832,8 @@ func (m *Merge) MergeAdjacent() {
 // markInternalCopies marks COPY ops that copy within the same HighVariable as NonPrinting.
 // C++ parity: merge.cc Merge::markInternalCopies (lines 1444-1542)
 func (m *Merge) markInternalCopies() {
+	copyIns := make(map[*HighVariable]int)
+	var multiCopy []*HighVariable
 	for _, op := range m.fd.GetPcodeOpBank().AliveOps() {
 		if op == nil {
 			continue
@@ -859,8 +861,33 @@ func (m *Merge) markInternalCopies() {
 		// If input and output share the same HighVariable, the COPY is internal.
 		if h1 == in0.High() {
 			op.SetFlag(PcodeOpNonPrinting)
+			continue
+		}
+		// A COPY between different variables: count them per variable.
+		if copyIns[h1] == 0 {
+			multiCopy = append(multiCopy, h1)
+		}
+		copyIns[h1]++
+		if v1.HasNoDescend() && shadowedVarnode(v1) {
+			op.SetFlag(PcodeOpNonPrinting) // don't print shadow assignments
 		}
 	}
+	for _, high := range multiCopy {
+		if copyIns[high] >= 2 {
+			m.processHighRedundantCopy(high)
+		}
+	}
+}
+
+// shadowedVarnode reports whether another instance of vn's variable is live
+// across vn. C++ parity: Merge::shadowedVarnode.
+func shadowedVarnode(vn *Varnode) bool {
+	for _, other := range vn.High().Instances() {
+		if other != vn && vnGetCover(vn).Intersect(vnGetCover(other)) == 2 {
+			return true
+		}
+	}
+	return false
 }
 
 // markInternalPiece hides a SUBPIECE or PIECE that only moves bytes between
