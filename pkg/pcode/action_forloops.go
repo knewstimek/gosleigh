@@ -114,7 +114,14 @@ func tryMarkForLoop(data *Funcdata, wdo *BlockWhileDo) {
 	// Using cbranch.Parent() avoids the wrapper-BlockBasic pointer mismatch
 	// that arises when structured children FlowBlocks share their ops slice
 	// with the original BasicBlocks but have different *BlockBasic addresses.
-	headBasic := cbranch.Parent()
+	// The loop head is the front leaf (where the MULTIEQUALs live), which
+	// differs from the CBRANCH's block for a compound condition.
+	// C++ parity: BlockWhileDo::finalTransform (getFrontLeaf()->subBlock(0)).
+	front := firstBasicBlock(&wdo.FlowBlock)
+	if front == nil || front.FirstOp() == nil {
+		return
+	}
+	headBasic := front.FirstOp().Parent()
 	if headBasic == nil {
 		return
 	}

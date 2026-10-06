@@ -1966,6 +1966,14 @@ func (s *printCState) emitWhileBlockOverflow(children []*FlowBlock) error {
 func (s *printCState) renderCondBlockComma(bl *FlowBlock) string {
 	basic, ok := bl.Concrete().(*BlockBasic)
 	if !ok {
+		// A compound condition under comma_separate is parenthesized whole
+		// and its left leaf drops its own parentheses.
+		// C++ parity: PrintC::emitBlockCondition (comma_separate branch).
+		if bl.Type() == BlockConditionType {
+			if frag, err := s.renderConditionInner(bl, true); err == nil {
+				return "(" + s.lang.ExprString(frag, cPrecLowest, ExprPosNone, ExprAssocNone) + ")"
+			}
+		}
 		return s.mustRenderCondition(bl)
 	}
 
