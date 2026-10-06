@@ -37,7 +37,7 @@ func TestRulesArith_RewriteAndNonRewrite(t *testing.T) {
 
 	neg := newRuleOp(data, CPUI_INT_2COMP, 4, y)
 	add := newRuleOp(data, CPUI_INT_ADD, 4, x, neg.Output())
-	if got := NewRule2Comp2Sub("arith").ApplyOp(add, data); got != 1 {
+	if got := NewRule2Comp2Sub("arith").ApplyOp(neg, data); got != 1 {
 		t.Fatalf("2comp2sub ApplyOp=%d, want 1", got)
 	}
 	if add.Code() != CPUI_INT_SUB || add.Input(0) != x || add.Input(1) != y {
@@ -60,8 +60,10 @@ func TestRulesArith_RewriteAndNonRewrite(t *testing.T) {
 		t.Fatalf("addmultcollapse ApplyOp=%d, want 0", got)
 	}
 
-	noneg := newRuleOp(data, CPUI_INT_ADD, 4, x, data.NewConstant(4, 7))
-	if got := NewRule2Comp2Sub("arith").ApplyOp(noneg, data); got != 0 {
+	// A negation read by something other than an INT_ADD stays.
+	lone := newRuleOp(data, CPUI_INT_2COMP, 4, x)
+	newRuleOp(data, CPUI_INT_MULT, 4, lone.Output(), data.NewConstant(4, 7))
+	if got := NewRule2Comp2Sub("arith").ApplyOp(lone, data); got != 0 {
 		t.Fatalf("2comp2sub non-rewrite=%d, want 0", got)
 	}
 }
