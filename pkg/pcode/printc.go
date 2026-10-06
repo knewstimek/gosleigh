@@ -1919,6 +1919,12 @@ func (s *printCState) emitWhileBlockOverflow(children []*FlowBlock) error {
 // C++ parity: PrintC::emitBlockBasic in setMod(comma_separate) mode +
 // emitBlockWhileDo (printc.cc ~3186).
 func (s *printCState) renderCondBlockComma(bl *FlowBlock) string {
+	return s.lang.ExprString(s.renderCondBlockCommaFrag(bl), cPrecLowest, ExprPosNone, ExprAssocNone)
+}
+
+// renderCondBlockCommaFrag is renderCondBlockComma as a structured fragment, so
+// the pretty-printer can break inside the statements.
+func (s *printCState) renderCondBlockCommaFrag(bl *FlowBlock) ExprFragment {
 	basic, ok := bl.Concrete().(*BlockBasic)
 	if !ok {
 		// A compound condition under comma_separate is parenthesized whole
@@ -1926,13 +1932,13 @@ func (s *printCState) renderCondBlockComma(bl *FlowBlock) string {
 		// C++ parity: PrintC::emitBlockCondition (comma_separate branch).
 		if bl.Type() == BlockConditionType {
 			if frag, err := s.renderConditionInner(bl, true); err == nil {
-				return "(" + s.lang.ExprString(frag, cPrecLowest, ExprPosNone, ExprAssocNone) + ")"
+				return s.lang.GroupExpr(frag)
 			}
 		}
-		return s.mustRenderCondition(bl)
+		return s.mustRenderConditionFrag(bl)
 	}
 
-	var parts []string
+	var parts []ExprFragment
 	var cbranch *PcodeOp
 
 	for _, op := range basic.Ops() {
@@ -2056,34 +2062,30 @@ func (s *printCState) renderCondBlockComma(bl *FlowBlock) string {
 
 		// Render this op as "lhs = rhs" (without semicolon) using renderForPartOp
 		// which already handles STORE and assignment ops correctly.
-		partStr, err := s.renderForPartOp(op)
-		if err != nil || partStr == "" {
+		part, err := s.renderForPartFrag(op)
+		if err != nil || part.Text == "" {
 			continue
 		}
-		parts = append(parts, partStr)
+		parts = append(parts, part)
 	}
 
 	if cbranch != nil {
-		condStr, err := s.renderBranchCondition(cbranch)
-		if err == nil && condStr != "" {
-			parts = append(parts, condStr)
+		if cond, err := s.renderBranchConditionFrag(cbranch); err == nil && cond.Text != "" {
+			parts = append(parts, cond)
 		}
 	} else {
 		// No CBRANCH found: fall back to mustRenderCondition.
-		parts = append(parts, s.mustRenderCondition(bl))
+		parts = append(parts, s.mustRenderConditionFrag(bl))
 	}
 
-	if len(parts) == 1 {
-		return parts[0]
+	if len(parts) == 0 {
+		return s.lang.Atom("")
 	}
-	var sb strings.Builder
-	for i, p := range parts {
-		if i > 0 {
-			sb.WriteString(", ")
-		}
-		sb.WriteString(p)
+	res := parts[0]
+	for _, p := range parts[1:] {
+		res = s.lang.CommaExpr(res, p)
 	}
-	return sb.String()
+	return res
 }
 
 // emitForBlock renders a BlockWhileDo as a C for-loop:
@@ -2180,6 +2182,32 @@ func (s *printCState) renderForPartOp(op *PcodeOp) (string, error) {
 		lhs := s.printName(op.Output())
 		return lhs + " = " + rhs, nil
 	}
+}
+
+// renderForPartFrag is renderForPartOp as a structured fragment.
+func (s *printCState) renderForPartFrag(op *PcodeOp) (ExprFragment, error) {
+	if op == nil || op.IsMarker() {
+		return ExprFragment{}, nil
+	}
+	if op.Code() == CPUI_STORE {
+		lhs, err := s.renderStoreLHS(storePointer(op), cPrecAssign)
+		if err != nil {
+			return ExprFragment{}, err
+		}
+		rhs, err := s.renderVarnodeExpr(storeValue(op))
+		if err != nil {
+			return ExprFragment{}, err
+		}
+		return s.lang.AssignExpr(lhs, rhs), nil
+	}
+	rhs, err := s.renderOpExprFrag(op)
+	if err != nil {
+		return ExprFragment{}, err
+	}
+	if op.Output() == nil {
+		return rhs, nil
+	}
+	return s.lang.AssignExpr(s.printName(op.Output()), rhs), nil
 }
 
 // emitDoWhileBlock renders a BlockDoWhile as do { body } while (cond);.
@@ -4344,7 +4372,9 @@ func (s *printCState) renderConditionInner(bl *FlowBlock, commaSep bool) (ExprFr
 			// emitBlockBasic under comma_separate joins the block's printable
 			// statements with ", " and ends with the branch condition
 			// (printc.cc:2839).
-			return s.lang.Expr(s.renderCondBlockComma(bl), cPrecLowest), nil
+			frag := s.renderCondBlockCommaFrag(bl)
+			frag.Precedence = cPrecLowest
+			return frag, nil
 		}
 		basic := toBasic(bl)
 		if basic == nil {

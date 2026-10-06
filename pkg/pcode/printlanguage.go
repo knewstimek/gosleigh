@@ -84,6 +84,8 @@ const (
 	fragPostSurround                 // child0 spaces open spaces child1 close
 	fragPreSurround                  // open child0 close spaces child1
 	fragSpace                        // child0 spaces child1
+	fragComma                        // child0 "," spaces child1 (comma_separate)
+	fragParen                        // "(" child0 ")" as a parenthesis group
 )
 
 // fragNode mirrors one ReversePolish entry: an OpToken with its operands.
@@ -237,7 +239,8 @@ func (pl *PrintLanguage) Atom(text string) ExprFragment {
 }
 
 func (pl *PrintLanguage) GroupExpr(expr ExprFragment) ExprFragment {
-	return ExprFragment{Text: "(" + expr.Text + ")", Precedence: ExprPrecPrimary}
+	return ExprFragment{Text: "(" + expr.Text + ")", Precedence: ExprPrecPrimary, node: &fragNode{
+		kind: fragParen, kids: []ExprFragment{expr}, parens: []bool{true}}}
 }
 
 func (pl *PrintLanguage) ExprString(expr ExprFragment, parent ExprPrecedence, pos ExprPosition, assoc ExprAssociativity) string {
@@ -383,6 +386,13 @@ func (pl *PrintLanguage) emitFragmentNode(ge GroupEmitter, n *fragNode) {
 		pl.emitFragmentOperand(ge, n.kids[0], n.parens[0])
 		ge.Spaces(n.spacing, n.bump)
 		pl.emitFragmentOperand(ge, n.kids[1], n.parens[1])
+	case fragParen:
+		pl.emitFragmentOperand(ge, n.kids[0], true)
+	case fragComma:
+		pl.emitFragmentOperand(ge, n.kids[0], n.parens[0])
+		pl.Token(n.print1)
+		ge.Spaces(n.spacing, n.bump)
+		pl.emitFragmentOperand(ge, n.kids[1], n.parens[1])
 	}
 	ge.CloseGroup(id)
 }
@@ -490,6 +500,24 @@ func (pl *PrintLanguage) binaryChild(child ExprFragment, parentOp string, parent
 		return "(" + child.Text + ")", true
 	}
 	return child.Text, false
+}
+
+// AssignExpr is "lhs = rhs" with the assignment token's break points.
+// C++ parity: PrintC::assignment (spacing 1, bump 5).
+func (pl *PrintLanguage) AssignExpr(lhs string, rhs ExprFragment) ExprFragment {
+	l := ExprFragment{Text: lhs, Precedence: ExprPrecPrimary}
+	return ExprFragment{Text: lhs + " = " + rhs.Text, Precedence: ExprPrecAssign, node: &fragNode{
+		kind: fragBinary, print1: "=", spacing: binaryOpSpacing, bump: assignOpBump,
+		kids: []ExprFragment{l, rhs}, parens: []bool{false, false}}}
+}
+
+// CommaExpr joins two statements printed under comma_separate: the first, a
+// comma, then a breakable space. C++ parity: PrintC::emitBlockBasic
+// (comma_separate: print(COMMA); spaces(1)).
+func (pl *PrintLanguage) CommaExpr(a, b ExprFragment) ExprFragment {
+	return ExprFragment{Text: a.Text + ", " + b.Text, Precedence: ExprPrecLowest, node: &fragNode{
+		kind: fragComma, print1: ",", spacing: 1,
+		kids: []ExprFragment{a, b}, parens: []bool{false, false}}}
 }
 
 func (pl *PrintLanguage) PostfixExpr(expr ExprFragment, suffix string) ExprFragment {
