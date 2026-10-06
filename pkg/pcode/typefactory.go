@@ -104,8 +104,38 @@ func (f *TypeFactory) GetBase(size int32, meta metatype, name string) Datatype {
 		return f.GetArray(size, f.GetBase(1, TYPE_UNKNOWN, ""))
 	}
 	value := NewBase(size, meta, name)
+	value.alignSize = primitiveAlignSize(size)
+	value.alignment = primitiveAlignment(value.alignSize)
 	key := fmt.Sprintf("base:%d:%d:%s", value.Size(), value.Metatype(), value.Name())
 	return f.internBase(key, value)
+}
+
+// primitiveAlignMap is the alignment of a primitive by size. The x86 cspecs'
+// size_alignment_map (1,2,4,8) decodes to the same table as the default.
+// C++ parity: TypeFactory::setDefaultAlignmentMap / decodeAlignmentMap.
+// Known mismatch: the map is not read from the cspec.
+var primitiveAlignMap = [...]int32{1, 1, 2, 2, 4, 4, 4, 4, 8}
+
+// primitiveAlignment is the expected alignment of a primitive of the given
+// aligned size. C++ parity: TypeFactory::getAlignment.
+func primitiveAlignment(size int32) int32 {
+	if size < 0 || int(size) >= len(primitiveAlignMap) {
+		return primitiveAlignMap[len(primitiveAlignMap)-1]
+	}
+	return primitiveAlignMap[size]
+}
+
+// primitiveAlignSize is the room a primitive takes in memory (sizeof).
+// C++ parity: TypeFactory::getPrimitiveAlignSize.
+func primitiveAlignSize(size int32) int32 {
+	if size <= 0 {
+		return size
+	}
+	align := primitiveAlignment(size)
+	if mod := size % align; mod != 0 {
+		size += align - mod
+	}
+	return size
 }
 
 // maxBasetypeSize is the widest base data-type. C++ parity:
