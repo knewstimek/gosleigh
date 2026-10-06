@@ -1,5 +1,7 @@
 package pcode
 
+import "math/bits"
+
 type RulePropagateCopy struct{ batchRule }
 
 func NewRulePropagateCopy(group string) *RulePropagateCopy {
@@ -20,48 +22,35 @@ func (r *RulePropagateCopy) apply(op *PcodeOp, data *Funcdata) int {
 	if op.HasFlag(PcodeOpReturnCopy) {
 		return 0
 	}
-	changed := 0
+	// Propagate just a single COPY per application; the pool revisits the
+	// op for the rest. C++ parity: RulePropagateCopy::applyOp.
 	for i := 0; i < op.NumInput(); i++ {
-		copyop := definedBy(op.Input(i), CPUI_COPY)
-		if copyop == nil || copyop.Input(0) == nil {
+		vn := op.Input(i)
+		copyop := definedBy(vn, CPUI_COPY)
+		if copyop == nil {
 			continue
 		}
-		if copyop.Input(0) == op.Input(i) {
+		invn := copyop.Input(0)
+		if !invn.IsHeritageKnown() { // don't move a free varnode from its first use
 			continue
 		}
-		// Don't propagate into marker ops (MULTIEQUAL/INDIRECT) when:
-		//  (a) source is a constant, or
-		//  (b) source and output are addr-tied to different locations.
-		// C++ parity: RulePropagateCopy::applyOp ruleaction.cc:3966-3971
+		if invn == vn {
+			panic("Self-defined varnode")
+		}
 		if op.IsMarker() {
-			invn := copyop.Input(0)
-			if invn.IsConstant() {
+			if invn.IsConstant() || vn.IsAddrForce() {
 				continue
 			}
-			out := op.Output()
-			// C++ parity: ruleaction.cc:3969 -- block only when both the COPY
-			// source and the marker output carry the real addrtied flag and map
-			// to different addresses. Registers used as transient computation are
-			// not addrtied, so propagating a stack param into a register-space phi
-			// is allowed (this is what unifies the param and register SSA chains).
-			if out != nil && invn.IsAddrTied() && out.IsAddrTied() {
-				if invn.Space() != out.Space() || invn.Offset() != out.Offset() {
-					continue
-				}
+			// Never merge different address-tied locations.
+			if out := op.Output(); invn.IsAddrTied() && out.IsAddrTied() &&
+				(invn.Space() != out.Space() || invn.Offset() != out.Offset()) {
+				continue
 			}
 		}
-		data.OpUnsetInput(op, i)
-		data.OpSetInput(op, copyop.Input(0), i)
-		changed = 1
-		// C++ leaves the now-dead COPY for the dead-code pass to reap
-		// (RulePropagateCopy::applyOp, ruleaction.cc:3960). Gosleigh used to reap
-		// detached COPYs here because AddTreeState created its ops without splicing
-		// them into a basic block, so ActionDeadCode never saw them; both the
-		// detached-op bug (Funcdata.NewOpBefore) and the spurious address-expression
-		// COPY (AddTreeState.buildTree) are fixed at the source, so the eager reap
-		// is gone.
+		data.OpSetInput(op, invn, i)
+		return 1
 	}
-	return changed
+	return 0
 }
 
 type RuleConcatCommute struct{ batchRule }
@@ -152,6 +141,29 @@ func (r *RuleSubCancel) apply(op *PcodeOp, data *Funcdata) int {
 	return 0
 }
 
+// RuleSubIdentity folds a SUBPIECE that keeps its whole input, sub(V,0) of
+// V's size, into a COPY. Not a C++ rule: C++ never builds one. Gosleigh's
+// ActionGuardReturns re-renames the return register outside heritage and can
+// rewire a wider register read to a same-size definition, leaving sub(V,0)
+// behind (x64 'xor eax,eax' in x64_auto probe_sign/probe_classify).
+// TODO known mismatch: drop once guardReturns runs inside Heritage::guard.
+type RuleSubIdentity struct{ batchRule }
+
+func NewRuleSubIdentity(group string) *RuleSubIdentity {
+	r := &RuleSubIdentity{}
+	r.batchRule = newBatchRule(group, "subidentity", []OpCode{CPUI_SUBPIECE}, r.apply, func(g string) Rule { return NewRuleSubIdentity(g) })
+	return r
+}
+
+func (r *RuleSubIdentity) apply(op *PcodeOp, data *Funcdata) int {
+	if op.Input(1).Offset() != 0 || op.Output().Size() != op.Input(0).Size() {
+		return 0
+	}
+	data.OpRemoveInput(op, 1)
+	data.OpSetOpcode(op, CPUI_COPY)
+	return 1
+}
+
 type RuleSubNormal struct{ batchRule }
 
 func NewRuleSubNormal(group string) *RuleSubNormal {
@@ -160,11 +172,85 @@ func NewRuleSubNormal(group string) *RuleSubNormal {
 	return r
 }
 
+// apply pulls a right shift into the truncation of a SUBPIECE:
+// sub(V >> n, c) becomes sub(V, c + n/8) >> (n%8), or an extension when the
+// cut runs past the input.
+// C++ parity: RuleSubNormal::applyOp.
 func (r *RuleSubNormal) apply(op *PcodeOp, data *Funcdata) int {
-	if isZeroConst(op.Input(1)) && outputSize(op) == op.Input(0).Size() {
-		return rewriteToCopy(data, op, op.Input(0))
+	shiftout := op.Input(0)
+	if !shiftout.IsWritten() {
+		return 0
 	}
-	return 0
+	shiftop := shiftout.Def()
+	opc := shiftop.Code()
+	if opc != CPUI_INT_RIGHT && opc != CPUI_INT_SRIGHT {
+		return 0
+	}
+	if !shiftop.Input(1).IsConstant() {
+		return 0
+	}
+	a := shiftop.Input(0)
+	if a.IsFree() {
+		return 0
+	}
+	outvn := op.Output()
+	if outvn.IsPrecisHi() || outvn.IsPrecisLo() {
+		return 0
+	}
+	n := int(shiftop.Input(1).Offset())
+	c := int(op.Input(1).Offset())
+	k := n / 8
+	insize := int(a.Size())
+	outsize := int(outvn.Size())
+	// Total shift + outsize must reach the size of the input.
+	if n+8*c+8*outsize < 8*insize && n != k*8 {
+		return 0
+	}
+	if k+c+outsize > insize { // the cut runs past the original input
+		truncSize := insize - c - k
+		if n == k*8 && truncSize > 0 && bits.OnesCount(uint(truncSize)) == 1 {
+			// An extension is needed as well.
+			c += k
+			newop := data.NewOp(2, op.Addr())
+			ext := CPUI_INT_ZEXT
+			if opc == CPUI_INT_SRIGHT {
+				ext = CPUI_INT_SEXT
+			}
+			data.OpSetOpcode(newop, CPUI_SUBPIECE)
+			data.NewUniqueOut(int32(truncSize), newop)
+			data.OpSetInput(newop, a, 0)
+			data.OpSetInput(newop, data.NewConstant(4, uint64(c)), 1)
+			data.OpInsertBefore(newop, op)
+			data.OpSetInput(op, newop.Output(), 0)
+			data.OpRemoveInput(op, 1)
+			data.OpSetOpcode(op, ext)
+			return 1
+		}
+		k = insize - c - outsize // or shrink the cut
+	}
+	c += k
+	n -= k * 8
+	if n == 0 { // the shift is unnecessary
+		data.OpSetInput(op, a, 0)
+		data.OpSetInput(op, data.NewConstant(4, uint64(c)), 1)
+		return 1
+	}
+	if n >= outsize*8 {
+		n = outsize * 8 // can only shift so far
+		if opc == CPUI_INT_SRIGHT {
+			n--
+		}
+	}
+	newop := data.NewOp(2, op.Addr())
+	data.OpSetOpcode(newop, CPUI_SUBPIECE)
+	data.NewUniqueOut(int32(outsize), newop)
+	data.OpSetInput(newop, a, 0)
+	data.OpSetInput(newop, data.NewConstant(4, uint64(c)), 1)
+	data.OpInsertBefore(newop, op)
+	data.OpSetInput(op, newop.Output(), 0)
+	data.OpSetInput(op, data.NewConstant(4, uint64(n)), 1)
+	data.OpSetOpcode(op, opc)
+	return 1
 }
 
 type RuleMultiCollapse struct{ batchRule }
