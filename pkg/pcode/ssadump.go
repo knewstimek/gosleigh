@@ -69,7 +69,41 @@ func DumpSSA(fd *Funcdata, regNames map[string]string) string {
 	if graph == nil || graph.GetSize() == 0 {
 		return ctx.dumpRawOpList(fd)
 	}
-	return ctx.dumpBlockGraph(graph)
+	out := ctx.dumpBlockGraph(graph)
+	if ssaDumpTree {
+		if st := fd.GetStructure(); st != nil && st.GetSize() > 0 {
+			var sb strings.Builder
+			sb.WriteString("Structure:\n")
+			for i := 0; i < st.GetSize(); i++ {
+				dumpStructTree(&sb, st.GetBlock(i), 1)
+			}
+			out += sb.String()
+		}
+	}
+	return out
+}
+
+// ssaDumpTree appends the structured block tree (SSA_DUMP_TREE=1).
+var ssaDumpTree = os.Getenv("SSA_DUMP_TREE") != ""
+
+var blockTypeNames = [...]string{"plain", "basic", "graph", "copy", "goto", "multigoto", "list",
+	"condition", "if", "whiledo", "dowhile", "switch", "infloop"}
+
+func dumpStructTree(sb *strings.Builder, b *FlowBlock, depth int) {
+	name := "?"
+	if t := int(b.Type()); t >= 0 && t < len(blockTypeNames) {
+		name = blockTypeNames[t]
+	}
+	fmt.Fprintf(sb, "%s%s idx=%d", strings.Repeat("  ", depth), name, b.Index())
+	if bb, ok := b.Concrete().(*BlockBasic); ok {
+		if op := bb.FirstOp(); op != nil {
+			fmt.Fprintf(sb, " @%x", op.Addr().Offset)
+		}
+	}
+	sb.WriteString("\n")
+	for _, c := range b.StructuredChildren() {
+		dumpStructTree(sb, c, depth+1)
+	}
 }
 
 // ssaDumpContext carries the formatting inputs (register-name map, default

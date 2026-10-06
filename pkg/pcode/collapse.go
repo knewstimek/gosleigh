@@ -789,9 +789,76 @@ func (b *FlowBlock) scopeBreak(curexit, curloopexit *FlowBlock) {
 	}
 }
 
-func (bg *BlockGraph) markUnstructured() {}
+// markUnstructured flags the targets of printed gotos so the printer emits
+// their labels. C++ parity: BlockGraph/BlockGoto/BlockIf::markUnstructured.
+// TODO known mismatch: BlockSwitch case gotos (caseblocks gototype) are not
+// modeled.
+func (bg *BlockGraph) markUnstructured() {
+	for i := 0; i < bg.GetSize(); i++ {
+		bg.GetBlock(i).markUnstructured()
+	}
+}
 
-func (bg *BlockGraph) markLabelBumpUp(bool) {}
+func (b *FlowBlock) markUnstructured() {
+	for _, c := range b.StructuredChildren() {
+		c.markUnstructured()
+	}
+	switch b.Type() {
+	case BlockGotoType:
+		if b.GotoType() == BlockFlagGotoGoto && b.gotoPrints() {
+			markCopyBlock(b.GotoTargetBlock())
+		}
+	case BlockIfType:
+		if t := b.GotoTargetBlock(); t != nil && b.GotoType() == BlockFlagGotoGoto {
+			markCopyBlock(t)
+		}
+	}
+}
+
+// markCopyBlock marks the leaf that starts bl as an unstructured target.
+// C++ parity: BlockGraph::markCopyBlock.
+func markCopyBlock(bl *FlowBlock) {
+	if bl == nil {
+		return
+	}
+	if leaf := bl.getFrontLeaf(); leaf != nil {
+		leaf.SetFlag(BlockFlagUnstructuredTarg)
+	}
+}
+
+// markLabelBumpUp lets a structured block print the label of its first
+// component; loops always take it. C++ parity: FlowBlock/BlockGraph/
+// BlockWhileDo/BlockDoWhile/BlockInfLoop::markLabelBumpUp.
+func (bg *BlockGraph) markLabelBumpUp(bump bool) {
+	if bump {
+		bg.SetFlag(BlockFlagLabelBumpUp)
+	}
+	for i := 0; i < bg.GetSize(); i++ {
+		bg.GetBlock(i).markLabelBumpUp(bump && i == 0)
+	}
+}
+
+func (b *FlowBlock) markLabelBumpUp(bump bool) {
+	children := b.StructuredChildren()
+	loop := false
+	switch b.Type() {
+	case BlockWhileDoType, BlockDoWhileType, BlockInfLoopType:
+		loop = true
+	}
+	inner := bump
+	if loop {
+		inner = true
+	}
+	if inner {
+		b.SetFlag(BlockFlagLabelBumpUp)
+	}
+	for i, c := range children {
+		c.markLabelBumpUp(inner && i == 0)
+	}
+	if loop && !bump {
+		b.ClearFlag(BlockFlagLabelBumpUp)
+	}
+}
 
 type CollapseStructure struct {
 	finaltrace          bool

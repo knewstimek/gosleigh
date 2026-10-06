@@ -133,6 +133,8 @@ type printCState struct {
 	// ghidraFormat mirrors PrintC.ghidraFormat for use during emit.
 	// Controls function brace placement, else newline style, and comma spacing.
 	ghidraFormat bool
+	// labelDone records leaves whose label was already printed.
+	labelDone map[*FlowBlock]bool
 	// sigLayout splits the rendered signature into the pieces
 	// emitFunctionDeclaration emits separately; nil when it cannot.
 	sigLayout *sigLayout
@@ -1652,16 +1654,32 @@ func (s *printCState) emitTopLevelBlock(bl *FlowBlock) error {
 	if bl == nil {
 		return nil
 	}
-	if label, ok := s.blockLabels[bl]; ok {
-		s.lang.Label(label)
-	}
 	return s.emitBlock(bl)
+}
+
+// emitAnyLabel prints the label of the leaf starting bl when that leaf is
+// the target of a printed goto, unless an enclosing block prints it.
+// C++ parity: PrintC::emitAnyLabelStatement / emitLabelStatement.
+func (s *printCState) emitAnyLabel(bl *FlowBlock) {
+	if bl == nil || bl.HasFlag(BlockFlagLabelBumpUp) {
+		return
+	}
+	leaf := bl.getFrontLeaf()
+	if leaf == nil || !leaf.HasFlag(BlockFlagUnstructuredTarg) || s.labelDone[leaf] {
+		return
+	}
+	if s.labelDone == nil {
+		s.labelDone = make(map[*FlowBlock]bool)
+	}
+	s.labelDone[leaf] = true
+	s.lang.Label(s.labelForBlock(leaf))
 }
 
 func (s *printCState) emitBlock(bl *FlowBlock) error {
 	if bl == nil {
 		return nil
 	}
+	s.emitAnyLabel(bl)
 	switch bl.Type() {
 	case BlockPlain, BlockBasicType:
 		return s.emitBasicBlock(bl)
@@ -2524,6 +2542,20 @@ func (s *printCState) emitGotoStatement(bl *FlowBlock) {
 }
 
 func (s *printCState) emitGotoBlock(bl *FlowBlock) error {
+	// The goto's body is a whole structured block, not just a basic block.
+	// C++ parity: PrintC::emitBlockGoto (getBlock(0)->emit with no_branch).
+	if children := bl.StructuredChildren(); len(children) > 0 && toBasic(children[0]) == nil {
+		if err := s.emitBlock(children[0]); err != nil {
+			return err
+		}
+		// No goto when its target is the next block printed.
+		if bl.gotoPrints() {
+			s.lang.Statement(func() {
+				s.emitGotoStatement(bl)
+			})
+		}
+		return nil
+	}
 	if basic := s.firstBasicChild(bl); basic != nil {
 		if err := s.emitOps(basic, true); err != nil {
 			return err
@@ -2584,10 +2616,20 @@ func (s *printCState) labelForBlock(bl *FlowBlock) string {
 	if bl == nil {
 		return "label_missing"
 	}
+	if leaf := bl.getFrontLeaf(); leaf != nil {
+		bl = leaf
+	}
 	if label, ok := s.blockLabels[bl]; ok {
 		return label
 	}
+	// Ghidra names a code label after the block's entry address.
+	// C++ parity: PrintC::emitLabel via the host's queryCodeLabel (LAB_).
 	label := fmt.Sprintf("label_%d", len(s.blockLabels))
+	if bb := toBasic(bl); bb != nil {
+		if op := bb.FirstOp(); op != nil {
+			label = fmt.Sprintf("LAB_%08x", op.Addr().Offset)
+		}
+	}
 	s.blockLabels[bl] = label
 	return label
 }
