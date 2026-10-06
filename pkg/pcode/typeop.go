@@ -319,6 +319,10 @@ func subpieceOperatorName(op *PcodeOp) string {
 	return "SUB" + strconv.Itoa(int(op.Input(0).Size())) + strconv.Itoa(int(op.Output().Size()))
 }
 
+// typeOpPiece: CONCAT, which casts to uint or int based on its output.
+// C++ parity: TypeOpPiece.
+type typeOpPiece struct{ typeOpBase }
+
 // typeOpSubpiece: SUBPIECE prints as a cast to whatever its output data-type is.
 // A dedicated type is needed so getOutputToken returns the output's own resolved
 // type (byte, int, ...) instead of the base UNKNOWN token; otherwise
@@ -434,7 +438,7 @@ func RegisterTypeOps() []TypeOp {
 	inst[CPUI_FLOAT_ROUND] = &typeOpBase{CPUI_FLOAT_ROUND, PcodeOpUnary, "ROUND"}
 
 	// Composite/pointer
-	inst[CPUI_PIECE] = &typeOpBase{CPUI_PIECE, PcodeOpBinary, "CONCAT"}
+	inst[CPUI_PIECE] = &typeOpPiece{typeOpBase{CPUI_PIECE, PcodeOpBinary, "CONCAT"}}
 	inst[CPUI_SUBPIECE] = &typeOpSubpiece{typeOpBase{CPUI_SUBPIECE, PcodeOpBinary, "SUB"}}
 	inst[CPUI_CAST] = &typeOpCast{typeOpBase{CPUI_CAST, PcodeOpUnary | PcodeOpSpecial | PcodeOpNoCollapse, "CAST"}}
 	inst[CPUI_PTRADD] = &typeOpPtradd{typeOpBase{CPUI_PTRADD, PcodeOpTernary | PcodeOpNoCollapse, "PTRADD"}}

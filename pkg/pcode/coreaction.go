@@ -1194,8 +1194,8 @@ func (a *ActionOutputPrototype) Apply(data *Funcdata) int {
 	// firstRet from its merged HighVariable -- breaking a loop-accumulator return where
 	// the return value (a stack local) is merged with its loop-body register definition,
 	// which then renders as a dead temp instead of writing back to the local.
-	if firstRet.Type() != nil {
-		hv.SetType(firstRet.Type())
+	if dt := firstRet.HighTypeDefFacing(); dt != nil {
+		hv.SetType(dt) // FuncProto::updateOutputTypes takes the high's type
 	}
 	return 0
 }

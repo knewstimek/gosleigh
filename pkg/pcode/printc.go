@@ -330,6 +330,11 @@ func (s *printCState) collectSymbols() {
 			// PrintC::emitScopeVarDecls).
 			if e := s.fd.globalEntryOf(vn); e != nil {
 				s.names[vn] = s.globalVarnodeName(vn, e)
+				// An implied global piece (ActionMarkExplicit lets an addrtied
+				// value through to a containing ZEXT/PIECE) folds into its reader.
+				if vn.Def() != nil && s.shouldInline(vn.Def()) {
+					s.inline[vn.Def()] = true
+				}
 				continue
 			}
 			// A register the convention preserves, read for its incoming value
@@ -951,6 +956,13 @@ func (s *printCState) shouldInline(op *PcodeOp) bool {
 func (s *printCState) inferReturnType() Datatype {
 	if s.fd == nil {
 		return sharedTypeFactory.GetVoid()
+	}
+	// The signature prints the output type ActionOutputPrototype fixed
+	// before ActionSetCasts. C++ parity: FuncProto::updateOutputTypes.
+	if fp := s.fd.GetFuncProto(); fp != nil && fp.GetOutput() != nil {
+		if dt := fp.GetOutput().Type(); dt != nil && dt.Metatype() != TYPE_VOID {
+			return dt
+		}
 	}
 	for _, op := range s.fd.GetPcodeOpBank().AllOps() {
 		if op == nil || op.Code() != CPUI_RETURN || op.HaltType() != 0 {

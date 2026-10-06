@@ -77,42 +77,71 @@ func (a *ActionMarkExplicit) Clone(groups ActionGroupList) Action {
 	return NewActionMarkExplicit(a.GetGroup())
 }
 
-// known mismatch: baseExplicit does not yet model mapped-symbol aliasing,
-// PTRSUB spacebase special-casing, or proto-partial PIECE root analysis.
+// markExplicitBase decides whether vn must print as its own variable: -1 if
+// explicit (-2 if explicit with special printing), else its reader count.
+// C++ parity: ActionMarkExplicit::baseExplicit. TODO known mismatch: the
+// concat_root (PcodeOp::isPartialRoot) mark is not modelled, so a piece of a
+// PIECE tree under a partial root is treated as implied.
 func markExplicitBase(vn *Varnode, maxref int) int {
 	def := vn.Def()
-	if def == nil {
-		return -1
-	}
-	if def.IsMarker() {
+	if def == nil || def.IsMarker() {
 		return -1
 	}
 	if def.IsCall() {
 		if def.Code() == CPUI_NEW && def.NumInput() == 1 {
-			return -2
+			return -2 // explicit, but may need special printing
 		}
 		return -1
 	}
 	if high := vn.High(); high != nil && high.NumInstances() > 1 {
-		return -1
+		return -1 // must not be merged at all
 	}
-	if vn.IsAddrTied() || vn.IsMapped() || vn.IsProtoPartial() {
+	switch {
+	case vn.IsAddrTied(): // pointers may reference it
+		if def.Code() == CPUI_SUBPIECE {
+			if vin := def.Input(0); vin.IsAddrTied() && uint64(vn.Overlap(vin)) == def.Input(1).Offset() {
+				return -1 // a copymarker, not printed
+			}
+		}
+		useOp := vn.LoneDescend()
+		if useOp == nil {
+			return -1
+		}
+		switch useOp.Code() {
+		case CPUI_INT_ZEXT:
+			if vnout := useOp.Output(); !vnout.IsAddrTied() || vnout.Contains(vn) != 0 {
+				return -1
+			}
+		case CPUI_PIECE:
+			if pieceFindRoot(vn) == vn {
+				return -1
+			}
+		default:
+			return -1
+		}
+	case vn.IsMapped():
+		// Not address tied but mapped: a first-use or dynamic mapping.
 		return -1
+	case vn.IsProtoPartial():
+		return -1 // pieced into a structure
+	case def.Code() == CPUI_PIECE && def.Input(0).IsProtoPartial():
+		return -1 // the base of a structure-building PIECE
 	}
 	if vn.HasNoDescend() {
 		return -1
 	}
 	if def.Code() == CPUI_INSERT {
-		storeOp := def.Output().LoneDescend()
-		if storeOp == nil || storeOp.Code() != CPUI_STORE {
-			return -1
+		if storeOp := def.Output().LoneDescend(); storeOp == nil || storeOp.Code() != CPUI_STORE {
+			return -1 // explicit unless immediately stored
+		}
+	}
+	if def.Code() == CPUI_PTRSUB { // a dereference of a constant/input spacebase is always implied
+		if basevn := def.Input(0); basevn.IsSpaceBase() && (basevn.IsConstant() || basevn.IsInput()) {
+			maxref = 1000000
 		}
 	}
 	descCount := 0
 	for _, op := range vn.DescendIter() {
-		if op == nil {
-			continue
-		}
 		if op.IsMarker() {
 			return -1
 		}
@@ -122,6 +151,57 @@ func markExplicitBase(vn *Varnode, maxref int) int {
 		}
 	}
 	return descCount
+}
+
+// pieceFindRoot follows vn up through the PIECE ops that place it at its own
+// storage, returning the root of its CONCAT tree.
+// C++ parity: PieceNode::findRoot.
+func pieceFindRoot(vn *Varnode) *Varnode {
+	for vn.IsProtoPartial() || vn.IsAddrTied() {
+		var pieceOp *PcodeOp
+		for _, op := range vn.DescendIter() {
+			if op.Code() != CPUI_PIECE {
+				continue
+			}
+			slot := op.GetSlot(vn)
+			addr := op.Output().Addr()
+			if addr.Space.BigEndian == (slot == 1) {
+				addr.Offset += uint64(op.Input(1 - slot).Size())
+			}
+			if addr != vn.Addr() {
+				continue
+			}
+			// C++ takes any non-zero compareOrder as "earlier".
+			if pieceOp == nil || opCompareOrder(op, pieceOp) != 0 {
+				pieceOp = op
+			}
+		}
+		if pieceOp == nil {
+			break
+		}
+		vn = pieceOp.Output()
+	}
+	return vn
+}
+
+// opCompareOrder orders two ops by control flow: -1 if a comes first, 1 if
+// b does, 0 if neither block dominates the other.
+// C++ parity: PcodeOp::compareOrder.
+func opCompareOrder(a, b *PcodeOp) int {
+	if a.Parent() == b.Parent() {
+		if a.Seq().Order < b.Seq().Order {
+			return -1
+		}
+		return 1
+	}
+	common := FindCommonBlock(&a.Parent().FlowBlock, &b.Parent().FlowBlock)
+	switch common {
+	case &a.Parent().FlowBlock:
+		return -1
+	case &b.Parent().FlowBlock:
+		return 1
+	}
+	return 0
 }
 
 func markExplicitMultipleInteraction(multlist []*Varnode) int {

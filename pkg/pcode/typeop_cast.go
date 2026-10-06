@@ -300,6 +300,17 @@ func (t *typeOpIntAdd) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 // this, castOutput retypes the result to int and markExplicitUnsigned then emits
 // a spurious 'U' on the other operand of a downstream mask. C++ parity:
 // TypeOpIntSub::getOutputToken -> arithmeticOutputStandard (typeop.cc:1328-1332).
+// GetOutputToken of a PIECE is its output's int/uint type, or a uint of its
+// size for anything else. C++ parity: TypeOpPiece::getOutputToken.
+func (t *typeOpPiece) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	vn := op.Output()
+	dt := vn.HighTypeDefFacing()
+	if meta := dt.Metatype(); meta == TYPE_INT || meta == TYPE_UINT {
+		return dt
+	}
+	return baseForMeta(cs.tlst, vn.Size(), TYPE_UINT)
+}
+
 func (t *typeOpIntSub) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 	return cs.arithmeticOutputStandard(op)
 }
