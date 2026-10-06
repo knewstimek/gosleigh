@@ -476,6 +476,11 @@ func mergeTestAdjacent(hOut, hIn *HighVariable) bool {
 	if sym := hOut.GetSymbol(); sym != nil && sym.IsIsolated() {
 		return false
 	}
+	// Currently don't allow speculative merging of variables that are in
+	// separate overlapping collections. C++ parity: merge.cc:207-209.
+	if hOut.piece != nil && hIn.piece != nil {
+		return false
+	}
 	return true
 }
 

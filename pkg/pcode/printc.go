@@ -3295,7 +3295,11 @@ func (s *printCState) renderVarnodeExpr(vn *Varnode) (ExprFragment, error) {
 		if frag, ok := s.renderEnumConstant(vn); ok {
 			return frag, nil
 		}
-		return s.lang.Atom(s.renderConstant(vn)), nil
+		text := s.renderConstant(vn)
+		if frag, ok := s.castConstantFrag(vn, text); ok {
+			return frag, nil
+		}
+		return s.lang.Atom(text), nil
 	}
 	if op := vn.Def(); op != nil && s.inline[op] {
 		if s.activeExpr[op] {
@@ -3306,6 +3310,26 @@ func (s *printCState) renderVarnodeExpr(vn *Varnode) (ExprFragment, error) {
 		return s.renderOpExprFrag(op)
 	}
 	return s.readExpr(vn), nil
+}
+
+// castConstantFrag rebuilds a default-printed constant (typecast + hex) as a
+// cast over the integer, so a line can break after the cast.
+// C++ parity: PrintC::pushConstant default printing (pushOp(&typecast)).
+func (s *printCState) castConstantFrag(vn *Varnode, text string) (ExprFragment, bool) {
+	var typeStr string
+	switch typed := vn.TypeReadFacing(nil).(type) {
+	case *Pointer:
+		typeStr = printedTypeString(s.normalizeTypeForDecl(typed))
+	case *Array, *Struct, *Union:
+		typeStr = printedTypeString(typed)
+	default:
+		return ExprFragment{}, false
+	}
+	hex := fmt.Sprintf("0x%x", vn.Offset())
+	if text != "("+typeStr+")"+hex {
+		return ExprFragment{}, false
+	}
+	return s.lang.CastExpr(typeStr, s.lang.Atom(hex)), true
 }
 
 // renderEnumConstant prints an enum constant as its named components joined
