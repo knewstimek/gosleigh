@@ -296,6 +296,7 @@ func (s *printCState) collectSymbols() {
 		// Kept separate from seenParamHV so that non-input varnodes merged by
 		// ActionMergeCopy into a param HighVariable can still appear in locals.
 		seenHV := make(map[*HighVariable]bool)
+		markerOnly := make(map[*HighVariable]*Varnode)
 		for _, vn := range all {
 			if vn == nil || vn.IsConstant() || vn.IsAnnotation() {
 				continue
@@ -444,6 +445,9 @@ func (s *printCState) collectSymbols() {
 						continue
 					}
 					if vn.Def() != nil && vn.Def().IsMarker() {
+						if _, ok := markerOnly[hv]; !ok {
+							markerOnly[hv] = vn
+						}
 						// Name is already registered in s.names above (line: s.names[vn] = name).
 						// Do NOT mark seenHV so that a non-marker SSA version of the same
 						// HighVariable (e.g. the COPY that writes into this phi) can still
@@ -640,6 +644,15 @@ func (s *printCState) collectSymbols() {
 			}
 			return CompareLocDef(params[i], params[j]) < 0
 		})
+		// A variable only ever defined by MULTIEQUAL/INDIRECT (a stack slot a
+		// call writes) is still a symbol and is declared through one of them.
+		// C++ parity: PrintC::emitScopeVarDecls declares every local symbol.
+		for hv, vn := range markerOnly {
+			if !seenHV[hv] && !seenParamHV[hv] && !vn.IsInput() {
+				seenHV[hv] = true
+				locals = append(locals, vn)
+			}
+		}
 		sort.Slice(locals, func(i, j int) bool { return CompareLocDef(locals[i], locals[j]) < 0 })
 		s.params = dedupVarnodes(params)
 		s.locals = dedupVarnodes(locals)
