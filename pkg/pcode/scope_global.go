@@ -73,6 +73,73 @@ func (s *printCState) globalSymbolName(sym *Symbol) string {
 	return ns + "::" + sym.Name()
 }
 
+// globalVarnodeName names vn through the global symbol entry it maps to:
+// the symbol itself, a piece of it (field, element or ._off_size_) when vn
+// lies inside the symbol, or the symbol name prefixed with '_' when vn
+// starts at the symbol but runs past its end.
+// C++ parity: PrintC::pushVnExplicit -> pushSymbol / pushPartialSymbol /
+// pushMismatchSymbol.
+// TODO known mismatch: the SUBPIECE-cast form of pushPartialSymbol
+// (allowCast) is not modeled.
+func (s *printCState) globalVarnodeName(vn *Varnode, e *SymbolEntry) string {
+	sym := e.Symbol()
+	name := s.globalSymbolName(sym)
+	ct := sym.Type()
+	if ct == nil || vn.Space() != e.Addr().Space || vn.Offset() < e.Addr().Offset {
+		return name
+	}
+	off := int32(vn.Offset() - e.Addr().Offset)
+	sz := vn.Size()
+	if off == 0 && sz == ct.Size() {
+		return name
+	}
+	if off+sz > ct.Size() {
+		if off == 0 {
+			return "_" + name
+		}
+		return name
+	}
+	var sb strings.Builder
+	sb.WriteString(name)
+	for ct != nil {
+		if off == 0 && sz == ct.Size() {
+			break
+		}
+		ok := false
+		switch t := ct.(type) {
+		case *Struct:
+			for _, f := range t.Fields() {
+				if f.Type != nil && f.Offset <= off && off+sz <= f.Offset+f.Type.Size() {
+					sb.WriteString("." + f.Name)
+					off -= f.Offset
+					ct = f.Type
+					ok = true
+					break
+				}
+			}
+		case *Array:
+			if el := t.Element(); el != nil && el.Size() > 0 {
+				idx, rem := off/el.Size(), off%el.Size()
+				if rem+sz <= el.Size() {
+					if mostNaturalBase(uint64(idx)) == 10 {
+						fmt.Fprintf(&sb, "[%d]", idx)
+					} else {
+						fmt.Fprintf(&sb, "[0x%x]", idx)
+					}
+					off = rem
+					ct = el
+					ok = true
+				}
+			}
+		}
+		if !ok {
+			fmt.Fprintf(&sb, "._%d_%d_", off, sz)
+			break
+		}
+	}
+	return sb.String()
+}
+
 // globalEntryOf returns the global symbol entry a Varnode is linked to. A
 // persistent Varnode created after ActionMapGlobals (rule rewrites) is linked
 // on demand by address, as Funcdata::linkSymbol does in ActionNameVars.

@@ -329,7 +329,7 @@ func (s *printCState) collectSymbols() {
 			// declared in the function body (only local-scope symbols are,
 			// PrintC::emitScopeVarDecls).
 			if e := s.fd.globalEntryOf(vn); e != nil {
-				s.names[vn] = s.globalSymbolName(e.Symbol())
+				s.names[vn] = s.globalVarnodeName(vn, e)
 				continue
 			}
 			// A register the convention preserves, read for its incoming value
@@ -4598,7 +4598,7 @@ func (s *printCState) nameOf(vn *Varnode) string {
 	}
 	// A global's name is its symbol's; no local naming pass may override it.
 	if e := s.fd.globalEntryOf(vn); e != nil {
-		return s.globalSymbolName(e.Symbol())
+		return s.globalVarnodeName(vn, e)
 	}
 	if name, ok := s.names[vn]; ok {
 		return name

@@ -650,9 +650,13 @@ func (fd *Funcdata) MapGlobals() {
 			if w == nil || !w.IsPersist() || w.Space() != addr.Space || w.Offset() >= end {
 				break
 			}
-			if !w.IsFree() && !w.IsAnnotation() {
-				group = append(group, w)
+			if w.IsFree() || w.IsAnnotation() {
+				// C++ never sees a free Varnode here: clearDeadVarnodes destroyed it
+				// (TODO known mismatch: Go keeps some, e.g. a lane-split original).
+				i++
+				continue
 			}
+			group = append(group, w)
 			if e := w.Offset() + uint64(w.Size()); e > end {
 				end = e
 			}
@@ -1507,11 +1511,20 @@ func (fd *Funcdata) MarkIndirectCreation(indop *PcodeOp, possibleOutput bool) {
 }
 
 // C++ parity: funcdata_varnode.cc Funcdata::transferVarnodeProperties
+// TransferVarnodeProperties carries the consumed-bit mask (shifted to the
+// piece) and the directwrite/addrforce flags from vn to a piece of it.
+// C++ parity: Funcdata::transferVarnodeProperties.
 func (fd *Funcdata) TransferVarnodeProperties(src, dst *Varnode, bytePos int32) {
-	// TODO known mismatch: the full C++ property transfer logic is not yet ported.
-	_ = src
-	_ = dst
-	_ = bytePos
+	newConsume := ^uint64(0) // bits shifted in above the precision stay set
+	if bytePos < 8 {
+		fill := uint64(0)
+		if bytePos != 0 {
+			fill = newConsume << (8 * uint(8-bytePos))
+		}
+		newConsume = ((src.Consumed() >> (8 * uint(bytePos))) | fill) & maskForSize(dst.Size())
+	}
+	dst.SetFlags(src.flags & (VarnodeDirectWrite | VarnodeAddrForce))
+	dst.SetConsumed(newConsume)
 }
 
 // VarnodesBySpace returns all varnodes in the given address space.
