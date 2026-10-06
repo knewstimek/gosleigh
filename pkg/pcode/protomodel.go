@@ -555,3 +555,12 @@ func (pm *ProtoModel) WithRegParams(offsets []uint64) *ProtoModel {
 	}
 	return pm
 }
+
+// Alias is a copy of the model under another name, printed in declarations.
+// C++ parity: ProtoModel::ProtoModel(const string &,const ProtoModel &).
+func (pm *ProtoModel) Alias(name string) *ProtoModel {
+	c := *pm
+	c.Name = name
+	c.PrintInDecl = true
+	return &c
+}

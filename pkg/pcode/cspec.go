@@ -186,6 +186,18 @@ type xmlNamedRef struct {
 	Name string `xml:"name,attr"`
 }
 
+// xmlModelAlias mirrors <modelalias name parent/>.
+type xmlModelAlias struct {
+	Name   string `xml:"name,attr"`
+	Parent string `xml:"parent,attr"`
+}
+
+// CspecModelAlias names a model that copies another.
+// C++ parity: Architecture::createModelAlias.
+type CspecModelAlias struct {
+	Name, Parent string
+}
+
 // xmlResolveProto mirrors <resolveprototype name><model name/>...</>.
 type xmlResolveProto struct {
 	Name   string        `xml:"name,attr"`
@@ -236,6 +248,8 @@ type CspecData struct {
 	DefaultProto *CspecPrototype
 	// ExtraProtos are all named non-default prototypes.
 	ExtraProtos []*CspecPrototype
+	// ModelAliases are the <modelalias> entries, in document order.
+	ModelAliases []CspecModelAlias
 	// StackPointer register name (e.g. "ESP").
 	StackPointerReg string
 	// StackPointerSpace is the backing address space for the stack pointer (e.g. "ram").
@@ -278,6 +292,7 @@ type xmlCompilerSpec struct {
 	ReturnAddr   CspecReturnAddress `xml:"returnaddress"`
 	DefaultProto CspecDefaultProto  `xml:"default_proto"`
 	Prototypes   []CspecPrototype   `xml:"prototype"`
+	ModelAliases []xmlModelAlias    `xml:"modelalias"`
 	DataOrg      *xmlDataOrg        `xml:"data_organization"`
 }
 
@@ -341,6 +356,9 @@ func ParseCspecBytes(data []byte) (*CspecData, error) {
 	for i := range raw.Prototypes {
 		p := raw.Prototypes[i]
 		cs.ExtraProtos = append(cs.ExtraProtos, &p)
+	}
+	for _, a := range raw.ModelAliases {
+		cs.ModelAliases = append(cs.ModelAliases, CspecModelAlias{Name: a.Name, Parent: a.Parent})
 	}
 
 	return cs, nil

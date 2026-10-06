@@ -803,11 +803,11 @@ func installModels(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdat
 	def := buildModel(engine, cspec, fd, entryPoint, nil)
 	def.PrintInDecl = false // The default model's name is never printed
 	fd.SetDefaultModel(def)
-	if cspec == nil || cspec.EvalCurrent == "" || cspec.EvalCurrent == def.Name {
-		fd.SetModels(map[string]*pcode.ProtoModel{def.Name: def})
+	named := map[string]*pcode.ProtoModel{def.Name: def}
+	if cspec == nil {
+		fd.SetModels(named)
 		return
 	}
-	named := map[string]*pcode.ProtoModel{def.Name: def}
 	for _, p := range cspec.ExtraProtos {
 		c := *cspec
 		c.DefaultProto = p
@@ -815,6 +815,18 @@ func installModels(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdat
 		m.PrintInDecl = true
 		named[p.Name] = m
 	}
+	// An alias copies its parent and prints its own name; a missing
+	// __thiscall is an alias of the default model.
+	// C++ parity: Architecture::createModelAlias and parseCompilerConfig.
+	alias := func(name, parent string) {
+		if pm := named[parent]; pm != nil && named[name] == nil {
+			named[name] = pm.Alias(name)
+		}
+	}
+	for _, a := range cspec.ModelAliases {
+		alias(a.Name, a.Parent)
+	}
+	alias("__thiscall", def.Name)
 	for _, rp := range cspec.ResolvePrototypes {
 		var comps []*pcode.ProtoModel
 		for _, n := range rp.Models {
@@ -827,6 +839,9 @@ func installModels(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdat
 		}
 	}
 	fd.SetModels(named)
+	if cspec.EvalCurrent == "" || cspec.EvalCurrent == def.Name {
+		return
+	}
 	if eval := named[cspec.EvalCurrent]; eval != nil {
 		fd.SetEvalCurrentModel(eval)
 	}

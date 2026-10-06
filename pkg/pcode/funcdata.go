@@ -248,7 +248,17 @@ func (fd *Funcdata) ModelByName(name string) *ProtoModel {
 	if name == "" || name == "unknown" {
 		return nil
 	}
-	return fd.models[name]
+	if m := fd.models[name]; m != nil {
+		return m
+	}
+	// An unrecognized name gets a clone of the default model, printed under
+	// that name. C++ parity: Architecture::createUnknownModel.
+	if fd.defaultModel == nil || fd.models == nil {
+		return nil
+	}
+	m := fd.defaultModel.Alias(name)
+	fd.models[name] = m
+	return m
 }
 
 // SetEvalCurrentModel sets the model that evaluates this function's own

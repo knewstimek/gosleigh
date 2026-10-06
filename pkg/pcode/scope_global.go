@@ -63,14 +63,17 @@ func (g *GlobalScope) EntryFor(vn *Varnode) *SymbolEntry {
 // TODO known mismatch: only the exact-namespace case is elided; C++ also
 // elides a common prefix with the function's scope.
 func (s *printCState) globalSymbolName(sym *Symbol) string {
+	// The symbol name is a variable/function token (cleaned by the Java
+	// PrettyPrinter); the scope is syntax and stays raw.
+	name := cppDisplayName(sym.Name())
 	ns := sym.Namespace()
 	if ns == "" {
-		return sym.Name()
+		return name
 	}
 	if fn := s.fd.Name(); strings.HasPrefix(fn, ns+"::") && !strings.Contains(fn[len(ns)+2:], "::") {
-		return sym.Name()
+		return name
 	}
-	return ns + "::" + sym.Name()
+	return ns + "::" + name
 }
 
 // globalVarnodeName names vn through the global symbol entry it maps to:

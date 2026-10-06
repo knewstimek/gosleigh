@@ -25,8 +25,8 @@ type FuncCallSpecs struct {
 	// inputActive: parameter recovery is in progress; the trials outlive it.
 	// C++ parity: FuncCallSpecs::isinputactive.
 	inputActive bool
-	op               *PcodeOp
-	fd               *Funcdata
+	op          *PcodeOp
+	fd          *Funcdata
 
 	// effectiveExtraPop is the working extrapop for this call site: the
 	// prototype's when known, otherwise solved by ActionStackPtrFlow.
@@ -71,9 +71,11 @@ type HostScope interface {
 // (Java grabFromFunction): calling-convention name ("" or "unknown" when not
 // known) and extrapop (purge + stackshift; ExtrapopUnknown when unknown).
 type HostFunction struct {
-	Name     string
-	Model    string
-	ExtraPop int32
+	Name string
+	// Namespace is the scope path of Name (Name is qualified by it).
+	Namespace string
+	Model     string
+	ExtraPop  int32
 	// NoReturn: the function never returns (FuncProto::isNoReturn).
 	NoReturn bool
 	// InputLocked: Params is the complete, typed parameter list.

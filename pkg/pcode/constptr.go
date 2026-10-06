@@ -1,6 +1,10 @@
 package pcode
 
-import "gosleigh/pkg/address"
+import (
+	"strings"
+
+	"gosleigh/pkg/address"
+)
 
 // bitTransitions counts the 0/1 transitions in the low sz bytes of val.
 // C++ parity: address.cc bit_transitions.
@@ -126,6 +130,13 @@ func (fd *Funcdata) resolveGlobalSymbol(addr address.Address) *SymbolEntry {
 	}
 	if hf, ok := fd.hostScope.QueryFunction(addr); ok && hf.Name != "" {
 		code := sharedTypeFactory.GetCode("", nil, nil, false)
+		if hf.Namespace != "" && strings.HasPrefix(hf.Name, hf.Namespace+"::") {
+			// The symbol lives in its scope, so printing keeps the scope raw
+			// and cleans only the name. C++ parity: Symbol in its Scope.
+			e := gs.AddSymbol(hf.Name[len(hf.Namespace)+2:], code, addr, 1, VarnodeTypeLock|VarnodeNameLock)
+			e.Symbol().namespace = hf.Namespace
+			return e
+		}
 		return gs.AddSymbol(hf.Name, code, addr, 1, VarnodeTypeLock|VarnodeNameLock)
 	}
 	return nil
