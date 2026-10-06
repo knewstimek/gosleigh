@@ -90,7 +90,10 @@ func FormatOpSSA(fd *Funcdata, op *PcodeOp) (res string) {
 			res = "<dead op>"
 		}
 	}()
-	ctx := &ssaDumpContext{defaultSize: ssaDefaultSize(fd)}
+	ctx := &ssaDumpContext{defaultSize: 4}
+	if fd != nil {
+		ctx.defaultSize = ssaDefaultSize(fd)
+	}
 	return ctx.opPrefix(op) + ctx.opBody(op)
 }
 
