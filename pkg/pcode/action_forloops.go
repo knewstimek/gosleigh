@@ -136,15 +136,13 @@ func tryMarkForLoop(data *Funcdata, wdo *BlockWhileDo) {
 		return
 	}
 
-	// testTerminal check: the varnode that loopDef reads from the tail slot must
-	// be explicit. If it is implied (single-use temp), the iterate statement
-	// cannot stand as a for-loop iterator clause.
-	// C++ parity: BlockWhileDo::testTerminal (block.cc:3271)
-	if tailSlot >= 0 && loopDef != nil {
-		tailVn := loopDef.Input(tailSlot)
-		if tailVn != nil && !tailVn.IsExplicit() {
-			return
-		}
+	// The iterator must be a printed, explicit statement.
+	// C++ parity: BlockWhileDo::finalizePrinting -> testTerminal.
+	// TODO known mismatch: the moveRespectingCover placement test is not ported.
+	if term := forLoopTerminal(loopDef, tailSlot); term != nil {
+		iterateOp = term
+	} else {
+		return
 	}
 
 	// testIterateForm: the loop variable must appear as an input in the
@@ -171,6 +169,36 @@ func tryMarkForLoop(data *Funcdata, wdo *BlockWhileDo) {
 	wdo.SetForLoop(iterateOp, initOp)
 }
 
+// forLoopTerminal returns the statement that produces the loop variable along
+// the given MULTIEQUAL slot, looking through a non-printed COPY, or nil when
+// that statement is not explicit and printed.
+// C++ parity: BlockWhileDo::testTerminal (minus moveRespectingCover).
+func forLoopTerminal(loopDef *PcodeOp, slot int) *PcodeOp {
+	if loopDef == nil || slot < 0 || slot >= loopDef.NumInput() {
+		return nil
+	}
+	vn := loopDef.Input(slot)
+	if !vn.IsWritten() {
+		return nil
+	}
+	finalOp := vn.Def()
+	resOp := finalOp
+	if finalOp.Code() == CPUI_COPY && finalOp.NotPrinted() {
+		vn = finalOp.Input(0)
+		if !vn.IsWritten() {
+			return nil
+		}
+		resOp = vn.Def()
+		if resOp.Parent() != finalOp.Parent() {
+			return nil
+		}
+	}
+	if !vn.IsExplicit() || resOp.NotPrinted() {
+		return nil
+	}
+	return resOp
+}
+
 // testIterateForm verifies that the iterator statement's input tree reaches
 // the loop variable HighVariable. Starts a depth-first walk from iterateOp;
 // returns true if any reachable input varnode shares the HighVariable of
@@ -189,34 +217,6 @@ func testIterateForm(iterateOp, loopDef *PcodeOp) bool {
 	high := targetVn.High()
 	if high == nil {
 		return false
-	}
-
-	// Reject cross-variable COPY ops that are within-HV phi snapshots.
-	//
-	// In Gosleigh, when mergeAddrTied / snipReads inserts a COPY for a phi-input
-	// varnode (e.g. "tmp = COPY(param_4)" where param_4 is already in the loop HV),
-	// both the COPY input and the MULTIEQUAL output end up in the same HighVariable.
-	// testIterateForm's DFS would find vn.High() == high on the very first step and
-	// return true, incorrectly accepting this snapshot COPY as the iterator op.
-	//
-	// C++ avoids this via testTerminal (block.cc:3264): it checks finalOp->notPrinted()
-	// (i.e. the COPY is a NonPrinting same-HV copy) and, when notPrinted, looks one
-	// level deeper for the actual computation. Gosleigh's testTerminal is not yet fully
-	// ported (it only checks isExplicit on the MULTIEQUAL slot input), so we add the
-	// equivalent guard here: if iterateOp is a COPY whose input already belongs to the
-	// loop variable HV, it is a within-HV snapshot and must be rejected.
-	//
-	// Exception: CountedLoop-style chains where iterateOp is a COPY with an input
-	// from a DIFFERENT HV are still valid (the COPY bridges from a register temp to
-	// the stack-backed loop variable). Those have inVn.High() != high and fall through
-	// to the DFS walk below.
-	if iterateOp.Code() == CPUI_COPY {
-		inVn := iterateOp.Input(0)
-		if inVn != nil && inVn.High() == high {
-			// Input already in the loop HV: this is a within-HV phi snapshot COPY, not
-			// a real loop update. Reject so the while-do stays a while-do.
-			return false
-		}
 	}
 
 	type frame struct {
