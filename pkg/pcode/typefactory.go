@@ -96,7 +96,7 @@ const maxBasetypeSize = 10
 // give a base of this size (no host-supplied name).
 func isGenericBaseName(name string, size int32) bool {
 	switch name {
-	case "", "unknown", fmt.Sprintf("undefined%d", size), fmt.Sprintf("int%d", size), fmt.Sprintf("uint%d", size):
+	case "", "unknown", "int", "uint", "bool", fmt.Sprintf("undefined%d", size), fmt.Sprintf("int%d", size), fmt.Sprintf("uint%d", size):
 		return true
 	}
 	return false

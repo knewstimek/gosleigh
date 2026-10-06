@@ -17,10 +17,6 @@ func mostSigBitSet(val uint64) int { return bits.Len64(val) - 1 }
 // MULTIEQUAL inputs arriving on loop back-edges so the initial DFS does not
 // depend on not-yet-computed cyclic values.
 //
-// Sizes larger than 8 bytes fall back to the full mask (conservative); the C++
-// extended-precision arithmetic is not ported (Gosleigh nzmask is a single
-// uint64). This is safe: a wider mask never enables an unsound simplification.
-//
 // C++ parity: op.cc PcodeOp::getNZMaskLocal (lines 548-778).
 func (op *PcodeOp) getNZMaskLocal(cliploop bool) uint64 {
 	out := op.Output()
@@ -68,17 +64,29 @@ func (op *PcodeOp) getNZMaskLocal(cliploop bool) uint64 {
 		}
 	case CPUI_INT_LEFT:
 		s := op.Input(1)
-		if s == nil || !s.IsConstant() || wide {
+		if s == nil || !s.IsConstant() {
 			resmask = fullmask
 		} else {
-			resmask = (in(0) << s.Offset()) & fullmask
+			resmask = pcodeLeft(in(0), s.Offset()) & fullmask
 		}
 	case CPUI_INT_RIGHT:
 		s := op.Input(1)
-		if s == nil || !s.IsConstant() || wide {
+		if s == nil || !s.IsConstant() {
 			resmask = fullmask
 		} else {
-			resmask = in(0) >> s.Offset()
+			sz1 := uint64(op.Input(0).Size())
+			sa := s.Offset()
+			resmask = pcodeRight(in(0), sa)
+			if sz1 > 8 { // resmask did not hold the most significant bits
+				switch {
+				case sa >= 8*sz1:
+					resmask = 0
+				case sa >= 64: // Full mask shifted over 64 bits
+					resmask = maskForSize(int32(sz1-8)) >> (sa - 64)
+				default: // Fill in one bits from the part not calculated
+					resmask |= ^uint64(0) << (64 - sa)
+				}
+			}
 		}
 	case CPUI_INT_SRIGHT:
 		s := op.Input(1)
@@ -213,6 +221,22 @@ func (op *PcodeOp) getNZMaskLocal(cliploop bool) uint64 {
 		resmask = fullmask
 	}
 	return resmask
+}
+
+// pcodeLeft and pcodeRight shift a mask as CPUI_INT_LEFT/RIGHT do, giving 0
+// for shifts past the mask width. C++ parity: pcode_left / pcode_right.
+func pcodeLeft(val, sa uint64) uint64 {
+	if sa >= 64 {
+		return 0
+	}
+	return val << sa
+}
+
+func pcodeRight(val, sa uint64) uint64 {
+	if sa >= 64 {
+		return 0
+	}
+	return val >> sa
 }
 
 // PcodeOp primary flags -- uint32 bitmask.
