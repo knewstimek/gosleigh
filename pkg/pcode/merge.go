@@ -633,25 +633,8 @@ func (m *Merge) MergeOp(op *PcodeOp) {
 	}
 
 	if !allOK {
-		// A loop-condition MULTIEQUAL whose cover conflict cannot be resolved by
-		// trimming inputs: its back-edge input transitively reads the phi output, so
-		// every input-trim COPY still lives inside the phi output's loop-spanning
-		// cover. C++ mergeOp discovers this by exhausting the input-trim loop
-		// (nexttrim==max) and falling through to trimOpOutput (merge.cc:759-760);
-		// Gosleigh's input-trim re-test spuriously succeeds for this cyclic case
-		// (a residual loop-carried Cover gap -- see docs/STATUS.md H8-debt-1), so we
-		// route loop-condition phis straight to trimOpOutput. trimOpOutput splits the
-		// long-lived output off via a COPY, producing the loop-head snapshot (iVar1).
-		// This replaces the former TrimJoinblockMultiequals forward-snip pass with the
-		// faithful C++ trimOpOutput mechanism. The loop-condition test (not a bare
-		// cyclic-input test) is deliberate: in gcd BOTH loop-variable phis are cyclic,
-		// but only the condition phi -- whose output is also consumed in the body as the
-		// pre-swap value (iVar1) -- has the output-side cover conflict that input-trim
-		// cannot resolve. Trimming the non-condition cyclic phi's output would split a
-		// variable Ghidra leaves merged. (Verified: a bare cyclic gate over-trims gcd.)
-		forceOutputTrim := op.Code() == CPUI_MULTIEQUAL && isLoopCondMultiequal(op)
 		trimmed := false
-		if !forceOutputTrim {
+		{
 			for nexttrim := 0; nexttrim < max; nexttrim++ {
 				m.TrimOpInput(op, nexttrim)
 				testlist = testlist[:0]
@@ -716,31 +699,6 @@ func (m *Merge) MergeOp(op *PcodeOp) {
 		}
 		mergeHighVariables(highOut, highIn, m.testCache)
 	}
-}
-
-// isLoopCondMultiequal returns true if the MULTIEQUAL's output is used (directly
-// or via a COPY chain ending at INT_EQUAL/INT_NOTEQUAL) as the condition for a
-// CBRANCH.  This identifies loop-head phi ops that feed the while condition;
-// MergeOp routes these straight to TrimOpOutput when they have a Cover conflict,
-// producing the loop-head snapshot local (e.g. iVar1) for a swapped loop variable.
-func isLoopCondMultiequal(op *PcodeOp) bool {
-	out := op.Output()
-	if out == nil {
-		return false
-	}
-	// Direct: output consumed by INT_EQUAL/INT_NOTEQUAL.
-	for _, desc := range out.DescendIter() {
-		if desc == nil {
-			continue
-		}
-		switch desc.Code() {
-		case CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL:
-			return true
-		case CPUI_CBRANCH:
-			return true
-		}
-	}
-	return false
 }
 
 // MergeMarker iterates over all live MULTIEQUAL and INDIRECT ops and forces the
