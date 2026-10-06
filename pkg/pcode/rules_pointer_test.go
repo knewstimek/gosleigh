@@ -9,7 +9,7 @@ func makePointerRuleTypes() (*Base, *Struct, *Pointer) {
 		{Offset: 4, Name: "tail", Type: int4},
 	})
 	ptr := sharedTypeFactory.GetPointer(4, st, 1)
-	return int4, st, ptr
+	return int4.(*Base), st, ptr
 }
 
 func TestAddTreeState_ClassifyAndRebuild(t *testing.T) {

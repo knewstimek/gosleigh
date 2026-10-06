@@ -72,15 +72,36 @@ func (f *TypeFactory) Intern(dt Datatype) Datatype {
 	}
 }
 
-func (f *TypeFactory) GetBase(size int32, meta metatype, name string) *Base {
+func (f *TypeFactory) GetBase(size int32, meta metatype, name string) Datatype {
 	if size == 1 && meta == TYPE_INT && (name == "" || name == "int" || name == "char") {
 		// C++ parity: TypeFactory::cacheCoreTypes -- the ASCII char is the
 		// preferred size-1 TYPE_INT, so getBase(1,TYPE_INT) yields char.
 		return f.GetChar("char")
 	}
+	// A value wider than any base type is an array of unknown bytes
+	// (undefined1 [16] for an XMM register); a float keeps its core type.
+	// Explicit host names are not generic and stay as named.
+	// C++ parity: TypeFactory::getBase (max_basetype_size = 10).
+	if size > maxBasetypeSize && meta != TYPE_FLOAT && isGenericBaseName(name, size) {
+		return f.GetArray(size, f.GetBase(1, TYPE_UNKNOWN, ""))
+	}
 	value := NewBase(size, meta, name)
 	key := fmt.Sprintf("base:%d:%d:%s", value.Size(), value.Metatype(), value.Name())
 	return f.internBase(key, value)
+}
+
+// maxBasetypeSize is the widest base data-type. C++ parity:
+// Architecture::max_basetype_size.
+const maxBasetypeSize = 10
+
+// isGenericBaseName reports whether name is one TypeFactory itself would
+// give a base of this size (no host-supplied name).
+func isGenericBaseName(name string, size int32) bool {
+	switch name {
+	case "", "unknown", fmt.Sprintf("undefined%d", size), fmt.Sprintf("int%d", size), fmt.Sprintf("uint%d", size):
+		return true
+	}
+	return false
 }
 
 // GetTypedefBase returns base under a typedef name. It prints by that name.

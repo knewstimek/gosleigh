@@ -2907,7 +2907,7 @@ func (r *RuleSplitLoad) apply(op *PcodeOp, data *Funcdata) int {
 		return 0
 	}
 	splitter := NewSplitDatatype(data)
-	inType := splitter.getValueDatatype(op, op.Output().Size(), splitter.types)
+	inType := splitValueDatatype(op, op.Output().Size(), splitter.types)
 	if inType == nil {
 		return 0
 	}
@@ -2936,7 +2936,7 @@ func (r *RuleSplitStore) apply(op *PcodeOp, data *Funcdata) int {
 		return 0
 	}
 	splitter := NewSplitDatatype(data)
-	outType := splitter.getValueDatatype(op, op.Input(2).Size(), splitter.types)
+	outType := splitValueDatatype(op, op.Input(2).Size(), splitter.types)
 	if outType == nil {
 		return 0
 	}

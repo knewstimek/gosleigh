@@ -2538,12 +2538,21 @@ func (s *printCState) labelForBlock(bl *FlowBlock) string {
 	if label, ok := s.blockLabels[bl]; ok {
 		return label
 	}
-	// Ghidra names a code label after the block's entry address.
-	// C++ parity: PrintC::emitLabel via the host's queryCodeLabel (LAB_).
+	// Ghidra names a code label after the block's entry address: the host's
+	// LAB_ symbol, except that a block made by joining or duplicating others
+	// has no symbol and gets a generic joined_/dup_ label.
+	// C++ parity: PrintC::emitLabel (queryCodeLabel skipped on hasSpecialLabel).
 	label := fmt.Sprintf("label_%d", len(s.blockLabels))
 	if bb := toBasic(bl); bb != nil {
 		if op := bb.FirstOp(); op != nil {
-			label = fmt.Sprintf("LAB_%08x", op.Addr().Offset)
+			switch {
+			case bb.HasFlag(BlockFlagJoinedBlock):
+				label = fmt.Sprintf("joined_r0x%08x", op.Addr().Offset)
+			case bb.HasFlag(BlockFlagDuplicateBlock):
+				label = fmt.Sprintf("dup_r0x%08x", op.Addr().Offset)
+			default:
+				label = fmt.Sprintf("LAB_%08x", op.Addr().Offset)
+			}
 		}
 	}
 	s.blockLabels[bl] = label
