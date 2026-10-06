@@ -239,8 +239,8 @@ func (s *printCState) emit() (string, error) {
 		s.lang.Newline()
 		s.lang.Newline()
 		s.lang.Token("{")
-		s.lang.Newline()
 		s.lang.Indent()
+		s.lang.Newline()
 	} else {
 		s.lang.OpenBlockAfter(func() {
 			s.lang.Token(s.renderFunctionSignature(retType))
@@ -1851,8 +1851,8 @@ func (s *printCState) emitIfBlockChain(bl *FlowBlock, isElseIf bool) error {
 			s.emitConditionParen(cond)
 			s.lang.Space()
 			s.lang.Token("{")
-			s.lang.Newline()
 			s.lang.Indent()
+			s.lang.Newline()
 		} else {
 			// Standard format: "} else if (cond) {" on same line as closing brace.
 			s.lang.CloseBlockWithSuffix(func() {
@@ -1915,8 +1915,8 @@ func (s *printCState) emitIfBlockChain(bl *FlowBlock, isElseIf bool) error {
 		s.lang.Token("else")
 		s.lang.Space()
 		s.lang.Token("{")
-		s.lang.Newline()
 		s.lang.Indent()
+		s.lang.Newline()
 	} else {
 		s.lang.CloseBlockWithSuffix(func() {
 			s.lang.Token("else")

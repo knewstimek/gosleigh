@@ -164,9 +164,12 @@ func (pl *PrintLanguage) Statement(fn func()) {
 }
 
 func (pl *PrintLanguage) OpenBlock() {
+	// The indent opens before the line break so the first statement's width
+	// is measured at the block's indent. C++ parity: PrintC emits
+	// startIndent then tagLine before each statement.
 	pl.Token("{")
-	pl.Newline()
 	pl.Indent()
+	pl.Newline()
 }
 
 func (pl *PrintLanguage) CloseBlock() {
