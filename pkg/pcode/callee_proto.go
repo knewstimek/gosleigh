@@ -266,7 +266,7 @@ func (fd *Funcdata) ApplyHostSelfPrototype(model *ProtoModel) {
 		if p.Type != nil {
 			fp.SetLockedParamType(p.Offset, p.Type)
 		}
-		fp.SetLockedParamName(p.Offset, p.Name, true, false)
+		fp.SetLockedParamName(p.Offset, p.Name, p.NameLock, p.Isolate)
 	}
 	fd.SetHostLocals(fd.hostLocals)
 }

@@ -245,7 +245,8 @@ func parseCaptureProto(fn *xnode, types map[string]*xnode) captureProto {
 	cp := captureProto{name: fn.attr("name"), noReturn: fn.attr("noreturn") == "true", extraPop: pcode.ExtrapopUnknown}
 	slot := func(sym, at *xnode) pcode.HostParam {
 		p := pcode.HostParam{Space: at.attr("space"), Offset: parseUint(at.attr("offset")),
-			Size: int32(parseUint(at.attr("size"))), Name: sym.attr("name"), ThisPtr: sym.attr("thisptr") == "true"}
+			Size: int32(parseUint(at.attr("size"))), Name: sym.attr("name"), ThisPtr: sym.attr("thisptr") == "true",
+			NameLock: sym.attr("namelock") == "true", Isolate: sym.attr("merge") == "false"}
 		for i := range sym.Kids {
 			if t := typeDesc(&sym.Kids[i], types, 0); t != nil {
 				p.Type = pcode.ResolveHostType(t)

@@ -27,8 +27,8 @@ func bitTransitions(val uint64, sz int32) int {
 
 // constPtrIsPointer decides whether constant vn (read by op at slot) is a
 // pointer into spc and returns the global symbol it points at.
-// infer_pointers is on (the Ghidra default). Not ported: locked call
-// parameter / locked return type vetoes, segmented resolveConstant.
+// infer_pointers is on (the Ghidra default). Not ported: segmented
+// resolveConstant.
 // C++ parity: coreaction.cc ActionConstantPtr::isPointer.
 func constPtrIsPointer(data *Funcdata, spc *address.Space, vn *Varnode, op *PcodeOp, slot int, scope *ScopeLocal) (*SymbolEntry, address.Address) {
 	needExact := true
@@ -43,7 +43,25 @@ func constPtrIsPointer(data *Funcdata, spc *address.Space, vn *Varnode, op *Pcod
 			if slot == 0 {
 				return nil, address.Address{}
 			}
-		case CPUI_COPY, CPUI_PIECE, CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL, CPUI_INT_LESS, CPUI_INT_LESSEQUAL:
+			// A locked parameter that is not a pointer vetoes.
+			if fc := op.callSpec; fc != nil && fc.IsInputLocked() {
+				if p, ok := fc.LockedParam(slot - 1); ok && p.Type != nil {
+					if m := p.Type.Metatype(); m != TYPE_PTR && m != TYPE_UNKNOWN {
+						return nil, address.Address{} // Definitely not passing a pointer
+					}
+				}
+			}
+		case CPUI_COPY:
+			// A constant returned through a locked non-pointer output is no
+			// pointer. C++ parity: ActionConstantPtr::checkCopy.
+			if ret := op.Output().LoneDescend(); ret != nil && ret.Code() == CPUI_RETURN {
+				if fp := data.GetFuncProto(); fp != nil && fp.IsOutputLocked() && fp.GetOutput() != nil && fp.GetOutput().Type() != nil {
+					if m := fp.GetOutput().Type().Metatype(); m != TYPE_PTR && m != TYPE_UNKNOWN {
+						return nil, address.Address{}
+					}
+				}
+			}
+		case CPUI_PIECE, CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL, CPUI_INT_LESS, CPUI_INT_LESSEQUAL:
 		case CPUI_INT_ADD:
 			if out := op.Output(); out != nil {
 				if odt := out.TypeDefFacing(); odt != nil && odt.Metatype() == TYPE_PTR {

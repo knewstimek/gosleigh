@@ -389,7 +389,7 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			// C++ parity: ScopeLocal::buildVariableName (addrtied branch first).
 			if c.inVn.IsAddrTied() && !c.inVn.IsPersist() && c.inVn.Space() == sl.SpaceID() &&
 				(sl.model == nil || sl.model.InLocalRange(c.inVn.Offset())) {
-				nm = sl.addrTiedName(c.inVn.Addr(), c.hv.Type())
+				nm = sl.addrTiedLinkName(c.inVn.Addr(), c.hv.Type())
 			}
 			nm = makeNameUnique(nm, used)
 			used[nm] = true

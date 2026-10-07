@@ -99,6 +99,9 @@ type HostParam struct {
 	Type    Datatype
 	Name    string
 	ThisPtr bool
+	// NameLock and Isolate are the symbol's namelock and merge="false"
+	// attributes. C++ parity: Symbol::decode (ATTRIB_NAMELOCK, ATTRIB_MERGE).
+	NameLock, Isolate bool
 }
 
 // C++ parity: FuncCallSpecs::FuncCallSpecs + FlowInfo::queryCall/setFuncdata:
