@@ -559,6 +559,55 @@ func (pl *ParamListStandard) findEntry(loc address.Address, size int32, just boo
 	return nil
 }
 
+// checkJoin reports whether the hi/lo storage pair forms one logical
+// parameter. C++ parity: ParamListStandard::checkJoin (fspec.cc).
+func (pl *ParamListStandard) checkJoin(hiaddr address.Address, hisize int32, loaddr address.Address, losize int32) bool {
+	entryHi := pl.findEntry(hiaddr, hisize, true)
+	if entryHi == nil {
+		return false
+	}
+	entryLo := pl.findEntry(loaddr, losize, true)
+	if entryLo == nil {
+		return false
+	}
+	if entryHi.getGroup() == entryLo.getGroup() {
+		if entryHi.isExclusion() || entryLo.isExclusion() {
+			return false
+		}
+		if !address.IsContiguous(hiaddr, hisize, loaddr, losize) {
+			return false
+		}
+		if (hiaddr.Offset-entryHi.addressbase)%uint64(entryHi.getAlign()) != 0 {
+			return false
+		}
+		return (loaddr.Offset-entryLo.addressbase)%uint64(entryLo.getAlign()) == 0
+	}
+	sizesum := hisize + losize
+	for _, pe := range pl.entry {
+		if pe.getSize() < sizesum {
+			continue
+		}
+		if pe.justifiedContain(loaddr, losize) != 0 {
+			continue
+		}
+		if pe.justifiedContain(hiaddr, hisize) != losize {
+			continue
+		}
+		return true
+	}
+	return false
+}
+
+// checkSplit reports whether the storage at loc may be split at splitpoint
+// into two parameters. C++ parity: ParamListStandard::checkSplit (fspec.cc).
+func (pl *ParamListStandard) checkSplit(loc address.Address, size, splitpoint int32) bool {
+	loc2 := address.Address{Space: loc.Space, Offset: loc.Offset + uint64(splitpoint)}
+	if pl.findEntry(loc, splitpoint, true) == nil {
+		return false
+	}
+	return pl.findEntry(loc2, size-splitpoint, true) != nil
+}
+
 // GetMaxDelay returns the maximum heritage delay across the spaces that hold a
 // parameter entry. A non-zero delay means parameter storage lives in a space
 // that is heritaged late (the stack spacebase), so trial classification must be

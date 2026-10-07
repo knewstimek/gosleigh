@@ -14,7 +14,7 @@
 
 package pcode
 
-import "math/bits"
+
 
 // ActionConstantFold evaluates pure ops whose every input is a constant
 // varnode and replaces the op with COPY(result_const).
@@ -143,250 +143,41 @@ func applyIdentityFold(data *Funcdata, op *PcodeOp) bool {
 	return false
 }
 
-// constFoldableOpcodes lists every opcode evalConstOp can evaluate. It is the
-// dispatch set for the pool-level RuleCollapseConstants so that the same
-// coverage applies both in the once-per-func ActionConstantFold pass and in the
-// fixpoint rule pool (which catches ops materialized after the once pass, e.g.
-// switch/jump-table case bodies). C++ parity: RuleCollapseConstants applies to
-// all opcodes (ruleaction.hh: "applies to all opcodes"), gated by
-// PcodeOp::isCollapsible; evalConstOp is the Go stand-in for op->collapse.
-// Keep this list in sync with the cases in evalConstOp.
-var constFoldableOpcodes = []OpCode{
-	// binary
-	CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_MULT,
-	CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR,
-	CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL,
-	CPUI_INT_LESS, CPUI_INT_LESSEQUAL,
-	CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL,
-	CPUI_INT_CARRY, CPUI_INT_SCARRY, CPUI_INT_SBORROW,
-	CPUI_BOOL_AND, CPUI_BOOL_OR,
-	CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT,
-	CPUI_SUBPIECE, CPUI_PIECE,
-	// unary
-	CPUI_INT_ZEXT, CPUI_INT_SEXT,
-	CPUI_INT_2COMP, CPUI_INT_NEGATE,
-	CPUI_BOOL_NEGATE,
-	CPUI_POPCOUNT,
-}
+// collapsibleOpcodes lists every opcode PcodeOp::collapse can evaluate: the
+// unary and binary TypeOps not marked nocollapse. C++ RuleCollapseConstants
+// applies to all opcodes and gates on isCollapsible; Go dispatches rules by
+// opcode, and the remaining opcodes can never collapse.
+var collapsibleOpcodes = func() []OpCode {
+	var res []OpCode
+	for code, t := range RegisterTypeOps() {
+		if t == nil {
+			continue
+		}
+		fl := t.GetFlags()
+		if fl&(PcodeOpUnary|PcodeOpBinary) != 0 && fl&PcodeOpNoCollapse == 0 {
+			res = append(res, OpCode(code))
+		}
+	}
+	return res
+}()
 
-// evalConstOp attempts to constant-fold op.
-// Returns (result, true) if all inputs are constants (or constant-valued via
-// COPY(const) forwarding) and the opcode is supported.
-// The result is NOT yet masked to output size; callers must mask.
+// evalConstOp folds a collapsible op. C++ parity: PcodeOp::isCollapsible +
+// PcodeOp::collapse.
 func evalConstOp(op *PcodeOp) (uint64, bool) {
-	// A result wider than a uintb is never collapsed.
-	// C++ parity: PcodeOp::isCollapsible (getOut()->getSize() > sizeof(uintb)).
-	if out := op.Output(); out != nil && out.Size() > 8 {
+	if !op.isCollapsible() {
 		return 0, false
 	}
-	switch op.Code() {
-	// --- binary ops ---
-	case CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_MULT,
-		CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR,
-		CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL,
-		CPUI_INT_LESS, CPUI_INT_LESSEQUAL,
-		CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL,
-		CPUI_INT_CARRY, CPUI_INT_SCARRY, CPUI_INT_SBORROW,
-		CPUI_BOOL_AND, CPUI_BOOL_OR,
-		// Shifts, SUBPIECE, and PIECE are ordinary assignment ops: when every
-		// input is constant they are collapsible just like the arithmetic ops
-		// above. C++ parity: op.cc PcodeOp::isCollapsible folds ANY assignment
-		// op with all-constant inputs (RuleCollapseConstants -> PcodeOp::collapse
-		// -> behave->evaluateBinary). evalBinary already implements each of these.
-		// Without them a constant SUBPIECE such as SUB(0x3f,0) never collapses,
-		// leaving spurious (undefined1)0x3f terms in shift-count masks.
-		CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT,
-		CPUI_SUBPIECE, CPUI_PIECE:
-		if op.NumInput() != 2 {
-			return 0, false
-		}
-		a, aok := foldedConstantValue(op.Input(0))
-		b, bok := foldedConstantValue(op.Input(1))
-		if !aok || !bok {
-			return 0, false
-		}
-		inSize := foldedSize(op.Input(0))
-		return evalBinary(op.Code(), a, b, inSize, constFoldOutSize(op)), true
-
-	// --- unary ops ---
-	case CPUI_INT_ZEXT, CPUI_INT_SEXT,
-		CPUI_INT_2COMP, CPUI_INT_NEGATE,
-		CPUI_BOOL_NEGATE,
-		CPUI_POPCOUNT:
-		if op.NumInput() != 1 {
-			return 0, false
-		}
-		a, aok := foldedConstantValue(op.Input(0))
-		if !aok {
-			return 0, false
-		}
-		inSize := foldedSize(op.Input(0))
-		return evalUnary(op.Code(), a, inSize, constFoldOutSize(op)), true
-	}
-	return 0, false
+	res, err := op.collapse()
+	return res, err == nil
 }
 
-// constFoldOutSize returns the output size of op for evaluation, defaulting to
-// 1 when the op has no output (evalConstOp is only reached with a non-nil
-// output, so the fallback is defensive).
-func constFoldOutSize(op *PcodeOp) int32 {
-	if o := op.Output(); o != nil {
-		return o.Size()
-	}
-	return 1
-}
-
-// foldedConstantValue returns the constant value of vn, following a chain of
-// COPY ops: if vn is defined by COPY(const) the constant is forwarded.
-// This allows the fixpoint loop to fold chains in a single pass by resolving
-// already-folded upstream ops without waiting for another iteration.
+// foldedConstantValue returns the value of a constant Varnode.
 func foldedConstantValue(vn *Varnode) (uint64, bool) {
-	// Only a constant Varnode counts: a COPY of a constant is folded once copy
-	// propagation has put the constant in place, as in C++.
-	// C++ parity: PcodeOp::isCollapsible (getIn(i)->isConstant()).
 	if vn == nil || !vn.IsConstant() {
 		return 0, false
 	}
 	return truncateToSize(vn.Offset(), vn.Size()), true
 }
-
-// foldedSize returns the input size used for signed arithmetic.
-func foldedSize(vn *Varnode) int32 {
-	if vn == nil {
-		return 1
-	}
-	return vn.Size()
-}
-
-// evalBinary evaluates a binary constant op.
-// inSize is the size of input 0 (needed for signed comparisons and shift sign
-// fills); outSize is the output size (needed for shift / SUBPIECE / PIECE
-// truncation). The arithmetic and comparison cases ignore outSize and are
-// byte-identical to before its addition; the constant-fold caller still masks
-// the result to the output size, so appending the outSize-dependent shift /
-// SUBPIECE / PIECE cases here does not change any previously supported op.
-// C++ parity: typeop.cc TypeOpBinary::evaluateBinary / opbehavior.cc
-// OpBehaviorInt*::evaluateBinary.
-func evalBinary(code OpCode, a, b uint64, inSize, outSize int32) uint64 {
-	switch code {
-	case CPUI_INT_ADD:
-		return a + b
-	case CPUI_INT_SUB:
-		return a - b
-	case CPUI_INT_MULT:
-		return a * b
-	case CPUI_INT_AND:
-		return a & b
-	case CPUI_INT_OR:
-		return a | b
-	case CPUI_INT_XOR:
-		return a ^ b
-	case CPUI_INT_EQUAL:
-		return boolToUint64(a == b)
-	case CPUI_INT_NOTEQUAL:
-		return boolToUint64(a != b)
-	case CPUI_INT_LESS:
-		return boolToUint64(a < b)
-	case CPUI_INT_LESSEQUAL:
-		return boolToUint64(a <= b)
-	case CPUI_INT_SLESS:
-		return boolToUint64(signedVal(a, inSize) < signedVal(b, inSize))
-	case CPUI_INT_SLESSEQUAL:
-		return boolToUint64(signedVal(a, inSize) <= signedVal(b, inSize))
-	case CPUI_INT_CARRY:
-		// unsigned carry: result overflows inSize bits
-		mask := maskForSize(inSize)
-		return boolToUint64((a+b)&mask < a&mask)
-	case CPUI_INT_SCARRY:
-		// signed carry (overflow): operands same sign, result different
-		sb := signBitForSize(inSize)
-		sum := a + b
-		return boolToUint64(((a^sum)&(b^sum))&sb != 0)
-	case CPUI_INT_SBORROW:
-		// signed borrow (overflow on subtract): operands differ in sign, result same sign as subtrahend
-		sb := signBitForSize(inSize)
-		diff := a - b
-		return boolToUint64(((a^b)&(a^diff))&sb != 0)
-	case CPUI_BOOL_AND:
-		return boolToUint64(a != 0 && b != 0)
-	case CPUI_BOOL_OR:
-		return boolToUint64(a != 0 || b != 0)
-	case CPUI_INT_LEFT:
-		// C++ parity: OpBehaviorIntLeft::evaluateBinary (opbehavior.cc:412).
-		if b >= uint64(outSize)*8 {
-			return 0
-		}
-		return (a << b) & maskForSize(outSize)
-	case CPUI_INT_RIGHT:
-		// C++ parity: OpBehaviorIntRight::evaluateBinary (opbehavior.cc:433).
-		if b >= uint64(outSize)*8 {
-			return 0
-		}
-		return (a & maskForSize(outSize)) >> b
-	case CPUI_INT_SRIGHT:
-		// C++ parity: OpBehaviorIntSright::evaluateBinary (opbehavior.cc:455).
-		if b >= 8*uint64(outSize) {
-			if signbitNegative(a, inSize) {
-				return maskForSize(outSize)
-			}
-			return 0
-		}
-		if signbitNegative(a, inSize) {
-			res := a >> b
-			m := maskForSize(inSize)
-			m = (m >> b) ^ m
-			return res | m
-		}
-		return a >> b
-	case CPUI_SUBPIECE:
-		// C++ parity: OpBehaviorSubpiece::evaluateBinary (opbehavior.cc:760).
-		// b is the truncation byte offset. sizeof(uintb)==8.
-		if b >= 8 {
-			return 0
-		}
-		return (a >> (b * 8)) & maskForSize(outSize)
-	case CPUI_PIECE:
-		// C++ parity: OpBehaviorPiece::evaluateBinary (opbehavior.cc:753).
-		// inSize is the size of the high piece (input 0); the low piece b is
-		// concatenated below it.
-		return (a << (uint64(outSize-inSize) * 8)) | b
-	}
-	return 0
-}
-
-// evalUnary evaluates a unary constant op.
-// inSize is the size of the input operand; outSize is the output size. Only
-// SEXT consumes outSize (masking the sign extension to the output width, per
-// C++ OpBehaviorIntSext); every other case is byte-identical to before and the
-// constant-fold caller still masks the result, so the SEXT change is idempotent
-// there (the low outSize bits are unchanged). CPUI_COPY is added for the
-// emulator's executeUnary path (constant folding never routes COPY here).
-// C++ parity: typeop.cc TypeOpUnary::evaluateUnary / opbehavior.cc
-// OpBehaviorInt*::evaluateUnary.
-func evalUnary(code OpCode, a uint64, inSize, outSize int32) uint64 {
-	switch code {
-	case CPUI_COPY:
-		// C++ parity: OpBehaviorCopy::evaluateUnary returns the input.
-		return a
-	case CPUI_INT_ZEXT:
-		// Zero-extend: value is already unsigned, no sign bits to extend.
-		return a
-	case CPUI_INT_SEXT:
-		// Sign-extend from inSize, then mask to the output width.
-		// C++ parity: sign_extend(in1,sizein,sizeout) (opbehavior.cc:267).
-		return truncateToSize(uint64(signedVal(a, inSize)), outSize)
-	case CPUI_INT_2COMP:
-		return -a
-	case CPUI_INT_NEGATE:
-		return ^a
-	case CPUI_BOOL_NEGATE:
-		return boolToUint64(a == 0)
-	case CPUI_POPCOUNT:
-		return uint64(bits.OnesCount64(a))
-	}
-	return 0
-}
-
 // signedVal interprets val as a two's-complement signed integer of inSize bytes.
 func signedVal(val uint64, inSize int32) int64 {
 	if inSize <= 0 || inSize >= 8 {

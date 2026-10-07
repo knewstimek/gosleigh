@@ -251,221 +251,65 @@ func (fc *FuncCallSpecs) ForceSet(_ *Funcdata, proto FuncProto) {
 	fc.FuncProto.Copy(&proto)
 }
 
-// CheckInputSplit reports whether the ABI permits splitting a CONCAT piece
-// parameter into two consecutive trials.
-// C++ parity: FuncCallSpecs::checkInputSplit -> FuncProto::checkInputSplit
-// -> ParamListStandard::checkSplit (fspec.cc:1342).
-//
-// The C++ routine asks the ParamList to resolve both halves against its
-// ParamEntry table; both halves must map to legal input entries. Gosleigh
-// does not yet port ParamEntry, so we run the closest available query:
-// for stack-space splits we require both halves to fall in the parameter
-// area and respect the ProtoModel's ParamAlign. For register-space splits
-// we answer false -- the full ParamEntry port will replace that branch.
+// CheckInputSplit reports whether the model allows a parameter at loc to be
+// split at splitpoint into two parameters.
+// C++ parity: FuncProto::checkInputSplit -> ProtoModel::checkInputSplit.
 func (fc *FuncCallSpecs) CheckInputSplit(loc address.Address, size int32, splitpoint int32) bool {
-	if fc == nil || fc.FuncProto.model == nil {
+	if fc == nil || fc.FuncProto.model == nil || fc.FuncProto.model.InputParams == nil {
 		return false
 	}
-	if size <= 0 || splitpoint <= 0 || splitpoint >= size {
-		return false
-	}
-	if loc.Space == nil || loc.Space.Kind != address.SpaceKindStack {
-		// TODO known mismatch: register-space splits need ParamEntry.findEntry.
-		return false
-	}
-	model := fc.FuncProto.model
-	align := uint64(model.ParamAlign)
-	if align == 0 {
-		align = 1
-	}
-	// Lo piece is at loc, Hi piece is at loc + splitpoint (in byte units --
-	// stack space has WordSize 1). Both halves must fit inside the parameter
-	// area and start on a ParamAlign boundary.
-	base := uint64(0)
-	if model.ParamBaseOffset > 0 {
-		base = uint64(model.ParamBaseOffset)
-	}
-	off1 := loc.Offset
-	off2 := loc.Offset + uint64(splitpoint)
-	if !model.IsParamOffset(off1) || !model.IsParamOffset(off2) {
-		return false
-	}
-	if off1 < base || off2 < base {
-		return false
-	}
-	if ((off1 - base) % align) != 0 {
-		return false
-	}
-	if ((off2 - base) % align) != 0 {
-		return false
-	}
-	return true
+	return fc.FuncProto.model.InputParams.checkSplit(loc, size, splitpoint)
 }
 
 // CheckInputJoin reports whether two adjacent input slots can be merged into
-// a double-precision whole parameter.
-// C++ parity: FuncCallSpecs::checkInputJoin (fspec.cc:5349) ->
-// FuncProto::checkInputJoin -> ParamListStandard::checkJoin (fspec.cc:1315).
-//
-// The Go port mirrors the C++ preflight: reject when the call is still
-// classifying its inputs, require the ishislot flag to match the slot order,
-// and require the declared trial sizes to match the varnode sizes at that
-// slot. After that we defer to the same stack-vs-register discrimination as
-// CheckInputSplit: stack halves must be contiguous and ParamAlign-aligned;
-// register-space halves get a TODO.
+// one parameter. C++ parity: FuncCallSpecs::checkInputJoin (fspec.cc).
 func (fc *FuncCallSpecs) CheckInputJoin(slot1 int, ishislot bool, vn1 *Varnode, vn2 *Varnode) bool {
-	if fc == nil || vn1 == nil || vn2 == nil || fc.FuncProto.model == nil {
-		return false
-	}
-	// C++ returns false when input recovery is still active; coreaction.cc
-	// only calls this from the !isInputActive branch so the guard normally
-	// short-circuits false when the call-site has an in-flight ParamActive.
 	if fc.IsInputActive() {
 		return false
 	}
 	active := fc.getActiveInputState()
-	if active == nil {
-		return false
-	}
-	if slot1 < 0 || slot1+1 >= active.NumTrials() {
+	if active == nil || slot1 >= active.NumTrials() { // Not enough params
 		return false
 	}
 	var hislot, loslot *ParamTrial
-	if ishislot {
+	if ishislot { // slot1 looks like the high slot
 		hislot = active.TrialForInputVarnode(slot1)
 		loslot = active.TrialForInputVarnode(slot1 + 1)
-		if hislot == nil || loslot == nil {
-			return false
-		}
-		if hislot.GetSize() != vn1.Size() || loslot.GetSize() != vn2.Size() {
+		if hislot == nil || loslot == nil || hislot.GetSize() != vn1.Size() || loslot.GetSize() != vn2.Size() {
 			return false
 		}
 	} else {
 		loslot = active.TrialForInputVarnode(slot1)
 		hislot = active.TrialForInputVarnode(slot1 + 1)
-		if hislot == nil || loslot == nil {
-			return false
-		}
-		if loslot.GetSize() != vn1.Size() || hislot.GetSize() != vn2.Size() {
+		if hislot == nil || loslot == nil || loslot.GetSize() != vn1.Size() || hislot.GetSize() != vn2.Size() {
 			return false
 		}
 	}
-	hiaddr := hislot.GetAddress()
-	hisize := hislot.GetSize()
-	loaddr := loslot.GetAddress()
-	losize := loslot.GetSize()
-	return checkParamJoin(fc.FuncProto.model, hiaddr, hisize, loaddr, losize)
+	model := fc.FuncProto.model
+	if model == nil || model.InputParams == nil {
+		return false
+	}
+	return model.InputParams.checkJoin(hislot.GetAddress(), hislot.GetSize(), loslot.GetAddress(), loslot.GetSize())
 }
 
-// checkParamJoin is the stack-space approximation of
-// ParamListStandard::checkJoin used by CheckInputJoin.
-// C++ parity: fspec.cc ParamListStandard::checkJoin (stack branch only).
-func checkParamJoin(model *ProtoModel, hiaddr address.Address, hisize int32, loaddr address.Address, losize int32) bool {
-	if model == nil {
-		return false
-	}
-	if hisize <= 0 || losize <= 0 {
-		return false
-	}
-	if hiaddr.Space == nil || loaddr.Space == nil {
-		return false
-	}
-	if hiaddr.Space != loaddr.Space {
-		return false
-	}
-	if hiaddr.Space.Kind != address.SpaceKindStack {
-		// TODO known mismatch: register-space joins need ParamEntry.findEntry.
-		return false
-	}
-	// Contiguity check. Endianness of the stack space decides which piece is
-	// at the lower address.
-	var lowAddr, highAddr address.Address
-	var lowSize int32
-	if hiaddr.Space.BigEndian {
-		lowAddr = hiaddr
-		lowSize = hisize
-		highAddr = loaddr
-	} else {
-		lowAddr = loaddr
-		lowSize = losize
-		highAddr = hiaddr
-	}
-	if lowAddr.Offset+uint64(lowSize) != highAddr.Offset {
-		return false
-	}
-	if !model.IsParamOffset(hiaddr.Offset) || !model.IsParamOffset(loaddr.Offset) {
-		return false
-	}
-	align := uint64(model.ParamAlign)
-	if align == 0 {
-		align = 1
-	}
-	base := uint64(0)
-	if model.ParamBaseOffset > 0 {
-		base = uint64(model.ParamBaseOffset)
-	}
-	if hiaddr.Offset < base || loaddr.Offset < base {
-		return false
-	}
-	if ((hiaddr.Offset - base) % align) != 0 {
-		return false
-	}
-	if ((loaddr.Offset - base) % align) != 0 {
-		return false
-	}
-	return true
-}
-
-// DoInputJoin records a successful input-join so later analysis passes pick
-// up the merged varnode.
-// C++ parity: FuncCallSpecs::doInputJoin (fspec.cc:5376). The C++ routine
-// builds a join-space address via Architecture::constructJoinAddress before
-// calling ParamActive::joinTrial. Gosleigh does not yet expose a join space,
-// so we collapse the two trials at the low-address piece which preserves the
-// slot mapping even though the synthetic address is not join-space.
-// TODO known mismatch: join-space addresses are not synthesized; downstream
-// code that inspects the joined trial's GetAddress() sees the low piece.
-func (fc *FuncCallSpecs) DoInputJoin(slot1 int, ishislot bool) {
-	if fc == nil {
-		return
-	}
+// DoInputJoin replaces two adjacent trials with their joined whole.
+// C++ parity: FuncCallSpecs::doInputJoin (fspec.cc).
+func (fc *FuncCallSpecs) DoInputJoin(data *Funcdata, slot1 int, ishislot bool) {
 	if fc.IsInputLocked() {
-		return
+		return // C++ throws: joining parameters on a locked prototype
 	}
 	active := fc.getActiveInputState()
-	if active == nil {
-		return
-	}
-	if slot1 < 0 || slot1+1 >= active.NumTrials() {
-		return
-	}
 	trial1 := active.TrialForInputVarnode(slot1)
 	trial2 := active.TrialForInputVarnode(slot1 + 1)
-	if trial1 == nil || trial2 == nil {
-		return
-	}
-	addr1 := trial1.GetAddress()
-	addr2 := trial2.GetAddress()
-	totalsz := trial1.GetSize() + trial2.GetSize()
-	// Approximation of constructJoinAddress: pick the low piece.
+	addr1, addr2 := trial1.GetAddress(), trial2.GetAddress()
 	var joinaddr address.Address
 	if ishislot {
-		// slot1 is hi, slot1+1 is lo -- lo address goes first on little-endian.
-		if addr1.Space != nil && addr1.Space.BigEndian {
-			joinaddr = addr1
-		} else {
-			joinaddr = addr2
-		}
+		joinaddr = data.constructJoinAddress(addr1, trial1.GetSize(), addr2, trial2.GetSize())
 	} else {
-		if addr1.Space != nil && addr1.Space.BigEndian {
-			joinaddr = addr2
-		} else {
-			joinaddr = addr1
-		}
+		joinaddr = data.constructJoinAddress(addr2, trial2.GetSize(), addr1, trial1.GetSize())
 	}
-	active.JoinTrial(int32(slot1), joinaddr, totalsz)
+	active.JoinTrial(int32(slot1), joinaddr, trial1.GetSize()+trial2.GetSize())
 }
-
 // activeInput/accessors bridge the side map into methods. A linter-visible
 // accessor-style pair is used so the helper is reachable without touching
 // funccallspec.go's declaration list.

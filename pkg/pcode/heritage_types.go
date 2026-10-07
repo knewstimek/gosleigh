@@ -139,17 +139,19 @@ func (lm *LocationMap) Add(addr address.Address, size int32, pass int32) (int, i
 		return idx, 0
 	}
 
-	// Check if fully contained in an existing entry with same or older pass
+	// Fully contained in an existing entry: intersect is 2 only when that
+	// entry is from an earlier pass. C++ parity: LocationMap::add
+	// (intersect = (pass < curpass) ? 2 : 0).
 	first := &lm.entries[startIdx]
 	if startIdx+1 == endIdx &&
 		first.Addr.Space == addr.Space &&
 		first.Addr.Offset <= addr.Offset {
 		firstEnd := first.Addr.Offset + uint64(first.SP.Size)
 		if firstEnd >= endOff {
-			if first.SP.Pass <= pass {
-				// Fully contained in existing entry, same or older pass
+			if first.SP.Pass < pass {
 				return startIdx, 2
 			}
+			return startIdx, 0
 		}
 	}
 

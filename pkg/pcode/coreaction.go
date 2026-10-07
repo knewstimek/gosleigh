@@ -2952,7 +2952,7 @@ func (a *ActionParamDouble) Apply(data *Funcdata) int {
 				if fc.CheckInputJoin(j, isslothi, vn1, vn2) {
 					data.OpSetInput(op, whole.GetWhole(), j)
 					data.OpRemoveInput(op, j+1)
-					fc.DoInputJoin(j, isslothi)
+					fc.DoInputJoin(data, j, isslothi)
 					max = op.NumInput() - 1
 					a.count++
 				}

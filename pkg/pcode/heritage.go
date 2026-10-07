@@ -446,12 +446,12 @@ func (h *Heritage) Collect(addr address.Address, size int32) (reads, writes, inp
 		// An annotation (code reference) is heritage-known and carries no value.
 		// C++ parity: heritage.cc Heritage::collect -- reads are the free
 		// Varnodes that are !isHeritageKnown() && !hasNoDescend().
-		if vn.IsInput() {
-			inputs = append(inputs, vn)
-		} else if vn.IsWritten() {
+		if vn.IsWritten() {
 			writes = append(writes, vn)
-		} else if !vn.IsAnnotation() {
+		} else if !vn.IsHeritageKnown() && !vn.HasNoDescend() {
 			reads = append(reads, vn)
+		} else if vn.IsInput() {
+			inputs = append(inputs, vn)
 		}
 	}
 	return

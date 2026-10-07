@@ -349,33 +349,25 @@ type RuleCollapseConstants struct{ batchRule }
 
 func NewRuleCollapseConstants(group string) *RuleCollapseConstants {
 	r := &RuleCollapseConstants{}
-	// RuleCollapseConstants::applyOp -- ruleaction.cc:3874. In C++ this rule
-	// "applies to all opcodes" (ruleaction.hh) and is gated at runtime by
-	// PcodeOp::isCollapsible (all inputs constant, assignment, out size <= 8).
-	// Go dispatches rules by opcode, so we register the full set evalConstOp can
-	// evaluate -- the Go stand-in for op->collapse -> behave->evaluate. Running
-	// in the fixpoint pool (not just the once-per-func ActionConstantFold pass)
-	// is what folds constants materialized late, e.g. the SUB(const,0) and shift
-	// masks in switch/jump-table case bodies.
-	r.batchRule = newBatchRule(group, "collapseconstants", constFoldableOpcodes, r.apply, func(g string) Rule { return NewRuleCollapseConstants(g) })
+	r.batchRule = newBatchRule(group, "collapseconstants", collapsibleOpcodes, r.apply, func(g string) Rule { return NewRuleCollapseConstants(g) })
 	return r
 }
 
-// RuleCollapseConstants::applyOp -- ruleaction.cc:3874.
-// evalConstOp performs the op->collapse role: it succeeds only when every input
-// resolves to a constant. The result is masked to the output size, mirroring
-// data.getArch()->getConstant on the collapsed value.
+// apply folds an op whose inputs are all constants into a COPY of the result;
+// an op that cannot be evaluated is marked nocollapse.
+// C++ parity: RuleCollapseConstants::applyOp (ruleaction.cc).
+// Known mismatch: collapseConstantSymbol (equate carry-over) is not ported.
 func (r *RuleCollapseConstants) apply(op *PcodeOp, data *Funcdata) int {
+	if !op.isCollapsible() {
+		return 0
+	}
+	res, err := op.collapse()
+	if err != nil {
+		op.SetFlag(PcodeOpNoCollapse) // Dont know how or dont want to collapse further
+		return 0
+	}
 	out := op.Output()
-	if out == nil {
-		return 0
-	}
-	res, ok := evalConstOp(op)
-	if !ok {
-		return 0
-	}
-	newConst := data.NewConstant(out.Size(), truncateToSize(res, out.Size()))
-	return rewriteToCopy(data, op, newConst)
+	return rewriteToCopy(data, op, data.NewConstant(out.Size(), truncateToSize(res, out.Size())))
 }
 
 type RuleCarryElim struct{ batchRule }

@@ -88,7 +88,10 @@ func (e *EmulateFunction) executeUnary() error {
 	if err != nil {
 		return err
 	}
-	out := evalUnary(op.Code(), in1, op.Input(0).Size(), op.Output().Size())
+	out, err := evaluateUnary(op.Code(), op.Output().Size(), op.Input(0).Size(), in1)
+	if err != nil {
+		return err
+	}
 	e.setVarnodeValue(op.Output(), out)
 	return nil
 }
@@ -105,7 +108,10 @@ func (e *EmulateFunction) executeBinary() error {
 	if err != nil {
 		return err
 	}
-	out := evalBinary(op.Code(), in1, in2, op.Input(0).Size(), op.Output().Size())
+	out, err := evaluateBinary(op.Code(), op.Output().Size(), op.Input(0).Size(), in1, in2)
+	if err != nil {
+		return err
+	}
 	e.setVarnodeValue(op.Output(), out)
 	return nil
 }
