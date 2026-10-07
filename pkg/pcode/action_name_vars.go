@@ -394,6 +394,14 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		// names the variable: the name representative prefers the input.
 		// C++ parity: HighVariable::compareName (isInput) + buildDefaultName.
 		unmappedStackInput := c.inVn != nil && sl != nil && c.inVn.Space() == sl.SpaceID() && !c.inVn.IsAddrTied()
+		// A stack input past the local frame that is no formal parameter is
+		// named as an irregular input (in_stack_<off>), whatever else merged
+		// into it. C++ parity: Scope::buildDefaultName (high->isInput) ->
+		// ScopeInternal::buildVariableName (input, index < 0).
+		if c.inVn != nil && sl != nil && c.inVn.Space() == sl.SpaceID() && c.inVn.IsAddrTied() &&
+			sl.model != nil && !sl.model.InLocalRange(c.inVn.Offset()) && !regParamHigh(c.hv, sl) {
+			unmappedStackInput = true
+		}
 		if (rep == nil || lockedIrregular || unmappedStackInput) && c.inVn != nil && highHasName(c.hv) && irregular && c.inVn.Space() != nil {
 			// An input that is not a formal parameter: in_<register>.
 			// C++ parity: ScopeInternal::buildVariableName (irregular input,
