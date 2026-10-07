@@ -1,10 +1,10 @@
 package pcode
 
 import (
-	"strconv"
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"strings"
 
 	"gosleigh/pkg/address"
@@ -83,6 +83,8 @@ func (p *PrintC) Emit(fd *Funcdata) (string, error) {
 type printCState struct {
 	printer *PrintC
 	fd      *Funcdata
+	// localNames caches the local scope's symbol names (isNameUsed).
+	localNames map[string]bool
 	// opStack holds the ops whose expressions are being rendered, innermost
 	// last; the one below an op is its reader (PrintC's readOp).
 	opStack []*PcodeOp
@@ -4379,7 +4381,14 @@ func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode, valueon bo
 	if off.Offset() != entry.Addr().Offset {
 		return ExprFragment{}, false
 	}
-	name := s.globalSymbolExpr(sym)
+	var name ExprFragment
+	if sl := s.fd.GetScopeLocal(); sl != nil && sl.SpaceID() == spc {
+		// A symbol of the use scope itself needs no qualification.
+		// C++ parity: Symbol::getResolutionDepth (scope == useScope).
+		name = s.lang.Atom(cppDisplayName(sym.Name()))
+	} else {
+		name = s.globalSymbolExpr(sym)
+	}
 	if sym.Category() == SymbolFakeInput || sym.Category() == SymbolFunctionParameter {
 		// An unnamed stack-input Symbol prints as its parameter.
 		for _, vn := range s.fd.GetVarnodeBank().AllVarnodes() {

@@ -965,8 +965,11 @@ func (s *printCState) minimalScopedName(qualified string) string {
 // global): the host answers for the namespaces, which stop at global.
 // C++ parity: ScopeInternal::isNameUsed (the local scope) ->
 // ScopeGhidraNamespace::isNameUsed.
-// Known mismatch: the local scope's own symbol names are not consulted.
+// The local scope is the use scope, so its own names are checked first.
 func (s *printCState) isNameUsed(name string, use []string, depth int) bool {
+	if s.localNameUsed(name) {
+		return true
+	}
 	if depth >= len(use) {
 		return false // The parent is the terminating scope, or global
 	}
@@ -975,6 +978,30 @@ func (s *printCState) isNameUsed(name string, use []string, depth int) bool {
 	}
 	h, ok := s.fd.HostScope().(HostNameUsed)
 	return ok && h.IsNameUsed(name, depth)
+}
+
+// localNameUsed reports whether a symbol of the function's local scope (a
+// named variable or a stack entry) carries name.
+// C++ parity: ScopeInternal::isNameUsed (the nametree lookup of ScopeLocal).
+func (s *printCState) localNameUsed(name string) bool {
+	if s.localNames == nil {
+		s.localNames = map[string]bool{}
+		if s.fd != nil {
+			for _, vn := range s.fd.GetVarnodeBank().AllVarnodes() {
+				if hv := vn.High(); hv != nil && hv.Name() != "" {
+					s.localNames[hv.Name()] = true
+				}
+			}
+			if sl := s.fd.GetScopeLocal(); sl != nil {
+				for _, e := range sl.Entries() {
+					if sym := e.Symbol(); sym != nil && sym.Name() != "" {
+						s.localNames[sym.Name()] = true
+					}
+				}
+			}
+		}
+	}
+	return s.localNames[name]
 }
 
 // isDynamicSymbolName reports a default FUN_/DAT_ name.
