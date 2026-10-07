@@ -85,6 +85,11 @@ func (s *printCState) emitSignature(sig string) {
 		if i > 0 {
 			s.lang.Token(",")
 		}
+		if !strings.HasSuffix(p, l.names[i]) {
+			// A declarator wrapped around the name ((*param_1) [32]).
+			s.lang.EmitFragment(declExpr(p, ""))
+			continue
+		}
 		s.lang.EmitFragment(declExpr(strings.TrimSuffix(p, l.names[i]), l.names[i]))
 	}
 	ge.CloseParen(")", id2)

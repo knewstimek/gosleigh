@@ -2,6 +2,7 @@ package sla
 
 import (
 	"fmt"
+	"sort"
 
 	"gosleigh/pkg/address"
 	"gosleigh/pkg/pcode"
@@ -313,6 +314,23 @@ func enginePayloadLoader(loader func(addr address.Address) (MatchInput, bool, er
 		return nil
 	}
 	return loader
+}
+
+// Spaces returns the language's address spaces in index order.
+// C++ parity: AddrSpaceManager::getSpace (the manager lists every space,
+// whether or not a function references it).
+func (e *Engine) Spaces() []*address.Space {
+	if e == nil {
+		return nil
+	}
+	out := make([]*address.Space, 0, len(e.loweringTemplate.SpacesByIndex))
+	for _, sp := range e.loweringTemplate.SpacesByIndex {
+		if sp != nil {
+			out = append(out, sp)
+		}
+	}
+	sort.Slice(out, func(i, j int) bool { return out[i].Index < out[j].Index })
+	return out
 }
 
 func (e *Engine) loweringContextForAddress(addr address.Address) LoweringContext {

@@ -284,9 +284,22 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	}
 
 	summary := summarizeSpaces(records, cfg.Entry.Space)
+	// A processor space no instruction names (the registers of a thunk that
+	// only jumps) is still heritaged: a locked callee puts its parameters
+	// there. C++ parity: Heritage::buildInfoList walks every space.
+	heritageSet := make(map[*address.Space]struct{}, len(summary.heritageSpaces))
+	for _, sp := range summary.heritageSpaces {
+		heritageSet[sp] = struct{}{}
+	}
+	for _, sp := range engine.Spaces() {
+		if sp.Kind == address.SpaceKindProcessor {
+			summary.collectHeritageSpace(sp, cfg.Entry.Space, heritageSet)
+		}
+	}
 	fixFlowOverrideReturns(records, summary.constSpace)
 	injectWarnings := applyInjections(records, cfg.Injections, summary.constSpace)
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, analysisUniqueBase, summary.constSpace)
+	fd.SetArchSpaces(engine.Spaces())
 	fd.UserOps().RegisterNames(engine.UserOpNames())
 	fd.SetRegisterNames(engine.RegisterNamesByLocation())
 	if len(cfg.IndirectOverrides) != 0 {

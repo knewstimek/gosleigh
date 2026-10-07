@@ -422,6 +422,17 @@ func datatypeNameBase(dt Datatype) string {
 		return "p" + datatypeNameBase(typed.Pointee())
 	case *Array:
 		return "a" + datatypeNameBase(typed.Element())
+	case *Code:
+		// A prototype-less code type is Ghidra's "code"; any other code type
+		// contributes its own name (none when unnamed).
+		name := typed.Name()
+		if name == "" && !typed.HasPrototype() {
+			name = bareCodeName(typed)
+		}
+		if name == "" {
+			return ""
+		}
+		return name[:1]
 	}
 	// Every core type has a name; an unnamed Gosleigh base type takes the
 	// name it prints with (undefined1 -> 'u').

@@ -54,8 +54,18 @@ func (fd *Funcdata) spaceByName(name string) *address.Space {
 			return sp
 		}
 	}
+	// A space the function never touches (the registers of a thunk that
+	// only jumps) is still part of the architecture.
+	for _, sp := range fd.archSpaces {
+		if sp.Name == name {
+			return sp
+		}
+	}
 	return nil
 }
+
+// SetArchSpaces records every address space of the architecture.
+func (fd *Funcdata) SetArchSpaces(spaces []*address.Space) { fd.archSpaces = spaces }
 
 func (fd *Funcdata) resolveHostParam(p HostParam) (ProtoSlot, bool) {
 	sp := fd.spaceByName(p.Space)

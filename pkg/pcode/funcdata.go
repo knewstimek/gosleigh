@@ -156,6 +156,8 @@ type Funcdata struct {
 	// C++ parity: Funcdata owns bblocks and the heritage's address-space set.
 	graph          *BlockGraph
 	heritageSpaces []*address.Space
+	// archSpaces are all of the architecture's address spaces.
+	archSpaces []*address.Space
 	// incidentalCopy holds the pspec <incidentalcopy> storage ranges.
 	incidentalCopy []GlobalRange
 	// heritage is the persistent SSA engine the universal-action tree reuses across

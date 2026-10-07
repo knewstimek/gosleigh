@@ -147,6 +147,7 @@ func newPrintCState(printer *PrintC, fd *Funcdata) *printCState {
 	lang := NewPrintLanguage(emitter)
 	if printer.ghidraFormat {
 		decls.noCommaSpace = true
+		decls.spacedArrays = true // (*param_1) [32], as PrintC::pushTypeEnd
 		lang.noCommaSpace = true
 	}
 	return &printCState{
@@ -1108,6 +1109,19 @@ func (s *printCState) renderFunctionSignature(retType Datatype) string {
 	// C++ parity: printc.cc PrintC::emitPrototypeOutput + emit->spaces(1).
 	if s.printer.ghidraFormat {
 		sig = strings.Replace(sig, "*"+displayName+"(", "* "+displayName+"(", 1)
+		// A pointer to an array or a function returned prints as an abstract
+		// type (undefined1 (*) [32]) ahead of the name, not as a declarator
+		// wrapped around it. C++ parity: emitPrototypeOutput -> pushType.
+		if ptr, ok := codeType.ReturnType().(*Pointer); ok && needsWrappedDeclarator(ptr.Pointee()) {
+			params := []string{"void"}
+			if len(allTypes) > 0 {
+				params = params[:0]
+				for i, dt := range allTypes {
+					params = append(params, s.decls.Declaration(dt, allNames[i]))
+				}
+			}
+			sig = printedTypeString(ptr) + " " + displayName + "(" + strings.Join(params, ",") + ")"
+		}
 	}
 	s.sigLayout = nil
 	if s.printer.ghidraFormat {
