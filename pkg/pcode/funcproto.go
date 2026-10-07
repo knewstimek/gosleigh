@@ -788,8 +788,8 @@ func buildReturnOutput(active *ParamActive, retop *PcodeOp, data *Funcdata) {
 		newwhole := data.NewVarnodeOut(trialhi.GetSize()+triallo.GetSize(), joinaddr, newop)
 		newwhole.SetAddlFlags(VarnodeWriteMask)
 		data.OpInsertBefore(newop, retop)
-		newparam[2] = newwhole
-		newparam = newparam[:3]
+		// C++: newparam.pop_back(); newparam.back() = newwhole;
+		newparam = append(newparam[:1], newwhole)
 		data.OpSetAllInput(retop, newparam)
 		data.OpSetInput(newop, hivn, 0)
 		data.OpSetInput(newop, lovn, 1)
