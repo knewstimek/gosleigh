@@ -314,42 +314,43 @@ func (fd *Funcdata) OpRemoveInput(op *PcodeOp, slot int) {
 	op.RemoveInput(slot)
 }
 
-func (fd *Funcdata) OpUndoPtradd(op *PcodeOp, allowCopy bool) {
+// OpUndoPtradd turns a PTRADD back into an INT_ADD of the scaled index. The
+// output Varnode (and its data-type) is kept; with finalize, a new scaled
+// constant or INT_MULT output takes the index's type and the product is
+// implied.
+// C++ parity: Funcdata::opUndoPtradd.
+func (fd *Funcdata) OpUndoPtradd(op *PcodeOp, finalize bool) {
 	if op == nil || op.NumInput() < 3 {
 		return
 	}
-	base := op.Input(0)
-	index := op.Input(1)
-	scaleVn := op.Input(2)
-	scale, ok := constantValue(scaleVn)
-	if !ok {
-		scale = 1
+	multVn := op.Input(2)
+	multSize := multVn.Offset() // Size the PTRADD thinks we are pointing
+	fd.OpRemoveInput(op, 2)
+	fd.OpSetOpcode(op, CPUI_INT_ADD)
+	if multSize == 1 {
+		return // No multiplier, we are done
 	}
-	outType := base.TypeReadFacing(op)
-	if indexVal, ok := constantValue(index); ok {
-		product := truncateToSize(indexVal*scale, base.Size())
-		if product == 0 && allowCopy {
-			rewriteToCopy(fd, op, base)
-			SetVarnodeType(op.Output(), outType)
-			return
+	offVn := op.Input(1)
+	if offVn.IsConstant() {
+		newVal := truncateToSize(multSize*offVn.Offset(), offVn.Size())
+		newOffVn := fd.NewConstant(offVn.Size(), newVal)
+		if finalize {
+			newOffVn.UpdateType(offVn.TypeReadFacing(op))
 		}
-		rewriteOp(fd, op, CPUI_INT_ADD, base, fd.NewConstant(base.Size(), product))
-		SetVarnodeType(op.Output(), outType)
+		fd.OpSetInput(op, newOffVn, 1)
 		return
 	}
-	if scale == 1 {
-		if allowCopy && isZeroConst(index) {
-			rewriteToCopy(fd, op, base)
-		} else {
-			rewriteOp(fd, op, CPUI_INT_ADD, base, index)
-		}
-		SetVarnodeType(op.Output(), outType)
-		return
+	multOp := fd.NewOp(2, op.Addr())
+	fd.OpSetOpcode(multOp, CPUI_INT_MULT)
+	addVn := fd.NewUniqueOut(offVn.Size(), multOp)
+	if finalize {
+		addVn.UpdateType(multVn.Type())
+		addVn.SetImplied()
 	}
-	mulType := sharedTypeFactory.GetBase(index.Size(), TYPE_INT, "int")
-	mulOp := fd.NewTypedOpBefore(op, CPUI_INT_MULT, index.Size(), mulType, index, fd.NewConstant(index.Size(), truncateToSize(scale, index.Size())))
-	rewriteOp(fd, op, CPUI_INT_ADD, base, mulOp.Output())
-	SetVarnodeType(op.Output(), outType)
+	fd.OpSetInput(multOp, offVn, 0)
+	fd.OpSetInput(multOp, multVn, 1)
+	fd.OpSetInput(op, addVn, 1)
+	fd.OpInsertBefore(multOp, op)
 }
 
 func signExtendToInt64(val uint64, size int32) int64 {
