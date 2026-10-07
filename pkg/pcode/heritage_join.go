@@ -247,3 +247,18 @@ func (h *Heritage) floatExtensionWrite(vn *Varnode, joinrec *address.JoinRecord)
 		h.fd.OpInsertAfter(ext, op)
 	}
 }
+
+// numHeritagePasses is how many times the space has been heritaged
+// (negative while its delay has not passed).
+// C++ parity: Funcdata::numHeritagePasses / Heritage::numHeritagePasses.
+func (fd *Funcdata) numHeritagePasses(spc *address.Space) int32 {
+	h := fd.heritage
+	if h == nil {
+		return 0
+	}
+	h.BuildInfoList()
+	if info := h.infoForSpace(spc); info != nil {
+		return h.pass - info.Delay
+	}
+	return 0
+}

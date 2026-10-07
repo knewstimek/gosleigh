@@ -3490,9 +3490,6 @@ func (a *ActionConditionalConst) Clone(groups ActionGroupList) Action {
 // advances a.count so the main loop will iterate.
 // C++ parity: coreaction.cc ActionConditionalConst::apply (lines 4525-4557)
 // TODO known mismatch:
-//   - Gosleigh has no Funcdata::numHeritagePasses, so useMultiequal is always
-//     enabled. C++ defers phi-node propagation until the stack space has been
-//     heritaged at least once.
 //   - pushConstant is limited to the straight-COPY case because
 //     PcodeOp::executeSimple is not ported yet.
 func (a *ActionConditionalConst) Apply(data *Funcdata) int {
@@ -3503,9 +3500,14 @@ func (a *ActionConditionalConst) Apply(data *Funcdata) int {
 	if bg == nil {
 		return 0
 	}
+	// Propagating into MULTIEQUALs waits until the stack has been heritaged.
+	useMulti := true
+	if st := data.stackSpace(); st != nil && data.numHeritagePasses(st) <= 0 {
+		useMulti = false
+	}
 	ctx := &condConstContext{
 		data:       data,
-		useMulti:   true,
+		useMulti:   useMulti,
 		markedOps:  make(map[*PcodeOp]bool),
 		markedVars: make(map[*Varnode]bool),
 	}
