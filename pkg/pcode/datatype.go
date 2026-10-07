@@ -179,6 +179,8 @@ type datatypeBase struct {
 	metatype    metatype
 	submeta     subMetatype
 	flags       datatypeFlags
+	// typedefOf is the data-type a typedef names. C++ parity: Datatype::typedefImm.
+	typedefOf Datatype
 }
 
 func newDatatypeBase(size int32, align int32, meta metatype, name string) datatypeBase {
@@ -194,15 +196,19 @@ func newDatatypeBase(size int32, align int32, meta metatype, name string) dataty
 	}
 }
 
-func (d datatypeBase) ID() uint64             { return d.id }
-func (d datatypeBase) Size() int32            { return d.size }
-func (d datatypeBase) Alignment() int32       { return d.alignment }
-func (d datatypeBase) AlignSize() int32       { return d.alignSize }
-func (d datatypeBase) Name() string           { return d.name }
-func (d datatypeBase) DisplayName() string    { return d.displayName }
-func (d datatypeBase) Metatype() metatype     { return d.metatype }
-func (d datatypeBase) SubMeta() subMetatype   { return d.submeta }
-func (d datatypeBase) Flags() datatypeFlags   { return d.flags }
+func (d datatypeBase) ID() uint64           { return d.id }
+func (d datatypeBase) Size() int32          { return d.size }
+func (d datatypeBase) Alignment() int32     { return d.alignment }
+func (d datatypeBase) AlignSize() int32     { return d.alignSize }
+func (d datatypeBase) Name() string         { return d.name }
+func (d datatypeBase) DisplayName() string  { return d.displayName }
+func (d datatypeBase) Metatype() metatype   { return d.metatype }
+func (d datatypeBase) SubMeta() subMetatype { return d.submeta }
+func (d datatypeBase) Flags() datatypeFlags { return d.flags }
+
+// Typedef returns the data-type this typedef names, or nil.
+// C++ parity: Datatype::getTypedef.
+func (d datatypeBase) Typedef() Datatype      { return d.typedefOf }
 func (d datatypeBase) IsCoreType() bool       { return d.flags&datatypeCoreType != 0 }
 func (d datatypeBase) IsEnumType() bool       { return d.flags&datatypeEnumType != 0 }
 func (d datatypeBase) IsIncomplete() bool     { return d.flags&datatypeTypeIncomplete != 0 }

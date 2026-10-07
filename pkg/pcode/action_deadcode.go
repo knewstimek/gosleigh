@@ -378,8 +378,6 @@ func (a *ActionSetCasts) castInput(op *PcodeOp, slot int, data *Funcdata, cs *Ca
 // of type ct2 in every operation: the same type once matching pointer levels
 // and typedefs are stripped.
 // C++ parity: ActionSetCasts::isOpIdentical.
-// Known mismatch: a Go typedef keeps no link to the type it names, so a
-// typedef is only identical to itself.
 func isOpIdentical(ct1, ct2 Datatype) bool {
 	for {
 		p1, ok1 := ct1.(*Pointer)
@@ -389,7 +387,18 @@ func isOpIdentical(ct1, ct2 Datatype) bool {
 		}
 		ct1, ct2 = p1.Pointee(), p2.Pointee()
 	}
-	return ct1 == ct2
+	return stripTypedef(ct1) == stripTypedef(ct2)
+}
+
+// stripTypedef follows typedef links to the named data-type.
+func stripTypedef(ct Datatype) Datatype {
+	for {
+		td, ok := ct.(interface{ Typedef() Datatype })
+		if !ok || td.Typedef() == nil {
+			return ct
+		}
+		ct = td.Typedef()
+	}
 }
 
 // tryResolutionAdjustment removes the need for a cast between an input and

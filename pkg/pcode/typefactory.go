@@ -281,6 +281,7 @@ func (f *TypeFactory) GetTypedefPointer(name string, p *Pointer) *Pointer {
 	value := *p
 	value.datatypeBase.name = name
 	value.datatypeBase.flags |= datatypeTypedef
+	value.datatypeBase.typedefOf = p
 	f.intern[key] = &value
 	return &value
 }
@@ -298,6 +299,7 @@ func (f *TypeFactory) GetTypedefStruct(name string, s *Struct) *Struct {
 	value := *s
 	value.datatypeBase.name = name
 	value.datatypeBase.flags |= datatypeTypedef
+	value.datatypeBase.typedefOf = s
 	f.intern[key] = &value
 	return &value
 }
@@ -314,6 +316,7 @@ func (f *TypeFactory) GetTypedefUnion(name string, u *Union) *Union {
 	value := *u
 	value.datatypeBase.name = name
 	value.datatypeBase.flags |= datatypeTypedef
+	value.datatypeBase.typedefOf = u
 	f.intern[key] = &value
 	return &value
 }
@@ -401,6 +404,7 @@ func (f *TypeFactory) GetTypedefBase(name string, base *Base) *Base {
 	value := NewBase(base.Size(), base.Metatype(), name)
 	value.submeta = base.SubMeta()
 	value.flags |= datatypeTypedef
+	value.typedefOf = base
 	return f.internBase("typedef:"+name, value)
 }
 
