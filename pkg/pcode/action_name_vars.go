@@ -318,6 +318,30 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 	// (variable.cc:456), which prefers input/addr-tied/non-unique members.
 	sl := data.GetScopeLocal()
 
+	// A stack local named early (ScopeLocal.BuildFromVarnodes, before the
+	// frame was restructured) takes the name of the Symbol now covering its
+	// storage: a piece of local_1c [3] is local_1c, not local_18.
+	// C++ parity: ActionNameVars names a mapped variable by its Symbol.
+	if sl != nil && sl.SpaceID() != nil {
+		for hv := range hvMap {
+			if !strings.HasPrefix(hv.Name(), "local_") || groupRootOf(hv) != nil {
+				continue
+			}
+			nr := highNameRepresentative(hv)
+			if nr == nil || nr.Space() != sl.SpaceID() || !nr.IsAddrTied() {
+				continue
+			}
+			e := sl.FindOverlap(nr.Addr(), nr.Size())
+			if e == nil || e.Symbol() == nil {
+				continue
+			}
+			if nm := e.Symbol().Name(); nm != "" && nm != hv.Name() && e.Addr().Offset < nr.Offset() &&
+				nr.Offset()+uint64(nr.Size()) <= e.Addr().Offset+uint64(e.Size()) {
+				hv.SetName(nm)
+			}
+		}
+	}
+
 	recmap := lookForFuncParamNames(data)
 	used := make(map[string]bool)
 	for _, c := range hvMap {
