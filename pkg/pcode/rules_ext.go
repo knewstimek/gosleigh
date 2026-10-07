@@ -108,10 +108,8 @@ func (r *RuleZextEliminate) apply(op *PcodeOp, data *Funcdata) int {
 	// fits in 8+ bytes), and smallsize>=8 with a wider zext output is not
 	// reachable on the supported architectures.
 	if val>>(8*uint(smallsize)) == 0 {
-		// C++ also does newvn->copySymbolIfValid(vn2) here; Varnode symbol markup
-		// propagation is unported project-wide, so the equate/enum annotation is
-		// not carried over.
 		newvn := data.NewConstant(smallsize, val)
+		newvn.copySymbolIfValid(vn2)
 		data.OpSetInput(op, zext.Input(0), zextslot)
 		data.OpSetInput(op, newvn, otherslot)
 		return 1

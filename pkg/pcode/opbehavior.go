@@ -250,3 +250,30 @@ func (op *PcodeOp) collapse() (uint64, error) {
 	}
 	return 0, errEvaluation // Invalid constant collapse
 }
+
+// collapseConstantSymbol carries a marked (equate) input's symbol onto the
+// constant the op collapsed to. C++ parity: PcodeOp::collapseConstantSymbol.
+func (op *PcodeOp) collapseConstantSymbol(newConst *Varnode) {
+	var copyVn *Varnode
+	switch op.Code() {
+	case CPUI_SUBPIECE:
+		if op.Input(1).Offset() != 0 {
+			return // Must be truncating high bytes
+		}
+		copyVn = op.Input(0)
+	case CPUI_COPY, CPUI_INT_ZEXT, CPUI_INT_NEGATE, CPUI_INT_2COMP,
+		CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT:
+		copyVn = op.Input(0) // Marked varnode must be first input
+	case CPUI_INT_ADD, CPUI_INT_MULT, CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR:
+		copyVn = op.Input(0)
+		if copyVn.GetSymbolEntry() == nil {
+			copyVn = op.Input(1)
+		}
+	default:
+		return
+	}
+	if copyVn.GetSymbolEntry() == nil {
+		return // The first input must be marked
+	}
+	newConst.copySymbolIfValid(copyVn)
+}

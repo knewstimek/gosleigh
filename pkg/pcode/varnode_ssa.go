@@ -216,6 +216,19 @@ func (v *Varnode) copySymbol(vn *Varnode) {
 	v.SetFlags(vn.flags & (VarnodeTypeLock | VarnodeNameLock))
 }
 
+// copySymbolIfValid copies vn's equate markup onto this constant when the two
+// constants are close in the sense of the equate.
+// C++ parity: Varnode::copySymbolIfValid.
+func (v *Varnode) copySymbolIfValid(vn *Varnode) {
+	e := vn.GetSymbolEntry()
+	if e == nil || e.Symbol() == nil || e.Symbol().Category() != SymbolEquate {
+		return
+	}
+	if e.Symbol().isValueClose(v.Offset(), v.Size()) {
+		v.copySymbol(vn) // Propagate the markup into our new constant
+	}
+}
+
 // SetSymbolEntry attaches a Symbol mapping to this Varnode. The Varnode is
 // marked mapped (and namelocked when the Symbol is namelocked); the data-type
 // is not changed. The owning HighVariable resolves the Symbol lazily through

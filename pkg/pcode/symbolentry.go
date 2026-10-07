@@ -55,6 +55,30 @@ type Symbol struct {
 	// ("" = the global namespace). C++ parity: Symbol::scope's parent chain.
 	namespace string
 	nsPath    []string // scope names, global excluded (nil when unknown)
+
+	// equateValue is the constant an equate symbol names (category
+	// SymbolEquate). C++ parity: EquateSymbol::value.
+	equateValue uint64
+}
+
+// isValueClose reports whether a constant of the given size is the equate's
+// value up to extension, complement, negation or +/-1.
+// C++ parity: EquateSymbol::isValueClose.
+func (s *Symbol) isValueClose(op2Value uint64, size int32) bool {
+	value := s.equateValue
+	if value == op2Value {
+		return true
+	}
+	mask := maskForSize(size)
+	maskValue := value & mask
+	if maskValue != value { // Only sign-extension may be masked off
+		if value != signExtendSize(maskValue, size, 8) {
+			return false
+		}
+	}
+	return maskValue == op2Value&mask || maskValue == ^op2Value&mask ||
+		maskValue == -op2Value&mask || maskValue == (op2Value+1)&mask ||
+		maskValue == (op2Value-1)&mask
 }
 
 // Namespace returns the symbol's namespace path ("" for global/local).

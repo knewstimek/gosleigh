@@ -356,7 +356,6 @@ func NewRuleCollapseConstants(group string) *RuleCollapseConstants {
 // apply folds an op whose inputs are all constants into a COPY of the result;
 // an op that cannot be evaluated is marked nocollapse.
 // C++ parity: RuleCollapseConstants::applyOp (ruleaction.cc).
-// Known mismatch: collapseConstantSymbol (equate carry-over) is not ported.
 func (r *RuleCollapseConstants) apply(op *PcodeOp, data *Funcdata) int {
 	if !op.isCollapsible() {
 		return 0
@@ -366,8 +365,18 @@ func (r *RuleCollapseConstants) apply(op *PcodeOp, data *Funcdata) int {
 		op.SetFlag(PcodeOpNoCollapse) // Dont know how or dont want to collapse further
 		return 0
 	}
+	markedInput := false
+	for i := 0; i < op.NumInput() && i < 2; i++ {
+		if op.Input(i).GetSymbolEntry() != nil {
+			markedInput = true
+		}
+	}
 	out := op.Output()
-	return rewriteToCopy(data, op, data.NewConstant(out.Size(), truncateToSize(res, out.Size())))
+	vn := data.NewConstant(out.Size(), truncateToSize(res, out.Size()))
+	if markedInput {
+		op.collapseConstantSymbol(vn)
+	}
+	return rewriteToCopy(data, op, vn)
 }
 
 type RuleCarryElim struct{ batchRule }

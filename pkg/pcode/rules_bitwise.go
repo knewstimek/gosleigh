@@ -615,9 +615,8 @@ func (r *RuleXorCollapse) apply(op *PcodeOp, data *Funcdata) int {
 	if coeff2 == 0 {
 		return 0
 	}
-	// C++ also does constvn->copySymbolIfValid(xorvn) here; Varnode symbol markup
-	// propagation is unported, so the equate/enum annotation is not carried over.
 	constvn := data.NewConstant(op.Input(1).Size(), coeff1^coeff2)
+	constvn.copySymbolIfValid(xorvn)
 	data.OpSetInput(op, constvn, 1)
 	data.OpSetInput(op, xorop.Input(0), 0)
 	return 1
