@@ -530,12 +530,23 @@ func (fp *FuncProto) TrashEnd() int {
 }
 
 // PossibleInputParam reports whether (addr,sz) could be a legal parameter
-// slot under this prototype model.
-// C++ parity: FuncProto::possibleInputParam
-// TODO known mismatch: forwards to the stack-only IsParamVarnode check; the
-// full register-classification path will land with ParamList.
+// slot under this prototype. A locked prototype (not varargs) answers from
+// its locked parameters alone: the storage must sit justified at the start
+// of one of them, and a void-locked prototype takes none.
+// C++ parity: FuncProto::possibleInputParam.
 func (fp *FuncProto) PossibleInputParam(addr address.Address, sz int32) bool {
 	if fp == nil || fp.model == nil {
+		return false
+	}
+	if !fp.dotdotdot && fp.hostInputLocked {
+		if len(fp.selfLocked) == 0 {
+			return false // voidinputlock
+		}
+		for _, slot := range fp.selfLocked {
+			if addrJustifiedContain(slot.Addr, slot.Size, addr, sz) == 0 {
+				return true
+			}
+		}
 		return false
 	}
 	// The model's input storage decides; a merged model accepts what any
@@ -1320,4 +1331,22 @@ func (fd *Funcdata) spacebasePtrsubMatching(spc *address.Space, ptr *Pointer, of
 		}
 	}
 	return true
+}
+
+// addrJustifiedContain is the endian-aware position of (addr2,sz2) inside
+// (addr,sz), or -1 when it is not contained.
+// C++ parity: Address::justifiedContain (forceleft false).
+func addrJustifiedContain(addr address.Address, sz int32, addr2 address.Address, sz2 int32) int32 {
+	if addr.Space != addr2.Space || addr2.Offset < addr.Offset {
+		return -1
+	}
+	off1 := addr.Offset + uint64(sz-1)
+	off2 := addr2.Offset + uint64(sz2-1)
+	if off2 > off1 {
+		return -1
+	}
+	if addr.Space != nil && addr.Space.BigEndian {
+		return int32(off1 - off2)
+	}
+	return int32(addr2.Offset - addr.Offset)
 }
