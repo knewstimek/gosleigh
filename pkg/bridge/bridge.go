@@ -935,15 +935,26 @@ func buildModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdata, 
 		// ActionSpacebase are still recovered. Requires model.StackSpace so the
 		// stack <pentry> resolves; built here after StackSpace is set.
 		ptrSize := int32(cspec.PointerSize())
+		regNames := engine.RegisterNamesByLocation()
+		regName := func(sp *address.Space, off uint64, size int32) string {
+			return regNames[fmt.Sprintf("%d:%d:%d", sp.Index, off, size)]
+		}
 		if specs := buildInputPentrySpecs(xr, cspec, model, fd); len(specs) > 0 {
 			pl := pcode.NewParamListStandard(specs)
+			pl.SetJoinContext(joinSpaceFor(fd), regName)
 			in := cspec.DefaultProto.Input
-			pl.SetModelRules(pcode.RuleSpecs(in.Rules), in.PointerMax, ptrSize)
+			pl.SetModelRules(in.Rules, in.PointerMax, ptrSize, false)
 			model.SetInputParams(pl)
 		}
 		if specs := buildOutputPentrySpecs(xr, cspec, fd); len(specs) > 0 {
 			pl := pcode.NewParamListStandard(specs)
-			pl.SetModelRules(pcode.RuleSpecs(cspec.DefaultProto.Output.Rules), 0, ptrSize)
+			pl.SetJoinContext(joinSpaceFor(fd), regName)
+			pl.SetModelRules(cspec.DefaultProto.Output.Rules, 0, ptrSize, true)
+			// A return list without a rule deciding the return storage kills
+			// every return location. C++ parity: ParamListStandardOut::initialize.
+			if pl.AutoKilledByCallLegacy() {
+				model.AutoKilledByCall = true
+			}
 			model.SetOutputParams(pl)
 		}
 	}

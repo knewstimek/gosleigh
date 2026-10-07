@@ -88,7 +88,11 @@ func (fd *Funcdata) assignCodeProtoStorage(proto *HostFunction) (*HostFunction, 
 	if out := proto.Output; out != nil && out.Type != nil {
 		outType = out.Type
 	}
-	pieces, ok := model.assignParameterStorage(outType, types)
+	pp := &prototypePieces{outtype: outType, intypes: types, firstVarArgSlot: -1}
+	if proto.Dotdotdot {
+		pp.firstVarArgSlot = len(types)
+	}
+	pieces, ok := model.assignParameterStorage(pp)
 	if !ok {
 		return nil, false
 	}

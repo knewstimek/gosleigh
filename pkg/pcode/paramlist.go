@@ -52,6 +52,7 @@ const (
 	peExtracheckLow    uint32 = 0x100
 	peIsGrouped        uint32 = 0x200
 	peOverlapping      uint32 = 0x400
+	peFirstStorage     uint32 = 0x800
 )
 
 // paramEntry is the full port of Ghidra ParamEntry: a contiguous range of
@@ -93,6 +94,10 @@ func (pe *paramEntry) getAlign() int32       { return pe.alignment }
 func (pe *paramEntry) getType() typeClass    { return pe.tclass }
 func (pe *paramEntry) isExclusion() bool     { return pe.alignment == 0 }
 func (pe *paramEntry) isReverseStack() bool  { return pe.flags&peReverseStack != 0 }
+
+// isFirstInClass: the entry is the first of its storage class.
+// C++ parity: ParamEntry::isFirstInClass.
+func (pe *paramEntry) isFirstInClass() bool { return pe.flags&peFirstStorage != 0 }
 
 // isParamCheckHigh / isParamCheckLow: a join piece overlapping an earlier
 // entry needs extra checks. C++ parity: ParamEntry::isParamCheckHigh/Low.
@@ -248,7 +253,14 @@ func (pl *ParamListStandard) possibleParamWithSlot(loc address.Address, size int
 // size is too small or there are not enough slots. C++ parity:
 // ParamEntry::getAddrBySlot (fspec.cc:450). smallsize_floatext and typeAlign
 // padding are not modeled: typeAlign is always 1 at the call sites here.
-func (pe *paramEntry) getAddrBySlot(slotnum *int32, sz int32) address.Address {
+func (pe *paramEntry) getAddrBySlot(slotnum *int32, sz, typeAlign int32) address.Address {
+	return pe.getAddrBySlotJustify(slotnum, sz, typeAlign, !pe.isLeftJustified())
+}
+
+// getAddrBySlotJustify is getAddrBySlot with an explicit justification: when
+// justifyRight the leading bytes of the slot space are padding.
+// C++ parity: ParamEntry::getAddrBySlot(slotnum,sz,typeAlign,justifyRight).
+func (pe *paramEntry) getAddrBySlotJustify(slotnum *int32, sz, typeAlign int32, justifyRight bool) address.Address {
 	var res address.Address
 	var spaceused int32
 	if sz < pe.minsize {
@@ -264,6 +276,11 @@ func (pe *paramEntry) getAddrBySlot(slotnum *int32, sz int32) address.Address {
 		res = address.Address{Space: pe.space, Offset: pe.addressbase}
 		spaceused = pe.size
 	} else {
+		if typeAlign > pe.alignment {
+			if tmp := (*slotnum * pe.alignment) % typeAlign; tmp != 0 {
+				*slotnum += (typeAlign - tmp) / pe.alignment // Waste slots to achieve typeAlign
+			}
+		}
 		slotsused := sz / pe.alignment
 		if sz%pe.alignment != 0 {
 			slotsused++
@@ -281,7 +298,7 @@ func (pe *paramEntry) getAddrBySlot(slotnum *int32, sz int32) address.Address {
 		res = address.Address{Space: pe.space, Offset: pe.addressbase + uint64(index*pe.alignment)}
 		*slotnum += slotsused
 	}
-	if !pe.isLeftJustified() {
+	if justifyRight {
 		res = res.Add(uint64(spaceused - sz))
 	}
 	return res
@@ -397,6 +414,54 @@ type ParamListStandard struct {
 	modelRules []modelRule
 	// pointerSize is the size of a pointer a rule converts a parameter to.
 	pointerSize int32
+	// isOutput: this is a return-value list (ParamListStandardOut).
+	isOutput bool
+	// useFillinFallback: no output rule can decide the return storage, so
+	// fillinMap uses the legacy best-entry match.
+	// C++ parity: ParamListStandardOut::useFillinFallback.
+	useFillinFallback bool
+	// joinSpace and regName build join storage for parameters that span
+	// several entries. C++ parity: Architecture::findAddJoin and
+	// Translate::getExactRegisterName (JoinRecord::mergeSequence).
+	joinSpace *address.Space
+	regName   func(sp *address.Space, off uint64, size int32) string
+}
+
+// SetJoinContext gives the list the join space and register names that
+// parameters spanning several entries are built with.
+func (pl *ParamListStandard) SetJoinContext(join *address.Space, regName func(sp *address.Space, off uint64, size int32) string) {
+	pl.joinSpace, pl.regName = join, regName
+}
+
+// extractTiles lists the single-group exclusion entries of the storage class.
+// C++ parity: ParamListStandard::extractTiles.
+func (pl *ParamListStandard) extractTiles(tp typeClass) []*paramEntry {
+	var tiles []*paramEntry
+	for _, pe := range pl.entry {
+		if !pe.isExclusion() || pe.tclass != tp || len(pe.getAllGroups()) != 1 {
+			continue
+		}
+		tiles = append(tiles, pe)
+	}
+	return tiles
+}
+
+// getStackEntry is the trailing stack entry, nil if there is none.
+// C++ parity: ParamListStandard::getStackEntry.
+func (pl *ParamListStandard) getStackEntry() *paramEntry {
+	if len(pl.entry) == 0 {
+		return nil
+	}
+	pe := pl.entry[len(pl.entry)-1]
+	if !pe.isExclusion() && pe.space != nil && pe.space.Kind == address.SpaceKindStack {
+		return pe
+	}
+	return nil
+}
+
+// isBigEndian reports the byte order of the list's storage.
+func (pl *ParamListStandard) isBigEndian() bool {
+	return len(pl.entry) != 0 && pl.entry[0].bigEndian
 }
 
 // metatypeTypeClass is the storage class a data-type of metatype m draws on.
@@ -416,16 +481,16 @@ func metatypeTypeClass(m metatype) typeClass {
 // (or every group of an exclusion entry). status holds the next slot per
 // group, -1 once the group is used up.
 // C++ parity: ParamListStandard::assignAddressFallback.
-func (pl *ParamListStandard) assignAddressFallback(resource typeClass, tp Datatype, status []int32) (address.Address, bool) {
+func (pl *ParamListStandard) assignAddressFallback(resource typeClass, tp Datatype, matchExact bool, status []int32) (address.Address, bool) {
 	for _, pe := range pl.entry {
 		grp := pe.getGroup()
 		if status[grp] < 0 {
 			continue
 		}
-		if resource != pe.tclass && pe.tclass != typeclassGeneral {
+		if resource != pe.tclass && (matchExact || pe.tclass != typeclassGeneral) {
 			continue // Wrong type
 		}
-		addr := pe.getAddrBySlot(&status[grp], tp.AlignSize())
+		addr := pe.getAddrBySlot(&status[grp], tp.AlignSize(), tp.Alignment())
 		if addr.Space == nil {
 			continue // tp does not fit
 		}
@@ -498,6 +563,11 @@ func NewParamListStandard(specs []ParamEntrySpec) *ParamListStandard {
 		// reverse_stack is set only for positive-growth stacks (!normalstack); the
 		// x86/x64 ABIs exercised here are all normalstack, so it stays clear.
 		pe.resolveJoin(pl.entry)
+		// The first entry, or one whose storage class differs from the entry
+		// before it, is first in its class. C++ parity: ParamEntry::resolveFirst.
+		if len(pl.entry) == 0 || pl.entry[len(pl.entry)-1].tclass != pe.tclass {
+			pe.flags |= peFirstStorage
+		}
 		pe.group = pe.groupSet[0]
 		pe.exclusion = pe.alignment == 0
 		pe.reverseStack = pe.flags&peReverseStack != 0
@@ -700,7 +770,7 @@ func (pl *ParamListStandard) buildTrialMap(active *ParamActive) {
 				sz = curentry.getAlign()
 			}
 			nextslot := int32(0)
-			addr := curentry.getAddrBySlot(&nextslot, sz)
+			addr := curentry.getAddrBySlot(&nextslot, sz, 1)
 			trialpos := active.NumTrials()
 			active.RegisterTrial(addr, sz)
 			pt := active.Trial(trialpos)
@@ -729,7 +799,7 @@ func (pl *ParamListStandard) buildTrialMap(active *ParamActive) {
 			for j := 0; j < len(slotlist); j++ {
 				if slotlist[j] == 0 {
 					nextslot := int32(j)
-					addr := curentry.getAddrBySlot(&nextslot, curentry.getAlign())
+					addr := curentry.getAddrBySlot(&nextslot, curentry.getAlign(), 1)
 					trialpos := active.NumTrials()
 					active.RegisterTrial(addr, curentry.getAlign())
 					pt := active.Trial(trialpos)
@@ -989,19 +1059,66 @@ func addressJustifiedContain(base address.Address, sz int32, op2 address.Address
 	return int32(op2.Offset - base.Offset)
 }
 
-// FillinMapOut marks the active output trials covered by the best matching
-// output entry as used. C++ parity: ParamListStandardOut::fillinMapFallback
-// with firstOnly false, which fillinMap uses when the list has no model rules
-// (the x86/x64 cspecs loaded here have none).
+// FillinMapOut decides which active output trials form the return value: a
+// model rule that can decide it is tried first, else the best matching entry.
+// C++ parity: ParamListStandardOut::fillinMap.
 func (pl *ParamListStandard) FillinMapOut(active *ParamActive) {
 	if active.NumTrials() == 0 {
 		return // No trials to check
 	}
+	if pl.useFillinFallback {
+		pl.fillinMapFallback(active, false)
+		return
+	}
+	for i := 0; i < active.NumTrials(); i++ {
+		trial := active.Trial(i)
+		trial.SetEntry(nil, 0)
+		if !trial.IsActive() {
+			continue
+		}
+		entry := pl.findEntry(trial.GetAddress(), trial.GetSize(), false)
+		if entry == nil {
+			trial.MarkNoUse()
+			continue
+		}
+		res := entry.justifiedContain(trial.GetAddress(), trial.GetSize())
+		if (trial.IsRemFormed() || trial.IsIndCreateFormed()) && !entry.isFirstInClass() {
+			trial.MarkNoUse()
+			continue
+		}
+		trial.SetEntry(entry, res)
+	}
+	active.SortTrials()
+	for i := range pl.modelRules {
+		if !pl.modelRules[i].assign.fillinOutputMap(active) {
+			continue
+		}
+		for j := 0; j < active.NumTrials(); j++ {
+			trial := active.Trial(j)
+			if trial.IsActive() {
+				trial.MarkUsed()
+			} else {
+				trial.MarkNoUse()
+				trial.SetEntry(nil, 0)
+			}
+		}
+		return
+	}
+	pl.fillinMapFallback(active, true)
+}
+
+// fillinMapFallback marks the active trials covered by the best matching
+// output entry as used; firstOnly restricts the match to the first entry of
+// each storage class. C++ parity: ParamListStandardOut::fillinMapFallback.
+func (pl *ParamListStandard) fillinMapFallback(active *ParamActive, firstOnly bool) {
 	var bestentry *paramEntry
 	bestcover := int32(0)
 	bestclass := typeclassPtr
 	// Find the entry best covered by the active trials
 	for _, curentry := range pl.entry {
+		if firstOnly && !curentry.isFirstInClass() && curentry.isExclusion() && len(curentry.getAllGroups()) == 1 {
+			continue // Not the first entry in the storage class
+		}
 		putativematch := false
 		for j := 0; j < active.NumTrials(); j++ { // Evaluate all trials against curentry
 			trial := active.Trial(j)
