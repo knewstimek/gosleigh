@@ -738,3 +738,22 @@ func (t *typeOpIntRight) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype
 func (t *typeOpIntSright) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 	return shiftOutputToken(op, cs)
 }
+
+// typeOpIntDivRem is INT_DIV/INT_SDIV/INT_REM/INT_SREM: an operand whose
+// natural integer promotion lacks the op's signedness is cast to the
+// operand type.
+// C++ parity: TypeOpIntDiv/IntSdiv/IntRem/IntSrem::getInputCast.
+type typeOpIntDivRem struct {
+	typeOpBase
+	wantExt int // unsignedExtension or signedExtension
+}
+
+func (t *typeOpIntDivRem) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
+	vn := op.Input(slot)
+	reqtype := t.InputTypeLocal(op, slot, cs.tlst)
+	curtype := vn.HighTypeReadFacing(op)
+	if promoType := cs.intPromotionType(vn); promoType != noPromotion && promoType&t.wantExt == 0 {
+		return reqtype
+	}
+	return cs.CastStandard(reqtype, curtype, true, true)
+}

@@ -524,10 +524,10 @@ func RegisterTypeOps() []TypeOp {
 	inst[CPUI_INT_RIGHT] = &typeOpIntRight{typeOpBase{CPUI_INT_RIGHT, PcodeOpBinary, ">>"}}
 	inst[CPUI_INT_SRIGHT] = &typeOpIntSright{typeOpBase{CPUI_INT_SRIGHT, PcodeOpBinary, ">>"}}
 	inst[CPUI_INT_MULT] = &typeOpIntMult{typeOpBase{CPUI_INT_MULT, PcodeOpBinary | PcodeOpCommutative, "*"}}
-	inst[CPUI_INT_DIV] = &typeOpBase{CPUI_INT_DIV, PcodeOpBinary, "/"}
-	inst[CPUI_INT_SDIV] = &typeOpBase{CPUI_INT_SDIV, PcodeOpBinary, "/"}
-	inst[CPUI_INT_REM] = &typeOpBase{CPUI_INT_REM, PcodeOpBinary, "%"}
-	inst[CPUI_INT_SREM] = &typeOpBase{CPUI_INT_SREM, PcodeOpBinary, "%"}
+	inst[CPUI_INT_DIV] = &typeOpIntDivRem{typeOpBase{CPUI_INT_DIV, PcodeOpBinary, "/"}, unsignedExtension}
+	inst[CPUI_INT_SDIV] = &typeOpIntDivRem{typeOpBase{CPUI_INT_SDIV, PcodeOpBinary, "/"}, signedExtension}
+	inst[CPUI_INT_REM] = &typeOpIntDivRem{typeOpBase{CPUI_INT_REM, PcodeOpBinary, "%"}, unsignedExtension}
+	inst[CPUI_INT_SREM] = &typeOpIntDivRem{typeOpBase{CPUI_INT_SREM, PcodeOpBinary, "%"}, signedExtension}
 
 	// Boolean
 	inst[CPUI_BOOL_NEGATE] = &typeOpBase{CPUI_BOOL_NEGATE, PcodeOpUnary | PcodeOpBoolOutput, "!"}
