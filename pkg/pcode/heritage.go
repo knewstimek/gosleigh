@@ -924,6 +924,18 @@ func (h *Heritage) renameRecurse(bl *BlockBasic, graph *BlockGraph,
 // value C++ Heritage::collect returns; placeMultiequals compares it against the
 // task size to decide whether the range needs refining.
 // C++ parity: heritage.cc Heritage::collect (lines 336-337).
+// hasFreeRead reports a read the renaming still has to link: free, not yet
+// heritage-known and read by something.
+// C++ parity: heritage.cc Heritage::collect (read list membership).
+func hasFreeRead(reads []*Varnode) bool {
+	for _, vn := range reads {
+		if !vn.IsHeritageKnown() && !vn.HasNoDescend() {
+			return true
+		}
+	}
+	return false
+}
+
 func maxWriteSize(writes []*Varnode) int32 {
 	m := int32(0)
 	for _, vn := range writes {
@@ -1422,11 +1434,15 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			if vn.IsAnnotation() {
 				continue
 			}
-			_, code := h.globalDisjoint.Add(vn.Addr(), vn.Size(), h.pass)
+			gidx, code := h.globalDisjoint.Add(vn.Addr(), vn.Size(), h.pass)
+			// The task covers the whole global range the Varnode merged into,
+			// not just the Varnode. C++ parity: heritage.cc:2708-2722
+			// (disjoint.add((*liter).first,(*liter).second.size,...)).
+			raddr, rsize := h.globalDisjoint.Range(gidx)
 			switch code {
 			case 0:
 				// All-new location (first time heritaged, or intersecting new).
-				h.disjoint.Add(vn.Addr(), vn.Size(), MemRangeNewAddresses)
+				h.disjoint.Add(raddr, rsize, MemRangeNewAddresses)
 			case 2:
 				// Completely contained in a previous-pass range. Skip if already in
 				// SSA (heritage-known) or dead -- this is the incremental key that
@@ -1438,11 +1454,11 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 				if vn.HasNoDescend() {
 					continue
 				}
-				h.disjoint.Add(vn.Addr(), vn.Size(), MemRangeOldAddresses)
+				h.disjoint.Add(raddr, rsize, MemRangeOldAddresses)
 			default:
 				// case 1: partially contained in an old range but may contain new
 				// addresses; always reprocess. C++ parity: heritage.cc:2721-2722.
-				h.disjoint.Add(vn.Addr(), vn.Size(), MemRangeOldAddresses|MemRangeNewAddresses)
+				h.disjoint.Add(raddr, rsize, MemRangeOldAddresses|MemRangeNewAddresses)
 			}
 		}
 
@@ -1466,6 +1482,18 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			if task.Size > 4 && maxWriteSize(writes) < task.Size {
 				if h.refinement(graph, i, reads, writes, inputs) {
 					task = h.disjoint.Get(i)
+				}
+			}
+			// With no read left to link, a range needs nothing when it is empty,
+			// internal (unique), or was already covered by an earlier pass; this
+			// is decided before any guard is placed.
+			// C++ parity: heritage.cc Heritage::placeMultiequals (2619-2625).
+			if r0, w0, in0 := h.Collect(task.Addr, task.Size); !hasFreeRead(r0) {
+				if len(w0) == 0 && len(in0) == 0 {
+					continue
+				}
+				if task.Addr.Space.IsUnique() || task.OldAddresses() {
+					continue
 				}
 			}
 			// Reads smaller than the range are normalized before any guard: the
@@ -1507,7 +1535,7 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			// Nothing reads the range: an internal (unique) range, or one an
 			// earlier pass already covered, needs no MULTIEQUALs.
 			// C++ parity: heritage.cc Heritage::placeMultiequals (2619-2625).
-			if len(reads) == 0 && (task.Addr.Space.IsUnique() || task.OldAddresses()) {
+			if !hasFreeRead(reads) && (task.Addr.Space.IsUnique() || task.OldAddresses()) {
 				continue
 			}
 			subSize := refinedSubTaskSize(reads, writes, inputs, task.Addr, task.Size)

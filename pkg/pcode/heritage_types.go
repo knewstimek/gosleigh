@@ -39,6 +39,11 @@ func (lm *LocationMap) Len() int { return len(lm.entries) }
 // Clear removes all entries.
 func (lm *LocationMap) Clear() { lm.entries = lm.entries[:0] }
 
+// Range returns the start and size of the entry at idx.
+func (lm *LocationMap) Range(idx int) (address.Address, int32) {
+	return lm.entries[idx].Addr, lm.entries[idx].SP.Size
+}
+
 // findIdx finds the first entry >= addr using binary search.
 func (lm *LocationMap) findIdx(addr address.Address) int {
 	return sort.Search(len(lm.entries), func(i int) bool {

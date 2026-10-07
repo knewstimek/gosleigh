@@ -920,11 +920,18 @@ func (s *SplitVarnode) buildPieceFromWhole(data *Funcdata, piece *Varnode, offse
 		data.OpSetAllInput(pieceOp, inlist)
 		data.OpInsertBegin(pieceOp, bb)
 	case CPUI_INDIRECT:
-		// TODO(parity): PcodeOp::getOpFromConst chain for affector; the C++
-		// path reinserts after the affector. Without that plumbing we just
-		// rewrite in place -- legal but may leave the op mis-ordered.
+		// The SUBPIECE reads the whole the new INDIRECT defines, so it moves
+		// after the op causing the indirect effect.
+		affector := pieceOp.Input(1).GetIndirectCause()
+		live := affector != nil && !affector.IsDead()
+		if live {
+			data.OpUninsert(pieceOp)
+		}
 		data.OpSetOpcode(pieceOp, CPUI_SUBPIECE)
 		data.OpSetAllInput(pieceOp, inlist)
+		if live {
+			data.OpInsertAfter(pieceOp, affector)
+		}
 	default:
 		data.OpSetOpcode(pieceOp, CPUI_SUBPIECE)
 		data.OpSetAllInput(pieceOp, inlist)
@@ -1155,15 +1162,9 @@ func SplitVarnodePrepareIndirectOp(in *SplitVarnode, affector *PcodeOp) bool {
 
 // SplitVarnodeReplaceIndirectOp synthesises a single double-precision
 // CPUI_INDIRECT inserted in front of affector. Both the input whole and the
-// output joined whole are created on demand. The input(1) cause-reference
-// uses the same zero-constant IOP stub as Funcdata::NewIndirectOp until the
-// real IPTR_IOP encoding is ported.
+// output joined whole are created on demand.
 //
 // C++ parity: SplitVarnode::replaceIndirectOp (double.cc:1376)
-// TODO known mismatch: input(1) is a zero constant rather than an
-// IOP-encoded varnode pointing at the affector op. The real C++ form uses
-// data.newVarnodeIop(affector); see the matching TODO in funcdata.go:725
-// (NewIndirectOp -- "cause ref (IOP stub)").
 func SplitVarnodeReplaceIndirectOp(data *Funcdata, out, in *SplitVarnode, affector *PcodeOp) {
 	out.CreateJoinedWhole(data)
 	in.FindCreateWhole(data)
@@ -1171,7 +1172,7 @@ func SplitVarnodeReplaceIndirectOp(data *Funcdata, out, in *SplitVarnode, affect
 	data.OpSetOpcode(newop, CPUI_INDIRECT)
 	data.OpSetOutput(newop, out.whole)
 	data.OpSetInput(newop, in.whole, 0)
-	data.OpSetInput(newop, data.NewConstant(4, 0), 1) // cause ref (IOP stub)
+	data.OpSetInput(newop, data.NewVarnodeIop(affector), 1)
 	data.OpInsertBefore(newop, affector)
 	out.BuildLoFromWhole(data)
 	out.BuildHiFromWhole(data)
