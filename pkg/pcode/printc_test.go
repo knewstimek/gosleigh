@@ -354,7 +354,9 @@ func TestPrintCEndToEndRawPcodeToStructuredC(t *testing.T) {
 	// Return type: this harness never runs ActionOutputPrototype, so there is
 	// no output prototype and the signature says void (C++ prints the
 	// FuncProto output, FuncProto::updateOutputTypes).
-	want := "void sample(undefined4 param_1) {\n    if (param_1 != 0) {\n        return param_1 + 1;\n    }\n    return 1;\n}\n"
+	// No ActionMarkImplied runs here, so the sum stays a named temporary: the
+	// return prints its input as is. C++ parity: PrintC::opReturn (pushVn).
+	want := "void sample(undefined4 param_1) {\n    if (param_1 != 0) {\n        return tmp_1;\n    }\n    return 1;\n}\n"
 	if got != want {
 		t.Fatalf("unexpected emitted C:\n%s", got)
 	}

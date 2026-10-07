@@ -2682,8 +2682,6 @@ func (s *printCState) emitOps(bb *BlockBasic, suppressControl bool) error {
 			// Free varnodes have been released by ActionDeadCode (MakeFree). The op is
 			// not dead itself but its output has no live consumers. Emitting "local_N = ..."
 			// for a free output produces an unreachable write with an undeclared name.
-			// The same op's expression may still be inlined at the RETURN site via
-			// findDefiningOpForFreeVarnode; suppress the stand-alone statement here.
 			if out.IsFree() {
 				continue
 			}
@@ -2748,12 +2746,11 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 		// C++ parity: PrintC::emitStatement CPUI_RETURN (printc.cc ~line 780):
 		//   if (op->numInput()>1) { pushVn(op->getIn(1), op, mods); }
 		// returnValue selects input[1] (the return-value wiring form) or input[0] (raw form).
-		// renderReturnValueFrag handles free (stale) varnodes by recovering the live expression.
 		var frag ExprFragment
 		expr := ""
 		if vn := returnValue(op); vn != nil {
 			var err error
-			frag, err = s.renderReturnValueFrag(vn)
+			frag, err = s.renderVarnodeExpr(vn)
 			if err != nil {
 				return err
 			}
@@ -2864,211 +2861,6 @@ func (s *printCState) emitAssign(lhs string, frag ExprFragment, rendered string)
 		return
 	}
 	s.lang.EmitAssignFragment(lhs, frag)
-}
-
-// renderReturnValueFrag is the return-value renderer, keeping the expression
-// tree so the RETURN statement can be emitted as a structured token stream.
-func (s *printCState) renderReturnValueFrag(vn *Varnode) (ExprFragment, error) {
-	if vn == nil {
-		return ExprFragment{}, nil
-	}
-	// If vn is free (its defining op was killed by ActionDeadCode after the return-value wiring
-	// wired it into RETURN), try to find a live varnode at the same location that
-	// carries the actual return expression.
-	// This handles the pattern where the return-value wiring picks a SUBPIECE or SSA version
-	// that later gets dead-code-eliminated, leaving a stale free reference in RETURN.
-	// C++ parity: ActionMarkImplied / Funcdata::deadCode cleans up stale RETURN inputs;
-	// Gosleigh approximates this at render time.
-	if vn.IsFree() && !vn.IsConstant() && vn.Space() != nil && s.fd != nil {
-		// First try to directly render the expression from the non-dead defining op
-		// (e.g. INT_MULT whose output was freed but the op itself is still alive).
-		if defOp := s.findDefiningOpForFreeVarnode(vn); defOp != nil {
-			return s.renderOpExprFrag(defOp)
-		}
-		// Fallback: find a live (written, non-free) varnode at the same register location.
-		if live := s.findLiveReturnVarnode(vn); live != nil {
-			vn = live
-		}
-	}
-	// Resolve through COPY chains and then inline the defining expression.
-	// This collapses "local_N = expr; return local_N;" into "return expr;".
-	// C++ parity: ActionMarkImplied / PrintC::isImplied inlines single-consumer defs;
-	// here we apply the same heuristic at render time for return varnodes.
-	resolved, defOp := s.resolveForReturn(vn, 8)
-	// Do not inline the definition of an EXPLICIT varnode. An explicit output is a
-	// named C variable emitted as its own "name = expr;" statement (e.g. a loop
-	// accumulator `local_14 = local_14 + i;`); the return must reference it by name
-	// (`return local_14;`), not re-expand the expression -- re-expanding would
-	// duplicate the loop-body computation at the return and read stale post-loop
-	// values. Only implied (single-use) intermediates collapse into the return.
-	// C++ parity: PrintC names explicit varnodes; ActionMarkImplied inlines only implied defs.
-	if resolved != nil && resolved.IsExplicit() {
-		return s.renderVarnodeExpr(resolved)
-	}
-	if defOp != nil && !defOp.IsDead() && !defOp.IsMarker() {
-		switch defOp.Code() {
-		case CPUI_BRANCH, CPUI_CBRANCH, CPUI_BRANCHIND, CPUI_STORE, CPUI_RETURN,
-			CPUI_MULTIEQUAL, CPUI_INDIRECT:
-			// Cannot inline control/marker ops.
-		case CPUI_CALL, CPUI_CALLIND, CPUI_CALLOTHER, CPUI_NEW:
-			// A call result is always explicit (ActionMarkExplicit::baseExplicit
-			// isCall -> -1) and is materialized as its own statement
-			// (uVar1 = call(...);), so the RETURN names it (return uVar1;) rather
-			// than re-expanding the call expression. C++ parity: baseExplicit.
-		default:
-			return s.renderOpExprFrag(defOp)
-		}
-	}
-	// Fall back to naming the resolved (or original) varnode.
-	if resolved != nil {
-		return s.renderVarnodeExpr(resolved)
-	}
-	return s.renderVarnodeExpr(vn)
-}
-
-// findDefiningOpForFreeVarnode finds the non-dead PcodeOp that originally wrote to
-// ref's register location (space/offset/size), where ref is a free varnode (its
-// defining op was cleared by ActionDeadCode's MakeFree). This allows rendering the
-// return expression even when the output varnode was freed.
-// Returns the latest-seq op that writes to that location and is non-dead, non-marker,
-// excluding COPY and MULTIEQUAL/INDIRECT (which are transparent/phi ops).
-func (s *printCState) findDefiningOpForFreeVarnode(ref *Varnode) *PcodeOp {
-	if ref == nil || ref.Space() == nil || s.fd == nil {
-		return nil
-	}
-	var best *PcodeOp
-	for _, op := range s.fd.GetPcodeOpBank().AllOps() {
-		if op == nil || op.IsDead() || op.IsMarker() || op.Output() == nil {
-			continue
-		}
-		out := op.Output()
-		if out.Space() == nil || out.Space().Index != ref.Space().Index {
-			continue
-		}
-		if out.Offset() != ref.Offset() || out.Size() != ref.Size() {
-			continue
-		}
-		// Skip trivial transparent ops; we want the computation op.
-		switch op.Code() {
-		case CPUI_COPY, CPUI_MULTIEQUAL, CPUI_INDIRECT:
-			continue
-		}
-		if best == nil || SeqNumLess(best.Seq(), op.Seq()) {
-			best = op
-		}
-	}
-	return best
-}
-
-// findFreeReturnVarnode returns the return-value varnode from op if it is a
-// free (stale) non-constant varnode. Uses the same slot selection as returnValue:
-// input[1] when numInput>1 (the return-value wiring form), input[0] otherwise (raw form).
-func (s *printCState) findFreeReturnVarnode(op *PcodeOp) *Varnode {
-	var inp *Varnode
-	if op.NumInput() > 1 {
-		inp = op.Input(1)
-	} else if op.NumInput() == 1 {
-		inp = op.Input(0)
-	} else {
-		return nil
-	}
-	if inp == nil || inp.IsAnnotation() || inp.IsInput() {
-		return nil
-	}
-	if inp.IsFree() && !inp.IsConstant() && inp.Space() != nil {
-		return inp
-	}
-	return nil
-}
-
-// findLiveReturnVarnode searches fd's VarnodeBank for a written (non-free) varnode
-// at the same location as ref. This recovers the return value when the return-value wiring
-// wired a varnode that was subsequently killed by ActionDeadCode.
-// Returns the most recent (by Seq) written varnode, preferring MULTIEQUAL outputs.
-func (s *printCState) findLiveReturnVarnode(ref *Varnode) *Varnode {
-	if ref == nil || ref.Space() == nil || s.fd == nil {
-		return nil
-	}
-	var best *Varnode
-	for _, vn := range s.fd.GetVarnodeBank().AllVarnodes() {
-		if vn == nil || vn.Space() == nil {
-			continue
-		}
-		if vn.Space().Index != ref.Space().Index {
-			continue
-		}
-		if vn.Offset() != ref.Offset() || vn.Size() != ref.Size() {
-			continue
-		}
-		if !vn.IsWritten() || vn.IsFree() || vn.Def() == nil {
-			continue
-		}
-		// Prefer MULTIEQUAL (phi-merge post-Heritage) over plain writes.
-		if vn.Def().Code() == CPUI_MULTIEQUAL {
-			return vn
-		}
-		if best == nil {
-			best = vn
-		} else if SeqNumLess(best.Def().Seq(), vn.Def().Seq()) {
-			best = vn
-		}
-	}
-	return best
-}
-
-// resolveForReturn walks COPY and MULTIEQUAL chains from vn, following each
-// input to find the deepest non-trivial expression.
-// Returns the resolved varnode and the defining op of that varnode.
-// MULTIEQUAL nodes that have a single non-marker defining input are followed;
-// this handles the common pattern where MergeMarker coalesced a single SSA
-// assignment into a phi-node for naming purposes.
-// maxDepth prevents infinite loops.
-func (s *printCState) resolveForReturn(vn *Varnode, maxDepth int) (resolved *Varnode, defOp *PcodeOp) {
-	if vn == nil {
-		return nil, nil
-	}
-	if maxDepth <= 0 {
-		op := vn.Def()
-		return vn, op
-	}
-	op := vn.Def()
-	if op == nil || op.IsDead() {
-		return vn, op
-	}
-	switch op.Code() {
-	case CPUI_COPY:
-		if op.NumInput() > 0 {
-			src := op.Input(0)
-			if src != nil && !src.IsConstant() {
-				return s.resolveForReturn(src, maxDepth-1)
-			}
-		}
-	case CPUI_MULTIEQUAL:
-		// If the MULTIEQUAL has exactly one live, non-trivial input, follow it.
-		// This collapses MergeMarker phi-nodes in straight-line code where the
-		// phi has only one real producer.
-		// Function parameter inputs (IsInput=true) count as real phi contributors
-		// even though they have no defining op (Def()==nil).
-		// Matches ActionMarkExplicit::baseExplicit returning -1 when a descendant
-		// is a marker op -- the MULTIEQUAL output is always explicit when it has
-		// multiple real inputs.
-		var candidate *Varnode
-		count := 0
-		for i := 0; i < op.NumInput(); i++ {
-			inp := op.Input(i)
-			if inp == nil || inp.IsAnnotation() {
-				continue
-			}
-			if (inp.Def() != nil && !inp.Def().IsDead()) || inp.IsInput() {
-				candidate = inp
-				count++
-			}
-		}
-		if count == 1 && candidate != nil {
-			return s.resolveForReturn(candidate, maxDepth-1)
-		}
-	}
-	return vn, op
 }
 
 func storePointer(op *PcodeOp) *Varnode {
