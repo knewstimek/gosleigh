@@ -4058,14 +4058,14 @@ func (s *printCState) tryRenderSubscript(addrVn *Varnode) (ExprFragment, bool, e
 		if idxVn.IsConstant() {
 			// The index prints like any integer constant (radix by
 			// PrintC::push_integer): param_1[0x28], not param_1[40].
-			frag := s.lang.PostfixExpr(baseExpr, "["+s.renderConstant(idxVn)+"]")
+			frag := s.lang.SubscriptExpr(baseExpr, s.lang.Atom(s.renderConstant(idxVn)))
 			return frag, true, nil
 		}
 		idxExpr, err := s.renderVarnodeExpr(idxVn)
 		if err != nil {
 			return ExprFragment{}, false, err
 		}
-		frag := s.lang.PostfixExpr(baseExpr, "["+s.lang.ExprString(idxExpr, cPrecLowest, ExprPosNone, ExprAssocNone)+"]")
+		frag := s.lang.SubscriptExpr(baseExpr, idxExpr)
 		return frag, true, nil
 	}
 	if def.Code() != CPUI_INT_ADD || def.NumInput() < 2 {
@@ -4096,7 +4096,7 @@ func (s *printCState) tryRenderSubscript(addrVn *Varnode) (ExprFragment, bool, e
 	if err != nil {
 		return ExprFragment{}, false, err
 	}
-	frag := s.lang.PostfixExpr(baseExpr, "["+formatIntegerLiteral(uint64(index), offsetVn.Size(), true)+"]")
+	frag := s.lang.SubscriptExpr(baseExpr, s.lang.Atom(formatIntegerLiteral(uint64(index), offsetVn.Size(), true)))
 	return frag, true, nil
 }
 
@@ -4330,7 +4330,7 @@ func (s *printCState) renderPtrSubField(op *PcodeOp, valueon bool) (ExprFragment
 			expr = s.lang.UnaryExpr("*", cPrecUnary, baseExpr)
 		}
 		if valueon { // A second dereference: ( )[0]
-			expr = s.lang.PostfixExpr(expr, "[0]")
+			expr = s.lang.SubscriptExpr(expr, s.lang.Atom("0"))
 		}
 		return expr, true
 	}
@@ -4391,20 +4391,13 @@ func (s *printCState) renderMemberField(base *Varnode, field TypeField, valueon 
 		if err != nil {
 			return ExprFragment{}, false
 		}
-		if baseExpr.member == "" && baseExpr.node == nil && hasTopLevelMember(baseExpr.Text) {
-			// A variable printed as a piece (FVar1.ReferenceController) is an
-			// object_member expression; under pointer_member it takes parens.
-			// C++ parity: PrintLanguage::parentheses (binary tokens of equal
-			// precedence, different token).
-			baseExpr.member = "."
-		}
 		expr = s.lang.MemberExpr(baseExpr, "->", field.Name) // EMIT ( )->name
 	}
 	if !valueon {
 		expr = s.lang.UnaryExpr("&", cPrecUnary, expr)
 	}
 	if arrayvalue {
-		expr = s.lang.PostfixExpr(expr, "[0]")
+		expr = s.lang.SubscriptExpr(expr, s.lang.Atom("0"))
 	}
 	return expr, true
 }
@@ -4816,13 +4809,31 @@ func (s *printCState) printNameExpr(vn *Varnode) ExprFragment {
 // name prints that whole symbol, else name as a single atom.
 func (s *printCState) globalNameExpr(vn *Varnode, name string) ExprFragment {
 	if e := s.fd.globalEntryOf(vn); e != nil {
-		if sym := e.Symbol(); sym != nil && name == s.globalSymbolName(sym) {
-			if expr := s.globalSymbolExpr(sym); expr.Text == name {
-				return expr
+		if sym := e.Symbol(); sym != nil {
+			if q := s.globalSymbolName(sym); strings.HasPrefix(name, q) {
+				if expr := s.globalSymbolExpr(sym); expr.Text == q {
+					return s.lang.PathExpr(expr, name[len(q):])
+				}
 			}
 		}
+		return s.lang.Atom(name)
+	}
+	// A local: its name up to the first path step.
+	if i := strings.IndexAny(name, ".["); i > 0 && isPlainIdentifier(name[:i]) {
+		return s.lang.PathExpr(s.lang.Atom(name[:i]), name[i:])
 	}
 	return s.lang.Atom(name)
+}
+
+// isPlainIdentifier reports a C identifier (no scope or template syntax).
+func isPlainIdentifier(name string) bool {
+	for i, c := range name {
+		if c == '_' || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (i > 0 && c >= '0' && c <= '9') {
+			continue
+		}
+		return false
+	}
+	return name != ""
 }
 
 // readExpr is a variable read: like printName, but a truncating piece of a
@@ -4849,7 +4860,7 @@ func (s *printCState) readExpr(vn *Varnode) ExprFragment {
 		name, cast = s.localPieceName(vn, s.nameOf(vn), castTo, rop, rslot)
 	}
 	if cast != nil {
-		return s.lang.CastExpr(printedTypeString(s.normalizeTypeForDecl(cast)), s.lang.Atom(name))
+		return s.lang.CastExpr(printedTypeString(s.normalizeTypeForDecl(cast)), s.globalNameExpr(vn, name))
 	}
 	return s.globalNameExpr(vn, name)
 }
@@ -4871,11 +4882,24 @@ func (s *printCState) renderSubpieceField(op *PcodeOp) (ExprFragment, bool) {
 		byteOff = vn.Size() - sz - byteOff
 	}
 	if vn.IsExplicit() {
-		name, cast := symbolPieceName(s.nameOf(vn), ct, byteOff, sz, nil, be, op, 0)
-		if cast != nil {
-			return s.lang.CastExpr(printedTypeString(s.normalizeTypeForDecl(cast)), s.lang.Atom(name)), true
+		// The path starts at the Symbol's own data-type (a union resolves
+		// its field per this read), not at the read-facing type.
+		// C++ parity: opSubpiece -> pushPartialSymbol(sym, byteOff + symbol
+		// offset, ..., op, slot).
+		symType := ct
+		if e := s.fd.globalEntryOf(vn); e != nil && e.Symbol() != nil && e.Symbol().Type() != nil && vn.Space() == e.Addr().Space {
+			symType = e.Symbol().Type()
+			byteOff += int32(vn.Offset() - e.Addr().Offset)
 		}
-		return s.lang.Atom(name), true
+		slot := 0
+		if ct.NeedsResolution() {
+			slot = 1 // Artificial slot for the initial resolution
+		}
+		name, cast := symbolPieceName(s.nameOf(vn), symType, byteOff, sz, nil, be, op, slot)
+		if cast != nil {
+			return s.lang.CastExpr(printedTypeString(s.normalizeTypeForDecl(cast)), s.globalNameExpr(vn, name)), true
+		}
+		return s.globalNameExpr(vn, name), true
 	}
 	if st, ok := ct.(*Struct); ok {
 		if field, ok := st.FieldAt(byteOff); ok && field.Offset == byteOff && field.Type.Size() == sz && field.Name != "" {
@@ -4921,12 +4945,20 @@ func (s *printCState) localPieceName(vn *Varnode, name string, castTo Datatype, 
 				rname := s.nameOf(rvn[0])
 				off := int32(vn.High().piece.offset - root.offset)
 				// The offset is into the Symbol's data-type, which may be
-				// larger than the group (a structure only partly in it).
-				if sl != nil && sl.SpaceID() != nil && rvn[0].Space() == sl.SpaceID() {
-					if e := sl.QueryContainer(rvn[0].Addr(), rvn[0].Size(), address.Address{}); e != nil && e.Symbol() != nil &&
-						e.Symbol().Type() != nil && e.Symbol().Name() == rname {
-						rt = e.Symbol().Type()
-						off += int32(rvn[0].Offset() - e.Addr().Offset)
+				// larger than the group (a structure only partly in it). The
+				// root's storage is its stack instance, wherever that sits
+				// among the instances (C++ high->getSymbol/getSymbolOffset).
+				if sl != nil && sl.SpaceID() != nil {
+					for _, w := range rvn {
+						if w.Space() != sl.SpaceID() {
+							continue
+						}
+						if e := sl.QueryContainer(w.Addr(), w.Size(), address.Address{}); e != nil && e.Symbol() != nil &&
+							e.Symbol().Type() != nil && e.Symbol().Name() == rname {
+							rt = e.Symbol().Type()
+							off += int32(w.Offset() - e.Addr().Offset)
+						}
+						break
 					}
 				}
 				return symbolPieceName(rname, rt, off, vn.Size(), castTo, be, rop, rslot)
@@ -5112,25 +5144,4 @@ func (s *printCState) applySelfLockedParams() {
 		}
 	}
 	s.params = params
-}
-
-// hasTopLevelMember reports a '.' member selection outside template
-// arguments and parentheses: the text is an object_member expression.
-func hasTopLevelMember(text string) bool {
-	depth := 0
-	for _, c := range text {
-		switch c {
-		case '<', '(', '[':
-			depth++
-		case '>', ')', ']':
-			if depth > 0 {
-				depth--
-			}
-		case '.':
-			if depth == 0 {
-				return true
-			}
-		}
-	}
-	return false
 }

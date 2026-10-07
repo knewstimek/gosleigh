@@ -723,10 +723,52 @@ func (pl *PrintLanguage) MemberExpr(base ExprFragment, op, name string) ExprFrag
 	} else {
 		paren = base.Text != "" && needsExprParens(base.Precedence, ExprPrecPostfix, ExprPosLeft, ExprAssocLeft)
 	}
-	if paren {
-		return ExprFragment{Text: "(" + pl.ExprString(base, ExprPrecLowest, ExprPosNone, ExprAssocNone) + ")" + op + name, Precedence: ExprPrecPostfix, member: op}
+	text := parenText(base.Text, paren) + op + name
+	// object_member / pointer_member are binary tokens with spacing 0: the
+	// line may break on either side of the operator.
+	return ExprFragment{Text: text, Precedence: ExprPrecPostfix, member: op, node: &fragNode{
+		kind: fragBinary, print1: op,
+		kids: []ExprFragment{base, {Text: name, Precedence: ExprPrecPrimary}}, parens: []bool{paren, false}}}
+}
+
+// SubscriptExpr builds base[index].
+// C++ parity: PrintC::subscript (postsurround "[" "]", spacing 0).
+func (pl *PrintLanguage) SubscriptExpr(base, index ExprFragment) ExprFragment {
+	paren := base.member == "" && base.Text != "" && needsExprParens(base.Precedence, ExprPrecPostfix, ExprPosLeft, ExprAssocLeft)
+	return ExprFragment{Text: parenText(base.Text, paren) + "[" + index.Text + "]", Precedence: ExprPrecPostfix, node: &fragNode{
+		kind: fragPostSurround, print1: "[", print2: "]",
+		kids: []ExprFragment{base, index}, parens: []bool{paren, false}}}
+}
+
+// PathExpr applies a printed symbol path (".field", "[3]", "._4_4_" steps)
+// to base as member and subscript tokens; an unrecognized path stays one
+// atom. C++ parity: PrintC::pushPartialSymbol.
+func (pl *PrintLanguage) PathExpr(base ExprFragment, path string) ExprFragment {
+	expr := base
+	for rest := path; rest != ""; {
+		switch rest[0] {
+		case '.':
+			end := strings.IndexAny(rest[1:], ".[")
+			if end < 0 {
+				end = len(rest) - 1
+			}
+			if end == 0 {
+				return ExprFragment{Text: base.Text + path, Precedence: ExprPrecPostfix}
+			}
+			expr = pl.MemberExpr(expr, ".", rest[1:1+end])
+			rest = rest[1+end:]
+		case '[':
+			end := strings.IndexByte(rest, ']')
+			if end < 0 {
+				return ExprFragment{Text: base.Text + path, Precedence: ExprPrecPostfix}
+			}
+			expr = pl.SubscriptExpr(expr, ExprFragment{Text: rest[1:end], Precedence: ExprPrecPrimary})
+			rest = rest[end+1:]
+		default:
+			return ExprFragment{Text: base.Text + path, Precedence: ExprPrecPostfix}
+		}
 	}
-	return ExprFragment{Text: pl.ExprString(base, ExprPrecPostfix, ExprPosLeft, ExprAssocLeft) + op + name, Precedence: ExprPrecPostfix, member: op}
+	return expr
 }
 
 func (pl *PrintLanguage) argSep() string {
