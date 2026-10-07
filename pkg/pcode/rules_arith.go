@@ -345,16 +345,10 @@ func (r *RuleSub2Add) apply(op *PcodeOp, data *Funcdata) int {
 	// Must NOT fold to V + (-const) directly: a raw negative constant would
 	// re-trigger RuleAddUnsigned on the resulting INT_ADD, causing an infinite
 	// rewrite cycle. Instead, introduce a CPUI_INT_MULT op so the result is a
-	// non-constant varnode from RuleAddUnsigned's perspective.
-	//
-	// Skip INT_SUB(x, 0): RuleIdentityEl handles this directly as COPY(x).
-	// If we converted it here we would produce INT_ADD(x, INT_MULT(0, allOnes))
-	// which requires a second sweep to collapse.
+	// non-constant varnode from RuleAddUnsigned's perspective. x - 0 goes
+	// the same way (RuleEqual2Zero may see the add before it collapses).
 	vn := op.Input(1)
 	if vn == nil {
-		return 0
-	}
-	if isZeroConst(vn) {
 		return 0
 	}
 	size := vn.Size()
@@ -719,15 +713,17 @@ func (r *RuleNegateNegate) apply(op *PcodeOp, data *Funcdata) int {
 }
 
 // RuleIdentityEl collapses identity-element operations:
-//   INT_ADD(x,0)->x, INT_SUB(x,0)->x, INT_XOR(x,0)->x, INT_OR(x,0)->x,
+//   INT_ADD(x,0)->x, INT_XOR(x,0)->x, INT_OR(x,0)->x,
 //   BOOL_XOR(x,0)->x, BOOL_OR(x,0)->x,
 //   INT_MULT(x,1)->x, INT_MULT(x,0)->0
-// C++ parity: RuleIdentityEl::applyOp (ruleaction.cc ~line 3696)
+// INT_SUB is not in the list: x - 0 reaches the add forms through
+// RuleSub2Add, after RuleEqual2Zero had its chance at the comparison.
+// C++ parity: RuleIdentityEl::getOpList / applyOp
 type RuleIdentityEl struct{ batchRule }
 
 func NewRuleIdentityEl(group string) *RuleIdentityEl {
 	opcodes := []OpCode{
-		CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_XOR, CPUI_INT_OR,
+		CPUI_INT_ADD, CPUI_INT_XOR, CPUI_INT_OR,
 		CPUI_BOOL_XOR, CPUI_BOOL_OR, CPUI_INT_MULT,
 	}
 	r := &RuleIdentityEl{}
@@ -746,7 +742,7 @@ func (r *RuleIdentityEl) apply(op *PcodeOp, data *Funcdata) int {
 	}
 	val, _ := constantValue(constvn)
 	switch op.Code() {
-	case CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_XOR, CPUI_INT_OR, CPUI_BOOL_XOR, CPUI_BOOL_OR:
+	case CPUI_INT_ADD, CPUI_INT_XOR, CPUI_INT_OR, CPUI_BOOL_XOR, CPUI_BOOL_OR:
 		if val == 0 {
 			return rewriteToCopy(data, op, op.Input(0))
 		}
@@ -754,8 +750,8 @@ func (r *RuleIdentityEl) apply(op *PcodeOp, data *Funcdata) int {
 		if val == 1 {
 			return rewriteToCopy(data, op, op.Input(0))
 		}
-		if val == 0 {
-			return rewriteToConst(data, op, 0)
+		if val == 0 { // Multiply by zero: a COPY of the zero itself
+			return rewriteToCopy(data, op, constvn)
 		}
 	}
 	return 0
