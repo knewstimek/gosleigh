@@ -548,7 +548,7 @@ func RegisterTypeOps() []TypeOp {
 	inst[CPUI_FLOAT_NEG] = &typeOpBase{CPUI_FLOAT_NEG, PcodeOpUnary, "-"}
 	inst[CPUI_FLOAT_ABS] = &typeOpBase{CPUI_FLOAT_ABS, PcodeOpUnary, "ABS"}
 	inst[CPUI_FLOAT_SQRT] = &typeOpBase{CPUI_FLOAT_SQRT, PcodeOpUnary, "SQRT"}
-	inst[CPUI_FLOAT_INT2FLOAT] = &typeOpBase{CPUI_FLOAT_INT2FLOAT, PcodeOpUnary, "INT2FLOAT"}
+	inst[CPUI_FLOAT_INT2FLOAT] = &typeOpInt2Float{typeOpBase{CPUI_FLOAT_INT2FLOAT, PcodeOpUnary, "INT2FLOAT"}}
 	inst[CPUI_FLOAT_FLOAT2FLOAT] = &typeOpBase{CPUI_FLOAT_FLOAT2FLOAT, PcodeOpUnary, "FLOAT2FLOAT"}
 	inst[CPUI_FLOAT_TRUNC] = &typeOpBase{CPUI_FLOAT_TRUNC, PcodeOpUnary, "TRUNC"}
 	inst[CPUI_FLOAT_CEIL] = &typeOpBase{CPUI_FLOAT_CEIL, PcodeOpUnary, "CEIL"}

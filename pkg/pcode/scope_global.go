@@ -296,7 +296,9 @@ func defaultGlobalName(addr address.Address, ct Datatype) string {
 
 // resolveGlobal returns the global symbol entry covering addr, asking the
 // host for it the first time (ScopeGhidra queries Java on a cache miss).
-// Code labels are not storage and never back a variable.
+// A code label is a one-byte entry of unknown type, so a wider access at its
+// address is a mismatch (_DAT_00000003). C++ parity: LabSymbol::buildType
+// (getBase(1,TYPE_UNKNOWN)) found by Scope::queryProperties.
 func (fd *Funcdata) resolveGlobal(addr address.Address) *SymbolEntry {
 	if fd.globalScope == nil {
 		fd.globalScope = NewGlobalScope()
@@ -310,8 +312,11 @@ func (fd *Funcdata) resolveGlobal(addr address.Address) *SymbolEntry {
 		return nil
 	}
 	hd, ok := hs.QueryData(addr)
-	if !ok || hd.Label {
+	if !ok {
 		return nil
+	}
+	if hd.Label {
+		hd.Type, hd.Size = nil, 1
 	}
 	dt := hd.Type
 	if dt == nil {

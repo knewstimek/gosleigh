@@ -595,6 +595,39 @@ func (t *typeOpSext) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Data
 // falls through to the base. C++ parity: typeop.cc TypeOpIntRight::getInputCast
 // (1545-1558, wantExt=UNSIGNED) / TypeOpIntSright::getInputCast (1587-1600,
 // wantExt=SIGNED).
+// typeOpInt2Float is FLOAT_INT2FLOAT. C++ parity: TypeOpFloatInt2Float.
+type typeOpInt2Float struct{ typeOpBase }
+
+// int2FloatAbsorbZext returns the implied INT_ZEXT feeding a FLOAT_INT2FLOAT:
+// the conversion then reads as one of the unsigned value before extension.
+// C++ parity: TypeOpFloatInt2Float::absorbZext.
+func int2FloatAbsorbZext(op *PcodeOp) *PcodeOp {
+	vn0 := op.Input(0)
+	if vn0.IsWritten() && vn0.IsImplied() {
+		if zextOp := vn0.Def(); zextOp.Code() == CPUI_INT_ZEXT {
+			return zextOp
+		}
+	}
+	return nil
+}
+
+// GetInputCast casts the integer input only when the value's sign bit can be
+// set; an absorbed extension needs none.
+// C++ parity: TypeOpFloatInt2Float::getInputCast.
+func (t *typeOpInt2Float) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
+	if int2FloatAbsorbZext(op) != nil {
+		return nil // No cast if we are absorbing an INT_ZEXT
+	}
+	vn := op.Input(slot)
+	reqtype := t.InputTypeLocal(op, slot, cs.tlst)
+	curtype := vn.HighTypeReadFacing(op)
+	careUintInt := true
+	if vn.Size() <= 8 {
+		careUintInt = (vn.NZMask()>>(8*uint(vn.Size())-1))&1 != 0
+	}
+	return cs.CastStandard(reqtype, curtype, careUintInt, true)
+}
+
 func (t *typeOpIntRight) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
 	return shiftValueInputCast(t, op, slot, cs, unsignedExtension)
 }

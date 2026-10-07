@@ -3865,6 +3865,15 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	case CPUI_FLOAT_SQRT:
 		return s.renderPseudoCall("SQRT", op, 0)
 	case CPUI_FLOAT_INT2FLOAT:
+		// An absorbed extension prints as the conversion of its input.
+		// C++ parity: PrintC::opFloatInt2Float.
+		if zextOp := int2FloatAbsorbZext(op); zextOp != nil {
+			inner, err := s.renderVarnodeExpr(zextOp.Input(0))
+			if err != nil {
+				return ExprFragment{}, err
+			}
+			return s.lang.CastExpr(printedTypeString(s.normalizeTypeForDecl(op.Output().HighTypeDefFacing())), inner), nil
+		}
 		return s.renderCast(op)
 	case CPUI_FLOAT_FLOAT2FLOAT:
 		return s.renderCast(op)
