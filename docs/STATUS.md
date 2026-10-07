@@ -25,11 +25,14 @@
 | 단일 필드 구조체 COPY의 whole/field resolution | unionresolve.go, cast 단계 | private-sample [147] |
 | TypePartialUnion, Go typedef의 원형 링크 | unionresolve.go, typefactory.go | 부분 유니온, isOpIdentical |
 | 지역 스코프 자체 이름의 isNameUsed | printlanguage.go | `::` 한정은 호스트 질의만 반영 |
+| 타입 전파 not settling: 스택 PTRSUB 타입이 패스마다 바뀌어 ptrarith/ptraddundo 진동 | addtreestate.go, action_infertypes.go | private-sample [173][177][194][199] |
+| 8바이트 long/longlong 코어 타입 슬롯 | typefactory.go `coreBaseName` | 이름별 인터닝 유지 |
+| heritage 조각(R8D) 생성 순서 -> 이름 대표/동적 심볼 | heritage.go | private-sample [193] |
+| merge 커버 교차로 C++만 넣는 trim COPY | merge.go | seed2 [192] 문장 순서 |
 
 ## 도구
 
-- C++ 정답 하네스: scratchpad `hx.py WORK IDX "print C"` (`load function @addr`로 캡처의 함수와
-  프로토타입을 그대로 씀). 계측 빌드 `build_tp.py`(`ONLY=tu`): TYPEPROP_DEBUG,
-  OPACTION_DEBUG, `ACT_TRACE=1`(action별 변경 수).
-- Go↔C++ 비교: `actcmp.sh IDX`(action 변경 순서 diff), C++ `print map`/`print high NAME`.
+- C++ 정답 하네스: `tools/cppharness` (`hx.py WORK IDX "print C"`, `load function @addr`).
+  `trace propagation on`(TYPEPROP), `trace address`+`trace enable`(규칙별 op 전후).
+- Go↔C++ 비교: `actcmp.py`(action 변경 수), `rulecmp.py`(규칙 적용 수), C++ `print map`/`print high NAME`.
 - Go 추적: `SSA_DUMP_AFTER`, `SSA_DUMP_TYPES`, `RULE_TRACE=1|2`(action 포함), `INFER_TRACE`.
