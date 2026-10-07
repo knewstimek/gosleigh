@@ -434,6 +434,28 @@ func mergeTestRequired(h1, h2 *HighVariable) bool {
 	if (!h1.IsInput() && h1.isExtraOut()) || (!h2.IsInput() && h2.isExtraOut()) {
 		return false
 	}
+	// A prototype piece merges only with a plain local variable.
+	// C++ parity: merge.cc Merge::mergeTestRequired (isProtoPartial).
+	if highProtoPartial(h2) {
+		if highProtoPartial(h1) || h1.IsInput() || h1.IsAddrTied() || h1.IsPersist() {
+			return false
+		}
+	}
+	if highProtoPartial(h1) {
+		if h2.IsInput() || h2.IsAddrTied() || h2.IsPersist() {
+			return false
+		}
+	}
+	// Two pieces merge only across groups, and one of them must be its
+	// whole group. C++ parity: merge.cc Merge::mergeTestRequired (piece).
+	if h2.piece != nil && h1.piece != nil {
+		if h2.piece.group == h1.piece.group {
+			return false
+		}
+		if h2.piece.size != h2.piece.group.size && h1.piece.size != h1.piece.group.size {
+			return false
+		}
+	}
 	// Symbol guard: two HighVariables that map to different Symbols -- or to
 	// different byte offsets within the same Symbol -- name distinct storage and
 	// must not merge. This is what keeps a namelocked register parameter (e.g.
@@ -451,6 +473,17 @@ func mergeTestRequired(h1, h2 *HighVariable) bool {
 		}
 	}
 	return true
+}
+
+// highProtoPartial reports a variable with a prototype-piece instance.
+// C++ parity: HighVariable::isProtoPartial (updateFlags ORs the instances).
+func highProtoPartial(h *HighVariable) bool {
+	for _, vn := range h.Instances() {
+		if vn.IsProtoPartial() {
+			return true
+		}
+	}
+	return false
 }
 
 // mergeTestAdjacent performs the required tests plus the additional adjacency
