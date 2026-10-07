@@ -101,7 +101,6 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 	blockByAddr := make(map[address.Address]*pcode.BlockBasic, len(starts))
 	instToBlock := make(map[address.Address]*pcode.BlockBasic, len(records))
 	lastInBlock := make(map[*pcode.BlockBasic]instructionRecord, len(starts))
-	var instructionDefs map[varKey]*pcode.Varnode
 
 	var current *pcode.BlockBasic
 	for idx, record := range records {
@@ -119,8 +118,7 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 		instToBlock[addr] = current
 		lastInBlock[current] = record
 
-		instructionDefs = make(map[varKey]*pcode.Varnode)
-		if err := addInstructionOps(fd, current, record.translation, instructionDefs); err != nil {
+		if err := addInstructionOps(fd, current, record.translation); err != nil {
 			return nil, err
 		}
 	}

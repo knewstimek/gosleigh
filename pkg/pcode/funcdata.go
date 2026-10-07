@@ -423,7 +423,9 @@ func (fd *Funcdata) ensureCallSpecs() {
 		if pa, pb := a.Parent(), b.Parent(); pa != nil && pb != nil && pa.Index() != pb.Index() {
 			return pa.Index() < pb.Index()
 		}
-		return a.Seq().Order < b.Seq().Order
+		// The C++ SeqNum order is the op's position in its block; a Go
+		// Seq().Order can lag behind ops inserted later.
+		return opBlockUIndex(a) < opBlockUIndex(b)
 	})
 }
 

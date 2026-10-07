@@ -197,12 +197,6 @@ type instructionFlow struct {
 	hasUndecodedTarget bool
 }
 
-type varKey struct {
-	space  *address.Space
-	offset uint64
-	size   uint32
-}
-
 type edgeKey struct {
 	from *pcode.BlockBasic
 	to   *pcode.BlockBasic
@@ -361,14 +355,6 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	blockByAddr := make(map[address.Address]*pcode.BlockBasic, len(starts))
 	instToBlock := make(map[address.Address]*pcode.BlockBasic, len(records))
 	lastInBlock := make(map[*pcode.BlockBasic]instructionRecord, len(starts))
-	// instructionDefs is reset per instruction so that cross-instruction reads
-	// always produce fresh free varnodes that Heritage can rename.
-	// Within one instruction, writes are cached so later ops in the same
-	// instruction can reference the written varnode (e.g. ZF = ECX_new == 0
-	// after DEC ECX writes ECX_new).
-	// C++ parity: Ghidra's SLEIGH builder creates fresh varnodes per read;
-	// within-instruction writes are tracked but not propagated across instructions.
-	var instructionDefs map[varKey]*pcode.Varnode
 
 	// splitTail links a block ending inside an instruction to the block
 	// holding the rest of that instruction (CMOVcc lowers to
@@ -400,9 +386,6 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		}
 		instToBlock[addr] = current
 
-		// Fresh defs map per instruction: reads in one instruction must not
-		// resolve to writes from a different instruction.
-		instructionDefs = make(map[varKey]*pcode.Varnode)
 		// An op after a branch inside one instruction starts a new block.
 		// C++ parity: FlowInfo marks the op following a branch startbasic.
 		ops := record.translation.Ops
@@ -418,13 +401,10 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 				tail := graph.NewBlockBasicInGraph()
 				splitTail[current] = tail
 				current = tail
-				// A value crossing a block boundary inside the instruction
-				// (a relative-branch loop) must reach heritage as a free read.
-				instructionDefs = make(map[varKey]*pcode.Varnode)
 			}
 			segBlocks[si] = current
 			lastInBlock[current] = rec
-			if err := addInstructionOps(fd, current, sub, instructionDefs); err != nil {
+			if err := addInstructionOps(fd, current, sub); err != nil {
 				return nil, err
 			}
 		}
@@ -1788,7 +1768,7 @@ func zeroOpRedirect(records []instructionRecord) map[address.Address]address.Add
 	return out
 }
 
-func addInstructionOps(fd *pcode.Funcdata, block *pcode.BlockBasic, translation sla.InstructionTranslation, defs map[varKey]*pcode.Varnode) error {
+func addInstructionOps(fd *pcode.Funcdata, block *pcode.BlockBasic, translation sla.InstructionTranslation) error {
 	if fd == nil || block == nil {
 		return fmt.Errorf("build bridge: funcdata or block is nil")
 	}
@@ -1804,12 +1784,11 @@ func addInstructionOps(fd *pcode.Funcdata, block *pcode.BlockBasic, translation 
 				fd.OpSetInput(op, fd.NewCodeRef(input.Address()), 0)
 				continue
 			}
-			vn := resolveInput(fd, input, defs)
+			vn := resolveInput(fd, input)
 			fd.OpSetInput(op, vn, slot)
 		}
 		if raw.Output != nil {
-			out := fd.NewVarnodeOut(int32(raw.Output.Size), raw.Output.Address(), op)
-			defs[makeVarKey(*raw.Output)] = out
+			fd.NewVarnodeOut(int32(raw.Output.Size), raw.Output.Address(), op)
 		}
 	}
 	return nil
@@ -1827,30 +1806,17 @@ func appendAliveOp(fd *pcode.Funcdata, block *pcode.BlockBasic, op *pcode.PcodeO
 	fd.OpMarkAlive(op)
 }
 
-func resolveInput(fd *pcode.Funcdata, input pcode.VarnodeData, defs map[varKey]*pcode.Varnode) *pcode.Varnode {
+func resolveInput(fd *pcode.Funcdata, input pcode.VarnodeData) *pcode.Varnode {
 	if input.Space != nil && input.Space.IsConstant() {
 		return fd.NewConstant(int32(input.Size), input.Offset)
 	}
 
-	// Only a temporary is linked to its write inside the instruction; every
-	// other read stays free for heritage, which normalizes partial reads and
-	// writes of a register (SUBPIECE/PIECE) the same way across instructions.
+	// Every read, a temporary included, stays free for heritage: a unique
+	// offset reused at different sizes across instructions (a 4-byte and a
+	// 1-byte temporary at the same offset) is normalized with SUBPIECE/PIECE
+	// like a register, which changes the order rules see the data-flow in.
 	// C++ parity: PcodeEmitFd::dump creates a fresh Varnode for every input.
-	key := makeVarKey(input)
-	if vn, exists := defs[key]; exists && input.Space != nil && input.Space.IsUnique() {
-		return vn
-	}
-
-	vn := fd.NewVarnode(int32(input.Size), input.Address())
-	// Do NOT store read varnodes in defs. If this location has not been written
-	// yet (no output defined it), it is a function live-in that Heritage will
-	// rename to an SSA input varnode. Storing the read would cause subsequent
-	// reads of the same register to reuse the same varnode object, which breaks
-	// Heritage's per-use renaming: Heritage marks the varnode active, renames
-	// the first user, then clears active -- leaving other users with the old
-	// pre-Heritage raw varnode.
-	// C++ parity: Ghidra's SLEIGH builder creates a fresh varnode per read.
-	return vn
+	return fd.NewVarnode(int32(input.Size), input.Address())
 }
 
 func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode.BlockBasic, instToBlock map[address.Address]*pcode.BlockBasic, lastInBlock map[*pcode.BlockBasic]instructionRecord, recoveredTables map[uint64]*pcode.JumpTable, splitTail map[*pcode.BlockBasic]*pcode.BlockBasic, relTarget map[*pcode.BlockBasic]relLink) {
@@ -2147,10 +2113,6 @@ func sameSpace(left address.Address, right address.Address) bool {
 		return false
 	}
 	return left.Space.Index == right.Space.Index
-}
-
-func makeVarKey(vn pcode.VarnodeData) varKey {
-	return varKey{space: vn.Space, offset: vn.Offset, size: vn.Size}
 }
 
 func defaultConstSpace() *address.Space {
