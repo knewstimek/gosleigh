@@ -3968,8 +3968,8 @@ func (s *printCState) extensionIsCast(op *PcodeOp, signed bool) bool {
 	if out == nil || in0 == nil {
 		return false
 	}
-	outType := out.TypeReadFacing(nil)
-	inType := in0.TypeReadFacing(nil)
+	outType := out.HighTypeDefFacing()
+	inType := in0.HighTypeReadFacing(op)
 	if signed {
 		return sharedCastStrategyC.IsSextCast(outType, inType)
 	}
@@ -4025,7 +4025,7 @@ func (s *printCState) subpieceIsCast(op *PcodeOp) bool {
 	if out == nil || in0 == nil {
 		return false
 	}
-	return sharedCastStrategyC.IsSubpieceCast(out.TypeReadFacing(nil), in0.TypeReadFacing(nil), uint32(off))
+	return sharedCastStrategyC.IsSubpieceCast(out.HighTypeDefFacing(), in0.HighTypeReadFacing(op), uint32(off))
 }
 
 func (s *printCState) renderCast(op *PcodeOp) (ExprFragment, error) {

@@ -22,6 +22,9 @@ type FuncCallSpecs struct {
 	FuncProto
 	// activeInputState: FuncCallSpecs::activeinput.
 	activeInputState *ParamActive
+	// inputConsume estimates per input slot how many low bytes the callee
+	// uses (0 = all). C++ parity: FuncCallSpecs::inputConsume.
+	inputConsume []int32
 	// inputActive: parameter recovery is in progress; the trials outlive it.
 	// C++ parity: FuncCallSpecs::isinputactive.
 	inputActive bool
@@ -175,3 +178,26 @@ func (fc *FuncCallSpecs) GetFuncdata() *Funcdata {
 // TODO known mismatch: upon-return injection from pcodeinjectlib is not yet ported.
 // C++ parity: FuncCallSpecs::insertPcode
 func (fc *FuncCallSpecs) InsertPcode(_ *Funcdata) {}
+
+// getInputBytesConsumed is the number of low bytes of the input in slot the
+// callee is estimated to use, or 0 when all are presumed used.
+// C++ parity: FuncCallSpecs::getInputBytesConsumed.
+func (fc *FuncCallSpecs) getInputBytesConsumed(slot int) int32 {
+	if slot >= len(fc.inputConsume) {
+		return 0
+	}
+	return fc.inputConsume[slot]
+}
+
+// setInputBytesConsumed records the estimate for slot; it only shrinks.
+// C++ parity: FuncCallSpecs::setInputBytesConsumed.
+func (fc *FuncCallSpecs) setInputBytesConsumed(slot int, val int32) bool {
+	for len(fc.inputConsume) <= slot {
+		fc.inputConsume = append(fc.inputConsume, 0)
+	}
+	if old := fc.inputConsume[slot]; old == 0 || val < old {
+		fc.inputConsume[slot] = val
+		return true
+	}
+	return false
+}

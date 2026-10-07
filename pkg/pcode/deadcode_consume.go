@@ -356,13 +356,14 @@ func (c *consumeAnalysis) computeConsumed(data *Funcdata) {
 			continue
 		}
 		// An open prototype consumes only the bits a parameter can hold.
-		// TODO known mismatch: FuncCallSpecs::getInputBytesConsumed hints are
-		// not recorded (always 0 = no restriction).
 		for j := 1; j < op.NumInput(); j++ {
 			vn := op.Input(j)
 			consumeVal := ^uint64(0)
 			if !vn.IsAutoLive() {
 				consumeVal = minimalMask(vn.NZMask())
+			}
+			if n := fc.getInputBytesConsumed(j); n != 0 {
+				consumeVal &= sizeMask(n)
 			}
 			c.push(consumeVal, vn)
 		}

@@ -135,6 +135,14 @@ func tracePathologyForward(op *PcodeOp, data *Funcdata) int {
 					marked[cur] = true
 					worklist = append(worklist, cur)
 				}
+			case CPUI_CALL, CPUI_CALLIND:
+				if fc := data.callSpecsForOp(cur); fc != nil && !fc.IsInputActive() && !fc.IsInputLocked() {
+					for i := 1; i < cur.NumInput(); i++ {
+						if cur.Input(i) == outVn && fc.setInputBytesConsumed(i, bytesConsumed) {
+							count++
+						}
+					}
+				}
 			case CPUI_RETURN:
 				if fp := data.GetFuncProto(); fp != nil && !fp.IsOutputLocked() {
 					if fp.SetReturnBytesConsumed(bytesConsumed) {
@@ -142,8 +150,6 @@ func tracePathologyForward(op *PcodeOp, data *Funcdata) int {
 					}
 				}
 			}
-			// TODO known mismatch: the CALL branch (FuncCallSpecs::
-			// setInputBytesConsumed) is not ported.
 		}
 	}
 	return count
