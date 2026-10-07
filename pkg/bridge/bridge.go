@@ -307,6 +307,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		return nil, err
 	}
 	installLanedRegisters(engine, fd)
+	installIncidentalCopy(engine, fd, summary.heritageSpaces)
 
 	// Install the load-image read hook so downstream jump-table address
 	// emulation (pcode.EmulateFunction.getLoadImageValue) can read section-mapped
@@ -791,6 +792,31 @@ func installLanedRegisters(engine *sla.Engine, fd *pcode.Funcdata) {
 		}
 	}
 	fd.SetLanedRegisters(recs)
+}
+
+// installIncidentalCopy hands the pspec incidental-copy registers to the
+// function as storage ranges. C++ parity: Architecture::decodeIncidentalCopy
+// (symboltab->setPropertyRange(Varnode::incidental_copy, range)).
+func installIncidentalCopy(engine *sla.Engine, fd *pcode.Funcdata, spaces []*address.Space) {
+	names := engine.IncidentalCopy()
+	if len(names) == 0 {
+		return
+	}
+	xr := engine.XRefs()
+	var ranges []pcode.GlobalRange
+	for _, name := range names {
+		si, off, sz, ok := xr.RegisterByName(name)
+		if !ok || sz <= 0 {
+			continue
+		}
+		for _, space := range spaces {
+			if space != nil && int64(space.Index) == si {
+				ranges = append(ranges, pcode.GlobalRange{Space: space, First: off, Last: off + uint64(sz) - 1})
+				break
+			}
+		}
+	}
+	fd.SetIncidentalCopyRanges(ranges)
 }
 
 func installTrackedSet(engine *sla.Engine, fd *pcode.Funcdata, regs map[string]uint64) {

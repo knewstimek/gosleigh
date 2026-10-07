@@ -76,6 +76,7 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 		return nil, err
 	}
 	installLanedRegisters(engine, fd)
+	installIncidentalCopy(engine, fd, summary.heritageSpaces)
 
 	// Same load-image read hook as Build so JumpBasic address emulation can read
 	// the section-mapped table entries at their virtual addresses.

@@ -152,6 +152,8 @@ type Funcdata struct {
 	// C++ parity: Funcdata owns bblocks and the heritage's address-space set.
 	graph          *BlockGraph
 	heritageSpaces []*address.Space
+	// incidentalCopy holds the pspec <incidentalcopy> storage ranges.
+	incidentalCopy []GlobalRange
 	// heritage is the persistent SSA engine the universal-action tree reuses across
 	// mainloop iterations so heritage is incremental (pass/globalDisjoint state is
 	// retained). The hand-ordered decompile driver builds its own Heritage and does
@@ -1198,6 +1200,15 @@ func (fd *Funcdata) setVarnodeProperties(vn *Varnode) {
 	if vn == nil || vn.IsMapped() || vn.Space() == nil {
 		return
 	}
+	// The property map marks storage copied to incidentally (the x87
+	// stack); it applies at the Varnode's starting address.
+	// C++ parity: Scope::queryProperties -> Database::getProperty.
+	for _, r := range fd.incidentalCopy {
+		if r.Space == vn.Space() && vn.Offset() >= r.First && vn.Offset() <= r.Last {
+			vn.SetFlags(VarnodeIncidentalCopy)
+			break
+		}
+	}
 	if sl := fd.scopeLocal; sl != nil {
 		if entry := sl.FindOverlap(vn.Addr(), vn.Size()); entry != nil {
 			vn.SetFlags(entry.AllFlags() &^ VarnodeTypeLock)
@@ -1282,6 +1293,11 @@ type GlobalRange struct {
 	Space       *address.Space
 	First, Last uint64
 }
+
+// SetIncidentalCopyRanges installs the storage the processor copies to
+// incidentally; Varnodes starting there carry the incidental_copy property.
+// C++ parity: Architecture::decodeIncidentalCopy.
+func (fd *Funcdata) SetIncidentalCopyRanges(r []GlobalRange) { fd.incidentalCopy = r }
 
 // SetGlobalRanges installs the global scope's storage ranges (cspec <global>).
 // C++ parity: Architecture::addToGlobalScope.

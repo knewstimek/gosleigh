@@ -233,6 +233,7 @@ func (b *EngineBuilder) Build() (*sla.Engine, address.Address, error) {
 		return nil, address.Address{}, fmt.Errorf("loader: NewEngineFromBoundaries: %w", err)
 	}
 	engine.SetLanedRegisters(pspecData.LanedRegisters)
+	engine.SetIncidentalCopy(pspecData.IncidentalCopy)
 	return engine, entryAddr, nil
 }
 

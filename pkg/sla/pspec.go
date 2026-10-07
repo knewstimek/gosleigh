@@ -37,6 +37,9 @@ type PspecData struct {
 	// LanedRegisters lists the registers carrying vector_lane_sizes.
 	// C++ parity: Architecture::decodeProcessorSpec register_data.
 	LanedRegisters []PspecLanedRegister
+	// IncidentalCopy names the registers copied to incidentally (the x87
+	// stack). C++ parity: Architecture::decodeIncidentalCopy.
+	IncidentalCopy []string
 }
 
 // PspecLanedRegister is a register_data entry with preferred lane sizes.
@@ -73,8 +76,9 @@ type pspecXMLContextData struct {
 
 // pspecXMLRoot is the XML shape of the top-level <processor_spec> element.
 type pspecXMLRoot struct {
-	ContextData  pspecXMLContextData  `xml:"context_data"`
-	RegisterData pspecXMLRegisterData `xml:"register_data"`
+	ContextData    pspecXMLContextData  `xml:"context_data"`
+	RegisterData   pspecXMLRegisterData `xml:"register_data"`
+	IncidentalCopy pspecXMLRegisterData `xml:"incidentalcopy"`
 }
 
 // ParsePspec reads a .pspec XML file and returns the context_set defaults.
@@ -105,6 +109,9 @@ func ParsePspec(path string) (PspecData, error) {
 		if r.LaneSizes != "" {
 			result.LanedRegisters = append(result.LanedRegisters, PspecLanedRegister{Name: r.Name, LaneSizes: r.LaneSizes})
 		}
+	}
+	for _, r := range root.IncidentalCopy.Registers {
+		result.IncidentalCopy = append(result.IncidentalCopy, r.Name)
 	}
 	return result, nil
 }

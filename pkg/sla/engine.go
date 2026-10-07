@@ -71,6 +71,7 @@ type Engine struct {
 	// lanedRegisters are the pspec vector registers with their register
 	// size resolved; consumers turn them into LanedRegister records.
 	lanedRegisters []LanedRegisterSpec
+	incidentalCopy []string
 }
 
 // LanedRegisterSpec is a vector register's whole size and its pspec lane
@@ -99,6 +100,21 @@ func (e *Engine) SetLanedRegisters(regs []PspecLanedRegister) {
 			e.lanedRegisters = append(e.lanedRegisters, LanedRegisterSpec{Size: sz, LaneSizes: r.LaneSizes})
 		}
 	}
+}
+
+// SetIncidentalCopy records the pspec incidental-copy register names.
+func (e *Engine) SetIncidentalCopy(names []string) {
+	if e != nil {
+		e.incidentalCopy = append([]string(nil), names...)
+	}
+}
+
+// IncidentalCopy returns the pspec incidental-copy register names.
+func (e *Engine) IncidentalCopy() []string {
+	if e == nil {
+		return nil
+	}
+	return e.incidentalCopy
 }
 
 // LanedRegisters returns the resolved pspec laned registers.
