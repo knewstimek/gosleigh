@@ -873,8 +873,7 @@ func (s *AddTreeState) buildDegenerate() bool {
 	dataSize := s.data.NewConstant(s.ptrSize, 1)
 	s.data.OpSetAllInput(s.baseOp, []*Varnode{s.ptr, s.baseOp.Input(1 - s.baseSlot), dataSize})
 	s.data.OpSetOpcode(s.baseOp, CPUI_PTRADD)
-	SetVarnodeType(out, s.ptrType)
-	return true
+	return true // The output keeps its data-type
 }
 
 func (s *AddTreeState) buildTree() {
