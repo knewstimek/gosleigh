@@ -339,8 +339,8 @@ func (hv *HighVariable) Type() Datatype {
 			continue
 		}
 		// A free Varnode without readers is one C++ clearDeadVarnodes would
-		// have destroyed (removing it from its high); Gosleigh keeps such
-		// leftovers (see ClearDeadVarnodes), so they must not vote here.
+		// have destroyed (removing it from its high); one created since the
+		// last ClearDeadVarnodes must not vote here.
 		if vn.IsFree() && vn.HasNoDescend() {
 			continue
 		}

@@ -55,18 +55,19 @@ func (sl *ScopeLocal) isNotMapped(off uint64, size int32) bool {
 	return false
 }
 
-// ClearDeadVarnodes frees unlocked input Varnodes nothing reads any more.
+// ClearDeadVarnodes frees unlocked input Varnodes nothing reads any more and
+// destroys every free Varnode without readers.
 // C++ parity: funcdata_varnode.cc Funcdata::clearDeadVarnodes.
 func (fd *Funcdata) ClearDeadVarnodes() {
 	for _, vn := range fd.vbank.AllVarnodes() {
 		if vn == nil || !vn.HasNoDescend() {
 			continue
 		}
-		// TODO known mismatch: C++ also destroys every free Varnode without
-		// descendants; printc's stack declaration pass still reads such
-		// leftovers (entryCoversVarnode).
 		if vn.IsInput() && !vn.HasAddlFlags(VarnodeLockedInput) {
 			fd.vbank.MakeFree(vn)
+		}
+		if vn.IsFree() {
+			fd.vbank.Destroy(vn)
 		}
 	}
 }
