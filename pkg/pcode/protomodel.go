@@ -196,6 +196,10 @@ type ProtoModel struct {
 	// C++ parity: ProtoModel::name.
 	Name string
 
+	// compatModel is the model this one was copied from, which it can stand
+	// in for. C++ parity: ProtoModel::compatModel.
+	compatModel *ProtoModel
+
 	// AutoKilledByCall: every potential output location is killed by a call
 	// (<output killedbycall="true">).
 	// C++ parity: ParamListStandard::autoKilledByCall via isAutoKilledByCall.
@@ -562,5 +566,13 @@ func (pm *ProtoModel) Alias(name string) *ProtoModel {
 	c := *pm
 	c.Name = name
 	c.PrintInDecl = true
+	c.compatModel = pm
 	return &c
+}
+
+// IsCompatible reports whether the other model can be substituted for this
+// one: the same model, or one a copy of the other.
+// C++ parity: fspec.cc ProtoModel::isCompatible (compatModel).
+func (pm *ProtoModel) IsCompatible(op2 *ProtoModel) bool {
+	return pm == op2 || (pm != nil && pm.compatModel == op2) || (op2 != nil && op2.compatModel == pm)
 }

@@ -1376,7 +1376,6 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 			if t, ok := cfg.FlowOverrides[cur.Offset]; ok {
 				translation = applyFlowOverride(translation, t)
 			}
-			translation = directExternalCall(translation, cfg.HostScope)
 			translation = haltAfterNoReturnCall(translation, cfg.HostScope)
 			// An instruction may legitimately emit no p-code (NOP, multi-byte
 			// NOP alignment padding). It is kept for flow; references to its

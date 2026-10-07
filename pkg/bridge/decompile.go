@@ -69,7 +69,13 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 		act.Reset(fd)
 		act.Perform(fd)
 		ov := fd.IndirectOverrides()
-		if !fd.RebuildRequested() || result.rebuild == nil || restarts >= 2 {
+		if !fd.RebuildRequested() || result.rebuild == nil {
+			break
+		}
+		// C++ parity: the universal ActionRestartGroup allows one restart
+		// (maxrestarts 1) and then gives up with a warning.
+		if restarts >= 1 {
+			fd.WarningHeader("Exceeded maximum restarts with more pending")
 			break
 		}
 		next, err := result.rebuild(ov)

@@ -2039,7 +2039,14 @@ func (a *ActionDeindirect) Apply(data *Funcdata) int {
 			// The host answers queryExternalRefFunction for the reference slot.
 			if h := data.HostScope(); h != nil {
 				if name, ok := h.QueryExternalRef(vn.Addr()); ok {
-					fc.deindirectExternal(data, name, vn.Addr())
+					// The host's description of the external function stands in
+					// for the Funcdata shell queryExternalRefFunction returns; an
+					// undescribed one has an unlocked prototype.
+					hf, known := h.QueryFunction(vn.Addr())
+					if !known {
+						hf = HostFunction{Name: name}
+					}
+					fc.deindirectHost(data, hf, vn.Addr(), name)
 					a.count++
 					continue
 				}
@@ -2061,7 +2068,7 @@ func (a *ActionDeindirect) Apply(data *Funcdata) int {
 			if h := data.HostScope(); h != nil && sp != nil {
 				codeaddr := address.Address{Space: sp, Offset: vn.Offset()}
 				if hf, ok := h.QueryFunction(codeaddr); ok {
-					fc.deindirectExternal(data, hf.Name, codeaddr)
+					fc.deindirectHost(data, hf, codeaddr, hf.Name)
 					a.count++
 					continue
 				}
