@@ -956,7 +956,7 @@ func inferPropagateToPointer(tf *TypeFactory, dt Datatype, sz int32, wordsz uint
 }
 
 // inferPropagateFromPointer dereferences a pointer type to its element type.
-// C++ parity: TypeOp::propagateFromPointer (typeop.cc:207-227, enum tail elided).
+// C++ parity: TypeOp::propagateFromPointer (typeop.cc:207-227).
 func inferPropagateFromPointer(tf *TypeFactory, dt Datatype, sz int32) Datatype {
 	ptr, ok := dt.(*Pointer)
 	if !ok {
@@ -969,8 +969,14 @@ func inferPropagateFromPointer(tf *TypeFactory, dt Datatype, sz int32) Datatype 
 	if ptrto.Size() == sz {
 		return ptrto
 	}
-	// Size mismatch: C++ only propagates (partial) enumerations here, which are
-	// out of scope for this slice (TODO).
+	// A size mismatch only propagates (partial) enumerations.
+	if ptr.IsPointerRel() {
+		if res := tf.exactPiece(ptr.Parent(), int64(ptr.ByteOffset()), sz); res != nil && res.Flags()&datatypeEnumType != 0 {
+			return res
+		}
+	} else if en, ok := ptrto.(*Enum); ok && en.parent == nil {
+		return tf.GetPartialEnum(en, 0, sz)
+	}
 	return nil
 }
 

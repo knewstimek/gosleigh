@@ -451,7 +451,15 @@ func (u *Union) Fields() []TypeField { return cloneFields(u.fields) }
 type Enum struct {
 	datatypeBase
 	values map[uint64]string
+	// A partial enumeration is a piece of parent starting offset bytes in;
+	// a variable uses the stripped undefined type. C++ parity: TypePartialEnum.
+	parent   *Enum
+	offset   int64
+	stripped Datatype
 }
+
+// IsPartialEnum reports a piece of an enumeration.
+func (e *Enum) IsPartialEnum() bool { return e.parent != nil }
 
 func NewEnum(size int32, enumMeta metatype, name string, values map[uint64]string) *Enum {
 	actualMeta := TYPE_UINT
@@ -479,6 +487,15 @@ func NewEnum(size int32, enumMeta metatype, name string, values map[uint64]strin
 // remaining bits.
 // C++ parity: TypeEnum::getMatches.
 func (e *Enum) Matches(val uint64) ([]string, bool) {
+	if e.parent != nil {
+		// C++ parity: TypePartialEnum::getMatches (value shifted into place).
+		// Known mismatch: a piece past byte 0 needs the shift printed
+		// (Representation::shiftAmount), so it is left unrepresented.
+		if e.offset != 0 {
+			return nil, false
+		}
+		return e.parent.Matches(val)
+	}
 	keys := make([]uint64, 0, len(e.values))
 	for k := range e.values {
 		keys = append(keys, k)
@@ -529,8 +546,22 @@ func (e *Enum) Matches(val uint64) ([]string, bool) {
 	return nil, false
 }
 
-func (e *Enum) Values() map[uint64]string { return cloneEnumValues(e.values) }
+func (e *Enum) Values() map[uint64]string {
+	if e.parent != nil {
+		if e.offset != 0 {
+			return nil
+		}
+		return e.parent.Values()
+	}
+	return cloneEnumValues(e.values)
+}
+
+// HasNamedValue reports a name for value. C++ parity: TypeEnum /
+// TypePartialEnum::hasNamedValue.
 func (e *Enum) HasNamedValue(value uint64) bool {
+	if e.parent != nil {
+		return e.parent.HasNamedValue(value << uint(8*e.offset))
+	}
 	_, ok := e.values[value]
 	return ok
 }

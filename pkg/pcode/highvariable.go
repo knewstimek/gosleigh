@@ -361,6 +361,10 @@ func (hv *HighVariable) Type() Datatype {
 	// A variable never keeps a partial type. C++ parity:
 	// HighVariable::updateType (getStripped).
 	switch t := rep.Type().(type) {
+	case *Enum:
+		if t.parent != nil {
+			return t.stripped
+		}
 	case *PartialStruct:
 		return t.stripped
 	case *PartialUnion:
@@ -499,6 +503,10 @@ func (hv *HighVariable) finalizeDatatype(tf *TypeFactory, sym *Symbol, off int64
 		return
 	}
 	switch t := tp.(type) { // stripType
+	case *Enum:
+		if t.parent != nil {
+			tp = t.stripped
+		}
 	case *PartialStruct:
 		tp = t.stripped
 	case *PartialUnion:

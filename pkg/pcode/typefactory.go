@@ -80,6 +80,9 @@ func (f *TypeFactory) internSlow(dt Datatype) Datatype {
 	case *Union:
 		return f.GetUnion(typed.Name(), typed.Fields())
 	case *Enum:
+		if typed.parent != nil {
+			return typed // A partial enumeration is interned by its parent
+		}
 		enumMeta := TYPE_ENUM_UINT
 		if typed.SubMeta() == SUB_INT_ENUM {
 			enumMeta = TYPE_ENUM_INT
@@ -328,6 +331,24 @@ func (f *TypeFactory) codeProto(code Datatype) *HostFunction {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	return f.codeProtos[code]
+}
+
+// GetPartialEnum returns the piece of size bytes at offset of enumeration
+// parent. C++ parity: TypeFactory::getTypePartialEnum.
+func (f *TypeFactory) GetPartialEnum(parent *Enum, offset int64, size int32) *Enum {
+	stripped := f.GetBase(size, TYPE_UNKNOWN, "")
+	key := fmt.Sprintf("partialenum:%p:%d:%d", parent, offset, size)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if v, ok := f.intern[key].(*Enum); ok {
+		return v
+	}
+	base := newDatatypeBase(size, 1, TYPE_PARTIALENUM, stripped.Name())
+	base.submeta = subMetaForMetatype(TYPE_PARTIALENUM)
+	base.flags |= datatypeEnumType
+	v := &Enum{datatypeBase: base, parent: parent, offset: offset, stripped: stripped}
+	f.intern[key] = v
+	return v
 }
 
 // GetPartialUnion returns the piece of size bytes at offset of container.
@@ -736,8 +757,7 @@ func paramKey(params []Datatype) string {
 // The descent stops at the first component the range runs past, so a piece
 // straddling two array elements is a partial of the array, not of the
 // element where it starts.
-// C++ parity: TypeFactory::getExactPiece. Known mismatch: partial enum
-// types are not modelled (nil instead).
+// C++ parity: TypeFactory::getExactPiece.
 func (f *TypeFactory) exactPiece(ct Datatype, offset int64, size int32) Datatype {
 	var lastType Datatype
 	var lastOff int64
@@ -760,6 +780,9 @@ func (f *TypeFactory) exactPiece(ct Datatype, offset int64, size int32) Datatype
 		switch lastType.Metatype() {
 		case TYPE_STRUCT, TYPE_ARRAY, TYPE_PARTIALSTRUCT:
 			return f.GetPartialStruct(lastType, lastOff, size)
+		}
+		if en, ok := lastType.(*Enum); ok && en.parent == nil {
+			return f.GetPartialEnum(en, lastOff, size)
 		}
 	}
 	return nil
