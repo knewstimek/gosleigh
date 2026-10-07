@@ -392,7 +392,7 @@ func mergeTestRequired(h1, h2 *HighVariable) bool {
 	// If both have locked types they must agree.
 	// C++ parity: merge.cc Merge::mergeTestRequired lines 107-109 uses isTypeLock().
 	if h1.IsTypeLock() && h2.IsTypeLock() {
-		if h1.datatype != h2.datatype {
+		if h1.Type() != h2.Type() {
 			return false
 		}
 	}
