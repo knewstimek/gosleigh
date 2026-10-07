@@ -4966,7 +4966,13 @@ func (s *printCState) renderSubpieceField(op *PcodeOp) (ExprFragment, bool) {
 		if ct.NeedsResolution() {
 			slot = 1 // Artificial slot for the initial resolution
 		}
-		name, cast := symbolPieceName(s.nameOf(vn), symType, byteOff, sz, nil, be, op, slot)
+		// allowCast: a final truncating step prints as a cast to the output's
+		// type. C++ parity: pushPartialSymbol(..., op->getOut(), ..., true).
+		var castTo Datatype
+		if hv := op.Output().High(); hv != nil {
+			castTo = hv.Type()
+		}
+		name, cast := symbolPieceName(s.nameOf(vn), symType, byteOff, sz, castTo, be, op, slot)
 		if cast != nil {
 			return s.lang.CastExpr(printedTypeString(s.normalizeTypeForDecl(cast)), s.globalNameExpr(vn, name)), true
 		}
