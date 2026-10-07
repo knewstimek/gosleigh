@@ -779,10 +779,7 @@ func buildReturnOutput(active *ParamActive, retop *PcodeOp, data *Funcdata) {
 		if triallo == nil || trialhi == nil {
 			return
 		}
-		joinaddr := trialhi.GetAddress()
-		if triallo.GetAddress().Less(joinaddr) {
-			joinaddr = triallo.GetAddress()
-		}
+		joinaddr := data.constructJoinAddress(trialhi.GetAddress(), trialhi.GetSize(), triallo.GetAddress(), triallo.GetSize())
 		newop := data.NewOp(2, retop.Addr())
 		data.OpSetOpcode(newop, CPUI_PIECE)
 		newwhole := data.NewVarnodeOut(trialhi.GetSize()+triallo.GetSize(), joinaddr, newop)
