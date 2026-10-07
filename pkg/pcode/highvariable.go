@@ -371,6 +371,22 @@ func (hv *HighVariable) stripType(tp Datatype) Datatype {
 			m := sym.Type().Metatype()
 			return m == TYPE_STRUCT || m == TYPE_UNION // A bigger backing symbol
 		}
+		// A piece of a variable group maps into the whole variable's symbol.
+		// C++ parity: Funcdata::linkProtoPartial (piece symbol offset).
+		if root := groupRootOf(hv); root != nil && root.high != nil && root.high != hv {
+			if sym := root.high.GetSymbol(); sym != nil && sym.Type() != nil {
+				m := sym.Type().Metatype()
+				return m == TYPE_STRUCT || m == TYPE_UNION
+			}
+			if fd := hv.funcdata(); fd != nil {
+				for _, vn := range root.high.instances {
+					if e := fd.globalEntryOf(vn); e != nil && e.Symbol() != nil && e.Symbol().Type() != nil {
+						m := e.Symbol().Type().Metatype()
+						return m == TYPE_STRUCT || m == TYPE_UNION
+					}
+				}
+			}
+		}
 		// A global variable's symbol is kept by the global scope.
 		if fd := hv.funcdata(); fd != nil {
 			for _, vn := range hv.instances {

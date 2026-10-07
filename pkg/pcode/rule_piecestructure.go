@@ -303,6 +303,13 @@ func (r *RulePieceStructure) apply(op *PcodeOp, data *Funcdata) int {
 			data.OpSetInput(copyOp, vn, 0)
 			data.OpSetInput(node.op, newVn, node.slot)
 			data.OpInsertBefore(copyOp, node.op)
+			if vn.Type() != nil && vn.Type().NeedsResolution() {
+				// Inherit PIECE's read resolution for COPY's read
+				data.inheritResolution(vn.Type(), copyOp, 0, node.op, node.slot)
+			}
+			if newType != nil && newType.NeedsResolution() {
+				resolveInFlow(newType, copyOp, -1) // The piece may be part of a union
+			}
 			if !newVn.IsAddrTied() {
 				newVn.SetFlags(VarnodeProtoPartial)
 			}

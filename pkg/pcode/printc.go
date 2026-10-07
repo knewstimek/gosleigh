@@ -4850,7 +4850,19 @@ func (s *printCState) printNameExpr(vn *Varnode) ExprFragment {
 // globalNameExpr returns the scoped expression of vn's global symbol when
 // name prints that whole symbol, else name as a single atom.
 func (s *printCState) globalNameExpr(vn *Varnode, name string) ExprFragment {
-	if e := s.fd.globalEntryOf(vn); e != nil {
+	e := s.fd.globalEntryOf(vn)
+	if e == nil {
+		// A piece of a global variable group prints through the whole
+		// variable's symbol. C++ parity: pushSymbolDetail -> pushPartialSymbol.
+		if root := groupRootOf(vn.High()); root != nil && root.high != nil {
+			for _, in := range root.high.Instances() {
+				if e = s.fd.globalEntryOf(in); e != nil {
+					break
+				}
+			}
+		}
+	}
+	if e != nil {
 		if sym := e.Symbol(); sym != nil {
 			if q := s.globalSymbolName(sym); strings.HasPrefix(name, q) {
 				if expr := s.globalSymbolExpr(sym); expr.Text == q {
