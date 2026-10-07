@@ -1124,16 +1124,10 @@ func (fd *Funcdata) OpStackLoad(spc *address.Space, off uint64, sz int32, op *Pc
 }
 
 // SpacebaseConstant rewrites op.Input(slot) (a constant pointer) into a
-// PTRSUB(spacebase, encoded-offset) chain, optionally followed by an
-// INT_ADD when the original constant pointed inside (not exactly at) the
-// matched symbol. The original constant input on op is replaced with the
-// chain output so downstream uses see a typed pointer.
-// C++ parity: funcdata.cc Funcdata::spacebaseConstant ~L360
-// TODO known mismatch: the C++ helper also handles size-mismatched COPY
-// rewrites (zext / subpiece) and pushes a typelock through updateType. The
-// Go port handles the size-equal non-COPY branch only -- which is the only
-// shape ActionConstantPtr currently produces because it filters on opcode
-// before calling here.
+// PTRSUB(spacebase, encoded-offset), plus an INT_ADD when the constant points
+// inside the symbol and a ZEXT/SUBPIECE when the pointer size differs from
+// the constant. A COPY is itself turned into the final op of the chain.
+// C++ parity: Funcdata::spacebaseConstant.
 func (fd *Funcdata) SpacebaseConstant(op *PcodeOp, slot int, sym *Symbol, entryStart address.Address, rampoint address.Address, origval uint64, origsize int32) bool {
 	if fd == nil || op == nil || rampoint.Space == nil {
 		return false
@@ -1149,8 +1143,7 @@ func (fd *Funcdata) SpacebaseConstant(op *PcodeOp, slot int, sym *Symbol, entryS
 	sbType := tf.GetTypeSpacebase(rampoint.Space)
 	ptrType := tf.GetPointer(sz, sbType, uint32(rampoint.Space.WordSize))
 
-	// extra is the byte delta from the entry's start to the rampoint, then
-	// converted to address units via the space's word size.
+	// extra is the offset from the entry's start, in address units.
 	var extra uint64
 	if rampoint.Offset >= entryStart.Offset {
 		extra = rampoint.Offset - entryStart.Offset
@@ -1159,39 +1152,54 @@ func (fd *Funcdata) SpacebaseConstant(op *PcodeOp, slot int, sym *Symbol, entryS
 		extra /= uint64(rampoint.Space.WordSize)
 	}
 
-	// Build a fresh constant-zero spacebase varnode. SpaceBase flag plus the
-	// pointer type lets later passes (rules_loadstore) recognise it as a
-	// valid spacebase for LOAD/STORE rewrites. The spacebase pointer type is
-	// type-locked (C++: spacebase_vn->updateType(sb_type,true,true)); this lock
-	// is what keeps it a pointer through every ActionInferTypes pass, so it can
-	// act as the propagation source that re-types the PTRSUB output (via
-	// TypeOpPtrsub::propagateType) each pass. RulePtrsubUndo would normally
-	// collapse a spacebase PTRSUB back to a constant, but its spacebase branch
-	// (TypePointer::isPtrsubMatching TYPE_SPACEBASE) resolves the symbol and
-	// keeps the &symbol form intact.
-	// C++ parity: funcdata.cc spacebaseConstant L391-393.
+	var addOp, extraOp, zextOp, subOp *PcodeOp
+	isCopy := false
+	if op.Code() == CPUI_COPY { // We replace COPY with final op of this calculation
+		isCopy = true
+		if sz < origsize {
+			zextOp = op
+		} else if origsize < sz { // PTRSUB, ADD, SUBPIECE all take 2 parameters
+			subOp = op
+		} else if extra != 0 {
+			extraOp = op
+		} else {
+			addOp = op
+		}
+	}
+	// setIn fills input i, growing a COPY being reused as a 2-input op.
+	setIn := func(o *PcodeOp, vn *Varnode, i int) {
+		if i >= o.NumInput() {
+			fd.OpInsertInput(o, vn, i)
+		} else {
+			fd.OpSetInput(o, vn, i)
+		}
+	}
+	// The spacebase is type-locked to the spacebase pointer, which keeps it
+	// the propagation source re-typing the PTRSUB each InferTypes pass.
 	sbVn := fd.NewConstant(sz, 0)
-	sbVn.SetFlags(VarnodeSpaceBase)
 	BindSpaceConstant(sbVn, rampoint.Space)
 	sbVn.UpdateTypeLock(ptrType, true, true)
+	sbVn.SetFlags(VarnodeSpaceBase)
+	if addOp == nil {
+		addOp = fd.NewOp(2, op.Addr())
+		fd.OpSetOpcode(addOp, CPUI_PTRSUB)
+		fd.NewUniqueOut(sz, addOp)
+		fd.OpInsertBefore(addOp, op)
+	} else {
+		fd.OpSetOpcode(addOp, CPUI_PTRSUB)
+	}
+	outvn := addOp.Output()
+	// Make sure newconstant and extra preserve origval in address units
+	newconst := fd.NewConstant(sz, origval-extra)
+	newconst.SetAddlFlags(VarnodePtrCheck) // No longer need to check this constant as a pointer
+	if rampoint.Space.IsTruncated() {
+		addOp.SetPtrFlow()
+	}
+	setIn(addOp, sbVn, 0)
+	setIn(addOp, newconst, 1)
 
-	// PTRSUB(sbVn, origval - extra). Both inputs are in address units.
-	newConstVal := origval - extra
-	ptrsub := fd.NewOp(2, op.Addr())
-	fd.OpSetOpcode(ptrsub, CPUI_PTRSUB)
-	ptrOut := fd.NewUniqueOut(sz, ptrsub)
-	fd.OpSetInput(ptrsub, sbVn, 0)
-	fd.OpSetInput(ptrsub, fd.NewConstant(sz, newConstVal), 1)
-	fd.OpInsertBefore(ptrsub, op)
-
-	// Type the PTRSUB output (the &symbol pointer) as a pointer to the symbol's
-	// data-type. Without this the output stays TYPE_INT and RulePtrArith never
-	// fires, so an index added to &symbol keeps an explicit integer-extension
-	// cast instead of collapsing into pointer arithmetic (PTRADD). The lock
-	// follows the symbol's type lock, except an UNKNOWN symbol type is never
-	// locked (leaving the pointer type to be re-derived by TypeOpPtrsub
-	// propagation from the locked spacebase input each InferTypes pass).
-	// C++ parity: funcdata.cc spacebaseConstant L413-419.
+	// The &symbol pointer takes the symbol's type; an UNKNOWN symbol type is
+	// never locked.
 	if sym != nil {
 		if entrytype := sym.Type(); entrytype != nil {
 			ptrentrytype := tf.GetPointerStripArray(sz, entrytype, uint32(rampoint.Space.WordSize))
@@ -1199,23 +1207,51 @@ func (fd *Funcdata) SpacebaseConstant(op *PcodeOp, slot int, sym *Symbol, entryS
 			if typelock && entrytype.Metatype() == TYPE_UNKNOWN {
 				typelock = false
 			}
-			ptrOut.UpdateTypeLock(ptrentrytype, typelock, false)
+			outvn.UpdateTypeLock(ptrentrytype, typelock, false)
 		}
 	}
-
-	currOut := ptrOut
 	if extra != 0 {
-		extraOp := fd.NewOp(2, op.Addr())
-		fd.OpSetOpcode(extraOp, CPUI_INT_ADD)
-		extraOut := fd.NewUniqueOut(sz, extraOp)
-		fd.OpSetInput(extraOp, currOut, 0)
-		fd.OpSetInput(extraOp, fd.NewConstant(sz, extra), 1)
-		fd.OpInsertBefore(extraOp, op)
-		currOut = extraOut
+		if extraOp == nil {
+			extraOp = fd.NewOp(2, op.Addr())
+			fd.OpSetOpcode(extraOp, CPUI_INT_ADD)
+			fd.NewUniqueOut(sz, extraOp)
+			fd.OpInsertBefore(extraOp, op)
+		} else {
+			fd.OpSetOpcode(extraOp, CPUI_INT_ADD)
+		}
+		extconst := fd.NewConstant(sz, extra)
+		extconst.SetAddlFlags(VarnodePtrCheck)
+		setIn(extraOp, outvn, 0)
+		setIn(extraOp, extconst, 1)
+		outvn = extraOp.Output()
 	}
-
-	// Replace the original constant input on op with the chain output.
-	fd.OpSetInput(op, currOut, slot)
+	if sz < origsize { // The new constant is smaller than the original varnode, so we extend it
+		if zextOp == nil {
+			zextOp = fd.NewOp(1, op.Addr())
+			fd.OpSetOpcode(zextOp, CPUI_INT_ZEXT)
+			fd.NewUniqueOut(origsize, zextOp)
+			fd.OpInsertBefore(zextOp, op)
+		} else {
+			fd.OpSetOpcode(zextOp, CPUI_INT_ZEXT)
+		}
+		setIn(zextOp, outvn, 0)
+		outvn = zextOp.Output()
+	} else if origsize < sz { // The new constant is bigger than the original varnode, truncate it
+		if subOp == nil {
+			subOp = fd.NewOp(2, op.Addr())
+			fd.OpSetOpcode(subOp, CPUI_SUBPIECE)
+			fd.NewUniqueOut(origsize, subOp)
+			fd.OpInsertBefore(subOp, op)
+		} else {
+			fd.OpSetOpcode(subOp, CPUI_SUBPIECE)
+		}
+		setIn(subOp, outvn, 0)
+		setIn(subOp, fd.NewConstant(4, 0), 1) // Take least significant piece
+		outvn = subOp.Output()
+	}
+	if !isCopy {
+		fd.OpSetInput(op, outvn, slot)
+	}
 	return true
 }
 

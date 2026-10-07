@@ -494,6 +494,9 @@ func (g *ActionGroup) Apply(data *Funcdata) int {
 			maybeDumpSSAAfter(g.list[g.state], data)
 		}
 		if res > 0 {
+			if ruleTrace {
+				fmt.Fprintf(os.Stderr, "ACTION %s %d\n", g.list[g.state].GetName(), res)
+			}
 			g.count += res
 			if g.checkActionBreak() {
 				g.state++

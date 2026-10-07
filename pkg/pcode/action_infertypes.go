@@ -92,6 +92,9 @@ func (a *ActionInferTypes) Apply(data *Funcdata) int {
 
 	// C++ also runs data.getScopeLocal()->applyTypeRecommendations() here; the
 	// register type-recommendation table is not modelled yet (TODO).
+	if inferTraceOn {
+		fmt.Fprintf(os.Stderr, "INFER pass %d\n", a.localcount)
+	}
 	inferBuildLocaltypes(data, tf)
 
 	for _, vn := range data.GetVarnodeBank().AllVarnodes() {
