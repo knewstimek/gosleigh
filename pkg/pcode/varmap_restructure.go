@@ -759,12 +759,20 @@ func (sl *ScopeLocal) restructureMap(ms *mapState) bool {
 // Symbol. C++ parity: ProtoStoreSymbol::setInput (the Symbol a locked
 // prototype keeps in the local scope).
 func (sl *ScopeLocal) addLockedParamSymbol(vn *Varnode) {
-	ct := vn.Type()
+	// The Symbol carries the parameter's own type and name, name-locked.
+	ct := sl.ext().hostLocalTypes[vn.Offset()]
+	if ct == nil || ct.Size() != vn.Size() {
+		ct = vn.Type()
+	}
 	if ct == nil {
 		ct = sharedTypeFactory.GetBase(vn.Size(), TYPE_UNKNOWN, "")
 	}
-	sym := NewSymbol("", ct)
+	name := sl.ext().hostLocals[vn.Offset()]
+	sym := NewSymbol(name, ct)
 	sym.SetFlags(VarnodeAddrTied)
+	if name != "" {
+		sym.SetFlags(VarnodeNameLock)
+	}
 	sym.SetCategory(SymbolFunctionParameter, -1)
 	entry := NewSymbolEntry(sym, 0, vn.Addr(), vn.Size(), 0)
 	sym.attachEntry(entry)

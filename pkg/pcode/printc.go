@@ -4969,6 +4969,20 @@ func (s *printCState) renderSubpieceField(op *PcodeOp) (ExprFragment, bool) {
 	return ExprFragment{}, false
 }
 
+// symbolDisplayName is the name a local Symbol prints as. A parameter
+// Symbol without a name of its own is its parameter, the input at its
+// storage. C++ parity: Scope::buildDefaultName (function_parameter).
+func (s *printCState) symbolDisplayName(e *SymbolEntry) string {
+	sym := e.Symbol()
+	if sym.Name() != "" || sym.Category() != SymbolFunctionParameter {
+		return sym.Name()
+	}
+	if in := s.fd.GetVarnodeBank().FindInput(e.Size(), e.Addr()); in != nil {
+		return s.nameOf(in)
+	}
+	return ""
+}
+
 // localPieceName prints a stack varnode that is only part of its local
 // symbol (an element of a local array) through the symbol's type.
 // C++ parity: PrintC::pushSymbolDetail (pushPartialSymbol).
@@ -5010,8 +5024,11 @@ func (s *printCState) localPieceName(vn *Varnode, name string, castTo Datatype, 
 						if w.Space() != sl.SpaceID() {
 							continue
 						}
-						if e := sl.QueryContainer(w.Addr(), w.Size(), address.Address{}); e != nil && e.Symbol() != nil &&
-							e.Symbol().Type() != nil && e.Symbol().Name() == rname {
+						// The Symbol is found at the base address alone, so a
+						// whole variable bigger than its Symbol still maps to it.
+						// C++ parity: Funcdata::linkSymbol (queryProperties size 1).
+						if e := sl.QueryContainer(w.Addr(), 1, address.Address{}); e != nil && e.Symbol() != nil &&
+							e.Symbol().Type() != nil && s.symbolDisplayName(e) == rname {
 							rt = e.Symbol().Type()
 							off += int32(w.Offset() - e.Addr().Offset)
 						}

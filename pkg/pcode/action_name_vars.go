@@ -534,6 +534,14 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			if nr := highNameRepresentative(c.hv); nr != nil {
 				if e := sl.FindOverlap(nr.Addr(), nr.Size()); e != nil && e.Symbol() != nil {
 					name := e.Symbol().Name()
+					// A parameter Symbol is named after its parameter, the input
+					// at its storage. C++ parity: Scope::buildDefaultName
+					// (function_parameter category -> param_N).
+					if name == "" && e.Symbol().Category() == SymbolFunctionParameter {
+						if in := data.GetVarnodeBank().FindInput(e.Size(), e.Addr()); in != nil && in.High() != nil {
+							name = in.High().Name()
+						}
+					}
 					if name == "" && nr.IsAddrTied() && !nr.IsPersist() {
 						// An unnamed symbol gets its default name from its storage.
 						// C++ parity: Scope::buildDefaultName -> buildVariableName.
