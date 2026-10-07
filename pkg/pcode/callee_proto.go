@@ -220,7 +220,16 @@ func (fd *Funcdata) ApplyHostSelfPrototype(model *ProtoModel) {
 			fp.SetModelLock(true)
 		}
 	}
-	if hf.OutputLocked && hf.Output != nil && hf.Output.Type != nil {
+	if hf.OutputLocked && hf.Output != nil && hf.Output.Type != nil && hf.Output.Type.Metatype() == TYPE_VOID {
+		// A locked void return: the function returns nothing, so no return
+		// value is recovered. C++ parity: FuncProto::decode (typelocked void
+		// returnsym) -> ActionPrototypeTypes skips initActiveOutput.
+		out := NewHighVariable("")
+		out.SetType(hf.Output.Type)
+		fp.output = out
+		fp.outputHasAddr = false
+		fp.SetOutputLock(true)
+	} else if hf.OutputLocked && hf.Output != nil && hf.Output.Type != nil {
 		if sp := fd.spaceByName(hf.Output.Space); sp != nil {
 			fp.SetLockedReturn(address.Address{Space: sp, Offset: hf.Output.Offset}, hf.Output.Size, hf.Output.Type)
 			fp.SetOutputLock(true)
