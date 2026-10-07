@@ -1470,9 +1470,9 @@ func (s *printCState) normalizeTypeForDecl(dt Datatype) Datatype {
 			return typed // a typedef prints by its name
 		}
 		switch typed.SubMeta() {
-		case SUB_INT_UNICODE, SUB_UINT_UNICODE, SUB_UINT_CHAR:
+		case SUB_INT_UNICODE, SUB_UINT_UNICODE, SUB_UINT_CHAR, SUB_INT_CHAR:
 			if typed.Name() != "" {
-				return typed // a character type prints by its name (wchar_t, uchar)
+				return typed // a character type prints by its name (wchar_t, uchar, schar)
 			}
 		}
 		if typed.Flags()&datatypeHostNamed != 0 {
@@ -2433,6 +2433,10 @@ func (s *printCState) emitDoWhileBody(bl *FlowBlock) error {
 	if bl == nil {
 		return nil
 	}
+	// The body is emitted like any block, so the goto target it starts
+	// with prints its label. C++ parity: emitBlockLs / emitBlockBasic
+	// (emitLabelStatement) under no_branch.
+	s.emitAnyLabel(bl)
 	switch bl.Type() {
 	case BlockListType, BlockCopyType:
 		children := bl.StructuredChildren()
