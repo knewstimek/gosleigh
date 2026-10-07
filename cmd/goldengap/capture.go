@@ -92,6 +92,7 @@ type captureProto struct {
 	inputLocked, outLocked bool
 	modelLock              bool
 	dotdotdot              bool
+	inline                 bool
 	params                 []pcode.HostParam
 	output                 *pcode.HostParam
 }
@@ -287,6 +288,9 @@ func parseCaptureProto(fn *xnode, types map[string]*xnode) captureProto {
 	cp.model = proto.attr("model")
 	cp.modelLock = proto.attr("modellock") == "true"
 	cp.dotdotdot = proto.attr("dotdotdot") == "true"
+	// An inline attribute or a call-fixup <inject> marks the prototype
+	// inline. C++ parity: FuncProto::decode (ATTRIB_INLINE, ELEM_INJECT).
+	cp.inline = proto.attr("inline") == "true" || proto.child("inject") != nil
 	if ep := proto.attr("extrapop"); ep != "" && ep != "unknown" {
 		cp.extraPop = int32(parseUint(ep))
 	}
@@ -330,6 +334,7 @@ func (h hostWithData) QueryFunction(addr address.Address) (pcode.HostFunction, b
 		hf.NoReturn = hf.NoReturn || cp.noReturn
 		hf.InputLocked, hf.OutputLocked = cp.inputLocked, cp.outLocked
 		hf.Dotdotdot = hf.Dotdotdot || cp.dotdotdot
+		hf.Inline = hf.Inline || cp.inline
 		if cp.modelLock {
 			hf.Model, hf.ModelLock = cp.model, true
 		}

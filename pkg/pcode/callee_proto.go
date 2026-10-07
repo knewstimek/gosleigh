@@ -207,6 +207,11 @@ func (fd *Funcdata) ApplyHostSelfPrototype(model *ProtoModel) {
 		return
 	}
 	hf, ok := fd.hostScope.QueryFunction(fd.baseAddr)
+	// Processing an inlined function starts with a header warning.
+	// C++ parity: Funcdata::startProcessing (funcp.isInline()).
+	if ok && hf.Inline {
+		fd.warningHeader("This is an inlined function")
+	}
 	if !ok || (!hf.InputLocked && !hf.OutputLocked) {
 		return
 	}

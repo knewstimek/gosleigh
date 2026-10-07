@@ -89,6 +89,9 @@ type HostFunction struct {
 	ModelLock bool
 	// Dotdotdot: the prototype takes variable arguments.
 	Dotdotdot bool
+	// Inline: the prototype is inlined (an inline attribute or a call-fixup
+	// injection). C++ parity: FuncProto::isInline.
+	Inline bool
 	Params    []HostParam
 	Output    *HostParam
 }

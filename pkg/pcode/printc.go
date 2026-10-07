@@ -308,12 +308,15 @@ func (s *printCState) collectSymbols() {
 		// ScopeInternal::buildVariableName (Varnode::unaffected branch).
 		unaffHigh := make(map[*HighVariable]bool)
 		for _, vn := range all {
-			if vn == nil || !vn.IsInput() || !vn.IsUnaffected() || vn.IsSpaceBase() || !isRegisterSpace(vn) ||
-				vn.HasFlags(VarnodeReturnAddress) {
+			if vn == nil || !vn.IsInput() || !vn.IsUnaffected() || vn.IsSpaceBase() {
 				continue
 			}
-			key := fmt.Sprintf("%d:%d:%d", vn.Space().Index, vn.Offset(), vn.Size())
-			rn := regNameByLoc[key]
+			var rn string
+			if vn.HasFlags(VarnodeReturnAddress) {
+				rn = "retaddr" // C++ parity: buildVariableName (unaff_retaddr)
+			} else if isRegisterSpace(vn) {
+				rn = regNameByLoc[fmt.Sprintf("%d:%d:%d", vn.Space().Index, vn.Offset(), vn.Size())]
+			}
 			if rn == "" {
 				continue
 			}

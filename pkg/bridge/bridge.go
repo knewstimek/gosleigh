@@ -1497,7 +1497,11 @@ func summarizeSpaces(records []instructionRecord, entrySpace *address.Space) spa
 		uniqueSpace: defaultUniqueSpace(entrySpace),
 	}
 	heritageSet := make(map[*address.Space]struct{})
-
+	// The default data space is heritaged even when raw p-code reaches it
+	// only through LOAD/STORE: RuleStoreVarnode later turns a store to a
+	// constant address (FS:[0], ExceptionList) into a ram Varnode that
+	// needs its guards. C++ parity: Heritage::buildInfoList walks every
+	// space of the AddrSpaceManager.
 	for _, record := range records {
 		for _, op := range record.translation.Ops {
 			for _, input := range op.Inputs {
@@ -1510,6 +1514,7 @@ func summarizeSpaces(records []instructionRecord, entrySpace *address.Space) spa
 			}
 		}
 	}
+	summary.collectHeritageSpace(entrySpace, entrySpace, heritageSet)
 	return summary
 }
 
