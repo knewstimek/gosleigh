@@ -297,12 +297,35 @@ func (a *ActionSetCasts) Apply(data *Funcdata) int {
 			a.resolveUnion(op, i, data, cs) // Union resolution must happen before casts are determined
 			a.castInput(op, i, data, cs)
 		}
+		if op.Code() == CPUI_LOAD {
+			checkPointerIssues(op, op.Output(), data)
+		} else if op.Code() == CPUI_STORE {
+			checkPointerIssues(op, op.Input(2), data)
+		}
 		if op.Output() == nil {
 			continue
 		}
 		a.castOutput(op, data, cs)
 	}
 	return 0
+}
+
+// checkPointerIssues warns when the pointer of a LOAD or STORE does not point
+// at a value of the size moved. The pointer's address space is not modelled,
+// so the space mismatch warning is not ported.
+// C++ parity: ActionSetCasts::checkPointerIssues.
+func checkPointerIssues(op *PcodeOp, vn *Varnode, data *Funcdata) {
+	if op.addlFlags&PcodeOpSpecialPrint != 0 || vn == nil {
+		return
+	}
+	ptr, ok := op.Input(1).HighTypeReadFacing(op).(*Pointer)
+	if !ok || ptr.Pointee() == nil || ptr.Pointee().Size() != vn.Size() {
+		name := "Load" // TypeOpLoad name "load", first letter upper-cased
+		if op.Code() == CPUI_STORE {
+			name = "Store"
+		}
+		data.warning(name+" size is inaccurate", op.Addr())
+	}
 }
 
 // castInput inserts a CAST producing the input Varnode at slot if the op expects
