@@ -4273,7 +4273,7 @@ func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode, valueon bo
 		// does not map) prints as its raw address: "&stack0xfffffffc".
 		// C++ parity: PrintC::opPtrsub symbol==null -> pushUnnamedLocation.
 		if sl := s.fd.GetScopeLocal(); sl != nil && sl.SpaceID() == spc {
-			raw := fmt.Sprintf("%s0x%0*x", spc.Name, 2*spc.AddrSize, off.Offset())
+			raw := spc.Name + PrintRawAddr(address.Address{Space: spc, Offset: off.Offset()})
 			if valueon {
 				return s.lang.Atom(raw), true
 			}

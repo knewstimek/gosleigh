@@ -333,7 +333,7 @@ func (ms *mapState) addRange(st uint64, ct Datatype, fl uint32, rt rhRangeType, 
 		ct = ms.defaultType
 	}
 	sz := ct.Size()
-	if !ms.sl.inScopeRange(st, sz) || ms.sl.inParamRange(st, sz) {
+	if !rangeListInRange(ms.sl.mapRanges(), st, sz) {
 		return
 	}
 	ms.hints = append(ms.hints, &mapHint{start: st, size: sz, sstart: signExtendSpaceOffset(st, ms.space),
@@ -597,14 +597,20 @@ func (sl *ScopeLocal) inParamRange(st uint64, sz int32) bool {
 }
 
 // inScopeRange: [st, st+sz) lies inside one mapped range.
-// C++ parity: RangeList::inRange.
 func (sl *ScopeLocal) inScopeRange(st uint64, sz int32) bool {
-	for _, r := range sl.scopeRanges() {
-		if st >= r[0] && st+uint64(sz)-1 <= r[1] && st+uint64(sz)-1 >= st {
-			return true
-		}
+	return rangeListInRange(sl.scopeRanges(), st, sz)
+}
+
+// rangeListInRange tests the last range starting at or before st against
+// the last byte. The end offset is not checked for wraparound, so a range
+// running past the top of the space passes when it wraps below the range's
+// end. C++ parity: RangeList::inRange.
+func rangeListInRange(ranges [][2]uint64, st uint64, sz int32) bool {
+	i := sort.Search(len(ranges), func(i int) bool { return ranges[i][0] > st })
+	if i == 0 {
+		return false
 	}
-	return false
+	return ranges[i-1][1] >= st+uint64(sz)-1
 }
 
 // longestFit is how many mapped bytes run from off, chaining adjacent
