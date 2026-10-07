@@ -379,6 +379,12 @@ func (t *typeOpPtrsub) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
 	return cs.tlst.GetPointer(op.Output().Size(), cs.tlst.GetBase(1, TYPE_UNKNOWN, ""), ptr.WordSize())
 }
 
+// GetInputCast is nil: a SUBPIECE never needs a cast on its input.
+// C++ parity: TypeOpSubpiece::getInputCast.
+func (t *typeOpSubpiece) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
+	return nil
+}
+
 // SUBPIECE output token: SUBPIECE prints as a cast to whatever its output type is,
 // so the token is the output Varnode's own def-facing type; when that is unknown a
 // C compiler treats the truncation as a cast to int. Returning the base UNKNOWN
