@@ -638,31 +638,32 @@ func paramKey(params []Datatype) string {
 
 // exactPiece is the data-type of exactly size bytes at offset within ct, or
 // nil when no component fits.
-// C++ parity: TypeFactory::getExactPiece. TODO known mismatch: partial
-// struct/union/enum types are not modelled, so a piece inside a component
-// larger than size yields nil (C++ builds a TypePartialStruct etc.).
+// The descent stops at the first component the range runs past, so a piece
+// straddling two array elements is a partial of the array, not of the
+// element where it starts.
+// C++ parity: TypeFactory::getExactPiece. Known mismatch: partial union and
+// partial enum types are not modelled (nil instead).
 func (f *TypeFactory) exactPiece(ct Datatype, offset int64, size int32) Datatype {
-	if ct == nil || offset+int64(size) > int64(ct.Size()) {
-		return nil
-	}
 	var lastType Datatype
 	var lastOff int64
 	curOff := offset
 	for ct != nil {
-		if ct.Size() <= size {
-			if ct.Size() == size {
-				return ct // perfect size match
-			}
-			break
+		if int64(ct.Size()) < int64(size)+curOff {
+			break // Range is beyond end of current data-type
+		}
+		if ct.Size() == size {
+			return ct // Perfect size match
+		}
+		if ct.Metatype() == TYPE_UNION {
+			return nil
 		}
 		lastType, lastOff = ct, curOff
 		ct, curOff = datatypeSubType(ct, curOff)
 	}
-	// lastType is bigger than size: a piece of a structure or array.
-	// C++ parity: TypeFactory::getExactPiece (partial union/enum not modelled).
 	if lastType != nil {
+		// lastType is bigger than size
 		switch lastType.Metatype() {
-		case TYPE_STRUCT, TYPE_ARRAY:
+		case TYPE_STRUCT, TYPE_ARRAY, TYPE_PARTIALSTRUCT:
 			return f.GetPartialStruct(lastType, lastOff, size)
 		}
 	}

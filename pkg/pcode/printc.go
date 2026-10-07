@@ -4366,8 +4366,11 @@ func (s *printCState) renderPtrSubField(op *PcodeOp, valueon bool) (ExprFragment
 // renderMemberField prints the member selection of field off the pointer
 // base: '.' on a value-flexible base, '->' otherwise, '&' unless valueon.
 func (s *printCState) renderMemberField(base *Varnode, field TypeField, valueon bool) (ExprFragment, bool) {
-	// An array field is printed without '&'. C++ parity: opPtrsub arrayvalue.
+	// An array field is printed without '&'; read as a value it is its
+	// first element ([0]). C++ parity: opPtrsub arrayvalue.
+	arrayvalue := false
 	if _, isArr := field.Type.(*Array); isArr {
+		arrayvalue = valueon
 		valueon = true
 	}
 	var expr ExprFragment
@@ -4395,6 +4398,9 @@ func (s *printCState) renderMemberField(base *Varnode, field TypeField, valueon 
 	}
 	if !valueon {
 		expr = s.lang.UnaryExpr("&", cPrecUnary, expr)
+	}
+	if arrayvalue {
+		expr = s.lang.PostfixExpr(expr, "[0]")
 	}
 	return expr, true
 }
