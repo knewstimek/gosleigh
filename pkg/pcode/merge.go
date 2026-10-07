@@ -470,10 +470,10 @@ func mergeTestAdjacent(hOut, hIn *HighVariable) bool {
 	// the accumulator<->param_2 adjacency here (mergeTestAdjacent=false), NOT via a
 	// Cover intersection.
 	// C++ parity: merge.cc:198-205 (high_in/high_out getSymbol()->isIsolated()).
-	if sym := hIn.GetSymbol(); sym != nil && sym.IsIsolated() {
+	if sym := mergeHighSymbol(hIn); sym != nil && sym.IsIsolated() {
 		return false
 	}
-	if sym := hOut.GetSymbol(); sym != nil && sym.IsIsolated() {
+	if sym := mergeHighSymbol(hOut); sym != nil && sym.IsIsolated() {
 		return false
 	}
 	// Currently don't allow speculative merging of variables that are in
@@ -482,6 +482,34 @@ func mergeTestAdjacent(hOut, hIn *HighVariable) bool {
 		return false
 	}
 	return true
+}
+
+// mergeHighSymbol is the Symbol a variable maps to, a global's included: Go
+// keeps global entries in the global scope rather than on the Varnodes, so a
+// persistent instance answers through its function's global scope.
+// C++ parity: HighVariable::getSymbol.
+func mergeHighSymbol(h *HighVariable) *Symbol {
+	if sym := h.GetSymbol(); sym != nil {
+		return sym
+	}
+	for _, vn := range h.Instances() {
+		if !vn.IsPersist() {
+			continue
+		}
+		op := vn.Def()
+		if op == nil {
+			for _, d := range vn.DescendIter() {
+				op = d
+				break
+			}
+		}
+		if fd := opFuncdata(op); fd != nil {
+			if e := fd.globalEntryOf(vn); e != nil {
+				return e.Symbol()
+			}
+		}
+	}
+	return nil
 }
 
 // mergeTestSpeculative performs the adjacency tests plus the extra restrictions

@@ -177,10 +177,8 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 	seenRegIdx := make(map[int]bool)
 
 	if len(sl.model.RegParamOffsets) > 0 {
-		// Two-pass: first pick isinput=true varnodes (function live-ins),
-		// then fall back to any written varnode if no input was found.
-		// This prevents a written copy of the register (e.g. INT_ADD output
-		// stored back into X0) from displacing the actual parameter input.
+		// Only an input (a function live-in) is a parameter: a register merely
+		// written in the body (ECX = DAT + 1) is a local, never param_N.
 		// C++ parity: ScopeLocal uses Heritage input varnodes (isInput()) for param slots.
 		type candidate struct {
 			vn      *Varnode
@@ -191,7 +189,7 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 			if vn == nil || vn.Space() == nil {
 				continue
 			}
-			if !isRegisterSpace(vn) {
+			if !isRegisterSpace(vn) || !vn.IsInput() {
 				continue
 			}
 			idx, ok := sl.model.IsRegParam(vn.Offset())

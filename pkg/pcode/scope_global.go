@@ -324,6 +324,9 @@ func (fd *Funcdata) resolveGlobal(addr address.Address) *SymbolEntry {
 	e := gs.AddSymbol(hd.Name, dt, hd.Addr, hd.Size, fl)
 	e.Symbol().namespace = hd.Namespace
 	e.Symbol().nsPath = hd.NamespacePath
+	if hd.Isolate {
+		e.Symbol().SetIsolated(true)
+	}
 	return e
 }
 

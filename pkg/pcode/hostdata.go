@@ -13,12 +13,15 @@ type HostData struct {
 	// NamespacePath is the same path one scope name per element, when the
 	// host keeps the scopes apart (a scope name may itself contain "::").
 	NamespacePath []string
-	Addr      address.Address
-	Size      int32
+	Addr          address.Address
+	Size          int32
 	// Type is the symbol's data-type; nil means undefined of Size bytes.
 	Type     Datatype
 	Label    bool
 	ReadOnly bool
+	// Isolate is merge="false": the variable is never speculatively merged.
+	// C++ parity: Symbol::decode (ATTRIB_MERGE -> isolate).
+	Isolate bool
 }
 
 // HostDataScope is implemented by a HostScope that also knows the program's

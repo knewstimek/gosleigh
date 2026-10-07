@@ -194,6 +194,7 @@ func loadCaptureData(path string, ram *address.Space) (*captureData, error) {
 				Addr:          address.Address{Space: ram, Offset: parseUint(at.attr("offset"))},
 				Size:          int32(parseUint(at.attr("size"))),
 				ReadOnly:      sym.attr("readonly") == "true",
+				Isolate:       sym.attr("merge") == "false",
 			}
 			switch sym.XMLName.Local {
 			case "symbol":
