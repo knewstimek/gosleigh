@@ -70,8 +70,10 @@ func assignStringData(buf []byte, charsize int, bigend bool, numChars int) ([]by
 		out = utf8.AppendRune(out, rune(cp))
 		i += skip
 	}
-	if len(out) == 0 {
-		return nil, false, false
+	if out == nil {
+		// An empty string is still a string: C++ keeps its terminator, so
+		// StringManager::isString holds and it prints as "".
+		out = []byte{}
 	}
 	return out, numChars >= maxStringChars, true
 }
