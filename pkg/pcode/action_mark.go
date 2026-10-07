@@ -79,9 +79,7 @@ func (a *ActionMarkExplicit) Clone(groups ActionGroupList) Action {
 
 // markExplicitBase decides whether vn must print as its own variable: -1 if
 // explicit (-2 if explicit with special printing), else its reader count.
-// C++ parity: ActionMarkExplicit::baseExplicit. TODO known mismatch: the
-// concat_root (PcodeOp::isPartialRoot) mark is not modelled, so a piece of a
-// PIECE tree under a partial root is treated as implied.
+// C++ parity: ActionMarkExplicit::baseExplicit.
 func markExplicitBase(vn *Varnode, maxref int) int {
 	def := vn.Def()
 	if def == nil || def.IsMarker() {
@@ -113,7 +111,13 @@ func markExplicitBase(vn *Varnode, maxref int) int {
 				return -1
 			}
 		case CPUI_PIECE:
-			if pieceFindRoot(vn) == vn {
+			rootVn := pieceFindRoot(vn)
+			if rootVn == vn {
+				return -1
+			}
+			if rootVn.Def().addlFlags&PcodeOpConcatRoot != 0 {
+				// Pieced into a structure: every such PIECE is explicit, the
+				// internal ones are hidden.
 				return -1
 			}
 		default:

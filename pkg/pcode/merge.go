@@ -1136,7 +1136,17 @@ func (m *Merge) mergeMultiEntry() {
 // the equivalent check must live here because Go's mergeHighVariables has no
 // return-false path.
 func (m *Merge) mergeOpcode(opc OpCode) {
-	for _, op := range m.fd.GetPcodeOpBank().AliveOps() {
+	// Merges go in linear block order: an earlier merge decides whether a
+	// later one intersects. C++ parity: Merge::mergeOpcode.
+	var ops []*PcodeOp
+	if bg := m.fd.GetBasicBlocks(); bg != nil {
+		for i := 0; i < bg.GetSize(); i++ {
+			if bb, ok := bg.GetBlock(i).Concrete().(*BlockBasic); ok {
+				ops = append(ops, bb.Ops()...)
+			}
+		}
+	}
+	for _, op := range ops {
 		if op == nil || op.Code() != opc {
 			continue
 		}
@@ -1271,8 +1281,18 @@ func (m *Merge) mergeAdjacentCopies() {
 			continue
 		}
 		highOut := outvn.High()
-		outType := outvn.Type()
+		// Only merge where the op's own grammar gives input and output the
+		// same type. C++ parity: Merge::mergeAdjacent (outputTypeLocal vs
+		// inputTypeLocal).
+		to := op.GetOpcode()
+		if to == nil {
+			continue
+		}
+		ct := to.OutputTypeLocal(op, sharedTypeFactory)
 		for i := 0; i < op.NumInput(); i++ {
+			if ct != to.InputTypeLocal(op, i, sharedTypeFactory) {
+				continue
+			}
 			invn := op.Input(i)
 			if !mergeTestBasic(invn) {
 				continue
@@ -1281,9 +1301,6 @@ func (m *Merge) mergeAdjacentCopies() {
 				continue
 			}
 			if invn.Def() == nil && !invn.IsInput() {
-				continue
-			}
-			if outType != invn.Type() {
 				continue
 			}
 			highIn := invn.High()
