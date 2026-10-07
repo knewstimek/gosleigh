@@ -39,6 +39,13 @@ type HostNameUsed interface {
 	IsNameUsed(name string, depth int) bool
 }
 
+// HostProperties is a host that knows the storage properties of an address
+// (VarnodeReadOnly, VarnodeVolatile), as the property map at its start.
+// C++ parity: Database::getProperty.
+type HostProperties interface {
+	Property(addr address.Address) uint32
+}
+
 type HostDataScope interface {
 	// QueryData returns the symbol whose storage contains addr.
 	QueryData(addr address.Address) (HostData, bool)

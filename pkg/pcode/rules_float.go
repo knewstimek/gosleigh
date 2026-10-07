@@ -63,30 +63,37 @@ func NewRuleIgnoreNan(group string) *RuleIgnoreNan {
 	return r
 }
 
+// apply removes NaN tests guarding a floating-point comparison of the same
+// value, following the NaN result through up to three boolean combinations.
+// C++ parity: RuleIgnoreNan::applyOp (nan_ignore_all off: the default
+// "compare" setting).
 func (r *RuleIgnoreNan) apply(op *PcodeOp, data *Funcdata) int {
 	if op.NumInput() != 1 || op.Output() == nil || op.Input(0).IsFree() {
 		return 0
 	}
 	floatVar := op.Input(0)
+	out1 := op.Output()
 	count := 0
-	for _, read := range op.Output().DescendIter() {
-		match := CPUI_BOOL_OR
-		vn := op.Output()
-		if read.Code() == CPUI_BOOL_NEGATE {
-			match = CPUI_BOOL_AND
-			vn = read.Output()
-			if vn == nil {
-				continue
-			}
-			for _, outer := range vn.DescendIter() {
-				if ignoreNanComparison(floatVar, outer, vn, match, data) {
-					count++
-				}
-			}
+	for _, boolRead1 := range append([]*PcodeOp(nil), out1.DescendIter()...) {
+		var out2 *Varnode
+		matchCode := CPUI_BOOL_OR
+		if boolRead1.Code() == CPUI_BOOL_NEGATE {
+			matchCode = CPUI_BOOL_AND
+			out2 = boolRead1.Output()
+		} else {
+			out2 = nanTestForComparison(floatVar, boolRead1, boolRead1.GetSlot(out1), matchCode, &count, data)
+		}
+		if out2 == nil {
 			continue
 		}
-		if ignoreNanComparison(floatVar, read, vn, match, data) {
-			count++
+		for _, boolRead2 := range append([]*PcodeOp(nil), out2.DescendIter()...) {
+			out3 := nanTestForComparison(floatVar, boolRead2, boolRead2.GetSlot(out2), matchCode, &count, data)
+			if out3 == nil {
+				continue
+			}
+			for _, boolRead3 := range append([]*PcodeOp(nil), out3.DescendIter()...) {
+				nanTestForComparison(floatVar, boolRead3, boolRead3.GetSlot(out3), matchCode, &count, data)
+			}
 		}
 	}
 	if count > 0 {
@@ -300,58 +307,141 @@ func (r *RuleFloatSignCleanup) apply(op *PcodeOp, data *Funcdata) int {
 	return 1
 }
 
-func ignoreNanComparison(floatVar *Varnode, op *PcodeOp, nanVn *Varnode, matchCode OpCode, data *Funcdata) bool {
-	slot := op.GetSlot(nanVn)
+// nanTestForComparison removes the NaN input of op (reading it at slot) when
+// op combines it with a floating-point comparison of floatVar, through
+// matchCode, INT_EQUAL/INT_NOTEQUAL, or a CBRANCH guarding a CBRANCH on the
+// comparison. It returns op's output when op combines it with another NaN.
+// C++ parity: RuleIgnoreNan::testForComparison.
+func nanTestForComparison(floatVar *Varnode, op *PcodeOp, slot int, matchCode OpCode, count *int, data *Funcdata) *Varnode {
 	if slot < 0 {
+		return nil
+	}
+	switch opc := op.Code(); {
+	case opc == matchCode:
+		vn := op.Input(1 - slot)
+		if nanCheckBackForCompare(floatVar, vn) {
+			data.OpSetOpcode(op, CPUI_COPY)
+			data.OpRemoveInput(op, 1)
+			data.OpSetInput(op, vn, 0)
+			*count++
+		} else if nanIsAnotherNan(vn) {
+			return op.Output()
+		}
+	case opc == CPUI_INT_EQUAL || opc == CPUI_INT_NOTEQUAL:
+		vn := op.Input(1 - slot)
+		if nanCheckBackForCompare(floatVar, vn) {
+			val := uint64(1)
+			if matchCode == CPUI_BOOL_OR {
+				val = 0
+			}
+			data.OpSetInput(op, data.NewConstant(1, val), slot)
+			*count++
+		}
+	case opc == CPUI_CBRANCH:
+		parent := op.Parent()
+		outDir := 1
+		if matchCode == CPUI_BOOL_OR {
+			outDir = 0
+		}
+		if op.HasFlag(PcodeOpBooleanFlip) {
+			outDir = 1 - outDir
+		}
+		if parent == nil || parent.SizeOut() != 2 {
+			return nil
+		}
+		outBranch := parent.OutEdge(outDir).Point
+		bb, ok := outBranch.Concrete().(*BlockBasic)
+		if !ok {
+			return nil
+		}
+		lastOp := bb.LastOp()
+		if lastOp != nil && lastOp.Code() == CPUI_CBRANCH && outBranch.SizeOut() == 2 {
+			otherBranch := parent.OutEdge(1 - outDir).Point
+			if outBranch.OutEdge(0).Point == otherBranch || outBranch.OutEdge(1).Point == otherBranch {
+				if nanCheckBackForCompare(floatVar, lastOp.Input(1)) {
+					val := uint64(1)
+					if matchCode == CPUI_BOOL_OR {
+						val = 0
+					}
+					data.OpSetInput(op, data.NewConstant(1, val), 1)
+					*count++
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// nanCheckBackForCompare reports a boolean root produced by (or combining
+// through BOOL_AND/BOOL_OR) a floating-point comparison of floatVar.
+// C++ parity: RuleIgnoreNan::checkBackForCompare.
+func nanCheckBackForCompare(floatVar, root *Varnode) bool {
+	if !root.IsWritten() {
 		return false
 	}
-	switch op.Code() {
-	case matchCode:
-		other := op.Input(1 - slot)
-		if !boolContainsFloatCompare(floatVar, other) {
+	def1 := root.Def()
+	if !def1.IsBoolOutput() {
+		return false
+	}
+	if def1.Code() == CPUI_BOOL_NEGATE {
+		vn := def1.Input(0)
+		if !vn.IsWritten() {
 			return false
 		}
-		data.OpSetOpcode(op, CPUI_COPY)
-		data.OpRemoveInput(op, 1)
-		data.OpSetInput(op, other, 0)
-		return true
-	case CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL:
-		other := op.Input(1 - slot)
-		if !boolContainsFloatCompare(floatVar, other) {
+		def1 = vn.Def()
+	}
+	if isFloatingPointOpcode(def1.Code()) {
+		if def1.NumInput() != 2 {
 			return false
 		}
-		if matchCode == CPUI_BOOL_OR {
-			data.OpSetInput(op, data.NewConstant(1, 0), slot)
-		} else {
-			data.OpSetInput(op, data.NewConstant(1, 1), slot)
+		return functionalEquality(floatVar, def1.Input(0)) || functionalEquality(floatVar, def1.Input(1))
+	}
+	if opc := def1.Code(); opc != CPUI_BOOL_AND && opc != CPUI_BOOL_OR {
+		return false
+	}
+	for i := 0; i < 2; i++ {
+		vn := def1.Input(i)
+		if !vn.IsWritten() {
+			continue
 		}
-		return true
+		def2 := vn.Def()
+		if !def2.IsBoolOutput() || !isFloatingPointOpcode(def2.Code()) || def2.NumInput() != 2 {
+			continue
+		}
+		if functionalEquality(floatVar, def2.Input(0)) || functionalEquality(floatVar, def2.Input(1)) {
+			return true
+		}
 	}
 	return false
 }
 
-func boolContainsFloatCompare(floatVar *Varnode, root *Varnode) bool {
-	if !root.IsWritten() {
+// nanIsAnotherNan reports vn as the direct or negated output of a NaN.
+// C++ parity: RuleIgnoreNan::isAnotherNan.
+func nanIsAnotherNan(vn *Varnode) bool {
+	if !vn.IsWritten() {
 		return false
 	}
-	def := root.Def()
-	if def == nil || !def.IsBoolOutput() {
-		return false
+	op := vn.Def()
+	if op.Code() == CPUI_BOOL_NEGATE {
+		vn = op.Input(0)
+		if !vn.IsWritten() {
+			return false
+		}
+		op = vn.Def()
 	}
-	if def.Code() == CPUI_BOOL_NEGATE {
-		return boolContainsFloatCompare(floatVar, def.Input(0))
-	}
-	if isFloatCompare(def.Code()) && def.NumInput() == 2 {
-		return sameValue(floatVar, def.Input(0)) || sameValue(floatVar, def.Input(1))
-	}
-	if def.Code() != CPUI_BOOL_AND && def.Code() != CPUI_BOOL_OR {
-		return false
-	}
-	return boolContainsFloatCompare(floatVar, def.Input(0)) || boolContainsFloatCompare(floatVar, def.Input(1))
+	return op.Code() == CPUI_FLOAT_NAN
 }
 
-func isFloatCompare(opc OpCode) bool {
-	return opc == CPUI_FLOAT_EQUAL || opc == CPUI_FLOAT_NOTEQUAL || opc == CPUI_FLOAT_LESS || opc == CPUI_FLOAT_LESSEQUAL
+// isFloatingPointOpcode is TypeOp::isFloatingPointOp (floatingpoint_op).
+func isFloatingPointOpcode(opc OpCode) bool {
+	switch opc {
+	case CPUI_FLOAT_EQUAL, CPUI_FLOAT_NOTEQUAL, CPUI_FLOAT_LESS, CPUI_FLOAT_LESSEQUAL, CPUI_FLOAT_NAN,
+		CPUI_FLOAT_ADD, CPUI_FLOAT_DIV, CPUI_FLOAT_MULT, CPUI_FLOAT_SUB, CPUI_FLOAT_NEG, CPUI_FLOAT_ABS,
+		CPUI_FLOAT_SQRT, CPUI_FLOAT_INT2FLOAT, CPUI_FLOAT_FLOAT2FLOAT, CPUI_FLOAT_TRUNC, CPUI_FLOAT_CEIL,
+		CPUI_FLOAT_FLOOR, CPUI_FLOAT_ROUND:
+		return true
+	}
+	return false
 }
 
 func rewriteFloatSignInput(op *PcodeOp, slot int, data *Funcdata) bool {

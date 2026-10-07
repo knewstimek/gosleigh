@@ -75,6 +75,11 @@ type captureData struct {
 	// from <entry>.names (GenNames).
 	namesUsed map[string][]int
 	syms         []pcode.HostData
+	// readonly are the ram ranges with the read-only property: the load
+	// image's read-only chunks and the read-only symbols' storage.
+	// C++ parity: Database::setPropertyRange (Architecture::fillinReadOnly
+	// FromLoader, ScopeGhidra::dump2Cache).
+	readonly [][2]uint64
 	// protos are the callee prototypes the core received, by entry offset.
 	protos map[uint64]captureProto
 }
@@ -210,6 +215,24 @@ func loadCaptureData(path string, ram *address.Space) (*captureData, error) {
 		}
 	}
 	sort.Slice(cd.syms, func(i, j int) bool { return cd.syms[i].Addr.Offset < cd.syms[j].Addr.Offset })
+	for _, hd := range cd.syms {
+		if hd.ReadOnly && hd.Size > 0 {
+			cd.readonly = append(cd.readonly, [2]uint64{hd.Addr.Offset, hd.Addr.Offset + uint64(hd.Size) - 1})
+		}
+	}
+	if img := root.child("binaryimage"); img != nil {
+		for i := range img.Kids {
+			k := &img.Kids[i]
+			if k.XMLName.Local != "bytechunk" || k.attr("readonly") != "true" || k.attr("space") != ram.Name {
+				continue
+			}
+			n := uint64(len(strings.Join(strings.Fields(k.text), "")) / 2)
+			if n > 0 {
+				first := parseUint(k.attr("offset"))
+				cd.readonly = append(cd.readonly, [2]uint64{first, first + n - 1})
+			}
+		}
+	}
 	return cd, nil
 }
 
@@ -628,6 +651,16 @@ func (cd *captureData) QueryData(addr address.Address) (pcode.HostData, bool) {
 		}
 	}
 	return pcode.HostData{}, false
+}
+
+// Property implements pcode.HostProperties.
+func (cd *captureData) Property(addr address.Address) uint32 {
+	for _, r := range cd.readonly {
+		if addr.Offset >= r[0] && addr.Offset <= r[1] {
+			return pcode.VarnodeReadOnly
+		}
+	}
+	return 0
 }
 
 // IsNameUsed implements pcode.HostNameUsed.

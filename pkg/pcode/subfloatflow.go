@@ -14,6 +14,8 @@
 
 package pcode
 
+import "math"
+
 // SubfloatFlow::State -- subflow.cc.
 type subfloatFlowState struct {
 	op           *PcodeOp
@@ -178,10 +180,12 @@ func (sf *SubfloatFlow) setReplacement(vn *Varnode) *TransformVar {
 		return nil
 	}
 	if vn.IsConstant() {
-		if vn.Size() != sf.precision {
-			return nil
+		// Return the converted form of the constant
+		val, ok := convertFloatEncoding(vn.Offset(), vn.Size(), sf.precision)
+		if !ok {
+			return nil // Unsupported constant format
 		}
-		return sf.NewConstant(sf.precision, 0, vn.Offset())
+		return sf.NewConstant(sf.precision, 0, val)
 	}
 	if vn.IsFree() {
 		return nil
@@ -221,10 +225,8 @@ func (sf *SubfloatFlow) traceForward(rvn *TransformVar) bool {
 		return false
 	}
 	vn := rvn.GetOriginal()
-	dcount := 0
-	hcount := 0
-	callcount := 0
-	for _, op := range vn.DescendIter() {
+	descs := vn.DescendIter()
+	for di, op := range descs {
 		if op == nil {
 			continue
 		}
@@ -232,7 +234,6 @@ func (sf *SubfloatFlow) traceForward(rvn *TransformVar) bool {
 		if outvn != nil && outvn.IsMark() {
 			continue
 		}
-		dcount++
 		slot := op.GetSlot(vn)
 		switch op.Code() {
 		case CPUI_FLOAT_ADD, CPUI_FLOAT_SUB, CPUI_FLOAT_MULT, CPUI_FLOAT_DIV:
@@ -248,7 +249,6 @@ func (sf *SubfloatFlow) traceForward(rvn *TransformVar) bool {
 			}
 			sf.OpSetInput(rop, rvn, slot)
 			sf.OpSetOutput(rop, outrvn)
-			hcount++
 		case CPUI_FLOAT_FLOAT2FLOAT:
 			if outvn == nil || outvn.Size() < sf.precision {
 				return false
@@ -260,7 +260,6 @@ func (sf *SubfloatFlow) traceForward(rvn *TransformVar) bool {
 			rop := sf.NewPreexistingOp(1, opc, op)
 			sf.OpSetInput(rop, rvn, 0)
 			sf.terminatorCount++
-			hcount++
 		case CPUI_FLOAT_EQUAL, CPUI_FLOAT_NOTEQUAL, CPUI_FLOAT_LESS, CPUI_FLOAT_LESSEQUAL:
 			if sf.exceedsPrecision(op) {
 				return false
@@ -270,28 +269,89 @@ func (sf *SubfloatFlow) traceForward(rvn *TransformVar) bool {
 			if rvn2 == nil {
 				return false
 			}
-			if !sf.PreexistingGuard(slot, rvn2) {
-				return false
+			if rvn == rvn2 {
+				slot = repeatSlot(op, vn, slot, descs[:di])
 			}
-			rop := sf.NewPreexistingOp(2, op.Code(), op)
-			sf.OpSetInput(rop, rvn, slot)
-			sf.OpSetInput(rop, rvn2, 1-slot)
-			sf.terminatorCount++
-			hcount++
+			if sf.PreexistingGuard(slot, rvn2) {
+				rop := sf.NewPreexistingOp(2, op.Code(), op)
+				sf.OpSetInput(rop, rvn, slot)
+				sf.OpSetInput(rop, rvn2, 1-slot)
+				sf.terminatorCount++
+			}
 		case CPUI_FLOAT_TRUNC, CPUI_FLOAT_NAN:
 			rop := sf.NewPreexistingOp(1, op.Code(), op)
 			sf.OpSetInput(rop, rvn, 0)
 			sf.terminatorCount++
-			hcount++
 		default:
 			return false
 		}
-		_ = callcount
-	}
-	if dcount != hcount && vn.IsInput() {
-		return false
 	}
 	return true
+}
+
+// repeatSlot is the input slot of op holding vn for the occurrence of op
+// in vn's descendant list after the earlier entries before.
+// C++ parity: PcodeOp::getRepeatSlot.
+func repeatSlot(op *PcodeOp, vn *Varnode, firstSlot int, before []*PcodeOp) int {
+	count := 1
+	for _, o := range before {
+		if o == op {
+			count++
+		}
+	}
+	if count == 1 {
+		return firstSlot
+	}
+	recount := 1
+	for i := firstSlot + 1; i < op.NumInput(); i++ {
+		if op.Input(i) == vn {
+			if recount++; recount == count {
+				return i
+			}
+		}
+	}
+	return -1
+}
+
+// convertFloatEncoding re-encodes a floating-point constant of size from
+// at size to: binary32 and binary64, rounding to nearest even.
+// C++ parity: FloatFormat::convertEncoding.
+// Known mismatch: a value too small for the target becomes a signed zero in
+// C++ (no rounding to the smallest subnormal); Go rounds.
+func convertFloatEncoding(val uint64, from, to int32) (uint64, bool) {
+	if from == to && (from == 4 || from == 8) {
+		return val, true
+	}
+	var f float64
+	switch from {
+	case 4:
+		f = float64(math.Float32frombits(uint32(val)))
+	case 8:
+		f = math.Float64frombits(val)
+	default:
+		return 0, false
+	}
+	switch to {
+	case 4:
+		if math.IsNaN(f) { // FloatFormat::getNaNEncoding: quiet NaN
+			sgn := uint64(0)
+			if math.Signbit(f) {
+				sgn = 1 << 31
+			}
+			return sgn | 0x7fc00000, true
+		}
+		return uint64(math.Float32bits(float32(f))), true
+	case 8:
+		if math.IsNaN(f) {
+			sgn := uint64(0)
+			if math.Signbit(f) {
+				sgn = 1 << 63
+			}
+			return sgn | 0x7ff8000000000000, true
+		}
+		return math.Float64bits(f), true
+	}
+	return 0, false
 }
 
 // SubfloatFlow::traceBackward -- subflow.cc.
@@ -344,7 +404,10 @@ func (sf *SubfloatFlow) traceBackward(rvn *TransformVar) bool {
 			if vn.Size() == sf.precision {
 				newVar = sf.NewConstant(sf.precision, 0, vn.Offset())
 			} else {
-				return false
+				newVar = sf.setReplacement(vn) // Convert constant to precision size
+				if newVar == nil {
+					return false // Unsupported float format
+				}
 			}
 		} else {
 			if vn != nil && vn.IsFree() {

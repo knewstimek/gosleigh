@@ -1213,11 +1213,15 @@ func (fd *Funcdata) setVarnodeProperties(vn *Varnode) {
 			if _, ok := fd.hostScope.QueryExternalRef(vn.Addr()); ok {
 				fl |= VarnodeExternRef
 			}
-			// A symbol's storage properties carry over to the Varnode.
-			// C++ parity: Scope::queryProperties (res->getAllFlags()).
+			// A symbol's storage properties carry over to the Varnode; with
+			// no symbol containing it, the address's own properties do.
+			// C++ parity: Scope::queryProperties (res->getAllFlags(), else
+			// symboltab->getProperty(addr)).
 			if e := fd.resolveGlobal(vn.Addr()); e != nil && e.Symbol() != nil &&
 				vn.Offset() >= e.Addr().Offset && vn.Offset()+uint64(vn.Size()) <= e.Addr().Offset+uint64(e.Size()) {
 				fl |= e.Symbol().Flags() & (VarnodeReadOnly | VarnodeVolatile)
+			} else {
+				fl |= fd.addrProperty(vn.Addr())
 			}
 		}
 		vn.SetFlags(fl)
@@ -1251,7 +1255,16 @@ func (fd *Funcdata) queryPropertyFlags(addr address.Address, size int32) uint32 
 		}
 	}
 	if fd.inGlobalScope(addr, size) {
-		return VarnodeMapped | VarnodeAddrTied | VarnodePersist
+		return VarnodeMapped | VarnodeAddrTied | VarnodePersist | fd.addrProperty(addr)
+	}
+	return fd.addrProperty(addr)
+}
+
+// addrProperty is the host's property map at addr (read-only, volatile).
+// C++ parity: Database::getProperty.
+func (fd *Funcdata) addrProperty(addr address.Address) uint32 {
+	if h, ok := fd.hostScope.(HostProperties); ok {
+		return h.Property(addr) & (VarnodeReadOnly | VarnodeVolatile)
 	}
 	return 0
 }
