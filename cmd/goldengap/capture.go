@@ -636,8 +636,11 @@ func captureInjections(fn goldenEntry, host pcode.HostScope, ram *address.Space)
 					hop.Out = &v
 				}
 				for _, n := range op.Kids[1:] {
-					if n.XMLName.Local == "addr" {
+					switch n.XMLName.Local {
+					case "addr":
 						hop.In = append(hop.In, vn(&n))
+					case "spaceid": // LOAD/STORE space operand
+						hop.In = append(hop.In, bridge.HostVarnode{SpaceRef: n.attr("name")})
 					}
 				}
 				inj.Ops = append(inj.Ops, hop)

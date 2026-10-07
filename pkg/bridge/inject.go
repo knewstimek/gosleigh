@@ -1,6 +1,7 @@
 package bridge
 
 import (
+	"math/bits"
 	"gosleigh/pkg/address"
 	"gosleigh/pkg/pcode"
 )
@@ -10,6 +11,9 @@ type HostVarnode struct {
 	Space  string
 	Offset uint64
 	Size   int32
+	// SpaceRef names the address space a LOAD/STORE operand selects
+	// (<spaceid name=..>); the operand is then that space's selector constant.
+	SpaceRef string
 }
 
 // HostInjectOp is one p-code op of a host-compiled injection payload.
@@ -55,6 +59,16 @@ func applyInjections(records []instructionRecord, injections map[uint64]HostInje
 		}
 	}
 	vd := func(h HostVarnode) (pcode.VarnodeData, bool) {
+		if h.SpaceRef != "" {
+			// The space selector of LOAD/STORE input 0: a constant holding the
+			// space index, as SLEIGH lowering builds it. C++ parity:
+			// PcodeOpRaw space operand (AddrSpace* as a constant).
+			sp := spaces[h.SpaceRef]
+			if sp == nil || constSpace == nil {
+				return pcode.VarnodeData{}, false
+			}
+			return pcode.VarnodeData{Space: constSpace, Offset: uint64(sp.Index), Size: uint32(bits.UintSize / 8)}, true
+		}
 		sp := spaces[h.Space]
 		if sp == nil {
 			return pcode.VarnodeData{}, false

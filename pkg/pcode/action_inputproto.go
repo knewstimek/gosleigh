@@ -137,7 +137,17 @@ func recoverMissingStackParams(data *Funcdata, fp *FuncProto) {
 			continue
 		}
 		vn := triallist[slot]
-		if vn == nil || isAlreadyNamedParam(vn) {
+		if vn == nil {
+			continue
+		}
+		if isAlreadyNamedParam(vn) {
+			// A provisional name counted only the referenced stack slots;
+			// the index is the position among all used trials.
+			if !fp.hostInputLocked && vn.Space().Kind == address.SpaceKindStack {
+				if _, typed := sl.ext().hostLocalTypes[vn.Offset()]; !typed {
+					vn.High().SetName(name)
+				}
+			}
 			continue
 		}
 		// A locked host prototype names and types the parameter at this
