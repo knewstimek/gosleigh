@@ -888,15 +888,11 @@ func (s *SplitVarnode) CreateJoinedWhole(data *Funcdata) {
 	if s.whole != nil {
 		return
 	}
-	if addr, ok := SplitVarnodeIsAddrTiedContiguous(s.lo, s.hi); ok {
-		s.whole = data.NewVarnode(s.wholesize, addr)
-		s.whole.SetAddlFlags(VarnodeWriteMask)
-		return
+	addr, ok := SplitVarnodeIsAddrTiedContiguous(s.lo, s.hi)
+	if !ok {
+		addr = data.constructJoinAddress(s.hi.Addr(), s.hi.Size(), s.lo.Addr(), s.lo.Size())
 	}
-	// TODO(parity): constructJoinAddress (double.cc:573). Use a unique as a
-	// safe fallback so the rewrite still proceeds; semantics for non-contiguous
-	// joined wholes may differ until the join-space plumbing is ported.
-	s.whole = data.vbank.CreateUnique(s.wholesize)
+	s.whole = data.NewVarnode(s.wholesize, addr)
 	s.whole.SetAddlFlags(VarnodeWriteMask)
 }
 

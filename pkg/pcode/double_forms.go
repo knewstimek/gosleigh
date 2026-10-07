@@ -2333,12 +2333,10 @@ func (ifm *IndirectForm) verify(h, l *Varnode, ind *PcodeOp) bool {
 	ifm.hi = h
 	ifm.lo = l
 	ifm.indhi = ind
-	if ind.NumInput() < 2 {
+	ifm.affector = ind.Input(1).GetIndirectCause()
+	if ifm.affector == nil || ifm.affector.IsDead() {
 		return false
 	}
-	// PARTIAL: use the indhi seqnum address as a stand-in for the affector
-	// pointer. We cannot recover a real affector op without IOP encoding.
-	ifm.affector = ind
 	ifm.reshi = ind.Output()
 	if ifm.reshi == nil {
 		return false
@@ -2349,15 +2347,11 @@ func (ifm *IndirectForm) verify(h, l *Varnode, ind *PcodeOp) bool {
 		return false
 	}
 	for _, indlo := range append([]*PcodeOp(nil), ifm.lo.DescendIter()...) {
-		if indlo.IsDead() {
-			continue
-		}
 		if indlo.Code() != CPUI_INDIRECT {
 			continue
 		}
-		// PARTIAL: match by seqnum address rather than IOP-decoded affector.
-		if indlo.Addr() != ind.Addr() {
-			continue
+		if indlo.Input(1).GetIndirectCause() != ifm.affector {
+			continue // hi and lo must be affected by the same op
 		}
 		ifm.reslo = indlo.Output()
 		if ifm.reslo == nil {
