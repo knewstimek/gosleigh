@@ -681,6 +681,9 @@ func (s *printCState) collectSymbols() {
 			if di != dj {
 				return dj
 			}
+			if c := compareMapOrder(locals[i], locals[j]); c != 0 {
+				return c < 0
+			}
 			return CompareLocDef(locals[i], locals[j]) < 0
 		})
 		s.params = dedupVarnodes(params)
@@ -4327,6 +4330,65 @@ func (s *printCState) renderMemberField(base *Varnode, field TypeField, valueon 
 		expr = s.lang.UnaryExpr("&", cPrecUnary, expr)
 	}
 	return expr, true
+}
+
+// compareMapOrder orders two declared variables as the local scope's map
+// iterates their symbols: by storage space and last storage byte, then by
+// the first address of the entry's use limit (none for an address-tied
+// symbol). A
+// variable whose symbol has no entry yet keys on its name representative,
+// whose definition is the use point ActionNameVars maps it at.
+// C++ parity: MapIterator over EntryMap (rangemap::insert places a record by
+// AddrRange::operator<, last then subsort; SymbolEntry::getSubsort);
+// Funcdata::linkSymbol (Varnode::getUsePoint).
+func compareMapOrder(a, b *Varnode) int {
+	type mapKey struct {
+		spc    uint16
+		off    uint64
+		useSpc uint16
+		useOff uint64
+	}
+	keyOf := func(vn *Varnode) (mapKey, bool) {
+		hv := vn.High()
+		if hv == nil {
+			return mapKey{}, false
+		}
+		if sym := hv.GetSymbol(); sym != nil && sym.NumEntries() > 0 {
+			if e := sym.FirstWholeMap(); e != nil && e.addr.Space != nil {
+				k := mapKey{spc: spaceOrder(e.addr.Space), off: e.addr.Offset + uint64(e.size) - 1}
+				if len(e.useLimit) > 0 && e.useLimit[0].space != nil {
+					k.useSpc, k.useOff = spaceOrder(e.useLimit[0].space), e.useLimit[0].first
+				}
+				return k, true
+			}
+		}
+		rep := hv.linkedRep // The representative ActionNameVars linked the symbol at
+		if rep == nil {
+			rep = highNameRepresentative(hv)
+		}
+		if rep == nil || rep.Space() == nil || rep.IsAddrTied() {
+			return mapKey{}, false
+		}
+		k := mapKey{spc: spaceOrder(rep.Space()), off: rep.Offset() + uint64(rep.Size()) - 1}
+		if def := rep.Def(); def != nil && def.Addr().Space != nil {
+			k.useSpc, k.useOff = spaceOrder(def.Addr().Space), def.Addr().Offset
+		}
+		return k, true
+	}
+	ka, oka := keyOf(a)
+	kb, okb := keyOf(b)
+	if !oka || !okb {
+		return 0
+	}
+	switch {
+	case ka.spc != kb.spc:
+		return cmpUint16(ka.spc, kb.spc)
+	case ka.off != kb.off:
+		return cmpUint64(ka.off, kb.off)
+	case ka.useSpc != kb.useSpc:
+		return cmpUint16(ka.useSpc, kb.useSpc)
+	}
+	return cmpUint64(ka.useOff, kb.useOff)
 }
 
 // isValueFlexible reports an implied PTRSUB/PTRADD whose value can be printed
