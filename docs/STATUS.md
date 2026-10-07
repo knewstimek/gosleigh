@@ -8,7 +8,7 @@
 |---|---|---|
 | realexe private-sample seed1 (x86-32) | 200/200 | 골든 재생성(프로그램 옵션, readonly on) |
 | realexe private-sample seed2 (보지 않은 표본) | 195/200 | 일반화 지표 |
-| realexe private-sample (x64 UE4) | 178/200, sim 0.990 | ENGINE-ERR 0, TIMEOUT 0 |
+| realexe private-sample (x64 UE4) | 189/200, sim 0.995 | ENGINE-ERR 0, TIMEOUT 0 |
 | 게이트 `tools/gates.py` | 전부 유지 | tree 10/10, corpus2 10/13, x64_auto 108/109 |
 
 측정: `realexe.py measure --work local/realexe/<name>` (표본 200, 위치 기준 짝짓기).
