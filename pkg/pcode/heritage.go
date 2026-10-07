@@ -1566,6 +1566,13 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 					task = h.disjoint.Get(i)
 				}
 			}
+			// A marker (or return COPY) from an earlier pass that fills the
+			// range shows that pass covered every address of it: no guard is
+			// added again. C++ parity: Heritage::collect
+			// (clearProperty(MemRange::new_addresses)).
+			if _, w0, _ := h.Collect(task.Addr, task.Size); coveredByEarlierPass(w0, task.Size) {
+				task.Flags &^= MemRangeNewAddresses
+			}
 			// With no read left to link, a range needs nothing when it is empty,
 			// internal (unique), or was already covered by an earlier pass; this
 			// is decided before any guard is placed.
@@ -1643,6 +1650,18 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 
 	h.disjoint.Clear()
 	h.pass++
+}
+
+// coveredByEarlierPass reports a write of the range made by a marker or a
+// return COPY of an earlier heritage pass, as big as the range.
+// C++ parity: Heritage::collect (op->isMarker() || op->isReturnCopy()).
+func coveredByEarlierPass(writes []*Varnode, size int32) bool {
+	for _, vn := range writes {
+		if op := vn.Def(); op != nil && (op.IsMarker() || op.HasFlag(PcodeOpReturnCopy)) && vn.Size() >= size {
+			return true
+		}
+	}
+	return false
 }
 
 // clearStackPlaceholders removes the placeholder LOAD of every call whose stack

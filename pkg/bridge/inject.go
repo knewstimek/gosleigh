@@ -76,7 +76,7 @@ func applyInjections(records []instructionRecord, injections map[uint64]HostInje
 		return pcode.VarnodeData{Space: sp, Offset: h.Offset, Size: uint32(h.Size)}, true
 	}
 	var warnings []string
-	for ri := range records {
+	for _, ri := range flowOrder(records) {
 		tr := &records[ri].translation
 		inj, ok := injections[tr.Address.Offset]
 		if !ok {
@@ -124,4 +124,47 @@ func applyInjections(records []instructionRecord, injections map[uint64]HostInje
 		warnings = append(warnings, "Function: "+inj.Callee+" replaced with injection: "+inj.Name)
 	}
 	return warnings
+}
+
+// flowOrder lists the records in the order flow following decodes them: a
+// stack of addresses where each instruction pushes its branch target, then
+// its fall-through, so the fall-through runs on and the latest target comes
+// next. Calls are injected in this order. Records flow does not reach keep
+// their collection order at the end.
+// C++ parity: FlowInfo::fallthru / processInstruction / newAddress
+// (addrlist is a stack) feeding FlowInfo::injectlist.
+func flowOrder(records []instructionRecord) []int {
+	if len(records) == 0 {
+		return nil
+	}
+	at := make(map[address.Address]int, len(records))
+	for i, r := range records {
+		at[r.translation.Address] = i
+	}
+	seen := make([]bool, len(records))
+	order := make([]int, 0, len(records))
+	stack := []address.Address{records[0].translation.Address}
+	for len(stack) > 0 {
+		a := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+		i, ok := at[a]
+		if !ok || seen[i] {
+			continue
+		}
+		seen[i] = true
+		order = append(order, i)
+		f := records[i].flow
+		if f.hasDirect {
+			stack = append(stack, f.directTarget)
+		}
+		if f.hasFallthrough {
+			stack = append(stack, f.fallthroughAddr)
+		}
+	}
+	for i := range records {
+		if !seen[i] {
+			order = append(order, i)
+		}
+	}
+	return order
 }
