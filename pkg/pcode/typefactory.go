@@ -111,27 +111,48 @@ func (f *TypeFactory) GetBase(size int32, meta metatype, name string) Datatype {
 	if meta == TYPE_FLOAT {
 		name = coreFloatName(name, size)
 	}
+	key := fmt.Sprintf("base:%d:%d:%s", size, meta, name)
+	if core, ok := coreBaseName(size, meta, name); ok {
+		// An unnamed request and every alias of the core type's name are one
+		// cache slot: getBase(4,TYPE_INT) is the "int" core type, so values
+		// typed through either spelling share the identical data-type. The
+		// unnamed spelling keeps the empty display name it always printed by.
+		// C++ parity: TypeFactory::getBase (typecache[size][meta]).
+		key = fmt.Sprintf("base:%d:%d:core", size, meta)
+		name = ""
+		value := NewBase(size, meta, name)
+		value.name = core
+		value.alignSize = primitiveAlignSize(size)
+		value.alignment = primitiveAlignment(value.alignSize)
+		return f.internBase(key, value)
+	}
 	value := NewBase(size, meta, name)
 	value.alignSize = primitiveAlignSize(size)
 	value.alignment = primitiveAlignment(value.alignSize)
-	key := fmt.Sprintf("base:%d:%d:%s", value.Size(), value.Metatype(), value.Name())
-	if core, ok := coreBaseName(size, meta, name); ok {
-		// An unnamed request and the core type's own name are one cache
-		// slot: getBase(4,TYPE_INT) is the "int" core type, so two values
-		// typed through either spelling share the identical data-type.
-		// C++ parity: TypeFactory::getBase (typecache[size][meta]).
-		key = fmt.Sprintf("base:%d:%d:core", size, meta)
-		if value.Name() == "" {
-			value.name = core
-		}
-	}
 	return f.internBase(key, value)
 }
 
+// getSpelling returns a base type that only carries a declaration spelling of
+// a core slot (long on LP64); it never takes part in typing.
+// C++ parity: on LP64 cacheCoreTypes fills the 8-byte slot with "long".
+func (f *TypeFactory) getSpelling(size int32, meta metatype, name string) Datatype {
+	value := NewBase(size, meta, name)
+	value.alignSize = primitiveAlignSize(size)
+	value.alignment = primitiveAlignment(value.alignSize)
+	out := f.internBase(fmt.Sprintf("spell:%d:%d:%s", size, meta, name), value)
+	f.mu.Lock()
+	f.canon[out] = struct{}{} // Intern keeps it rather than folding it into the core slot
+	f.mu.Unlock()
+	return out
+}
+
 // coreBaseName reports whether name ("" for unnamed) spells the core type in
-// the (size, meta) cache slot, and the name that type carries. Known
-// mismatch: the 8-byte long/longlong slot depends on the data organization
-// and is left keyed by name.
+// the (size, meta) cache slot, and the name that type carries. The 8-byte
+// slot holds one core type whichever of long/longlong/int it is asked by, so
+// every 8-byte integer (and every pointer to one) is the same data-type.
+// Its stored name is "longlong"/"ulonglong"; the declaration spelling
+// (long on LP64) is chosen by normalizedBaseType from the model's long size.
+// C++ parity: TypeFactory::getBase (typecache[8][meta] from cacheCoreTypes).
 func coreBaseName(size int32, meta metatype, name string) (string, bool) {
 	var names []string
 	switch meta {
@@ -141,6 +162,8 @@ func coreBaseName(size int32, meta metatype, name string) (string, bool) {
 			names = []string{"short"}
 		case 4:
 			names = []string{"int"}
+		case 8:
+			names = []string{"longlong", "long", "int"}
 		}
 	case TYPE_UINT:
 		switch size {
@@ -150,10 +173,12 @@ func coreBaseName(size int32, meta metatype, name string) (string, bool) {
 			names = []string{"ushort"}
 		case 4:
 			names = []string{"uint"}
+		case 8:
+			names = []string{"ulonglong", "ulong", "uint"}
 		}
 	case TYPE_UNKNOWN:
 		if size >= 1 && size <= 8 {
-			names = []string{fmt.Sprintf("undefined%d", size)}
+			names = []string{fmt.Sprintf("undefined%d", size), "unknown"}
 		}
 	case TYPE_BOOL:
 		if size == 1 {

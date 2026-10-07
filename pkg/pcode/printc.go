@@ -1557,7 +1557,7 @@ func normalizedBaseType(base *Base, longSize int) Datatype {
 			// wins the cache slot.
 			// C++ parity: TypeFactory::setupSizes / cacheCoreTypes (type.cc).
 			if longSize >= 8 {
-				return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "long")
+				return sharedTypeFactory.getSpelling(base.Size(), TYPE_INT, "long")
 			}
 			return sharedTypeFactory.GetBase(base.Size(), TYPE_INT, "longlong")
 		default:
@@ -1594,7 +1594,7 @@ func normalizedBaseType(base *Base, longSize int) Datatype {
 			// Windows x64 (sizeOfLong==4), matching which unsigned core type fills
 			// the size-8 cache slot.
 			if longSize >= 8 {
-				return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "ulong")
+				return sharedTypeFactory.getSpelling(base.Size(), TYPE_UINT, "ulong")
 			}
 			return sharedTypeFactory.GetBase(base.Size(), TYPE_UINT, "ulonglong")
 		default:
