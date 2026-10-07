@@ -348,7 +348,11 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			// name below; a stack input keeps its local Symbol.
 			lockedIrregular = irregular && sl != nil && regParamHigh(c.hv, sl)
 		}
-		if (rep == nil || lockedIrregular) && c.inVn != nil && highHasName(c.hv) && irregular && c.inVn.Space() != nil {
+		// A stack input outside every mapped Symbol (a hole in the frame map)
+		// names the variable: the name representative prefers the input.
+		// C++ parity: HighVariable::compareName (isInput) + buildDefaultName.
+		unmappedStackInput := c.inVn != nil && sl != nil && c.inVn.Space() == sl.SpaceID() && !c.inVn.IsAddrTied()
+		if (rep == nil || lockedIrregular || unmappedStackInput) && c.inVn != nil && highHasName(c.hv) && irregular && c.inVn.Space() != nil {
 			// An input that is not a formal parameter: in_<register>.
 			// C++ parity: ScopeInternal::buildVariableName (irregular input,
 			// index < 0).
