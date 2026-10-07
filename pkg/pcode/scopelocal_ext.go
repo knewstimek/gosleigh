@@ -83,6 +83,8 @@ type scopeLocalExt struct {
 	hostLocals  map[uint64]string             // Host name-locked stack symbols by offset
 	// hostLocalTypes are the host's type-locked stack symbol types by offset.
 	hostLocalTypes map[uint64]Datatype
+	// hostIsolated are the host's merge="false" stack parameters by offset.
+	hostIsolated map[uint64]bool
 	// notMapped are the [first,last] stack offset ranges removed from the
 	// scope's owned range (saved registers, call parameter areas).
 	notMapped [][2]uint64

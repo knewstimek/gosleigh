@@ -246,6 +246,7 @@ func overrideSizeLockedGlobals(data *Funcdata) {
 // Must be called after ActionMergeCopy so all HV merging is complete.
 // C++ parity: ActionNameVars::apply() -> ScopeLocal::assignDefaultNames()
 func (a *ActionNameVars) Apply(data *Funcdata) int {
+	data.symbolsLinked = true
 	overrideSizeLockedGlobals(data)
 	finalizeLocalHighTypes(data)
 	// Collect unique unnamed register-space HighVariables.

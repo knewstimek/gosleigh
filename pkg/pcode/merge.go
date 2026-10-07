@@ -459,13 +459,6 @@ func mergeTestRequired(h1, h2 *HighVariable) bool {
 //
 // C++ parity: merge.cc Merge::mergeTestAdjacent (lines 175-211).
 //
-// Unported guards (known mismatch): the illegal-input test
-// (high.getInputVarnode().isIllegalInput() && !isIndirectOnly()) and the
-// isolated-Symbol test (high.getSymbol().isIsolated()) are omitted because
-// Gosleigh does not yet model illegal inputs or isolated symbols. The
-// VariablePiece overlap guard is likewise omitted (VariablePiece unported).
-// None of these fire for the register/stack HighVariables produced by the
-// current corpus; they are noted so a later port can restore them verbatim.
 func mergeTestAdjacent(hOut, hIn *HighVariable) bool {
 	if !mergeTestRequired(hOut, hIn) {
 		return false
@@ -480,6 +473,22 @@ func mergeTestAdjacent(hOut, hIn *HighVariable) bool {
 	if hOut.Type() != hIn.Type() {
 		return false
 	}
+	// Keep an illegal input (one that is not directly written, such as a
+	// preserved register) out of speculative merges, unless it is only
+	// used indirectly. C++ parity: merge.cc:190-197 (isIllegalInput).
+	for _, h := range []*HighVariable{hOut, hIn} {
+		if !h.IsInput() {
+			continue
+		}
+		for _, vn := range h.Instances() {
+			if vn.IsInput() {
+				if !vn.IsDirectWrite() && !vn.IsIndirectOnly() {
+					return false
+				}
+				break
+			}
+		}
+	}
 	// Isolated-Symbol guard: a Symbol flagged isolate (merge="false" in the
 	// committed prototype) must never be speculatively merged. This is what keeps
 	// a namelocked/typelocked register parameter (e.g. param_2) distinct from a
@@ -489,10 +498,7 @@ func mergeTestAdjacent(hOut, hIn *HighVariable) bool {
 	// the accumulator<->param_2 adjacency here (mergeTestAdjacent=false), NOT via a
 	// Cover intersection.
 	// C++ parity: merge.cc:198-205 (high_in/high_out getSymbol()->isIsolated()).
-	if sym := mergeHighSymbol(hIn); sym != nil && sym.IsIsolated() {
-		return false
-	}
-	if sym := mergeHighSymbol(hOut); sym != nil && sym.IsIsolated() {
+	if highIsolated(hIn) || highIsolated(hOut) {
 		return false
 	}
 	// Currently don't allow speculative merging of variables that are in
@@ -501,6 +507,26 @@ func mergeTestAdjacent(hOut, hIn *HighVariable) bool {
 		return false
 	}
 	return true
+}
+
+// highIsolated reports a variable whose Symbol must never be speculatively
+// merged (merge="false"). A locked stack parameter has no Symbol of its
+// own in Gosleigh, so the host's flag for its storage stands in for it.
+// C++ parity: Symbol::isIsolated in Merge::mergeTestAdjacent.
+func highIsolated(h *HighVariable) bool {
+	if sym := mergeHighSymbol(h); sym != nil {
+		return sym.IsIsolated()
+	}
+	fd := h.funcdata()
+	if fd == nil || fd.hostIsolated == nil {
+		return false
+	}
+	for _, vn := range h.Instances() {
+		if vn.IsInput() && vn.Space() != nil && vn.Space().Kind == address.SpaceKindStack && fd.hostIsolated[vn.Offset()] {
+			return true
+		}
+	}
+	return false
 }
 
 // mergeHighSymbol is the Symbol a variable maps to, a global's included: Go

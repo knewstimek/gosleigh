@@ -303,6 +303,35 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 		}
 	}
 
+	// A locked parameter in any other register (a float in XMM3) still maps
+	// its input to the parameter's Symbol, merge="false" included.
+	// C++ parity: Funcdata::linkSymbol for a locked ProtoParameter.
+	if fp != nil {
+		for _, vn := range varnodes {
+			if vn == nil || !vn.IsInput() || !isRegisterSpace(vn) || vn.symbolEntry != nil {
+				continue
+			}
+			if _, done := sl.paramByVn[vn]; done {
+				continue
+			}
+			pname, nlock, isolate, ok := fp.LockedParamName(vn.Offset())
+			if !ok {
+				continue
+			}
+			sym := NewSymbol(pname, vn.Type())
+			sym.SetCategory(SymbolFunctionParameter, -1)
+			if nlock {
+				sym.SetFlags(VarnodeNameLock)
+			}
+			if isolate {
+				sym.SetIsolated(true)
+			}
+			entry := NewSymbolEntry(sym, 0, vn.Addr(), vn.Size(), 0)
+			sym.attachEntry(entry)
+			vn.SetSymbolEntry(entry)
+		}
+	}
+
 	// --- Stack parameters and locals ---
 	// Group all stack varnodes by offset. Each unique offset gets one HighVariable;
 	// all SSA versions at that offset (input, MULTIEQUAL output, COPY output) become

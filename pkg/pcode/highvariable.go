@@ -385,6 +385,16 @@ func (hv *HighVariable) stripType(tp Datatype) Datatype {
 						return m == TYPE_STRUCT || m == TYPE_UNION
 					}
 				}
+				// Once names are linked, a local whole variable has a Symbol
+				// of its own type, which the piece maps into.
+				// C++ parity: Funcdata::linkSymbol (addSymbol with the high's
+				// type) then linkProtoPartial for the piece.
+				if fd.symbolsLinked && !root.high.IsPersist() {
+					if rt := root.high.Type(); rt != nil {
+						m := rt.Metatype()
+						return m == TYPE_STRUCT || m == TYPE_UNION
+					}
+				}
 			}
 		}
 		// A global variable's symbol is kept by the global scope.

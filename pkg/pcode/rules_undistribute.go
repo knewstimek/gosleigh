@@ -70,6 +70,17 @@ func (e *addExpression) gatherTwoTermsAdd(a, b *Varnode) {
 	e.gather(b, 1, depth)
 }
 
+// gatherTwoTermsSubtract gathers a - b. C++ parity:
+// AddExpression::gatherTwoTermsSubtract.
+func (e *addExpression) gatherTwoTermsSubtract(a, b *Varnode) {
+	depth := 0
+	if a.IsConstant() || b.IsConstant() {
+		depth = 1
+	}
+	e.gather(a, 1, depth)
+	e.gather(b, maskForSize(b.Size()), depth)
+}
+
 func (e *addExpression) gatherTwoTermsRoot(root *Varnode) {
 	e.gather(root, 1, 1)
 }

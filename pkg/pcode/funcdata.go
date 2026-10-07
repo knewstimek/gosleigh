@@ -106,6 +106,12 @@ type Funcdata struct {
 	models map[string]*ProtoModel
 	// hostLocals are the host's name-locked stack symbol names by offset.
 	hostLocals map[uint64]string
+	// hostIsolated are the stack offsets of locked parameters the host
+	// serializes with merge="false".
+	hostIsolated map[uint64]bool
+	// symbolsLinked is set once ActionNameVars links every variable to a
+	// Symbol. C++ parity: Funcdata::linkSymbol in ActionNameVars.
+	symbolsLinked bool
 	// unionMap holds the resolution of each edge reading or writing a
 	// data-type that needs resolution. C++ parity: Funcdata::unionMap.
 	unionMap map[resolveEdge]*ResolvedUnion
@@ -318,6 +324,9 @@ func (fd *Funcdata) SetScopeLocal(sl *ScopeLocal) {
 	if sl != nil && fd.hostLocalTypes != nil {
 		sl.ext().hostLocalTypes = fd.hostLocalTypes
 	}
+	if sl != nil && fd.hostIsolated != nil {
+		sl.ext().hostIsolated = fd.hostIsolated
+	}
 }
 
 // SetHostLocals installs the host's name-locked stack symbols for this
@@ -329,6 +338,7 @@ func (fd *Funcdata) SetHostLocals(m map[uint64]string) {
 	if fd.scopeLocal != nil {
 		fd.scopeLocal.ext().hostLocals = m
 		fd.scopeLocal.ext().hostLocalTypes = fd.hostLocalTypes
+		fd.scopeLocal.ext().hostIsolated = fd.hostIsolated
 	}
 }
 

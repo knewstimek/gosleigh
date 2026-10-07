@@ -318,6 +318,12 @@ func (fd *Funcdata) ApplyHostSelfPrototype(model *ProtoModel) {
 				fd.hostLocals = map[uint64]string{}
 			}
 			fd.hostLocals[off] = p.Name
+			if p.Isolate {
+				if fd.hostIsolated == nil {
+					fd.hostIsolated = map[uint64]bool{}
+				}
+				fd.hostIsolated[off] = true
+			}
 			if p.Type != nil {
 				if fd.hostLocalTypes == nil {
 					fd.hostLocalTypes = map[uint64]Datatype{}

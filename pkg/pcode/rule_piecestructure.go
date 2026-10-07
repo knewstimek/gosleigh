@@ -188,6 +188,9 @@ func convertZextToPiece(zext *PcodeOp, ct Datatype, offset int64, data *Funcdata
 	}
 	data.OpSetOpcode(zext, CPUI_PIECE)
 	data.OpInsertInput(zext, zerovn, 0)
+	if t := invn.Type(); t != nil && t.NeedsResolution() {
+		data.inheritResolution(t, zext, 1, zext, 0) // invn's resolution moves to slot 1
+	}
 	return true
 }
 
