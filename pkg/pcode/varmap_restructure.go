@@ -695,9 +695,19 @@ func (sl *ScopeLocal) overlapEntry(start uint64, size int32) *SymbolEntry {
 
 // createEntry makes the Symbol for a final hint, an array when it holds
 // more than one element. C++ parity: ScopeLocal::createEntry.
+// concretize is the data-type a variable can have: a code type (the
+// pointed-to type of a function pointer) becomes an unknown byte.
+// C++ parity: TypeFactory::concretize.
+func concretize(ct Datatype) Datatype {
+	if ct != nil && ct.Metatype() == TYPE_CODE {
+		return sharedTypeFactory.GetBase(1, TYPE_UNKNOWN, "")
+	}
+	return ct
+}
+
 func (sl *ScopeLocal) createEntry(a *mapHint) {
 	addr := address.Address{Space: sl.SpaceID(), Offset: a.start}
-	ct := a.typ
+	ct := concretize(a.typ)
 	if align := ct.AlignSize(); align > 0 {
 		if num := a.size / align; num > 1 {
 			ct = sharedTypeFactory.GetArray(num, ct)

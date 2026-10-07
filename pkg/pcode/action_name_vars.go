@@ -413,6 +413,7 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		return cands[i].hv.serial < cands[j].hv.serial
 	})
 	var toName []hvEntry
+	var linkedOnly []hvEntry // named otherwise, but linked like toName
 	for _, c := range cands {
 		rep := c.bestVn
 		if rep == nil {
@@ -572,6 +573,14 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		if nm, ok := recmap[c.hv]; ok && !highHasInput(c.hv) && c.hv.numMergeClasses() == 1 {
 			c.hv.SetName(makeNameUnique(nm, used))
 			a.count++
+			// It was linked to a symbol before it got its name, which may
+			// still conflict. C++ parity: linkSymbols runs before
+			// lookForFuncParamNames.
+			if key := highNameRepresentative(c.hv); key != nil {
+				linkedOnly = append(linkedOnly, hvEntry{hv: c.hv, key: key})
+			} else if rep != nil {
+				linkedOnly = append(linkedOnly, hvEntry{hv: c.hv, key: rep})
+			}
 			continue
 		}
 		prefix := hvTypePrefix(c.hv)
@@ -593,7 +602,7 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		})
 	}
 
-	if len(toName) == 0 {
+	if len(toName) == 0 && len(linkedOnly) == 0 {
 		return 0
 	}
 
@@ -645,7 +654,7 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			linkAt[root.High()] = vn
 		}
 	}
-	claimOrder := append([]hvEntry(nil), toName...)
+	claimOrder := append(append([]hvEntry(nil), toName...), linkedOnly...)
 	claimKey := func(e hvEntry) *Varnode {
 		if vn := linkAt[e.hv]; vn != nil && CompareLocDef(vn, e.key) < 0 {
 			return vn

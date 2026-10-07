@@ -322,7 +322,7 @@ func (fd *Funcdata) resolveGlobal(addr address.Address) *SymbolEntry {
 	}
 	hd, ok := hs.QueryData(addr)
 	if !ok {
-		return nil
+		return fd.externRefSymbol(addr)
 	}
 	if hd.Label {
 		hd.Type, hd.Size = nil, 1
@@ -342,6 +342,25 @@ func (fd *Funcdata) resolveGlobal(addr address.Address) *SymbolEntry {
 		e.Symbol().SetIsolated(true)
 	}
 	return e
+}
+
+// externRefSymbol maps an import slot to its external-reference Symbol: a
+// type-locked code pointer named <function>_exref.
+// C++ parity: ExternRefSymbol::buildNameType (Ghidra names it _exref).
+func (fd *Funcdata) externRefSymbol(addr address.Address) *SymbolEntry {
+	if fd.hostScope == nil || addr.Space == nil {
+		return nil
+	}
+	name, ok := fd.hostScope.QueryExternalRef(addr)
+	if !ok || name == "" {
+		return nil
+	}
+	size := int32(addr.Space.AddrSize)
+	if size <= 0 {
+		return nil
+	}
+	ct := sharedTypeFactory.GetPointer(size, sharedTypeFactory.GetCode("code", nil, nil, false), uint32(addr.Space.WordSize))
+	return fd.globalScope.AddSymbol(name+"_exref", ct, addr, size, VarnodeTypeLock|VarnodeNameLock|VarnodeExternRef)
 }
 
 // NewGlobalScope constructs an empty global scope.
