@@ -1333,6 +1333,10 @@ func (s *printCState) stackSymbolType(vn *Varnode) Datatype {
 			return nil
 		}
 		e := sl.FindEntryAt(vn.Addr(), int32(vn.Size()))
+		if e == nil {
+			// A piece of a larger stack variable declares the variable.
+			e = sl.QueryContainer(vn.Addr(), vn.Size(), address.Address{})
+		}
 		if e == nil || e.Symbol() == nil {
 			return nil
 		}
