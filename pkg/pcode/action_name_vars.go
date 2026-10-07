@@ -402,7 +402,13 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			sl.model != nil && !sl.model.InLocalRange(c.inVn.Offset()) && !regParamHigh(c.hv, sl) {
 			unmappedStackInput = true
 		}
-		if (rep == nil || lockedIrregular || unmappedStackInput) && c.inVn != nil && highHasName(c.hv) && irregular && c.inVn.Space() != nil {
+		// A register input merged into the variable names it: the name
+		// representative prefers an input and buildDefaultName names an
+		// input variable that is no parameter in_<reg>.
+		// C++ parity: HighVariable::compareName + Scope::buildDefaultName
+		// (high->isInput()).
+		regInput := c.inVn != nil && c.inVn.Space() != nil && c.inVn.Space().Kind == address.SpaceKindProcessor
+		if (rep == nil || lockedIrregular || unmappedStackInput || regInput) && c.inVn != nil && highHasName(c.hv) && irregular && c.inVn.Space() != nil {
 			// An input that is not a formal parameter: in_<register>.
 			// C++ parity: ScopeInternal::buildVariableName (irregular input,
 			// index < 0).
