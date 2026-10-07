@@ -1139,7 +1139,7 @@ func (s *printCState) emitLocalDeclarations() bool {
 		// A piece of a grouped variable is printed through the whole variable,
 		// which carries the declaration: the stack Symbol holding it.
 		// C++ parity: the group shares one Symbol; emitScopeVarDecls declares it.
-		if groupRootOf(vn.High()) != nil {
+		if namedGroupRoot(vn.High(), sl) != nil {
 			if sl == nil || vn.Space() != sl.SpaceID() {
 				continue
 			}
@@ -5026,7 +5026,7 @@ func (s *printCState) localPieceName(vn *Varnode, name string, castTo Datatype, 
 			}
 		}
 	}
-	if root := groupRootOf(vn.High()); root != nil {
+	if root := namedGroupRoot(vn.High(), sl); root != nil {
 		if rvn := root.high.Instances(); len(rvn) > 0 {
 			if rt := root.high.Type(); rt != nil {
 				be := vn.Space() != nil && vn.Space().BigEndian
@@ -5079,8 +5079,19 @@ func (s *printCState) localPieceName(vn *Varnode, name string, castTo Datatype, 
 		// C++ parity: PrintC::pushSymbolDetail -> pushMismatchSymbol.
 		e = sl.QueryContainer(at.Addr(), 1, address.Address{})
 	}
-	if e == nil || e.Symbol() == nil || e.Symbol().Type() == nil || e.Symbol().Name() != name {
+	if e == nil || e.Symbol() == nil || e.Symbol().Type() == nil {
 		return name, nil
+	}
+	if sym := e.Symbol(); sym.Name() != name {
+		// A locked prototype's parameter Symbol carries no name in Gosleigh;
+		// it is the parameter printed for the input at its storage.
+		if sym.Name() != "" || sym.Category() != SymbolFunctionParameter {
+			return name, nil
+		}
+		in := s.fd.GetVarnodeBank().FindInput(e.Size(), e.Addr())
+		if in == nil || s.nameOf(in) != name {
+			return name, nil
+		}
 	}
 	return symbolPieceName(name, e.Symbol().Type(), int32(at.Offset()-e.Addr().Offset), vn.Size(), castTo, sl.SpaceID().BigEndian, rop, rslot)
 }

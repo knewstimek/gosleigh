@@ -14,6 +14,8 @@
 
 package pcode
 
+import "gosleigh/pkg/address"
+
 // variableGroup collects HighVariables whose storage mutually overlaps (pieces
 // of one address-tied variable, e.g. a 4-byte global and a 1-byte read of its
 // third byte). C++ parity: VariableGroup.
@@ -220,6 +222,34 @@ func groupRootOf(hv *HighVariable) *variablePiece {
 		}
 	}
 	return nil
+}
+
+// namedGroupRoot is groupRootOf for naming and printing: a piece takes the
+// whole variable's Symbol only when it is a prototype piece or its storage
+// lies in a Symbol. An input piece outside every Symbol (the upper bytes of
+// a char parameter read as a dword) gets a Symbol of its own and prints as
+// an irregular input (in_stack_00000009).
+// C++ parity: Funcdata::linkSymbol (linkProtoPartial for a proto-partial
+// piece, otherwise queryProperties at the piece's own address).
+func namedGroupRoot(hv *HighVariable, sl *ScopeLocal) *variablePiece {
+	root := groupRootOf(hv)
+	if root == nil || sl == nil {
+		return root
+	}
+	for _, vn := range hv.Instances() {
+		if vn.IsProtoPartial() {
+			return root
+		}
+	}
+	for _, vn := range hv.Instances() {
+		if !vn.IsInput() || vn.Space() != sl.SpaceID() {
+			continue
+		}
+		if sl.QueryContainer(vn.Addr(), 1, address.Address{}) == nil {
+			return nil
+		}
+	}
+	return root
 }
 
 // size returns the storage size of the variable.

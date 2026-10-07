@@ -248,7 +248,7 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			continue
 		}
 		// A piece of a grouped variable is named through the whole variable.
-		if groupRootOf(hv) != nil {
+		if namedGroupRoot(hv, data.GetScopeLocal()) != nil {
 			continue
 		}
 		// Skip if already has a human-readable name.
