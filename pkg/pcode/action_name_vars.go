@@ -468,7 +468,7 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 					if name == "" && nr.IsAddrTied() && !nr.IsPersist() {
 						// An unnamed symbol gets its default name from its storage.
 						// C++ parity: Scope::buildDefaultName -> buildVariableName.
-						name = makeNameUnique(sl.addrTiedName(nr.Addr(), c.hv.Type()), used)
+						name = makeNameUnique(sl.addrTiedLinkName(nr.Addr(), c.hv.Type()), used)
 						used[name] = true
 					}
 					c.hv.SetName(name)
@@ -605,7 +605,7 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		// consume an index. C++ parity: ScopeInternal::buildVariableName
 		// (addrtied branch) through ScopeLocal::buildVariableName.
 		if sl != nil && e.key.IsAddrTied() && !e.key.IsPersist() && !e.key.IsInput() {
-			nm := makeNameUnique(sl.addrTiedName(e.key.Addr(), e.hv.Type()), used)
+			nm := makeNameUnique(sl.addrTiedLinkName(e.key.Addr(), e.hv.Type()), used)
 			used[nm] = true
 			e.hv.SetName(nm)
 			a.count++

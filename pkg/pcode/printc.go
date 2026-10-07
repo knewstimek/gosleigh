@@ -1924,6 +1924,35 @@ func (s *printCState) emitIfBlockChain(bl *FlowBlock, isElseIf bool) error {
 			return s.emitIfBlockChain(elseChild, true)
 		}
 	}
+	// A conditional goto merges the same way: "else if (cond) goto L;".
+	if elseChild.Type() == BlockIfType && elseChild.GotoTargetBlock() != nil {
+		condChild := elseChild
+		if grand := elseChild.StructuredChildren(); len(grand) > 0 {
+			condChild = grand[0]
+		}
+		if s.conditionLeadEmpty(condChild) {
+			cond := s.mustRenderConditionFrag(condChild)
+			ifGoto := func() {
+				s.lang.Token("else")
+				s.lang.Space()
+				s.lang.Token("if")
+				s.lang.Space()
+				s.emitConditionParen(cond)
+				s.lang.Space()
+				s.lang.StatementGroup(func() {
+					s.emitGotoStatement(elseChild)
+					s.lang.Token(";")
+				})
+			}
+			if s.ghidraFormat {
+				s.lang.CloseBlock()
+				s.lang.Line(ifGoto)
+			} else {
+				s.lang.CloseBlockWithSuffix(ifGoto)
+			}
+			return nil
+		}
+	}
 	if s.ghidraFormat {
 		// Ghidra format: "}\nelse {\n"
 		// C++ parity: Ghidra PrintC emits "}\nelse {\n" for terminal else.

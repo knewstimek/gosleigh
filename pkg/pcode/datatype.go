@@ -398,6 +398,26 @@ func (p *PartialStruct) componentForPtr() Datatype {
 	return p.stripped
 }
 
+// PartialUnion is the type of a piece of a union that is not the whole of a
+// field starting at the union's base. Each read or write resolves it to the
+// field the piece falls in; a variable uses the stripped undefined type.
+// C++ parity: TypePartialUnion.
+type PartialUnion struct {
+	datatypeBase
+	container *Union
+	offset    int64
+	stripped  Datatype
+}
+
+// Container returns the union this is a piece of.
+func (p *PartialUnion) Container() *Union { return p.container }
+
+// Offset returns the byte offset within the union.
+func (p *PartialUnion) Offset() int64 { return p.offset }
+
+// Stripped returns the undefined type used where a formal type is needed.
+func (p *PartialUnion) Stripped() Datatype { return p.stripped }
+
 // Union is a composite type with overlapping fields.
 type Union struct {
 	datatypeBase
@@ -675,6 +695,21 @@ func typeOrderLevel(a, b Datatype, level int) int {
 			return 0
 		}
 		return compareFieldLists(a, b, ta.fields, tb.fields, level, false)
+	case *PartialUnion: // C++ parity: TypePartialUnion::compare
+		tb, ok := b.(*PartialUnion)
+		if !ok {
+			return 0
+		}
+		if ta.offset != tb.offset {
+			if ta.offset < tb.offset {
+				return -1
+			}
+			return 1
+		}
+		if level--; level < 0 {
+			return compareTypeID(a, b)
+		}
+		return typeOrderLevel(ta.container, tb.container, level)
 	case *Enum: // C++ parity: TypeEnum::compare (compareDependency)
 		tb, ok := b.(*Enum)
 		if !ok {

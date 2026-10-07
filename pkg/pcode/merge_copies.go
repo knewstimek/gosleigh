@@ -164,16 +164,20 @@ func (m *Merge) buildDominantCopy(high *HighVariable, copy []*PcodeOp) {
 		oldCopy := domCopy
 		domCopy = m.fd.NewOp(1, addr)
 		m.fd.OpSetOpcode(domCopy, CPUI_COPY)
-		if ct := rootVn.Type(); ct != nil && ct.NeedsResolution() {
+		ct := rootVn.Type()
+		if ct != nil && ct.NeedsResolution() {
 			fieldNum := -1
 			if res := m.fd.getUnionField(ct, oldCopy, 0); res != nil {
 				fieldNum = res.fieldNum
 			}
 			m.fd.forceFacingType(ct, fieldNum, domCopy, 0)
 			m.fd.forceFacingType(ct, fieldNum, domCopy, -1)
+			if ct.Metatype() == TYPE_PARTIALUNION {
+				ct = rootVn.TypeReadFacing(oldCopy)
+			}
 		}
 		domVn = m.fd.NewUnique(rootVn.Size())
-		SetVarnodeType(domVn, rootVn.Type())
+		SetVarnodeType(domVn, ct)
 		NewHighVariable("").AddInstance(domVn) // C++ newUnique assigns a high once highs are on
 		m.fd.OpSetOutput(domCopy, domVn)
 		m.fd.OpSetInput(domCopy, rootVn, 0)

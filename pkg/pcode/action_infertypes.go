@@ -546,12 +546,17 @@ func inferPropagateEdge(data *Funcdata, tf *TypeFactory, op *PcodeOp, invn, outv
 		return alttype
 	case CPUI_SUBPIECE:
 		// From the input to the output: the component the truncation selects.
-		// C++ parity: TypeOpSubpiece::propagateType. Known mismatch: the
-		// union branch (resolveTruncation) and near/far pointers.
+		// C++ parity: TypeOpSubpiece::propagateType. Known mismatch: near/far
+		// pointers.
 		if inslot != 0 || outslot != -1 {
 			return nil
 		}
 		byteOff := subpieceByteOffsetForComposite(op)
+		if m := alttype.Metatype(); m == TYPE_UNION || m == TYPE_PARTIALUNION {
+			// An artificial slot holds the field being truncated to, as the
+			// facing data-type of slot 0 is already the union itself.
+			alttype, byteOff = datatypeResolveTruncation(alttype, byteOff, op, 1)
+		}
 		for alttype != nil && (byteOff != 0 || alttype.Size() != outvn.Size()) {
 			alttype, byteOff = datatypeSubType(alttype, byteOff)
 		}

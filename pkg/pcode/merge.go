@@ -705,18 +705,22 @@ func (m *Merge) TrimOpOutput(op *PcodeOp) {
 		}
 	}
 
-	// The stubby output keeps the original's data-type (newUnique(size,ct)).
-	uniq := m.fd.GetVarnodeBank().CreateUnique(vn.Size())
-	if dt := vn.Type(); dt != nil {
-		SetVarnodeType(uniq, dt)
-	}
-
 	// Create the COPY op that carries the original output forward.
+	ct := vn.Type()
 	copyOp := m.fd.NewOp(1, op.Addr())
 	m.fd.OpSetOpcode(copyOp, CPUI_COPY)
-	if ct := vn.Type(); ct != nil && ct.NeedsResolution() {
+	if ct != nil && ct.NeedsResolution() {
 		fieldNum := m.fd.inheritResolution(ct, copyOp, -1, op, -1)
 		m.fd.forceFacingType(ct, fieldNum, copyOp, 0)
+		if ct.Metatype() == TYPE_PARTIALUNION {
+			ct = vn.TypeDefFacing()
+		}
+	}
+
+	// The stubby output keeps the original's data-type (newUnique(size,ct)).
+	uniq := m.fd.GetVarnodeBank().CreateUnique(vn.Size())
+	if ct != nil {
+		SetVarnodeType(uniq, ct)
 	}
 
 	// Reassign outputs:

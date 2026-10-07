@@ -23,7 +23,6 @@ package pcode
 // C++ parity: unionresolve.hh/cc (ResolvedUnion, ResolveEdge), funcdata.cc
 // (getUnionField, setUnionField, forceFacingType, inheritResolution) and the
 // resolveInFlow/findResolve/findCompatibleResolve methods of type.cc.
-// Known mismatch: TypePartialUnion is not modelled.
 
 // ResolvedUnion is a data-type resolved from a parent that needs
 // resolution: one of its components (fieldNum >= 0) or the parent itself.
@@ -49,6 +48,9 @@ func newResolvedSelf(parent Datatype) ResolvedUnion {
 // it when parent is a pointer), or to itself for fldNum < 0.
 // C++ parity: ResolvedUnion::ResolvedUnion(Datatype *,int4,TypeFactory &).
 func newResolvedField(parent Datatype, fldNum int, tf *TypeFactory) ResolvedUnion {
+	if p, ok := parent.(*PartialUnion); ok {
+		parent = p.container
+	}
 	res := ResolvedUnion{baseType: parent, fieldNum: fldNum}
 	if fldNum < 0 {
 		res.resolve = parent
@@ -102,6 +104,8 @@ func newResolveEdge(parent Datatype, op *PcodeOp, slot int) resolveEdge {
 	if p, ok := parent.(*Pointer); ok {
 		e.base = p.Pointee() // Strip pointer
 		e.encoding += 0x1000 // Encode the fact that a pointer is getting accessed
+	} else if p, ok := parent.(*PartialUnion); ok {
+		e.base = p.container
 	}
 	return e
 }
@@ -192,7 +196,7 @@ func resolveInFlow(dt Datatype, op *PcodeOp, slot int) Datatype {
 	if fd == nil || dt == nil || !dt.NeedsResolution() {
 		return dt
 	}
-	switch dt.(type) {
+	switch t := dt.(type) {
 	case *Struct, *Array:
 		if res := fd.getUnionField(dt, op, slot); res != nil {
 			return res.resolve
@@ -208,6 +212,26 @@ func resolveInFlow(dt Datatype, op *PcodeOp, slot int) Datatype {
 		res := scoreUnionField(sharedTypeFactory, dt, op, slot)
 		fd.setUnionField(dt, op, slot, res)
 		return res.resolve
+	case *PartialUnion:
+		// C++ parity: TypePartialUnion::resolveInFlow.
+		var cur Datatype = t.container
+		off := t.offset
+		for cur != nil && cur.Size() > t.Size() {
+			if u, ok := cur.(*Union); ok {
+				idx, newoff := resolveTruncation(u, off, op, slot)
+				if idx < 0 {
+					cur = nil
+				} else {
+					cur, off = u.fields[idx].Type, newoff
+				}
+			} else {
+				cur, off = datatypeSubType(cur, off)
+			}
+		}
+		if cur != nil && cur.Size() == t.Size() {
+			return cur
+		}
+		return t.stripped
 	case *Pointer:
 		// C++ parity: TypePointer::resolveInFlow (only a pointer to a union).
 		if dt.(*Pointer).Pointee().Metatype() != TYPE_UNION {
@@ -255,6 +279,26 @@ func resolveTruncation(u *Union, offset int64, op *PcodeOp, slot int) (int, int6
 	return -1, offset
 }
 
+// datatypeResolveTruncation is the type of the field of a union or partial
+// union a truncation at offset reads, and the offset left within it, or nil.
+// C++ parity: TypeUnion/TypePartialUnion::resolveTruncation.
+func datatypeResolveTruncation(dt Datatype, offset int64, op *PcodeOp, slot int) (Datatype, int64) {
+	var u *Union
+	switch t := dt.(type) {
+	case *Union:
+		u = t
+	case *PartialUnion:
+		u, offset = t.container, offset+t.offset
+	default:
+		return nil, offset
+	}
+	idx, newoff := resolveTruncation(u, offset, op, slot)
+	if idx < 0 {
+		return nil, newoff
+	}
+	return u.fields[idx].Type, newoff
+}
+
 // unionFindTruncation is the cached field of a union a truncation of sz
 // bytes at offset reads, or -1; no new scoring is done.
 // C++ parity: TypeUnion::findTruncation.
@@ -297,6 +341,26 @@ func findResolve(dt Datatype, op *PcodeOp, slot int) Datatype {
 		if res := fd.getUnionField(dt, op, slot); res != nil {
 			return res.resolve
 		}
+	case *PartialUnion:
+		// C++ parity: TypePartialUnion::findResolve. As in C++, the offset is
+		// not moved past a resolved union level.
+		var cur Datatype = t.container
+		off := t.offset
+		for cur != nil && cur.Size() > t.Size() {
+			if cur.Metatype() == TYPE_UNION {
+				if nt := findResolve(cur, op, slot); nt != cur {
+					cur = nt
+				} else {
+					cur = nil
+				}
+			} else {
+				cur, off = datatypeSubType(cur, off)
+			}
+		}
+		if cur != nil && cur.Size() == t.Size() {
+			return cur
+		}
+		return t.stripped
 	case *Pointer:
 		if t.Pointee().Metatype() == TYPE_UNION {
 			if res := fd.getUnionField(dt, op, slot); res != nil {
@@ -326,6 +390,8 @@ func findCompatibleResolve(dt, ct Datatype) int {
 			}
 		}
 		return -1
+	case *PartialUnion: // C++ parity: TypePartialUnion::findCompatibleResolve
+		return findCompatibleResolve(t.container, ct)
 	default:
 		return -1
 	}

@@ -395,6 +395,20 @@ func (sl *ScopeLocal) addrTiedName(addr address.Address, ct Datatype) string {
 	return fmt.Sprintf("%s%s%0*x", datatypeNameBase(ct), spacename, 2*addr.Space.AddrSize, addr.Offset/ws)
 }
 
+// addrTiedLinkName names a symbol linkSymbols created at address-tied
+// storage: a host name recorded at exactly that address wins over the
+// default storage name. C++ parity: ScopeLocal::
+// recoverNameRecommendationsForSymbols (invalid use point: the Symbol must
+// start at the recommendation's address and be address tied).
+func (sl *ScopeLocal) addrTiedLinkName(addr address.Address, ct Datatype) string {
+	if addr.Space == sl.SpaceID() {
+		if n := sl.ext().hostLocals[addr.Offset]; n != "" {
+			return n
+		}
+	}
+	return sl.addrTiedName(addr, ct)
+}
+
 // datatypeNameBase is the name-prefix a data-type contributes to a default
 // variable name: the first letter of its name, with pointers and arrays
 // prepending 'p' / 'a' and recursing.

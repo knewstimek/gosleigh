@@ -363,6 +363,15 @@ func (hv *HighVariable) Type() Datatype {
 	switch t := rep.Type().(type) {
 	case *PartialStruct:
 		return t.stripped
+	case *PartialUnion:
+		// A piece of a union keeps resolving per use unless the variable is
+		// mapped into a Symbol that is no structure or union.
+		if sym := hv.GetSymbol(); sym != nil && sym.Type() != nil && hv.GetSymbolOffset() != -1 {
+			if m := sym.Type().Metatype(); m != TYPE_STRUCT && m != TYPE_UNION {
+				return t.stripped
+			}
+		}
+		return t
 	case *Pointer:
 		if t.relStripped != nil {
 			return t.relStripped
@@ -491,6 +500,8 @@ func (hv *HighVariable) finalizeDatatype(tf *TypeFactory, sym *Symbol, off int64
 	}
 	switch t := tp.(type) { // stripType
 	case *PartialStruct:
+		tp = t.stripped
+	case *PartialUnion:
 		tp = t.stripped
 	case *Pointer:
 		if t.relStripped != nil {

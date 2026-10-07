@@ -68,7 +68,7 @@ func (f *TypeFactory) internSlow(dt Datatype) Datatype {
 		return f.GetPointer(typed.Size(), typed.Pointee(), typed.WordSize())
 	case *Array:
 		return f.GetArray(typed.Count(), typed.Element())
-	case *PartialStruct:
+	case *PartialStruct, *PartialUnion:
 		return typed
 	case *Struct:
 		if typed.Flags()&(datatypeTypedef|datatypeHostNamed) != 0 {
@@ -305,6 +305,24 @@ func (f *TypeFactory) GetPartialStruct(container Datatype, offset int64, size in
 	base := newDatatypeBase(size, 1, TYPE_PARTIALSTRUCT, stripped.Name())
 	base.submeta = SUB_PARTIALSTRUCT
 	v := &PartialStruct{datatypeBase: base, container: container, offset: offset, stripped: stripped}
+	f.intern[key] = v
+	return v
+}
+
+// GetPartialUnion returns the piece of size bytes at offset of container.
+// C++ parity: TypeFactory::getTypePartialUnion.
+func (f *TypeFactory) GetPartialUnion(container *Union, offset int64, size int32) *PartialUnion {
+	stripped := f.GetBase(size, TYPE_UNKNOWN, "")
+	key := fmt.Sprintf("partialunion:%p:%d:%d", container, offset, size)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if v, ok := f.intern[key].(*PartialUnion); ok {
+		return v
+	}
+	base := newDatatypeBase(size, 1, TYPE_PARTIALUNION, stripped.Name())
+	base.submeta = SUB_PARTIALUNION
+	base.flags |= datatypeNeedsResolution
+	v := &PartialUnion{datatypeBase: base, container: container, offset: offset, stripped: stripped}
 	f.intern[key] = v
 	return v
 }
@@ -697,8 +715,8 @@ func paramKey(params []Datatype) string {
 // The descent stops at the first component the range runs past, so a piece
 // straddling two array elements is a partial of the array, not of the
 // element where it starts.
-// C++ parity: TypeFactory::getExactPiece. Known mismatch: partial union and
-// partial enum types are not modelled (nil instead).
+// C++ parity: TypeFactory::getExactPiece. Known mismatch: partial enum
+// types are not modelled (nil instead).
 func (f *TypeFactory) exactPiece(ct Datatype, offset int64, size int32) Datatype {
 	var lastType Datatype
 	var lastOff int64
@@ -710,8 +728,8 @@ func (f *TypeFactory) exactPiece(ct Datatype, offset int64, size int32) Datatype
 		if ct.Size() == size {
 			return ct // Perfect size match
 		}
-		if ct.Metatype() == TYPE_UNION {
-			return nil
+		if u, ok := ct.(*Union); ok {
+			return f.GetPartialUnion(u, curOff, size)
 		}
 		lastType, lastOff = ct, curOff
 		ct, curOff = datatypeSubType(ct, curOff)
