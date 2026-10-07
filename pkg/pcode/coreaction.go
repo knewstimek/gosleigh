@@ -1172,7 +1172,15 @@ func addStackParamSymbols(data *Funcdata) {
 		if e := sl.FindOverlap(vn.Addr(), vn.Size()); e != nil {
 			continue
 		}
-		ct := vn.Type()
+		// The parameter takes its variable's data-type (pieces.type =
+		// vn->getHigh()->getType()).
+		var ct Datatype
+		if hv := vn.High(); hv != nil {
+			ct = hv.Type()
+		}
+		if ct == nil {
+			ct = vn.Type()
+		}
 		if ct == nil {
 			ct = sharedTypeFactory.GetBase(vn.Size(), TYPE_UNKNOWN, "")
 		}
