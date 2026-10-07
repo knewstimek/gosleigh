@@ -5,6 +5,9 @@ Ghidra C++ 디컴파일러 콘솔(CPUI_DEBUG 빌드)을 이 머신의 MSVC로 �
 
 - 산출물: `tools/decomp_dbg.exe` (약 2.5 MB, x86 32-bit, static CRT). `*.exe`는 gitignore라 커밋 안 됨.
 - 빌드 스크립트: `tools/build_decomp_dbg.py` (아래 절차를 자동화. 상단 상수의 BUILD/OBJ 경로는 임시 디렉터리를 가리키므로 재빌드 시 원하는 위치로 바꿀 것).
+- 진단용 계측 하네스는 `tools/cppharness/`: `build.py --fresh`가 ghidra-ref를 `local/cppharness/src`로 복사해
+  패치(`load function @addr`, `ACT_TRACE`)하고 OPACTION/TYPEPROP_DEBUG로 빌드한다. 실행은 `hx.py`,
+  Go와의 action 변경 순서 비교는 `actcmp.py`.
 - 대상 Makefile 타깃: `ghidra-ref/.../decompile/cpp/Makefile`의 `decomp_dbg` (COMMANDLINE 빌드).
 
 ## 툴체인
