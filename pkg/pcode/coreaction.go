@@ -2164,9 +2164,6 @@ func (a *ActionDirectWrite) Clone(groups ActionGroupList) Action {
 
 // Apply performs the two-phase DirectWrite labelling.
 // C++ parity: coreaction.cc ActionDirectWrite::apply
-// TODO known mismatch: FuncProto::possibleInputParam classification is
-// approximated via FuncProto::IsParamVarnode because the full ABI-level
-// possibleInputParam query has not yet been ported.
 func (a *ActionDirectWrite) Apply(data *Funcdata) int {
 	if data == nil {
 		return 0

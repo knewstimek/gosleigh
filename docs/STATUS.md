@@ -6,9 +6,9 @@
 
 | 측정 | 결과 | 비고 |
 |---|---|---|
-| realexe private-sample seed1/2/3 (x86-32) | 200/200/200 | seed3은 HEAD 코어 골든 |
+| realexe private-sample seed1/2/3 (x86-32) | 200/200/200 | 전부 HEAD 코어 골든(12.0.4판은 golden_12.0.4) |
 | realexe private-sample seed1 (x64 UE4) | 200/200 | HEAD 코어 골든 |
-| realexe private-sample seed2 | 199/200 | [156] enum 경고 순서(아래) |
+| realexe private-sample seed2 | 200/200 | |
 | 게이트 `tools/gates.py` | 전부 유지 | tree 10/10, corpus2 10/13, x64_auto 108/109 |
 | x64 코퍼스 C++ 코어 대조 `rawcmp.py` | corpus 8/8, corpus2 13/13, x64_auto 109/109 | 같은 바이트를 C++ 하네스로 |
 
@@ -17,7 +17,7 @@
 
 골든 코어는 ghidra-ref HEAD(12.2 DEV)여야 한다: `tools/cppharness/build_native.py`로 만든 decompile.exe를
 local/ghidra12_head에 넣고 `GHIDRA_HEADLESS=<그 사본>/support/analyzeHeadless.bat realexe.py sample`.
-private-sample seed1/2는 12.0.4 골든 그대로 통과.
+shift count >= 64 같은 C++ UB는 이 빌드 동작을 따른다(pcodeop.go INT_RIGHT nzmask).
 
 ## 알려진 불일치 (known mismatch)
 
@@ -29,7 +29,6 @@ private-sample seed1/2는 12.0.4 골든 그대로 통과.
 | 8바이트 long/longlong 코어 슬롯 | typefactory.go `coreBaseName` | 이름별 인터닝 |
 | Go typedef의 원형 링크 | typefactory.go | isOpIdentical |
 | 모델 `<rule>` 미포팅 | paramlist.go assignMap | 함수 타입은 fallback 배정만 |
-| enum 경고 순서(같은 enum 재전송) | capture `.typeorder` | Java 타입 전달 순서를 캡처가 못 담음 |
 
 ## 도구
 
@@ -38,4 +37,6 @@ private-sample seed1/2는 12.0.4 골든 그대로 통과.
   Go 쪽에 같은 형식 트레이스를 넣고 나란히 비교(pretty printer 토큰, collapse 규칙, guardCalls 등).
 - Go↔C++ 비교: `actcmp.py`, `rulecmp.py`(규칙 적용 수), C++ `print tree block`/`print map`.
 - 캡처 없는 x64 코퍼스: `rawcmp.py testdata/<corpus>/x64_goldens.json [name]`.
+- : GenCapture가 getFNTypes 기록(C++ decode 아님)을 빼고 쓴다. 옛 캡처는 재캡처 필요할 수 있음.
+- `.typeorder`: GenCapture가 getFNTypes 기록(C++ decode 아님)을 빼고 쓴다. 옛 캡처는 재캡처가 필요할 수 있다.
 - Go 추적: `SSA_DUMP_AFTER`, `SSA_DUMP_TYPES`, `SSA_DUMP_TREE`, `RULE_TRACE=1|2`, `INFER_TRACE`.

@@ -24,11 +24,51 @@ import ghidra.program.model.data.TypeDef;
 import java.io.File;
 import java.io.PrintWriter;
 import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
 public class GenCapture extends GhidraScript {
+
+	// DecompileDebug.dtypes also records getFNTypes: the return and parameter
+	// types of every function symbol Java encodes, before (and whether or
+	// not) the core decodes them. Those are references, not core decodes,
+	// so they say nothing about warning order. This list remembers which
+	// entries came from getFNTypes so writeTypeOrder can drop them.
+	@SuppressWarnings("serial")
+	private static class SourcedTypes extends ArrayList<Object> {
+		final List<Boolean> fromFN = new ArrayList<>();
+
+		@Override
+		public boolean add(Object o) {
+			boolean fn = false;
+			for (StackTraceElement e : Thread.currentThread().getStackTrace()) {
+				if (e.getMethodName().equals("getFNTypes")) {
+					fn = true;
+					break;
+				}
+			}
+			fromFN.add(fn);
+			return super.add(o);
+		}
+	}
+
+	// Swap in a SourcedTypes list right after enableDebug created the
+	// DecompileDebug, before anything is recorded.
+	private void tagTypeSources(DecompInterface iface) {
+		try {
+			Field df = DecompInterface.class.getDeclaredField("debug");
+			df.setAccessible(true);
+			Object debug = df.get(iface);
+			Field tf = debug.getClass().getDeclaredField("dtypes");
+			tf.setAccessible(true);
+			tf.set(debug, new SourcedTypes());
+		}
+		catch (Exception e) {
+			println("GenCapture: cannot tag type sources: " + e);
+		}
+	}
 
 	// The savefile lists data-types in dependency order, but the C++ core
 	// issues type warnings (an enum with duplicate values) in the order it
@@ -56,8 +96,14 @@ public class GenCapture extends GhidraScript {
 			List<?> dtypes = (List<?>) tf.get(debug);
 			// Only enums the core warns about: two names with one value
 			// (TypeEnum::decode "Some values do not have unique names").
+			List<Boolean> fromFN =
+				(dtypes instanceof SourcedTypes) ? ((SourcedTypes) dtypes).fromFN : null;
 			try (PrintWriter w = new PrintWriter(out, "UTF-8")) {
-				for (Object o : dtypes) {
+				for (int k = 0; k < dtypes.size(); k++) {
+					if (fromFN != null && fromFN.get(k)) {
+						continue;
+					}
+					Object o = dtypes.get(k);
 					if (o instanceof TypeDef) {
 						o = ((TypeDef) o).getBaseDataType();
 					}
@@ -106,6 +152,7 @@ public class GenCapture extends GhidraScript {
 			opts.grabFromProgram(currentProgram);
 			iface.setOptions(opts);
 			iface.enableDebug(out);
+			tagTypeSources(iface);
 			if (!iface.openProgram(currentProgram)) {
 				println("GenCapture: openProgram failed for " + args[i] + ": " + iface.getLastMessage());
 				iface.dispose();

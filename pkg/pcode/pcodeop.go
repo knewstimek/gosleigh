@@ -82,10 +82,12 @@ func (op *PcodeOp) getNZMaskLocal(cliploop bool) uint64 {
 				case sa >= 8*sz1:
 					resmask = 0
 				case sa >= 64: // Full mask shifted over 64 bits
-					// C++ shifts a 64-bit uintb by sa-64, which can reach 64
-					// or more for inputs past 16 bytes; x86-64 masks the
-					// count to 6 bits, and goldens come from that behavior.
-					resmask = maskForSize(int32(sz1-8)) >> ((sa - 64) & 63)
+					// C++ shifts a 64-bit uintb by sa-64, which reaches 64 or
+					// more for inputs past 16 bytes (undefined behavior). The
+					// reference core build (tools/cppharness, the HEAD golden
+					// decompile.exe) yields 0 there, as a Go shift does; the
+					// 12.0.4 release binary masked the count to 6 bits.
+					resmask = maskForSize(int32(sz1-8)) >> (sa - 64)
 				default: // Fill in one bits from the part not calculated
 					resmask |= ^uint64(0) << (64 - sa)
 				}
