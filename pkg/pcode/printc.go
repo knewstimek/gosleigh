@@ -2562,7 +2562,7 @@ func (s *printCState) emitSwitchCaseLabels(c switchCase, jt *JumpTable) {
 	}
 	var ct Datatype
 	if op := jt.IndirectOp(); op != nil && op.NumInput() > 0 {
-		ct = op.Input(0).TypeReadFacing(op)
+		ct = op.Input(0).HighTypeReadFacing(op) // C++ parity: BlockSwitch::getSwitchType
 	}
 	for j, n := 0, jt.NumIndicesByBlock(c.basic); j < n; j++ {
 		// PrintLanguage.Label appends the ':' itself.
@@ -2581,6 +2581,11 @@ func caseLabelText(val uint64, ct Datatype) string {
 		if name, ok := e.Values()[val]; ok {
 			return name
 		}
+	}
+	// A pointer-typed switch variable prints its labels as cast hex
+	// constants. C++ parity: PrintC::pushConstant TYPE_PTR default path.
+	if _, ok := ct.(*Pointer); ok {
+		return "(" + printedTypeString(ct) + ")" + fmt.Sprintf("0x%x", val)
 	}
 	return formatIntegerLiteral(val, ct.Size(), ct.Metatype() == TYPE_INT)
 }

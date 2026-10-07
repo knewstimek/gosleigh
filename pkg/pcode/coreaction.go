@@ -3673,11 +3673,8 @@ func (a *ActionSwitchNorm) Clone(groups ActionGroupList) Action {
 // Apply iterates every recovered JumpTable and, for ones that have not yet
 // been labelled, runs matchModel -> recoverLabels -> foldInNormalization.
 // foldInGuards is always re-run to pick up newly collapsed guards.
-// C++ parity: coreaction.cc ActionSwitchNorm::apply (lines 4559-4576)
-// TODO known mismatch: data.getStructure().clear() is not wired up because
-// the Go Funcdata has no structured-block cache yet (blockaction.cc). Each
-// foldInGuards success still bumps the action count as in the C++ path so
-// the restart loop re-evaluates downstream rules.
+// A folded guard changes the switch's block structure, so the structure is
+// rebuilt from scratch. C++ parity: coreaction.cc ActionSwitchNorm::apply.
 func (a *ActionSwitchNorm) Apply(data *Funcdata) int {
 	if data == nil {
 		return 0
@@ -3694,7 +3691,7 @@ func (a *ActionSwitchNorm) Apply(data *Funcdata) int {
 			a.count++
 		}
 		if jt.FoldInGuards(data) {
-			// C++ calls data.getStructure().clear() here; see TODO above.
+			data.SetStructureGraph(NewBlockGraph()) // Make sure we redo structure
 			a.count++
 		}
 	}
