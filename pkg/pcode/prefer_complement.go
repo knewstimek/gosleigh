@@ -96,6 +96,7 @@ func replaceLessequal(fd *Funcdata, op *PcodeOp) bool {
 		// mask, so mask here or a -1 result is stored as full-width 0xff..ff in
 		// an undersized varnode and the printer mis-renders it.
 		newVn := fd.NewConstant(sz, uint64(val+diff)&maskForSize(sz))
+		newVn.copySymbol(vn) // Preserve data-type (and any Symbol info)
 		fd.OpSetInput(op, newVn, constIdx)
 		fd.OpSetOpcode(op, CPUI_INT_SLESS)
 	} else {
@@ -114,6 +115,7 @@ func replaceLessequal(fd *Funcdata, op *PcodeOp) bool {
 		}
 		// C++ parity: res = (val+diff) & calc_mask(size). See signed branch note.
 		newVn := fd.NewConstant(sz, uint64(int64(uval)+diff)&maskForSize(sz))
+		newVn.copySymbol(vn) // Preserve data-type (and any Symbol info)
 		fd.OpSetInput(op, newVn, constIdx)
 		fd.OpSetOpcode(op, CPUI_INT_LESS)
 	}

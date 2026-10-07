@@ -1,6 +1,10 @@
 package pcode
 
-import "strings"
+import (
+	"strings"
+
+	"gosleigh/pkg/address"
+)
 
 // ExprPrecedence uses larger numbers for tighter binding.
 type ExprPrecedence int
@@ -938,6 +942,21 @@ func splitScopePath(name string) []string {
 // C++ parity: PrintC::pushSymbolScope (MINIMAL_NAMESPACES) ->
 // Symbol::getResolutionDepth + Scope::findDistinguishingScope.
 func (s *printCState) minimalScopedName(qualified string) string {
+	return s.minimalScopedNameAt(qualified, address.Address{})
+}
+
+// namespaceIDs is the host's scope-id path of the symbol at addr and of the
+// current function. Either is nil when the host does not know it.
+func (s *printCState) namespaceIDs(addr address.Address) (symIDs, useIDs []uint64) {
+	h, ok := s.fd.HostScope().(HostNamespaceIDs)
+	if !ok || addr.Space == nil {
+		return nil, nil
+	}
+	return h.NamespaceIDsAt(addr), h.NamespaceIDsAt(s.fd.baseAddr)
+}
+
+// minimalScopedNameAt is minimalScopedName for the symbol at addr.
+func (s *printCState) minimalScopedNameAt(qualified string, addr address.Address) string {
 	parts := splitScopePath(qualified)
 	symScope := parts[:len(parts)-1] // Path of the symbol's scope (global excluded)
 	var useScope []string
@@ -950,7 +969,8 @@ func (s *printCState) minimalScopedName(qualified string) string {
 			useScope = up[:len(up)-1]
 		}
 	}
-	depth := resolutionDepth(symScope, useScope, parts[len(parts)-1], s.isNameUsed)
+	symIDs, useIDs := s.namespaceIDs(addr)
+	depth := resolutionDepthIDs(symScope, useScope, symIDs, useIDs, parts[len(parts)-1], s.isNameUsed)
 	if depth == 0 {
 		return parts[len(parts)-1]
 	}
@@ -1023,18 +1043,25 @@ func isDynamicSymbolName(nm string) bool {
 // excluded); a name overridden on the way needs one more.
 // C++ parity: Symbol::getResolutionDepth.
 func resolutionDepth(sym, use []string, name string, used func(string, []string, int) bool) int {
-	same := func(a, b []string) bool {
-		if len(a) != len(b) {
-			return false
-		}
-		for i := range a {
-			if a[i] != b[i] {
-				return false
-			}
-		}
-		return true
+	return resolutionDepthIDs(sym, use, nil, nil, name, used)
+}
+
+// resolutionDepthIDs is resolutionDepth with the scopes' host ids, when
+// known: two namespaces of one name are distinct scopes (Ghidra can hold
+// two "physx" namespaces). C++ parity: Scope identity in
+// Scope::findDistinguishingScope.
+func resolutionDepthIDs(sym, use []string, symIDs, useIDs []uint64, name string, used func(string, []string, int) bool) int {
+	if len(symIDs) != len(sym) || len(useIDs) != len(use) {
+		symIDs, useIDs = nil, nil
 	}
-	if same(sym, use) {
+	eq := func(i int) bool {
+		return sym[i] == use[i] && (symIDs == nil || symIDs[i] == useIDs[i])
+	}
+	same := len(sym) == len(use)
+	for i := 0; same && i < len(sym); i++ {
+		same = eq(i)
+	}
+	if same {
 		return 0 // Symbol is in the scope where it is used
 	}
 	// findDistinguishingScope: the first scope on sym's path not shared
@@ -1045,7 +1072,7 @@ func resolutionDepth(sym, use []string, name string, used func(string, []string,
 	}
 	dist := -1 // Index into sym of the distinguishing scope
 	for i := 0; i < min; i++ {
-		if sym[i] != use[i] {
+		if !eq(i) {
 			dist = i
 			break
 		}

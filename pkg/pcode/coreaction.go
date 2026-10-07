@@ -2084,6 +2084,12 @@ func (a *ActionDeindirect) Apply(data *Funcdata) int {
 					if !known {
 						hf = HostFunction{Name: name}
 					}
+					// The call prints through the function symbol found, in
+					// its own scope. C++ parity: PrintC::opCall
+					// (pushSymbolScope(fd->getSymbol())).
+					if hf.Name != "" {
+						name = hf.Name
+					}
 					fc.deindirectHost(data, hf, vn.Addr(), name)
 					a.count++
 					continue

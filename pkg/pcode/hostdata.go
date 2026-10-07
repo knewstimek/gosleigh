@@ -38,6 +38,13 @@ type HostTypeWarnings interface {
 // current function's namespace path: whether name is used by a namespace at
 // depth >= depth of that path (0 = outermost namespace below global).
 // C++ parity: ScopeGhidraNamespace::isNameUsed (DecompileCallback.isNameUsed).
+type HostNamespaceIDs interface {
+	// NamespaceIDsAt is the scope-id path (outermost first, global
+	// excluded) of the symbol at addr, nil when unknown.
+	NamespaceIDsAt(addr address.Address) []uint64
+}
+
+// HostNameUsed answers ScopeGhidraNamespace::isNameUsed.
 type HostNameUsed interface {
 	IsNameUsed(name string, depth int) bool
 }

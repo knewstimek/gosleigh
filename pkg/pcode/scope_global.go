@@ -57,6 +57,14 @@ func (g *GlobalScope) EntryFor(vn *Varnode) *SymbolEntry {
 	return g.vnMap[vn]
 }
 
+// symbolAddr is the storage address of the symbol's first entry.
+func symbolAddr(sym *Symbol) address.Address {
+	if len(sym.mapEntry) == 0 {
+		return address.Address{}
+	}
+	return sym.mapEntry[0].Addr()
+}
+
 // globalSymbolName is how a global symbol is referenced from the current
 // function: qualified only as far as needed from the function's scope.
 // C++ parity: PrintC::pushSymbolScope (minimal namespace strategy).
@@ -68,7 +76,7 @@ func (s *printCState) globalSymbolName(sym *Symbol) string {
 	if ns := sym.Namespace(); ns != "" {
 		q = ns + "::" + q
 	}
-	q = s.minimalScopedName(q)
+	q = s.minimalScopedNameAt(q, symbolAddr(sym))
 	if i := strings.LastIndex(q, "::"); i >= 0 && strings.HasSuffix(q, "::"+sym.Name()) {
 		return q[:i+2] + name
 	}
@@ -88,7 +96,8 @@ func (s *printCState) globalSymbolExpr(sym *Symbol) ExprFragment {
 			useScope = up[:len(up)-1]
 		}
 		base := cppDisplayName(sym.Name())
-		depth := resolutionDepth(sym.nsPath, useScope, sym.Name(), s.isNameUsed)
+		symIDs, useIDs := s.namespaceIDs(symbolAddr(sym))
+		depth := resolutionDepthIDs(sym.nsPath, useScope, symIDs, useIDs, sym.Name(), s.isNameUsed)
 		if depth == 0 {
 			return s.lang.Atom(base)
 		}

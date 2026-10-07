@@ -710,6 +710,9 @@ func typeOrderLevel(a, b Datatype, level int) int {
 		}
 		return 0
 	}
+	if a.Metatype() == TYPE_CODE && b.Metatype() == TYPE_CODE {
+		return compareCode(a, b, level)
+	}
 	switch ta := a.(type) {
 	case *Array: // C++ parity: TypeArray::compare
 		tb, ok := b.(*Array)
@@ -775,6 +778,89 @@ func typeOrderLevel(a, b Datatype, level int) int {
 		}
 	}
 	return 0
+}
+
+// codeProtoOf is the prototype a function data-type carries: a host
+// function type's, or a Code built with parameters, nil for plain code.
+func codeProtoOf(dt Datatype) *HostFunction {
+	if hf := sharedTypeFactory.codeProto(dt); hf != nil {
+		return hf
+	}
+	c, ok := dt.(*Code)
+	if !ok || !c.HasPrototype() {
+		return nil
+	}
+	hf := &HostFunction{Dotdotdot: c.variadic}
+	for _, p := range c.params {
+		hf.Params = append(hf.Params, HostParam{Type: p})
+	}
+	if c.returnType != nil {
+		hf.Output = &HostParam{Type: c.returnType}
+	}
+	return hf
+}
+
+// compareCode orders two function data-types: one with a prototype comes
+// first, then by model, parameter count, flags, parameter and return types.
+// C++ parity: TypeCode::compare / TypeCode::compareBasic.
+func compareCode(a, b Datatype, level int) int {
+	pa, pb := codeProtoOf(a), codeProtoOf(b)
+	switch {
+	case pa == nil && pb == nil:
+		return 0
+	case pa == nil:
+		return 1
+	case pb == nil:
+		return -1
+	}
+	if (pa.Model == "") != (pb.Model == "") {
+		if pa.Model == "" {
+			return 1
+		}
+		return -1
+	}
+	if pa.Model != pb.Model {
+		if pa.Model < pb.Model {
+			return -1
+		}
+		return 1
+	}
+	if len(pa.Params) != len(pb.Params) {
+		if len(pb.Params) < len(pa.Params) {
+			return -1
+		}
+		return 1
+	}
+	if pa.Dotdotdot != pb.Dotdotdot { // getComparableFlags (dotdotdot)
+		if !pa.Dotdotdot {
+			return -1
+		}
+		return 1
+	}
+	if level--; level < 0 {
+		return compareTypeID(a, b)
+	}
+	for i := range pa.Params {
+		if c := typeOrderLevel(pa.Params[i].Type, pb.Params[i].Type, level); c != 0 {
+			return c
+		}
+	}
+	var oa, ob Datatype
+	if pa.Output != nil {
+		oa = pa.Output.Type
+	}
+	if pb.Output != nil {
+		ob = pb.Output.Type
+	}
+	switch {
+	case oa == nil && ob == nil:
+		return 0
+	case oa == nil:
+		return 1
+	case ob == nil:
+		return -1
+	}
+	return typeOrderLevel(oa, ob, level)
 }
 
 // compareTypeID is the last tie-break between two equal-looking data-types.

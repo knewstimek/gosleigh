@@ -74,6 +74,8 @@ type captureData struct {
 	// path that use it (-1: more symbols carry it than the host checks),
 	// from <entry>.names (GenNames).
 	namesUsed map[string][]int
+	// nsIDs maps a symbol address to its scope-id path (outermost first).
+	nsIDs map[uint64][]uint64
 	syms      []pcode.HostData
 	// readonly are the ram ranges with the read-only property: the load
 	// image's read-only chunks and the read-only symbols' storage.
@@ -87,6 +89,7 @@ type captureData struct {
 // captureProto is the locked part of a host function prototype.
 type captureProto struct {
 	name, model            string
+	namespace              string // scope path of the function symbol
 	extraPop               int32
 	noReturn               bool
 	inputLocked, outLocked bool
@@ -172,10 +175,23 @@ func loadCaptureData(path string, ram *address.Space) (*captureData, error) {
 		}
 		return append(append([]string(nil), parent...), s.attr("name"))
 	}
-	cd := &captureData{}
+	var idList func(id string) []uint64
+	idList = func(id string) []uint64 {
+		s := scopes[id]
+		if s == nil || s.attr("name") == "" {
+			return nil
+		}
+		var parent []uint64
+		if p := s.child("parent"); p != nil {
+			parent = idList(p.attr("id"))
+		}
+		return append(append([]uint64(nil), parent...), parseUint(id))
+	}
+	cd := &captureData{nsIDs: map[uint64][]uint64{}}
 	for id, s := range scopes {
 		ns := nsPath(id)
 		nsl := nsList(id)
+		ids := idList(id)
 		list := s.child("symbollist")
 		if list == nil {
 			continue
@@ -188,6 +204,11 @@ func loadCaptureData(path string, ram *address.Space) (*captureData, error) {
 			sym, at := &ms.Kids[0], ms.child("addr")
 			if at == nil || at.attr("space") != ram.Name {
 				continue
+			}
+			// An external reference shares its function's address from the
+			// global scope; it must not hide the function's own scope path.
+			if sym.XMLName.Local != "externrefsymbol" {
+				cd.nsIDs[parseUint(at.attr("offset"))] = ids
 			}
 			hd := pcode.HostData{
 				Name:          sym.attr("name"),
@@ -209,7 +230,9 @@ func loadCaptureData(path string, ram *address.Space) (*captureData, error) {
 				if cd.protos == nil {
 					cd.protos = map[uint64]captureProto{}
 				}
-				cd.protos[hd.Addr.Offset] = parseCaptureProto(sym, types)
+				cp := parseCaptureProto(sym, types)
+				cp.namespace = ns
+				cd.protos[hd.Addr.Offset] = cp
 				continue
 			default:
 				continue // externrefs come from the symbol table
@@ -353,6 +376,15 @@ func (h hostWithData) QueryFunction(addr address.Address) (pcode.HostFunction, b
 			// import slot): the capture holds all the core received.
 			hf = pcode.HostFunction{Name: cp.name, Model: cp.model, ExtraPop: cp.extraPop}
 			ok = true
+		}
+		// The callee is the function symbol the core finds at the address,
+		// named within its own scope (a thunk's target class).
+		// C++ parity: FuncCallSpecs takes the FunctionSymbol's name and scope.
+		if cp.name != "" {
+			hf.Name, hf.Namespace = cp.name, cp.namespace
+			if cp.namespace != "" {
+				hf.Name = cp.namespace + "::" + cp.name
+			}
 		}
 		hf.NoReturn = hf.NoReturn || cp.noReturn
 		hf.InputLocked, hf.OutputLocked = cp.inputLocked, cp.outLocked
@@ -757,6 +789,11 @@ func (cd *captureData) Property(addr address.Address) uint32 {
 
 // IsNameUsed implements pcode.HostNameUsed.
 // Java parity: DecompileCallback.isNameUsed.
+// NamespaceIDsAt implements pcode.HostNamespaceIDs.
+func (cd *captureData) NamespaceIDsAt(addr address.Address) []uint64 {
+	return cd.nsIDs[addr.Offset]
+}
+
 func (cd *captureData) IsNameUsed(name string, depth int) bool {
 	for _, d := range cd.namesUsed[name] {
 		if d < 0 || d >= depth {

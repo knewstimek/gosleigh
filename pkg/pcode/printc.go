@@ -2648,14 +2648,16 @@ func (s *printCState) labelForBlock(bl *FlowBlock) string {
 	label := fmt.Sprintf("label_%d", len(s.blockLabels))
 	if bb := toBasic(bl); bb != nil {
 		if bb.FirstOp() != nil {
-			off := bb.entryAddr().Offset // C++ parity: BlockBasic::getEntryAddr
+			// Without a code label symbol the label is the block kind, the
+			// space shortcut ('r' for the code space) and the raw address.
+			raw := "r" + PrintRawAddr(bb.entryAddr()) // C++ parity: BlockBasic::getEntryAddr
 			switch {
 			case bb.HasFlag(BlockFlagJoinedBlock):
-				label = fmt.Sprintf("joined_r0x%08x", off)
+				label = "joined_" + raw
 			case bb.HasFlag(BlockFlagDuplicateBlock):
-				label = fmt.Sprintf("dup_r0x%08x", off)
+				label = "dup_" + raw
 			default:
-				label = fmt.Sprintf("LAB_%08x", off)
+				label = "code_" + raw
 				// A code label the host knows at the entry names it.
 				// C++ parity: PrintC::emitLabel -> Scope::queryCodeLabel.
 				if hs, ok := s.fd.hostScope.(HostDataScope); ok {
@@ -4197,7 +4199,7 @@ func (s *printCState) renderCallTarget(op *PcodeOp, indirect bool) (ExprFragment
 	if !indirect && s.fd != nil {
 		if fc := s.fd.callSpecsForOp(op); fc != nil && fc.GetEntryAddress().Space != nil {
 			if name := fc.GetName(); name != "" {
-				return s.lang.Atom(s.minimalScopedName(name)), nil
+				return s.lang.Atom(s.minimalScopedNameAt(name, fc.GetEntryAddress())), nil
 			}
 			return s.lang.Atom(genericFunctionName(fc.GetEntryAddress())), nil
 		}
