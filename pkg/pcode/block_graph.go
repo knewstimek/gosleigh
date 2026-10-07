@@ -49,6 +49,19 @@ func (bg *BlockGraph) RemoveEdge(begin, end *FlowBlock) {
 	}
 }
 
+// removeFromFlowSplit removes a block that splits flow between its two
+// in-edges and two out-edges: in-edge 0 joins out-edge 0 or 1 (flipflow),
+// the remaining in-edge joins the remaining out-edge.
+// C++ parity: block.cc BlockGraph::removeFromFlowSplit.
+func (bg *BlockGraph) removeFromFlowSplit(bl *FlowBlock, flipflow bool) {
+	if flipflow {
+		bl.replaceEdgesThru(0, 1) // Replace edge slot from 0 -> 1
+	} else {
+		bl.replaceEdgesThru(1, 1) // Replace edge slot from 1 -> 1
+	}
+	bl.replaceEdgesThru(0, 0) // Replace remaining edge
+}
+
 // RemoveBlock removes bl from the graph, removing all its edges first.
 // C++ parity: block.cc BlockGraph::removeBlock
 func (bg *BlockGraph) RemoveBlock(bl *FlowBlock) {

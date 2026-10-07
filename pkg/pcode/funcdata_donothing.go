@@ -213,6 +213,20 @@ func (fd *Funcdata) RemoveDoNothingBlock(bb *BlockBasic) {
 	fd.StructureReset() // delete any structure we had before
 }
 
+// removeFromFlowSplit removes an empty block that splits flow, wiring each
+// in-edge straight through to an out-edge (swap pairs in-edge 0 with out-edge
+// 1), and resets the structure.
+// C++ parity: Funcdata::removeFromFlowSplit.
+func (fd *Funcdata) removeFromFlowSplit(bl *BlockBasic, swap bool) {
+	if len(bl.Ops()) != 0 {
+		panic("Can only split the flow for an empty block")
+	}
+	bg := fd.GetBasicBlocks()
+	bg.removeFromFlowSplit(&bl.FlowBlock, swap)
+	bg.RemoveBlock(&bl.FlowBlock)
+	fd.StructureReset()
+}
+
 // removeJumpTable forgets jt; its switch block is no longer a switch out.
 // C++ parity: funcdata_block.cc Funcdata::removeJumpTable.
 func (fd *Funcdata) removeJumpTable(jt *JumpTable) {

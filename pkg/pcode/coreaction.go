@@ -3533,12 +3533,10 @@ func (a *ActionConditionalExe) Clone(groups ActionGroupList) Action {
 // Apply iterates all basic blocks looking for modifiable conditional-execute
 // configurations, calling ConditionalExecution.Trial then .Execute on every
 // hit until a pass makes no changes. Matches C++ coreaction.cc lines 4478-4503.
+// The elimination logic may not work with unreachable blocks.
 // C++ parity: condexe.cc ActionConditionalExe::apply
-// TODO known mismatch: the C++ implementation first bails out if
-// data.hasUnreachableBlocks() is true. Gosleigh has no such method; instead
-// we trust Trial() to reject malformed iblocks via testIBlock/findInitPre.
 func (a *ActionConditionalExe) Apply(data *Funcdata) int {
-	if data == nil {
+	if data == nil || data.HasFlag(FuncBlocksUnreachable) {
 		return 0
 	}
 	bg := data.GetBasicBlocks()

@@ -304,6 +304,23 @@ func (b *FlowBlock) halfDeleteOutEdge(slot int) {
 	b.outEdges = b.outEdges[:len(b.outEdges)-1]
 }
 
+// replaceEdgesThru splices this block out of one path: the predecessor on
+// in-edge in now flows directly into the successor on out-edge out, and the
+// two half-edges through this block are deleted.
+// C++ parity: block.cc FlowBlock::replaceEdgesThru.
+func (b *FlowBlock) replaceEdgesThru(in, out int) {
+	inb := b.inEdges[in].Point
+	inblockOutslot := b.inEdges[in].ReverseIndex
+	outb := b.outEdges[out].Point
+	outblockInslot := b.outEdges[out].ReverseIndex
+	inb.outEdges[inblockOutslot].Point = outb
+	inb.outEdges[inblockOutslot].ReverseIndex = outblockInslot
+	outb.inEdges[outblockInslot].Point = inb
+	outb.inEdges[outblockInslot].ReverseIndex = inblockOutslot
+	b.halfDeleteInEdge(in)
+	b.halfDeleteOutEdge(out)
+}
+
 // RemoveInEdge removes the bidirectional edge at inEdges[slot].
 // C++ parity: block.cc FlowBlock::removeInEdge
 func (b *FlowBlock) RemoveInEdge(slot int) {

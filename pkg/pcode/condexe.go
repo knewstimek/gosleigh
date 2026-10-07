@@ -608,8 +608,6 @@ func (ce *ConditionalExecution) verify() bool {
 
 // Trial stores ib as candidate iblock and runs verify().
 // C++ parity: condexe.cc ConditionalExecution::trial
-// Note: the C++ trial() additionally recurses on directsplit configurations;
-// that secondary recursion is not yet ported. TODO known mismatch.
 func (ce *ConditionalExecution) Trial(ib *BlockBasic) bool {
 	ce.iblock = ib
 	if !ce.verify() {
@@ -618,12 +616,9 @@ func (ce *ConditionalExecution) Trial(ib *BlockBasic) bool {
 	return true
 }
 
-// Execute destroys iblock ops and rewrites their readers. Must be called
-// after a successful Trial().
+// Execute destroys iblock ops, rewrites their readers, and removes iblock
+// from the flow. Must be called after a successful Trial().
 // C++ parity: condexe.cc ConditionalExecution::execute
-// Known mismatch: Funcdata::removeFromFlowSplit is not ported; the CFG-level
-// edge rewiring is left to subsequent passes (blockaction). The data-flow
-// fixup is complete and iblock ops are destroyed.
 func (ce *ConditionalExecution) Execute() {
 	ops := ce.iblock.Ops()
 	for i := len(ops) - 1; i >= 0; i-- {
@@ -636,7 +631,7 @@ func (ce *ConditionalExecution) Execute() {
 		}
 		ce.fd.OpDestroy(op)
 	}
-	// TODO known mismatch: fd.removeFromFlowSplit(iblock, postaOutslot != camethruPostaSlot).
+	ce.fd.removeFromFlowSplit(ce.iblock, ce.postaOutslot != ce.camethruPostaSlot)
 }
 
 // ---------------------------------------------------------------------------
