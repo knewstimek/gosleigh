@@ -74,7 +74,7 @@ type captureData struct {
 	// path that use it (-1: more symbols carry it than the host checks),
 	// from <entry>.names (GenNames).
 	namesUsed map[string][]int
-	syms         []pcode.HostData
+	syms      []pcode.HostData
 	// readonly are the ram ranges with the read-only property: the load
 	// image's read-only chunks and the read-only symbols' storage.
 	// C++ parity: Database::setPropertyRange (Architecture::fillinReadOnly
@@ -91,6 +91,7 @@ type captureProto struct {
 	noReturn               bool
 	inputLocked, outLocked bool
 	modelLock              bool
+	dotdotdot              bool
 	params                 []pcode.HostParam
 	output                 *pcode.HostParam
 }
@@ -285,6 +286,7 @@ func parseCaptureProto(fn *xnode, types map[string]*xnode) captureProto {
 	}
 	cp.model = proto.attr("model")
 	cp.modelLock = proto.attr("modellock") == "true"
+	cp.dotdotdot = proto.attr("dotdotdot") == "true"
 	if ep := proto.attr("extrapop"); ep != "" && ep != "unknown" {
 		cp.extraPop = int32(parseUint(ep))
 	}
@@ -327,6 +329,7 @@ func (h hostWithData) QueryFunction(addr address.Address) (pcode.HostFunction, b
 		}
 		hf.NoReturn = hf.NoReturn || cp.noReturn
 		hf.InputLocked, hf.OutputLocked = cp.inputLocked, cp.outLocked
+		hf.Dotdotdot = hf.Dotdotdot || cp.dotdotdot
 		if cp.modelLock {
 			hf.Model, hf.ModelLock = cp.model, true
 		}

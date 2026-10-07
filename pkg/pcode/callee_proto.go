@@ -78,6 +78,9 @@ func (fc *FuncCallSpecs) applyHostLocks(data *Funcdata, hp *HostFunction) {
 	if hp.NoReturn {
 		fc.SetNoReturn(true)
 	}
+	if hp.Dotdotdot {
+		fc.SetDotdotdot(true)
+	}
 }
 
 // LockedParam returns the i-th locked parameter slot of the call.

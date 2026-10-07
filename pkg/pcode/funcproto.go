@@ -25,6 +25,9 @@ import (
 //
 // C++ parity: funcdata.hh FuncProto (partial)
 type FuncProto struct {
+	// dotdotdot: the prototype takes variable arguments after its locked
+	// parameters. C++ parity: FuncProto::dotdotdot flag.
+	dotdotdot bool
 	// selfLocked: the locked parameters of the function's own prototype as
 	// the host stores them (FuncProto::store with an input lock).
 	selfLocked []ProtoSlot
@@ -163,6 +166,7 @@ func (fp *FuncProto) Copy(other *FuncProto) {
 	fp.inputLocked = other.inputLocked
 	fp.modelLocked = other.modelLocked
 	fp.outputLocked = other.outputLocked
+	fp.dotdotdot = other.dotdotdot
 	fp.params = append([]*HighVariable(nil), other.params...)
 	fp.output = other.output
 	fp.outputAddr = other.outputAddr
@@ -943,3 +947,7 @@ func (fp *FuncProto) SetReturnBytesConsumed(val int32) bool {
 
 // ReturnBytesConsumed returns the hint (0 = all bytes).
 func (fp *FuncProto) ReturnBytesConsumed() int32 { return fp.returnBytesConsumed }
+
+// SetDotdotdot marks the prototype as taking variable arguments.
+// C++ parity: FuncProto::setDotdotdot.
+func (fp *FuncProto) SetDotdotdot(val bool) { fp.dotdotdot = val }

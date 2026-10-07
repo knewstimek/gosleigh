@@ -661,20 +661,134 @@ func (m *JumpBasic) flowsOnlyToModel(vn *Varnode, trailOp *PcodeOp) bool {
 
 // backup2Switch reverse-emulates output from outvn back to invn, undoing each
 // normalization op along the way, to recover the original switch value used as
-// a case label. C++ parity: jumptable.cc JumpBasic::backup2Switch (jumptable.cc:472).
-//
-// Known gap: reverse evaluation of a binary/unary normalization op needs
-// TypeOp::recoverInputBinary/recoverInputUnary, which are not ported. For dense
-// switches the normalized variable is the switch variable (outvn == invn), so
-// the loop never runs; any non-trivial normalization chain returns
-// errBadSwitchNorm, which BuildLabels maps to JumpValueNoLabel (the C++
-// EvaluationError arm).
-func (m *JumpBasic) backup2Switch(_ *Funcdata, output uint64, outvn, invn *Varnode) (uint64, error) {
+// a case label. A constant operand not in the constant space is read from the
+// load image. C++ parity: jumptable.cc JumpBasic::backup2Switch.
+func (m *JumpBasic) backup2Switch(fd *Funcdata, output uint64, outvn, invn *Varnode) (uint64, error) {
 	curvn := outvn
 	for curvn != invn {
-		return 0, errBadSwitchNorm
+		op := curvn.Def()
+		if op == nil {
+			return 0, errBadSwitchNorm
+		}
+		slot := 0
+		for slot < op.NumInput() && op.Input(slot).IsConstant() { // first non-constant input
+			slot++
+		}
+		et := op.EvalType()
+		switch {
+		case et&PcodeOpBinary != 0:
+			other := op.Input(1 - slot)
+			otherval := other.Offset()
+			if !other.IsConstant() {
+				if fd == nil || fd.imageReader == nil {
+					return 0, errBadSwitchNorm
+				}
+				v, err := fd.imageReader(other.Addr(), int(other.Size()))
+				if err != nil {
+					return 0, errBadSwitchNorm
+				}
+				otherval = v
+			}
+			res, err := recoverInputBinary(op.Code(), slot, op.Output().Size(), output, op.Input(slot).Size(), otherval)
+			if err != nil {
+				return 0, err
+			}
+			output = res
+			curvn = op.Input(slot)
+		case et&PcodeOpUnary != 0:
+			res, err := recoverInputUnary(op.Code(), op.Output().Size(), output, op.Input(slot).Size())
+			if err != nil {
+				return 0, err
+			}
+			output = res
+			curvn = op.Input(slot)
+		default:
+			return 0, errBadSwitchNorm // Bad switch normalization op
+		}
 	}
 	return output, nil
+}
+
+// errCannotRecover is OpBehavior's "cannot recover input" / EvaluationError.
+var errCannotRecover = errBadSwitchNorm
+
+// recoverInputUnary undoes a unary op: the input giving output out.
+// C++ parity: OpBehavior*::recoverInputUnary.
+func recoverInputUnary(opc OpCode, sizeout int32, out uint64, sizein int32) (uint64, error) {
+	switch opc {
+	case CPUI_COPY:
+		return out, nil
+	case CPUI_INT_ZEXT:
+		if mask := sizeMask(sizein); mask&out != out {
+			return 0, errCannotRecover // Output is not in range of zext operation
+		}
+		return out, nil
+	case CPUI_INT_SEXT:
+		masklong, maskshort := sizeMask(sizeout), sizeMask(sizein)
+		if out&(maskshort^(maskshort>>1)) == 0 { // Positive input
+			if out&maskshort != out {
+				return 0, errCannotRecover
+			}
+		} else if out&(masklong^maskshort) != masklong^maskshort { // Negative input
+			return 0, errCannotRecover
+		}
+		return out & maskshort, nil
+	case CPUI_INT_2COMP:
+		return (^(out - 1)) & sizeMask(sizein), nil
+	case CPUI_INT_NEGATE:
+		return (^out) & sizeMask(sizein), nil
+	}
+	return 0, errCannotRecover
+}
+
+// recoverInputBinary undoes a binary op whose other input is in: the input
+// in slot giving output out. C++ parity: OpBehavior*::recoverInputBinary.
+func recoverInputBinary(opc OpCode, slot int, sizeout int32, out uint64, sizein int32, in uint64) (uint64, error) {
+	switch opc {
+	case CPUI_INT_ADD:
+		return (out - in) & sizeMask(sizeout), nil
+	case CPUI_INT_SUB:
+		if slot == 0 {
+			return (in + out) & sizeMask(sizeout), nil
+		}
+		return (in - out) & sizeMask(sizeout), nil
+	case CPUI_INT_LEFT:
+		if slot != 0 || in >= uint64(sizeout)*8 {
+			return 0, errCannotRecover
+		}
+		sa := in
+		if (out<<(8*uint64(sizeout)-sa))&sizeMask(sizeout) != 0 {
+			return 0, errCannotRecover
+		}
+		return out >> sa, nil
+	case CPUI_INT_RIGHT:
+		if slot != 0 || in >= uint64(sizeout)*8 {
+			return 0, errCannotRecover
+		}
+		sa := in
+		if out>>(8*uint64(sizein)-sa) != 0 {
+			return 0, errCannotRecover
+		}
+		return out << sa, nil
+	case CPUI_INT_SRIGHT:
+		if slot != 0 || in >= uint64(sizeout)*8 {
+			return 0, errCannotRecover
+		}
+		sa := in
+		testval := out >> (uint64(sizein)*8 - sa - 1)
+		count := uint64(0)
+		for i := uint64(0); i <= sa; i++ {
+			if testval&1 != 0 {
+				count++
+			}
+			testval >>= 1
+		}
+		if count != sa+1 {
+			return 0, errCannotRecover
+		}
+		return out << sa, nil
+	}
+	return 0, errCannotRecover
 }
 
 // foldInOneGuard folds a single guard CBRANCH into the switch's default edge:

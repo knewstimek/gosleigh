@@ -2646,6 +2646,13 @@ func (s *printCState) labelForBlock(bl *FlowBlock) string {
 				label = fmt.Sprintf("dup_r0x%08x", off)
 			default:
 				label = fmt.Sprintf("LAB_%08x", off)
+				// A code label the host knows at the entry names it.
+				// C++ parity: PrintC::emitLabel -> Scope::queryCodeLabel.
+				if hs, ok := s.fd.hostScope.(HostDataScope); ok {
+					if hd, ok := hs.QueryData(bb.entryAddr()); ok && hd.Label && hd.Addr == bb.entryAddr() && hd.Name != "" {
+						label = hd.Name
+					}
+				}
 			}
 		}
 	}

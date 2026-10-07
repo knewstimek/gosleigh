@@ -34,14 +34,8 @@ import (
 
 // IsDotdotdot reports whether the call-site has varargs tail parameters.
 // C++ parity: FuncCallSpecs::isDotdotdot (via FuncProto::isDotdotdot)
-// TODO known mismatch: dotdotdot flag is not yet tracked separately from the
-// prototype model; we conservatively return false until FuncProto grows the
-// flag as part of the full fspec port.
 func (fc *FuncCallSpecs) IsDotdotdot() bool {
-	if fc == nil {
-		return false
-	}
-	return false
+	return fc != nil && fc.FuncProto.dotdotdot
 }
 
 // GetSpacebase returns the stack space associated with the caller's frame.
