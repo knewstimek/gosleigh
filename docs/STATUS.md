@@ -25,7 +25,7 @@ shift count >= 64 같은 C++ UB는 이 빌드 동작을 따른다(pcodeop.go INT
 
 | 항목 | 위치 | 영향 |
 |---|---|---|
-| heritage 쓰기 정규화 순서 / Go 고유 subtask 분할 | heritage.go `refinedSubTaskSize` | guard 전 쓰기 정규화 시 퇴행 |
+| heritage 쓰기 정규화 순서 | heritage.go guard 앞 normalizeRange | guard 전 쓰기 정규화 시 x86 퇴행(repoplane memo) |
 | guardReturns를 heritage 밖에서 1회만 | coreaction.go ActionReturnRecovery | 출력 trial 수 차이 |
 | 지역 스코프 이름의 isNameUsed | printlanguage.go | `::` 한정은 호스트 질의만 |
 | 8바이트 long/longlong 코어 슬롯 | typefactory.go `coreBaseName` | 이름별 인터닝 |
