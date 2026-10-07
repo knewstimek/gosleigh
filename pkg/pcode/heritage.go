@@ -1539,7 +1539,6 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 
 	h.disjoint.Clear()
 	h.pass++
-	h.AnnotateFloatTypes()
 }
 
 // clearStackPlaceholders removes the placeholder LOAD of every call whose stack
@@ -1583,38 +1582,6 @@ func (h *Heritage) HeritageRange(graph *BlockGraph, addr address.Address, size i
 	}
 	h.placeMultiequals(graph, addr, size, reads, writes, inputs)
 	h.Rename(graph, addr, size)
-}
-
-// AnnotateFloatTypes marks output varnodes of FLOAT_* ops with float type.
-// This is a post-Heritage additive pass -- it does not change SSA placement or renaming.
-// C++ parity: heritage.cc Heritage::analyzeNewVarnodes (simplified float subset)
-func (h *Heritage) AnnotateFloatTypes() {
-	for _, op := range h.fd.GetPcodeOpBank().AllOps() {
-		if op.IsDead() {
-			continue
-		}
-		if !isFloatOpcode(op.Code()) {
-			continue
-		}
-		out := op.Output()
-		if out == nil {
-			continue
-		}
-		// Determine float size from output varnode size.
-		// Comparison ops (FLOAT_EQUAL etc.) produce size-1 boolean outputs --
-		// those fall through the default case and are intentionally skipped.
-		sz := out.Size()
-		var dt Datatype
-		switch sz {
-		case 4:
-			dt = NewBase(4, TYPE_FLOAT, "float")
-		case 8:
-			dt = NewBase(8, TYPE_FLOAT, "double")
-		default:
-			continue // unusual float size or boolean comparison result, skip
-		}
-		SetVarnodeType(out, dt)
-	}
 }
 
 // ---------------------------------------------------------------------------
