@@ -31,16 +31,7 @@ type Heritage struct {
 	// proto is the optional calling-convention model for CALL-site INDIRECT guard
 	// insertion.  nil means no guardCalls pass (leaf-function safe default).
 	// C++ parity: Heritage uses fd->getFuncProto()->getModel() for guardCalls.
-	proto   *ProtoModel
-	guarded map[callGuardKey]bool // deduplicate (callOp, addr) guard insertions
-}
-
-// callGuardKey uniquely identifies a guarded (callOp, register-offset, size) triple.
-type callGuardKey struct {
-	callOp *PcodeOp
-	space  *address.Space
-	offset uint64
-	size   int32
+	proto *ProtoModel
 }
 
 const (
@@ -78,8 +69,8 @@ func (h *Heritage) WithProtoModel(pm *ProtoModel) *Heritage {
 // callee's frame using the call's resolved stack offset; when that offset is
 // unknown the range is still guarded but never registered as a trial.
 //
-// h.guarded deduplicates (callOp, offset, size) across Heritage() passes: the
-// Go heritage loop revisits ranges that C++ would not re-guard.
+// Like C++, only ranges with new addresses are guarded, so a call is never
+// guarded twice for the same range.
 //
 // C++ parity: heritage.cc Heritage::guardCalls (1443-1527). Not ported:
 // guardCallOverlappingInput / tryOutputOverlapGuard / tryOutputStackGuard
@@ -87,9 +78,6 @@ func (h *Heritage) WithProtoModel(pm *ProtoModel) *Heritage {
 func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 	if h.proto == nil || sp == nil {
 		return
-	}
-	if h.guarded == nil {
-		h.guarded = make(map[callGuardKey]bool)
 	}
 	addr := address.Address{Space: sp, Offset: offset}
 	holdind := h.fd.queryPropertyFlags(addr, size)&VarnodeAddrTied != 0
@@ -140,11 +128,6 @@ func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 			}
 			// TODO known mismatch: contained_by -> guardCallOverlappingInput.
 		}
-		key := callGuardKey{callOp: op, offset: offset, size: size, space: sp}
-		if h.guarded[key] {
-			continue
-		}
-		h.guarded[key] = true
 		// The call is not guarded when the effect is "unaffected".
 		switch effecttype {
 		case EffectUnknown, EffectReturnAddress:
@@ -1478,8 +1461,8 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			// Insert INDIRECT guards for call-site side-effects on this range BEFORE
 			// Collect so the INDIRECT output varnodes appear as written SSA definitions.
 			// C++ parity: heritage.cc Heritage::heritage -> guard -> guardCalls
-			h.guardCalls(info.Space, task.Addr.Offset, task.Size)
 			if task.NewAddresses() {
+				h.guardCalls(info.Space, task.Addr.Offset, task.Size)
 				// C++ parity: Heritage::guard -> guardReturns.
 				h.guardReturns(0, task.Addr, task.Size)
 				if h.fd.queryPropertyFlags(task.Addr, task.Size)&VarnodePersist != 0 {
@@ -1748,18 +1731,10 @@ func (h *Heritage) guardReturns(fl uint32, addr address.Address, size int32) {
 // C++ parity: heritage.cc Heritage::guardReturns, the Varnode::persist branch
 // (lines 1676-1691).
 func (h *Heritage) guardReturnsPersist(addr address.Address, size int32) {
-	if h.guarded == nil {
-		h.guarded = make(map[callGuardKey]bool)
-	}
 	for _, op := range h.fd.GetPcodeOpBank().AllOps() {
 		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN {
 			continue
 		}
-		key := callGuardKey{callOp: op, offset: addr.Offset, size: size, space: addr.Space}
-		if h.guarded[key] {
-			continue
-		}
-		h.guarded[key] = true
 		copyop := h.fd.NewOp(1, op.Addr())
 		vn := h.fd.NewVarnodeOut(size, addr, copyop)
 		vn.SetFlags(VarnodeAddrForce)
