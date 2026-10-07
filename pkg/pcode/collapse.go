@@ -486,14 +486,18 @@ func (bg *BlockGraph) collapseRegion(nodes []*FlowBlock, tp BlockType) *FlowBloc
 		}
 	}
 
+	// Edges to the same outside block merge into the first one, which takes
+	// the union of their labels (a switch's default edge and a case exit to
+	// the same block become one edge). C++ parity: BlockGraph::selfIdentify ->
+	// FlowBlock::dedup (eliminateOutDups).
 	outgoing := make([]edgeRecord, 0, len(outgoingRaw))
-	outgoingSeen := make(map[string]struct{})
+	outgoingSeen := make(map[*FlowBlock]int)
 	for _, edge := range outgoingRaw {
-		key := fmt.Sprintf("%p:%d", edge.other, edge.label)
-		if _, ok := outgoingSeen[key]; ok {
+		if k, ok := outgoingSeen[edge.other]; ok {
+			outgoing[k].label |= edge.label
 			continue
 		}
-		outgoingSeen[key] = struct{}{}
+		outgoingSeen[edge.other] = len(outgoing)
 		outgoing = append(outgoing, edge)
 	}
 

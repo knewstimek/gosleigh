@@ -363,7 +363,9 @@ func (fc *FuncCallSpecs) commitNewInputs(data *Funcdata, newinput []*Varnode) {
 	}
 	if placeholder != nil {
 		newinput = append(newinput, placeholder)
-		fc.stackPlaceholderSlot = len(newinput) - 1
+		// The placeholder takes a trial slot, so later trials number past it.
+		// C++ parity: setStackPlaceholderSlot -> ParamActive::setPlaceholderSlot.
+		fc.SetStackPlaceholderSlot(len(newinput) - 1)
 	}
 	data.OpSetAllInput(op, newinput)
 	if !fc.IsDotdotdot() {

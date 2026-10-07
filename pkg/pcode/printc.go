@@ -2307,7 +2307,9 @@ func (s *printCState) renderForPartFrag(op *PcodeOp) (ExprFragment, error) {
 		return ExprFragment{}, nil
 	}
 	if op.Code() == CPUI_STORE {
-		lhs, err := s.renderStoreLHS(storePointer(op), cPrecAssign)
+		// The left side stays structured so its tokens can break across
+		// lines like any other expression. C++ parity: PrintC::opStore.
+		lhs, err := s.renderStoreLHSFrag(storePointer(op))
 		if err != nil {
 			return ExprFragment{}, err
 		}
@@ -2315,7 +2317,7 @@ func (s *printCState) renderForPartFrag(op *PcodeOp) (ExprFragment, error) {
 		if err != nil {
 			return ExprFragment{}, err
 		}
-		return s.lang.AssignExpr(lhs, rhs), nil
+		return s.lang.AssignExprFrag(lhs, rhs), nil
 	}
 	rhs, err := s.renderOpExprFrag(op)
 	if err != nil {
