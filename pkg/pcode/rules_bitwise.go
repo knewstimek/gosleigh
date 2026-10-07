@@ -41,18 +41,9 @@ func NewRuleAndMask(group string) *RuleAndMask {
 
 // apply is a faithful port of RuleAndMask::applyOp (ruleaction.cc:310), collapsing
 // an unnecessary INT_AND via non-zero-bit (NZMask) and consume analysis.
-//
-// The all-ones algebraic shortcuts are kept ahead of the faithful path: they
-// handle "all-ones & X => X" in either operand slot without depending on a prior
-// commutative normalization moving the constant to slot 1, matching prior Go
-// behavior exactly (a strict subset of what the NZMask logic below also removes).
+// There is no all-ones shortcut: "X & 0xff" with an unconsumed result or a
+// zero NZMask input must collapse to 0, not to X.
 func (r *RuleAndMask) apply(op *PcodeOp, data *Funcdata) int {
-	if isAllOnesConst(op.Input(0)) {
-		return rewriteToCopy(data, op, op.Input(1))
-	}
-	if isAllOnesConst(op.Input(1)) {
-		return rewriteToCopy(data, op, op.Input(0))
-	}
 	out := op.Output()
 	if out == nil {
 		return 0
