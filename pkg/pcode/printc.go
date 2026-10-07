@@ -617,9 +617,16 @@ func (s *printCState) collectSymbols() {
 								}
 								locals = append(locals, rep)
 							}
+						} else if hvNamed := hv.Name() != ""; hvNamed && !seenHV[hv] && !seenParamHV[hv] && !highHasWrittenInstance(hv, liveSet) {
+							// An input never written in the function (a frame slot an
+							// injected prologue filled) is still a local Symbol; with no
+							// written representative it declares itself.
+							// C++ parity: PrintC::emitScopeVarDecls declares every local
+							// symbol.
+							seenHV[hv] = true
+							locals = append(locals, vn)
 						}
-						// Input varnodes with HV set: name is already in s.names (line above).
-						// Declaration is provided by the written representative; skip here.
+						// Otherwise the written representative declares the variable.
 					}
 				}
 				continue
@@ -5266,4 +5273,14 @@ func (s *printCState) applySelfLockedParams() {
 		}
 	}
 	s.params = params
+}
+
+// highHasWrittenInstance reports a live, written instance of hv.
+func highHasWrittenInstance(hv *HighVariable, live map[*Varnode]struct{}) bool {
+	for _, w := range hv.Instances() {
+		if _, ok := live[w]; ok && w.IsWritten() {
+			return true
+		}
+	}
+	return false
 }
