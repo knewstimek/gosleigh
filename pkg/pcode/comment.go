@@ -248,12 +248,20 @@ func seqLess(a, b *PcodeOp) bool {
 	return opBlockUIndex(a) < opBlockUIndex(b)
 }
 
-// blockContainsAddr reports whether ad falls within the address span of bb's
-// ops. This is a proxy for Ghidra's BlockBasic::contains, which tests the
-// block's cover range; the span of op addresses is sufficient for warning
-// comments, which always attach to an exact op address inside the block.
+// blockContainsAddr reports whether ad falls within bb's address cover (a
+// spliced block keeps the gaps between its pieces). A block without a cover
+// falls back to the span of its op addresses.
+// C++ parity: BlockBasic::contains (RangeList::inRange).
 func blockContainsAddr(bb *BlockBasic, ad address.Address) bool {
 	if bb == nil {
+		return false
+	}
+	if len(bb.cover) > 0 {
+		for _, r := range bb.cover {
+			if r.space == ad.Space && r.first <= ad.Offset && ad.Offset <= r.last {
+				return true
+			}
+		}
 		return false
 	}
 	ops := bb.Ops()
@@ -298,14 +306,23 @@ func findCommentPosition(alive []*PcodeOp, ad address.Address) (int32, int, bool
 			}
 		}
 	}
+	var backup *PcodeOp
 	if at != nil && at.Parent() != nil {
-		if at.Addr() == ad || blockContainsAddr(at.Parent(), ad) {
+		if blockContainsAddr(at.Parent(), ad) {
 			return at.Parent().Index(), opIndexInBlock(at), true
+		}
+		if at.Addr() == ad {
+			backup = at
 		}
 	}
 	if prev != nil && prev.Parent() != nil && blockContainsAddr(prev.Parent(), ad) {
 		// Treat the comment as being at the very end of this block.
 		return prev.Parent().Index(), len(prev.Parent().Ops()), true
+	}
+	if backup != nil {
+		// The op may have migrated from its original block; the address
+		// matches exactly, so hang the comment on it.
+		return backup.Parent().Index(), opIndexInBlock(backup), true
 	}
 	return 0, 0, false
 }

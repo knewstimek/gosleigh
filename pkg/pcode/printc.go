@@ -2428,6 +2428,11 @@ func (s *printCState) emitSwitchBlock(bl *FlowBlock) error {
 	if len(children) == 0 {
 		return nil
 	}
+	// The switch block's own statements come first (no_branch).
+	// C++ parity: PrintC::emitBlockSwitch.
+	if err := s.emitConditionLead(children[0]); err != nil {
+		return err
+	}
 	s.lang.OpenBlockAfter(func() {
 		// Ghidra emits "switch(...)" with no space before the paren.
 		s.lang.Token("switch")

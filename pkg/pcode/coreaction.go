@@ -651,12 +651,7 @@ func (a *ActionRedundBranch) Clone(groups ActionGroupList) Action {
 // the same block is stripped to a fall-through.
 // C++ parity: coreaction.cc ActionRedundBranch::apply.
 //
-// The C++ action also splices a single-exit block into a single-entry successor
-// (spliceBlockBasic). That normalization is not yet ported here; it is not
-// render-visible on the current corpus (a straightened fall-through chain emits
-// the same C as a spliced block), and it never fired before because this whole
-// action was a stub. Only the redundant-branch removal is implemented, which is
-// what conditional-move collapse (RuleConditionalMove) leaves behind.
+// A single-exit block is also spliced into a single-entry successor.
 func (a *ActionRedundBranch) Apply(data *Funcdata) int {
 	graph := data.GetBasicBlocks()
 	for i := 0; i < graph.GetSize(); i++ {
@@ -666,7 +661,13 @@ func (a *ActionRedundBranch) Apply(data *Funcdata) int {
 		}
 		bl := bb.OutEdge(0).Point
 		if bb.SizeOut() == 1 {
-			// C++ splices bb into bl here (spliceBlockBasic); unported (see above).
+			// Do not splice a block coming from a single exit switch: that
+			// prevents a possible second stage recovery.
+			if bl.SizeIn() == 1 && !bl.HasFlag(BlockFlagEntryPoint) && !bb.HasFlag(BlockFlagSwitchOut) {
+				data.spliceBlockBasic(bb)
+				a.count++
+				i = -1 // A block was removed: restart the scan
+			}
 			continue
 		}
 		// Are all exits to the same block (bl)?

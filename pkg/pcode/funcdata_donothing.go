@@ -213,6 +213,41 @@ func (fd *Funcdata) RemoveDoNothingBlock(bb *BlockBasic) {
 	fd.StructureReset() // delete any structure we had before
 }
 
+// spliceBlockBasic appends the p-code of bl's single output block (whose
+// only input is bl) to bl, drops bl's branch, and removes the output block.
+// C++ parity: Funcdata::spliceBlockBasic.
+func (fd *Funcdata) spliceBlockBasic(bl *BlockBasic) {
+	var outbl *BlockBasic
+	if bl.SizeOut() == 1 {
+		outbl = asBasic(bl.OutEdge(0).Point)
+		if outbl != nil && outbl.SizeIn() != 1 {
+			outbl = nil
+		}
+	}
+	if outbl == nil {
+		panic("Cannot splice basic blocks")
+	}
+	// Remove any jump op at the end of bl.
+	if ops := bl.Ops(); len(ops) > 0 && ops[len(ops)-1].IsBranch() {
+		fd.OpDestroy(ops[len(ops)-1])
+	}
+	if ops := outbl.Ops(); len(ops) > 0 {
+		if ops[0].Code() == CPUI_MULTIEQUAL {
+			panic("Splicing block with MULTIEQUAL")
+		}
+		ops[0].ClearFlag(PcodeOpStartBasic)
+		moved := append([]*PcodeOp(nil), ops...)
+		for _, op := range moved {
+			outbl.RemoveOp(op)
+			op.SetParent(bl)
+			bl.InsertOpEnd(op)
+		}
+	}
+	bl.mergeRange(outbl) // Update the address cover
+	fd.GetBasicBlocks().spliceOutput(&bl.FlowBlock)
+	fd.StructureReset()
+}
+
 // removeFromFlowSplit removes an empty block that splits flow, wiring each
 // in-edge straight through to an out-edge (swap pairs in-edge 0 with out-edge
 // 1), and resets the structure.

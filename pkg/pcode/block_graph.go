@@ -132,6 +132,33 @@ func (bg *BlockGraph) SpliceBlock(bl *FlowBlock) {
 	bl.parent = nil
 }
 
+// spliceOutput merges bl's single output block (which has bl as its only
+// input) into bl: bl takes over the output's out-edges and the output block
+// is removed. bl keeps its own unstructured-target and entry flags and the
+// output's switch flag.
+// C++ parity: block.cc BlockGraph::spliceBlock.
+func (bg *BlockGraph) spliceOutput(bl *FlowBlock) {
+	var outbl *FlowBlock
+	if bl.SizeOut() == 1 {
+		outbl = bl.OutEdge(0).Point
+		if outbl.SizeIn() != 1 {
+			outbl = nil
+		}
+	}
+	if outbl == nil {
+		panic("Can only splice a block with 1 output to a block with 1 input")
+	}
+	fl1 := bl.flags & (BlockFlagUnstructuredTarg | BlockFlagEntryPoint)
+	fl2 := outbl.flags & BlockFlagSwitchOut
+	bl.RemoveOutEdge(0)
+	szout := outbl.SizeOut()
+	for i := 0; i < szout; i++ {
+		bg.MoveOutEdge(outbl, 0, bl)
+	}
+	bg.RemoveBlock(outbl)
+	bl.flags = fl1 | fl2
+}
+
 // Clear removes all blocks from the graph.
 func (bg *BlockGraph) Clear() {
 	bg.blocks = nil
