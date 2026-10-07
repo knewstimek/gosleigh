@@ -539,7 +539,34 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		}
 		return data.BaseAddr().Add(^uint64(0))
 	}
-	for _, e := range toName {
+	// A piece of a structure visited before its whole links the whole's
+	// symbol first, so the whole claims its storage at the piece's position.
+	// C++ parity: Funcdata::linkSymbol -> linkProtoPartial.
+	linkAt := make(map[*HighVariable]*Varnode)
+	for _, vn := range data.GetVarnodeBank().AllVarnodes() {
+		hv := vn.High()
+		if vn.IsFree() || !vn.IsProtoPartial() || hv == nil || hv.piece == nil || !highHasName(hv) || highNameRepresentative(hv) != vn {
+			continue
+		}
+		root := pieceFindRoot(vn)
+		if root == vn || root.High() == nil || root.High().piece == nil || root.High().piece.group != hv.piece.group {
+			continue
+		}
+		if cur := linkAt[root.High()]; cur == nil || CompareLocDef(vn, cur) < 0 {
+			linkAt[root.High()] = vn
+		}
+	}
+	claimOrder := append([]hvEntry(nil), toName...)
+	claimKey := func(e hvEntry) *Varnode {
+		if vn := linkAt[e.hv]; vn != nil && CompareLocDef(vn, e.key) < 0 {
+			return vn
+		}
+		return e.key
+	}
+	sort.SliceStable(claimOrder, func(i, j int) bool {
+		return CompareLocDef(claimKey(claimOrder[i]), claimKey(claimOrder[j])) < 0
+	})
+	for _, e := range claimOrder {
 		vn := e.key
 		up := usePoint(vn)
 		conflict := false
