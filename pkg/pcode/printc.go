@@ -549,40 +549,6 @@ func (s *printCState) collectSymbols() {
 										consumer.Output().Space() != nil &&
 										!consumer.Output().Space().IsUnique() {
 										rep = consumer.Output()
-									} else {
-										// Case 2 (TrimOpOutput COPY output): unique that feeds both an
-										// INT_EQUAL/INT_NOTEQUAL (loop condition) and a COPY to a named
-										// non-unique varnode (e.g. register:0x4 iVar1). Use the named
-										// register varnode as the declaration representative so that
-										// "int iVar1;" appears in the local declarations.
-										// C++ parity: Ghidra's trimOpOutput preserves the original
-										// register varnode as the COPY output, which is then declared
-										// by the standard local-declaration path. Gosleigh inserts a
-										// new unique as the COPY output, so we must lift it here.
-										hasCondConsumer := false
-										var namedRegRep *Varnode
-										for _, desc := range vn.DescendIter() {
-											if desc == nil {
-												continue
-											}
-											if desc.Code() == CPUI_INT_EQUAL || desc.Code() == CPUI_INT_NOTEQUAL {
-												hasCondConsumer = true
-											} else if desc.Code() == CPUI_COPY {
-												dout := desc.Output()
-												if dout != nil && dout.Space() != nil && !dout.Space().IsUnique() {
-													dname := ""
-													if dhv := dout.High(); dhv != nil {
-														dname = dhv.Name()
-													}
-													if dname != "" && !s.isMachineGeneratedName(dname) {
-														namedRegRep = dout
-													}
-												}
-											}
-										}
-										if hasCondConsumer && namedRegRep != nil {
-											rep = namedRegRep
-										}
 									}
 								}
 								// Choose the declaration representative via the C++ name
