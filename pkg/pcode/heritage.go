@@ -1461,19 +1461,19 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 					continue
 				}
 			}
-			// Reads smaller than the range are normalized before any guard: the
-			// SUBPIECE feeding a call's argument then precedes the call's
-			// INDIRECTs and reads the value from before the call.
-			// C++ parity: Heritage::guard (normalizeReadSize ahead of guardCalls).
-			// TODO known mismatch: C++ normalizes the writes here too; Go still
-			// does that after the guards (doing it here breaks the wide global
-			// ranges that the Go-only later refinement path splits).
-			// A range with no reads is only guarded when its addresses are new
-			// (C++ placeMultiequals skips guard otherwise).
-			if r, w, in := h.Collect(task.Addr, task.Size); len(r) > 0 ||
-				((len(w) > 0 || len(in) > 0) && !task.Addr.Space.IsUnique() && task.NewAddresses()) {
-				h.guardInput(graph, task.Addr, task.Size, in) // C++ parity: placeMultiequals (guardInput before guard)
-				h.normalizeRange(task.Addr, task.Size, r, nil)
+			// Reads and writes smaller than the range are normalized before any
+			// guard, so a SUBPIECE feeding a call's argument precedes the call's
+			// INDIRECTs. C++ guard() then works on these lists: the pieces that
+			// normalizeWriteSize builds are never collected as writes, and only
+			// the guards' own outputs join the list.
+			// C++ parity: Heritage::placeMultiequals -> guardInput, guard.
+			r, w, in := h.Collect(task.Addr, task.Size)
+			h.guardInput(graph, task.Addr, task.Size, in)
+			_, normWrites := h.normalizeRange(task.Addr, task.Size, r, w)
+			_, preWrites, _ := h.Collect(task.Addr, task.Size)
+			preGuard := make(map[*Varnode]bool, len(preWrites))
+			for _, vn := range preWrites {
+				preGuard[vn] = true
 			}
 			// Insert INDIRECT guards for call-site side-effects on this range BEFORE
 			// Collect so the INDIRECT output varnodes appear as written SSA definitions.
@@ -1494,6 +1494,13 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 				h.guardLoads(h.fd.queryPropertyFlags(task.Addr, task.Size), task.Addr, task.Size)
 			}
 			reads, writes, inputs = h.Collect(task.Addr, task.Size)
+			guardWrites := append([]*Varnode(nil), normWrites...)
+			for _, vn := range writes {
+				if !preGuard[vn] {
+					guardWrites = append(guardWrites, vn)
+				}
+			}
+			writes = guardWrites
 			if len(reads) == 0 && len(writes) == 0 && len(inputs) == 0 {
 				continue
 			}
