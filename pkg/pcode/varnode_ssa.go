@@ -360,6 +360,18 @@ func (vn *Varnode) ClearPrecisHi() { vn.ClearFlags(VarnodePrecisHi) }
 // AddDescend adds a reading PcodeOp to this varnode's descendant list.
 func (vn *Varnode) AddDescend(op *PcodeOp) {
 	vn.descend = append(vn.descend, op)
+	vn.markCoverDirty()
+}
+
+// markCoverDirty flags that the cover of this Varnode, and so of its high,
+// must be rebuilt; cached intersection tests of the high are then retaken.
+// C++ parity: Varnode::addDescend/eraseDescend setFlags(coverdirty) ->
+// HighVariable::coverDirty.
+func (vn *Varnode) markCoverDirty() {
+	vn.flags |= VarnodeCoverDirty
+	if vn.high != nil {
+		vn.high.MarkCoverDirty()
+	}
 }
 
 // EraseDescend removes one occurrence of op from the descendant list.
@@ -367,6 +379,7 @@ func (vn *Varnode) EraseDescend(op *PcodeOp) {
 	for i, d := range vn.descend {
 		if d == op {
 			vn.descend = append(vn.descend[:i], vn.descend[i+1:]...)
+			vn.markCoverDirty()
 			return
 		}
 	}
