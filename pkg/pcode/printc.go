@@ -1135,7 +1135,14 @@ func (s *printCState) emitLocalDeclarations() bool {
 		if st := s.stackSymbolType(vn); st != nil {
 			dt = st
 		} else {
-			dt = s.normalizeTypeForDecl(vn.HighTypeDefFacing())
+			// The declaration is the variable's Symbol, typed with the
+			// HighVariable's type (not a resolved field of it).
+			// C++ parity: Funcdata::linkSymbol (addSymbol with high->getType()).
+			ht := vn.HighTypeDefFacing()
+			if hv := vn.High(); hv != nil && hv.Type() != nil {
+				ht = hv.Type()
+			}
+			dt = s.normalizeTypeForDecl(ht)
 		}
 		// A default name's prefix is the printNameBase of the type the
 		// variable is declared with; types can still settle after
@@ -4846,6 +4853,23 @@ func (s *printCState) localPieceName(vn *Varnode, name string, castTo Datatype, 
 	// (pt.y). C++ parity: pushSymbolDetail -> pushPartialSymbol with
 	// HighVariable::getSymbolOffset.
 	sl := s.fd.GetScopeLocal()
+	// A variable whose type is a structure with one field filling it prints
+	// through the field. C++ parity: pushSymbolDetail (symboloff -1 with a
+	// needsResolution Symbol type -> pushPartialSymbol at offset 0).
+	if hv := vn.High(); hv != nil && groupRootOf(hv) == nil && (sl == nil || vn.Space() != sl.SpaceID()) {
+		if ht := hv.Type(); ht != nil && ht.Metatype() == TYPE_STRUCT && ht.NeedsResolution() && ht.Size() == vn.Size() {
+			stackInst := false
+			for _, in := range hv.Instances() {
+				if sl != nil && in.Space() == sl.SpaceID() {
+					stackInst = true
+					break
+				}
+			}
+			if !stackInst {
+				return symbolPieceName(name, ht, 0, vn.Size(), castTo, vn.Space() != nil && vn.Space().BigEndian, rop, rslot)
+			}
+		}
+	}
 	if root := groupRootOf(vn.High()); root != nil {
 		if rvn := root.high.Instances(); len(rvn) > 0 {
 			if rt := root.high.Type(); rt != nil {
