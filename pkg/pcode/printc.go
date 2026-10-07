@@ -681,7 +681,7 @@ func (s *printCState) collectSymbols() {
 			if di != dj {
 				return dj
 			}
-			if c := compareMapOrder(locals[i], locals[j]); c != 0 {
+			if c := s.compareMapOrder(locals[i], locals[j]); c != 0 {
 				return c < 0
 			}
 			return CompareLocDef(locals[i], locals[j]) < 0
@@ -1152,6 +1152,9 @@ func (s *printCState) emitLocalDeclarations() bool {
 		if sp := vn.Space(); sp != nil && sl != nil && sp == sl.SpaceID() {
 			rec.hasOffset = true
 			rec.offset = vn.Addr().Offset
+		} else if e := s.stackEntryOf(vn.High()); e != nil {
+			rec.hasOffset = true // A temporary declaring its stack Symbol
+			rec.offset = e.Addr().Offset
 		}
 		decls = append(decls, rec)
 	}
@@ -1308,18 +1311,33 @@ func (s *printCState) entryCoversVarnode(e *SymbolEntry, covered map[uint64]stru
 // is snapshotted at restructure time, so it does not leak the later-propagated
 // Varnode type. C++ parity: PrintC::emitVarDecl uses sym->getType().
 func (s *printCState) stackSymbolType(vn *Varnode) Datatype {
-	if vn == nil || vn.Space() == nil || vn.Space().IsUnique() || s.fd == nil {
+	if vn == nil || vn.Space() == nil || s.fd == nil {
 		return nil
 	}
-	sl := s.fd.GetScopeLocal()
-	if sl == nil {
-		return nil
+	var st Datatype
+	if hv := vn.High(); hv != nil && vn.Space().IsUnique() {
+		// A temporary standing for a stack variable declares that
+		// variable's Symbol. C++ parity: PrintC::emitVarDecl (sym->getType()).
+		if e := s.stackEntryOf(hv); e != nil && e.Symbol() != nil {
+			st = e.Symbol().Type()
+		}
+		if st == nil {
+			return nil
+		}
+	} else {
+		if vn.Space().IsUnique() {
+			return nil
+		}
+		sl := s.fd.GetScopeLocal()
+		if sl == nil {
+			return nil
+		}
+		e := sl.FindEntryAt(vn.Addr(), int32(vn.Size()))
+		if e == nil || e.Symbol() == nil {
+			return nil
+		}
+		st = e.Symbol().Type()
 	}
-	e := sl.FindEntryAt(vn.Addr(), int32(vn.Size()))
-	if e == nil || e.Symbol() == nil {
-		return nil
-	}
-	st := e.Symbol().Type()
 	if st == nil {
 		return nil
 	}
@@ -1329,6 +1347,25 @@ func (s *printCState) stackSymbolType(vn *Varnode) Datatype {
 		return sharedTypeFactory.GetBase(st.Size(), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", st.Size()))
 	}
 	return s.normalizeTypeForDecl(st)
+}
+
+// stackEntryOf is the local stack Symbol entry a variable's stack instances
+// map to (the largest, when pieces map separately).
+func (s *printCState) stackEntryOf(hv *HighVariable) *SymbolEntry {
+	sl := s.fd.GetScopeLocal()
+	if sl == nil || hv == nil {
+		return nil
+	}
+	var best *SymbolEntry
+	for _, inst := range hv.instances {
+		if inst == nil || inst.Space() != sl.SpaceID() {
+			continue
+		}
+		if e := sl.QueryContainer(inst.Addr(), inst.Size(), address.Address{}); e != nil && (best == nil || e.Size() > best.Size()) {
+			best = e
+		}
+	}
+	return best
 }
 
 func (s *printCState) normalizeTypeForDecl(dt Datatype) Datatype {
@@ -4341,7 +4378,7 @@ func (s *printCState) renderMemberField(base *Varnode, field TypeField, valueon 
 // C++ parity: MapIterator over EntryMap (rangemap::insert places a record by
 // AddrRange::operator<, last then subsort; SymbolEntry::getSubsort);
 // Funcdata::linkSymbol (Varnode::getUsePoint).
-func compareMapOrder(a, b *Varnode) int {
+func (s *printCState) compareMapOrder(a, b *Varnode) int {
 	type mapKey struct {
 		spc    uint16
 		off    uint64
@@ -4360,6 +4397,13 @@ func compareMapOrder(a, b *Varnode) int {
 					k.useSpc, k.useOff = spaceOrder(e.useLimit[0].space), e.useLimit[0].first
 				}
 				return k, true
+			}
+		}
+		// A variable held by a temporary maps to the stack Symbol of its
+		// stack instance (address-tied: minimal subsort).
+		if rep := hv.linkedRep; rep == nil || rep.Space() == nil || rep.Space().IsUnique() {
+			if e := s.stackEntryOf(hv); e != nil {
+				return mapKey{spc: spaceOrder(e.addr.Space), off: e.addr.Offset + uint64(e.Size()) - 1}, true
 			}
 		}
 		rep := hv.linkedRep // The representative ActionNameVars linked the symbol at
