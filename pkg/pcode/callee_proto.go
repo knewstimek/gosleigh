@@ -184,11 +184,21 @@ func (fc *FuncCallSpecs) resolveLockedStackOffset(phvn *Varnode, spacebase *addr
 // prototype. C++ parity: typeop.cc TypeOpCall::getInputLocal/getOutputLocal.
 type typeOpCall struct{ typeOpBase }
 
+// InputTypeLocal is a typelocked parameter's type, else a this pointer to a
+// structure. C++ parity: TypeOpCall::getInputLocal.
 func (t *typeOpCall) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) Datatype {
 	if fc := op.callSpec; slot > 0 && fc != nil && fc.IsInputLocked() {
 		if p, ok := fc.LockedParam(slot - 1); ok && p.Type != nil &&
 			p.Type.Metatype() != TYPE_VOID && p.Type.Size() <= op.Input(slot).Size() {
 			return p.Type
+		}
+	} else if slot > 0 && fc != nil && fc.hostProto != nil && slot-1 < len(fc.hostProto.UnlockedParams) {
+		// A known this pointer is effectively type locked even when the
+		// prototype as a whole is not.
+		if p := fc.hostProto.UnlockedParams[slot-1]; p.ThisPtr {
+			if ptr, ok := p.Type.(*Pointer); ok && ptr.Pointee() != nil && ptr.Pointee().Metatype() == TYPE_STRUCT {
+				return p.Type
+			}
 		}
 	}
 	return t.typeOpBase.InputTypeLocal(op, slot, tf)

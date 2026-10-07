@@ -243,7 +243,7 @@ def run_one(binary, base_args, idx, name, timeout_s):
 	t0 = time.time()
 	try:
 		r = subprocess.run([binary] + base_args + ["-index", str(idx)],
-			capture_output=True, text=True, timeout=timeout_s)
+			capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=timeout_s)
 	except subprocess.TimeoutExpired:
 		return {"name": name, "output": "", "error": "TIMEOUT: exceeded %ds" % timeout_s}, timeout_s
 	dt = time.time() - t0

@@ -97,6 +97,7 @@ type captureProto struct {
 	dotdotdot              bool
 	inline                 bool
 	params                 []pcode.HostParam
+	unlockedParams         []pcode.HostParam
 	output                 *pcode.HostParam
 }
 
@@ -318,9 +319,11 @@ func parseCaptureProto(fn *xnode, types map[string]*xnode) captureProto {
 		cp.extraPop = int32(parseUint(ep))
 	}
 	cp.inputLocked = proto.attr("voidlock") == "true" || (len(ins) > 0 && ins[0].locked)
-	if cp.inputLocked {
-		for _, in := range ins {
+	for _, in := range ins {
+		if cp.inputLocked {
 			cp.params = append(cp.params, in.p)
+		} else {
+			cp.unlockedParams = append(cp.unlockedParams, in.p)
 		}
 	}
 	if ret := proto.child("returnsym"); ret != nil && ret.attr("typelock") == "true" {
@@ -394,6 +397,7 @@ func (h hostWithData) QueryFunction(addr address.Address) (pcode.HostFunction, b
 			hf.Model, hf.ModelLock = cp.model, true
 		}
 		hf.Params, hf.Output = cp.params, cp.output
+		hf.UnlockedParams = cp.unlockedParams
 	}
 	return hf, ok
 }

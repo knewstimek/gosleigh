@@ -4188,48 +4188,50 @@ func NewRuleDoubleLoad(group string) *RuleDoubleLoad {
 // of the two ops is returned so callers can insert after it. Indirects whose
 // affector is op1 or op2 are accumulated when the caller cares.
 //
-// C++ parity: double.cc:3370-3434. The affector-walk uses
-// PcodeOp::getOpFromConst on the second input of an INDIRECT, which isn't
-// plumbed in Gosleigh yet, so the indirect-range extension is skipped.
-// TODO(parity): Funcdata::newVarnodeIop and PcodeOp::getOpFromConst.
+// C++ parity: RuleDoubleLoad::noWriteConflict.
 func doubleLoadNoWriteConflict(op1, op2 *PcodeOp, spc *address.Space, indirects *[]*PcodeOp) *PcodeOp {
 	bb := op1.Parent()
+	// Force the two ops to be in the same basic block
 	if bb != op2.Parent() {
 		return nil
 	}
+	// Block position stands in for the C++ sequence order, which BlockBasic
+	// keeps sorted on insertion.
 	if opBlockUIndex(op2) < opBlockUIndex(op1) {
 		op1, op2 = op2, op1
 	}
-	for _, curop := range bb.Ops() {
-		if opBlockUIndex(curop) <= opBlockUIndex(op1) {
-			continue
+	startop := op1
+	if op1.Code() == CPUI_STORE {
+		// Include the INDIRECTs associated with the initial STORE
+		for tmp := startop.PreviousOp(); tmp != nil && tmp.Code() == CPUI_INDIRECT; tmp = tmp.PreviousOp() {
+			startop = tmp
 		}
-		if opBlockUIndex(curop) >= opBlockUIndex(op2) {
-			break
+	}
+	for curop := startop; curop != nil && curop != op2; curop = curop.NextOp() {
+		if curop == op1 {
+			continue
 		}
 		switch curop.Code() {
 		case CPUI_STORE:
 			if curop.Input(0).GetSpaceFromConst() == spc {
-				return nil
+				return nil // Don't go any further trying to resolve alias
 			}
 		case CPUI_INDIRECT:
-			// We cannot resolve affector from const iop yet, so we treat
-			// every INDIRECT as potentially conflicting unless its output
-			// lives in a different space.
-			out := curop.Output()
-			if out != nil && out.Space() == spc {
+			if affector := curop.Input(1).GetIndirectCause(); affector == op1 || affector == op2 {
+				if indirects != nil {
+					*indirects = append(*indirects, curop)
+				}
+			} else if out := curop.Output(); out != nil && out.Space() == spc {
 				return nil
 			}
 		case CPUI_CALL, CPUI_CALLIND, CPUI_CALLOTHER,
 			CPUI_RETURN, CPUI_BRANCH, CPUI_CBRANCH, CPUI_BRANCHIND:
 			return nil
 		default:
-			out := curop.Output()
-			if out != nil && out.Space() == spc {
+			if out := curop.Output(); out != nil && out.Space() == spc {
 				return nil
 			}
 		}
-		_ = indirects
 	}
 	return op2
 }
@@ -4376,11 +4378,7 @@ func (r *RuleDoubleStore) apply(op *PcodeOp, data *Funcdata) int {
 			if latest == nil {
 				continue
 			}
-			// TODO(parity): RuleDoubleStore::testIndirectUse and
-			// reassignIndirects need Funcdata::newVarnodeIop. Until that is
-			// ported we skip merges that carry any INDIRECTs to avoid losing
-			// side-effect edges.
-			if len(indirects) != 0 {
+			if !doubleStoreTestIndirectUse(storelo, storehi, indirects) {
 				continue
 			}
 			// Build the merged STORE.
@@ -4397,10 +4395,73 @@ func (r *RuleDoubleStore) apply(op *PcodeOp, data *Funcdata) int {
 			data.OpInsertAfter(newstore, latest)
 			data.OpDestroy(op)
 			data.OpDestroy(storeOp2)
+			doubleStoreReassignIndirects(data, newstore, indirects)
 			return 1
 		}
 	}
 	return 0
+}
+
+// doubleStoreTestIndirectUse reports that no INDIRECT output in the list is
+// read between op1 and op2, except by the paired INDIRECT of the second STORE.
+// C++ parity: RuleDoubleStore::testIndirectUse.
+func doubleStoreTestIndirectUse(op1, op2 *PcodeOp, indirects []*PcodeOp) bool {
+	if opBlockUIndex(op2) < opBlockUIndex(op1) {
+		op1, op2 = op2, op1
+	}
+	for _, ind := range indirects {
+		outvn := ind.Output()
+		usecount, usebyop2 := 0, 0
+		for _, op := range outvn.DescendIter() {
+			usecount++
+			if op.Parent() != op1.Parent() {
+				continue
+			}
+			if opBlockUIndex(op) < opBlockUIndex(op1) || opBlockUIndex(op) > opBlockUIndex(op2) {
+				continue
+			}
+			// INDIRECTs from the first STORE likely feed INDIRECTs of the second
+			if op.Code() == CPUI_INDIRECT && op.Input(1).GetIndirectCause() == op2 {
+				usebyop2++ // Note this pairing
+				continue
+			}
+			return false
+		}
+		// If some uses of the output feed later INDIRECTs, all of them must.
+		if usebyop2 > 0 && usecount != usebyop2 {
+			return false
+		}
+		if usebyop2 > 1 {
+			return false
+		}
+	}
+	return true
+}
+
+// doubleStoreReassignIndirects moves the INDIRECTs of the removed STOREs to
+// the new one; of each INDIRECT pair the earlier is deleted and the later
+// takes its input. C++ parity: RuleDoubleStore::reassignIndirects.
+func doubleStoreReassignIndirects(data *Funcdata, newStore *PcodeOp, indirects []*PcodeOp) {
+	marked := make(map[*PcodeOp]bool, len(indirects))
+	for _, op := range indirects {
+		marked[op] = true
+		vn := op.Input(0)
+		if !vn.IsWritten() {
+			continue
+		}
+		if earlyop := vn.Def(); marked[earlyop] {
+			data.OpSetInput(op, earlyop.Input(0), 0) // Take the earlier op's input
+			data.OpDestroy(earlyop)
+		}
+	}
+	for _, op := range indirects {
+		if op.IsDead() {
+			continue
+		}
+		data.OpUninsert(op)
+		data.OpInsertBefore(op, newStore) // Move the INDIRECT to the new STORE
+		data.OpSetInput(op, data.NewVarnodeIop(newStore), 1)
+	}
 }
 
 // RuleStringCopy rewrites a sequence of constant-char COPY ops into a single

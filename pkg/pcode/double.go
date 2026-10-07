@@ -41,7 +41,6 @@ import (
 //   - newVarnodeIop + op-from-const affector chain (buildLoFromWhole / buildHiFromWhole INDIRECT case)
 //   - Form classes         (SplitVarnode::applyRuleIn) -- 13/13 ported;
 //                            IndirectForm is PARTIAL pending IOP-affector encoding
-//   - RuleDoubleStore::reassignIndirects op-from-const chain
 
 // SplitVarnode mirrors the C++ SplitVarnode class.
 //

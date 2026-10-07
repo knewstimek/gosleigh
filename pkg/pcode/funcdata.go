@@ -118,6 +118,10 @@ type Funcdata struct {
 	// target during this run; rebuildRequested asks the driver to restart.
 	// C++ parity: Override indirect overrides + Funcdata restartPending.
 	indirectOverrides map[uint64]address.Address
+	// deadcodeDelays are dead-code delay overrides by space name, installed
+	// by Heritage::bumpDeadcodeDelay and kept across a restart.
+	// C++ parity: Override::deadcodedelay.
+	deadcodeDelays map[string]int32
 	// protoOverrides are the prototypes forced onto call sites (instruction
 	// offset). C++ parity: Override::protoover.
 	protoOverrides map[uint64]*HostFunction

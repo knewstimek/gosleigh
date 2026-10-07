@@ -94,6 +94,10 @@ type HostFunction struct {
 	Inline bool
 	Params    []HostParam
 	Output    *HostParam
+	// UnlockedParams are the parameters of a prototype whose input is not
+	// locked (their types are not binding, except a this pointer's).
+	// C++ parity: the ProtoParameters of an unlocked FuncProto store.
+	UnlockedParams []HostParam
 }
 
 // HostParam is one storage slot of a host prototype: a register or a stack

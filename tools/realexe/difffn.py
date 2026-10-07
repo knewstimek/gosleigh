@@ -13,6 +13,8 @@ import os
 import subprocess
 import sys
 
+sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, HERE)
@@ -40,7 +42,7 @@ def main():
 	if os.path.isdir(cap):
 		args += ["-host-captures", cap]
 	for i in a.idx:
-		r = subprocess.run([exe] + args + ["-index", str(i)], capture_output=True, text=True, timeout=60)
+		r = subprocess.run([exe] + args + ["-index", str(i)], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=60)
 		try:
 			got = json.loads(r.stdout)["functions"][0]
 			out = got.get("output") or got.get("error", "")

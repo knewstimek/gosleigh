@@ -1021,7 +1021,7 @@ func returnValue(op *PcodeOp) *Varnode {
 		return nil
 	}
 	inp := op.Input(1)
-	if inp == nil || inp.IsAnnotation() || inp.IsInput() {
+	if inp == nil || inp.IsAnnotation() {
 		return nil
 	}
 	return inp
@@ -2139,7 +2139,11 @@ func (s *printCState) renderCondBlockCommaFrag(bl *FlowBlock) ExprFragment {
 		if out := op.Output(); out != nil {
 			// An explicit unique def is a statement like any other, as in
 			// emitOps. C++ parity: emitBlockBasic prints non-implied outputs.
-			if out.Space() != nil && out.Space().IsUnique() && !(out.IsExplicit() && out.NumDescend() > 0) {
+			// A COPY made after ActionMarkImplied (Merge::buildDominantCopy)
+			// carries neither flag and prints under its merged variable's name,
+			// as in emitOps. C++ parity: emitBlockBasic skips only implied outputs.
+			mergedCopy := !out.IsImplied() && !out.IsExplicit() && out.NumDescend() > 0 && out.High() != nil && out.High().NumInstances() > 1
+			if out.Space() != nil && out.Space().IsUnique() && !(out.IsExplicit() && out.NumDescend() > 0) && !mergedCopy {
 				passedUniqueFilter := false
 
 				// Case 2: TrimOpOutput COPY whose output feeds the while condition,
@@ -3391,10 +3395,9 @@ func renderCharConstant(vn *Varnode, dt Datatype) (string, bool) {
 		if !isCharPrintLike(dt) {
 			return "", false
 		}
+		// The value is taken as a unicode code-point, printed as UTF-8 or
+		// as an escape. C++ parity: PrintC::printUnicode.
 		val := vn.Offset() & maskForSize(dt.Size())
-		if val >= 0x80 {
-			return "", false // TODO known mismatch: non-ASCII code points
-		}
 		return "L'" + escapeCharForC(int(val)) + "'", true
 	}
 	charLike := isCharPrintLike(dt)
@@ -3465,7 +3468,43 @@ func unicodeNeedsEscape(c int) bool {
 		}
 		return true // DEL + C1 control characters
 	}
-	return true
+	if c >= 0x2fa20 { // Beyond the last currently defined language
+		return true
+	}
+	if c < 0x2000 {
+		// Mongolian separators, arabic letter mark, ogham space mark
+		return (c >= 0x180b && c <= 0x180e) || c == 0x61c || c == 0x1680
+	}
+	if c < 0x3000 {
+		switch {
+		case c < 0x2010: // white space and separators
+			return true
+		case c >= 0x2028 && c <= 0x202f: // white space and separators
+			return true
+		case c == 0x205f || c == 0x2060: // white space and word joiner
+			return true
+		case c >= 0x2066 && c <= 0x206f: // bidirectional markers
+			return true
+		}
+		return false
+	}
+	if c < 0xe000 {
+		// ideographic space; D7FC-D7FF unassigned and D800-DFFF surrogates
+		return c == 0x3000 || c >= 0xd7fc
+	}
+	if c < 0xf900 {
+		return true // private use
+	}
+	if c >= 0xfe00 && c <= 0xfe0f {
+		return true // variation selectors
+	}
+	if c == 0xfeff {
+		return true // zero width non-breaking space
+	}
+	if c >= 0xfff0 && c <= 0xffff {
+		return c != 0xfffc && c != 0xfffd // interlinear specials
+	}
+	return false
 }
 
 // printCharHexEscapeC mirrors PrintC::printCharHexEscape (printc.cc:1575-1586).
@@ -4865,7 +4904,13 @@ func (s *printCState) printName(vn *Varnode) string {
 	// A global prints through its own symbol (a piece with a symbol of its
 	// own prints through that one). C++ parity: pushSymbolDetail with the
 	// HighVariable's own symbol.
-	if s.fd.globalEntryOf(vn) != nil {
+	// A written global resolves a single-field structure through its
+	// defining op. C++ parity: pushSymbolDetail(vn,op,false) (slot -1).
+	if e := s.fd.globalEntryOf(vn); e != nil {
+		if vn.IsWritten() {
+			name, _ := s.globalVarnodeName(vn, e, nil, vn.Def(), -1)
+			return name
+		}
 		return s.nameOf(vn)
 	}
 	name, _ := s.localPieceName(vn, s.nameOf(vn), nil, vn.Def(), -1)

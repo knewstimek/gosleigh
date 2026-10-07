@@ -4146,6 +4146,18 @@ func (a *ActionPrototypeWarnings) Apply(data *Funcdata) int {
 	if data == nil {
 		return 0
 	}
+	// Override messages, in space order. C++ parity:
+	// Override::generateOverrideMessages (generateDeadcodeDelayMessage).
+	if len(data.deadcodeDelays) != 0 && data.heritage != nil {
+		for _, sp := range data.heritage.spaces {
+			if sp == nil {
+				continue
+			}
+			if d, ok := data.deadcodeDelays[sp.Name]; ok && d >= 0 {
+				data.warningHeader("Restarted to delay deadcode elimination for space: " + sp.Name)
+			}
+		}
+	}
 	if data.GetFuncProto() == nil {
 		data.warningHeader("Prototype unavailable; parameter locations may be inaccurate")
 	}

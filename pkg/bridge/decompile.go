@@ -78,7 +78,7 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 			fd.WarningHeader("Exceeded maximum restarts with more pending")
 			break
 		}
-		next, err := result.rebuild(ov, fd.ProtoOverrides())
+		next, err := result.rebuild(ov, fd.ProtoOverrides(), fd.DeadcodeDelays())
 		if err != nil || next == nil || next.Funcdata == nil {
 			break
 		}

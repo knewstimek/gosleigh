@@ -27,6 +27,6 @@ lines += [c for c in cmds if not c.startswith('pre:')]
 lines.append('quit')
 exe = os.environ.get('DBG_EXE', os.path.join(ROOT, 'local', 'cppharness', 'decomp_dbg.exe'))
 env = dict(os.environ, SLEIGHHOME=os.environ.get('SLEIGHHOME', 'C:/ghidra12'))
-r = subprocess.run([exe], input='\n'.join(lines) + '\n', text=True, capture_output=True, env=env, timeout=300)
+r = subprocess.run([exe], input='\n'.join(lines) + '\n', text=True, encoding='utf-8', errors='replace', capture_output=True, env=env, timeout=300)
 sys.stdout.write(r.stdout)
 sys.stdout.write(r.stderr)

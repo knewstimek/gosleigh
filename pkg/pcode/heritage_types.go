@@ -315,7 +315,10 @@ type HeritageInfo struct {
 	Space         *address.Space
 	Delay         int32 // passes to wait before first heritage
 	DeadCodeDelay int32
-	DeadRemoved   int32
+	// SpaceDeadcodeDelay is the space's own dead-code delay, which an
+	// override does not change. C++ parity: AddrSpace::getDeadcodeDelay.
+	SpaceDeadcodeDelay int32
+	DeadRemoved        int32
 	LoadGuardDone bool
 	WarningIssued bool
 	// HasCallPlaceholders is true for the stack space until its unresolved
@@ -339,9 +342,13 @@ func NewHeritageInfo(spc *address.Space) HeritageInfo {
 		address.SpaceKindJoin:
 		return HeritageInfo{}
 	default:
+		// The space declares no separate dead-code delay, so it equals the
+		// heritage delay. C++ parity: AddrSpace::decodeBasicAttributes.
 		return HeritageInfo{
 			Space:               spc,
 			Delay:               spc.Delay,
+			DeadCodeDelay:       spc.Delay,
+			SpaceDeadcodeDelay:  spc.Delay,
 			HasCallPlaceholders: spc.Kind == address.SpaceKindStack,
 		}
 	}
@@ -355,7 +362,7 @@ func (hi *HeritageInfo) Reset() {
 	if hi.Space != nil {
 		hi.Delay = hi.Space.Delay
 	}
-	hi.DeadCodeDelay = 0
+	// Leave any override of DeadCodeDelay intact. C++ parity: HeritageInfo::reset.
 	hi.DeadRemoved = 0
 	hi.LoadGuardDone = false
 	hi.WarningIssued = false

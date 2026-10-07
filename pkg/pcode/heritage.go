@@ -177,6 +177,37 @@ func (h *Heritage) BuildInfoList() {
 	for _, spc := range h.spaces {
 		h.infoList = append(h.infoList, NewHeritageInfo(spc))
 	}
+	// C++ parity: Funcdata::startProcessing -> Override::applyDeadCodeDelay.
+	for i := range h.infoList {
+		info := &h.infoList[i]
+		if info.Space == nil {
+			continue
+		}
+		if d, ok := h.fd.deadcodeDelays[info.Space.Name]; ok && d >= info.Delay {
+			info.DeadCodeDelay = d
+		}
+	}
+}
+
+// bumpDeadcodeDelay asks for a restart that delays dead-code removal in the
+// space by one more heritage pass, unless a delay is already in place.
+// C++ parity: Heritage::bumpDeadcodeDelay.
+func (h *Heritage) bumpDeadcodeDelay(info *HeritageInfo) {
+	spc := info.Space
+	if spc.Kind != address.SpaceKindProcessor && spc.Kind != address.SpaceKindStack {
+		return // Not the right kind of space
+	}
+	if info.Delay != info.SpaceDeadcodeDelay {
+		return // There is already a global delay
+	}
+	if d, ok := h.fd.deadcodeDelays[spc.Name]; ok && d != info.SpaceDeadcodeDelay {
+		return // A delay has already been installed
+	}
+	if h.fd.deadcodeDelays == nil {
+		h.fd.deadcodeDelays = make(map[string]int32)
+	}
+	h.fd.deadcodeDelays[spc.Name] = info.SpaceDeadcodeDelay + 1
+	h.fd.rebuildRequested = true // Funcdata::setRestartPending
 }
 
 // toBasic recovers the *BlockBasic from a *FlowBlock using the concrete
@@ -1379,6 +1410,10 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 		// for already-resolved (heritage-known) varnodes.
 		// C++ parity: heritage.cc Heritage::heritage (2702-2732).
 		h.disjoint.Clear()
+		// A read in a range covered by an earlier pass, after dead code was
+		// already removed from the space, means data-flow may have been lost.
+		// C++ parity: Heritage::heritage (needwarning, bumpDeadcodeDelay).
+		var warnvn *Varnode
 		for _, vn := range vns {
 			// Skip dead free varnodes (no def, no uses, not unaffected, not input):
 			// they carry no data-flow to heritage. C++ parity: heritage.cc:2704.
@@ -1410,12 +1445,31 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 				if vn.HasNoDescend() {
 					continue
 				}
+				if warnvn == nil && info.DeadRemoved > 0 && !h.fd.IsJumptableRecoveryOn() {
+					h.bumpDeadcodeDelay(info)
+					warnvn = vn
+				}
 				h.disjoint.Add(raddr, rsize, MemRangeOldAddresses)
 			default:
 				// case 1: partially contained in an old range but may contain new
 				// addresses; always reprocess. C++ parity: heritage.cc:2721-2722.
 				h.disjoint.Add(raddr, rsize, MemRangeOldAddresses|MemRangeNewAddresses)
+				if warnvn == nil && info.DeadRemoved > 0 && !h.fd.IsJumptableRecoveryOn() {
+					if vn.IsHeritageKnown() {
+						continue // Assume it is tiled and produced by merging
+					}
+					h.bumpDeadcodeDelay(info)
+					warnvn = vn
+				}
 			}
+		}
+		if warnvn != nil && !info.WarningIssued {
+			info.WarningIssued = true
+			msg := "Heritage AFTER dead removal. Example location: " + h.fd.printRawNoMarkup(warnvn)
+			if !warnvn.HasNoDescend() {
+				msg += " : " + PrintRawAddr(warnvn.DescendIter()[0].Addr())
+			}
+			h.fd.warningHeader(msg)
 		}
 
 		// Place multiequals for each range (refined first when no write fills
@@ -1960,8 +2014,24 @@ func (fd *Funcdata) deadRemovalAllowed(sp *address.Space) bool {
 	}
 	for i := range h.infoList {
 		if info := &h.infoList[i]; info.Space == sp {
-			return h.pass > info.Delay
+			return h.pass > info.DeadCodeDelay
 		}
 	}
 	return true
 }
+
+// printRawNoMarkup is a Varnode's register name, or its space shortcut and
+// raw address. C++ parity: Varnode::printRawNoMarkup.
+func (fd *Funcdata) printRawNoMarkup(vn *Varnode) string {
+	if name := fd.registerName(vn); name != "" {
+		return name
+	}
+	return string(spaceShortcut(vn.Space())) + PrintRawAddr(vn.Addr())
+}
+
+// DeadcodeDelays are the dead-code delay overrides by space name, kept
+// across a restart. C++ parity: Override::deadcodedelay.
+func (fd *Funcdata) DeadcodeDelays() map[string]int32 { return fd.deadcodeDelays }
+
+// SetDeadcodeDelays installs the dead-code delay overrides of a restart.
+func (fd *Funcdata) SetDeadcodeDelays(d map[string]int32) { fd.deadcodeDelays = d }

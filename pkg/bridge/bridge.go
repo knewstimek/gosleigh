@@ -18,6 +18,9 @@ type BuildConfig struct {
 	// ProtoOverrides are the prototypes forced onto call sites (keyed by
 	// instruction offset). C++ parity: Override::insertProtoOverride.
 	ProtoOverrides map[uint64]*pcode.HostFunction
+	// DeadcodeDelays are dead-code delay overrides by space name.
+	// C++ parity: Override::insertDeadcodeDelay.
+	DeadcodeDelays map[string]int32
 
 	Name            string
 	Entry           address.Address
@@ -166,7 +169,7 @@ type Result struct {
 	// CspecData is set when BuildConfig.CspecPath is non-empty.
 	CspecData *pcode.CspecData
 	// rebuild re-runs Build with indirect-call overrides (a decompiler restart).
-	rebuild func(map[uint64]address.Address, map[uint64]*pcode.HostFunction) (*Result, error)
+	rebuild func(map[uint64]address.Address, map[uint64]*pcode.HostFunction, map[string]int32) (*Result, error)
 }
 
 type instructionRecord struct {
@@ -302,6 +305,13 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 			po[k] = v
 		}
 		fd.SetProtoOverrides(po)
+	}
+	if len(cfg.DeadcodeDelays) != 0 {
+		dd := make(map[string]int32, len(cfg.DeadcodeDelays))
+		for k, v := range cfg.DeadcodeDelays {
+			dd[k] = v
+		}
+		fd.SetDeadcodeDelays(dd)
 	}
 	if err := attachEnvironment(engine, fd, cfg, summary.heritageSpaces); err != nil {
 		return nil, err
@@ -536,10 +546,11 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		Instructions:   translations,
 		HeritageSpaces: summary.heritageSpaces,
 		Warnings:       warnings,
-		rebuild: func(ov map[uint64]address.Address, po map[uint64]*pcode.HostFunction) (*Result, error) {
+		rebuild: func(ov map[uint64]address.Address, po map[uint64]*pcode.HostFunction, dd map[string]int32) (*Result, error) {
 			next := cfg
 			next.IndirectOverrides = ov
 			next.ProtoOverrides = po
+			next.DeadcodeDelays = dd
 			return Build(engine, next)
 		},
 	}
