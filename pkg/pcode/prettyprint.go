@@ -204,6 +204,13 @@ type PrettyEmitter struct {
 	rightotal   int
 	needbreak   bool
 	countbase   int
+	// pendingLines counts statement-ending newlines not yet queued. Gosleigh's
+	// printer ends a statement with a newline where Ghidra starts the next
+	// line with tagLine, so the break is held until the next token: an
+	// indent change in between (closing brace) then precedes the break and
+	// the new line is measured at the right indent.
+	// C++ parity: Emit::closeBraceIndent (stopIndent; tagLine; print).
+	pendingLines int
 
 	scanqueue *ppCircQueueInt
 	tokqueue  *ppCircQueueTok
@@ -475,7 +482,15 @@ func (e *PrettyEmitter) endDocument() {
 	e.scan()
 }
 
+// flushLines queues the held statement-ending line breaks.
+func (e *PrettyEmitter) flushLines() {
+	for ; e.pendingLines > 0; e.pendingLines-- {
+		e.tagLine()
+	}
+}
+
 func (e *PrettyEmitter) contentToken(s string) {
+	e.flushLines()
 	e.checkstring()
 	tok := e.tokqueue.push()
 	e.setContent(tok, s)
@@ -483,6 +498,7 @@ func (e *PrettyEmitter) contentToken(s string) {
 }
 
 func (e *PrettyEmitter) spacesToken(num, bump int) {
+	e.flushLines()
 	e.checkbreak()
 	tok := e.tokqueue.push()
 	e.setSpaces(tok, num, bump)
@@ -563,7 +579,7 @@ func (e *PrettyEmitter) Emit(text string) {
 			if i > start {
 				e.contentToken(text[start:i])
 			}
-			e.tagLine()
+			e.pendingLines++
 			start = i + 1
 		}
 	}
@@ -573,7 +589,7 @@ func (e *PrettyEmitter) Emit(text string) {
 }
 
 func (e *PrettyEmitter) Space()   { e.spacesToken(1, 0) }
-func (e *PrettyEmitter) Newline() { e.tagLine() }
+func (e *PrettyEmitter) Newline() { e.pendingLines++ }
 func (e *PrettyEmitter) Indent()  { e.startIndent() }
 func (e *PrettyEmitter) Dedent()  { e.stopIndent() }
 
@@ -590,6 +606,7 @@ func (e *PrettyEmitter) Dedent()  { e.stopIndent() }
 // remaining line space, which becomes the continuation indent for any break
 // taken inside it. C++ parity: EmitPrettyPrint::openGroup (prettyprint.cc:1149).
 func (e *PrettyEmitter) OpenGroup() int {
+	e.flushLines()
 	e.checkstart()
 	tok := e.tokqueue.push()
 	tok.tagtype = ppTagBegin
@@ -604,6 +621,7 @@ func (e *PrettyEmitter) OpenGroup() int {
 // CloseGroup ends the group opened by OpenGroup.
 // C++ parity: EmitPrettyPrint::closeGroup (prettyprint.cc:1159).
 func (e *PrettyEmitter) CloseGroup(id int) {
+	e.flushLines()
 	e.checkend()
 	tok := e.tokqueue.push()
 	tok.tagtype = ppTagEnd
@@ -649,12 +667,14 @@ func (e *PrettyEmitter) Reset() {
 	e.leftotal = 1
 	e.rightotal = 1
 	e.needbreak = false
+	e.pendingLines = 0
 	e.spaceremain = e.maxlinesize
 	e.countbase = 0
 	e.beginDocument()
 }
 
 func (e *PrettyEmitter) String() string {
+	e.flushLines()
 	e.endDocument()
 	e.flush()
 	return e.sink.String()

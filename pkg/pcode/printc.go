@@ -2462,13 +2462,17 @@ func (s *printCState) emitSwitchBlock(bl *FlowBlock) error {
 	if err := s.emitConditionLead(children[0]); err != nil {
 		return err
 	}
-	s.lang.OpenBlockAfter(func() {
-		// Ghidra emits "switch(...)" with no space before the paren.
-		s.lang.Token("switch")
-		s.lang.Token("(")
-		s.lang.Token(s.mustRenderSwitchSelector(children[0]))
-		s.lang.Token(")")
-	})
+	// Ghidra emits "switch(...)" with no space before the paren. The brace
+	// opens no indent level: case labels sit at the switch's indent and only
+	// each case body is indented. C++ parity: Emit::openBrace (not
+	// openBraceIndent) plus startIndent per case.
+	s.lang.Token("switch")
+	s.lang.Token("(")
+	s.lang.Token(s.mustRenderSwitchSelector(children[0]))
+	s.lang.Token(")")
+	s.lang.Space()
+	s.lang.Token("{")
+	s.lang.Newline()
 	cases := getBlockStructInfo(bl).cases
 	jt := bl.switchJumpTable(s.fd)
 	for i, c := range cases {
@@ -2497,7 +2501,8 @@ func (s *printCState) emitSwitchBlock(bl *FlowBlock) error {
 		}
 		s.lang.Dedent()
 	}
-	s.lang.CloseBlock()
+	s.lang.Token("}")
+	s.lang.Newline()
 	return nil
 }
 
@@ -3130,7 +3135,7 @@ func (s *printCState) renderBranchConditionFrag(op *PcodeOp) (ExprFragment, erro
 			// C++ parity: PrintC pointer comparison rendering with explicit null cast.
 			if negTok == "==" || negTok == "!=" {
 				if castStr, constIdx := s.nullPtrCastStr(defOp); castStr != "" {
-					nullFrag := s.lang.Atom(castStr)
+					nullFrag := s.lang.CastExpr(castStr, s.lang.Atom("0x0"))
 					if reorder {
 						// Inputs were swapped: constIdx in original -> opposite in swapped.
 						if constIdx == 0 {
@@ -3875,8 +3880,9 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	}
 }
 
-// nullPtrCastStr returns the cast string for a null pointer in a comparison,
-// or "" if this is not a null pointer comparison.
+// nullPtrCastStr returns the pointer type a null constant in a comparison is
+// cast to, or "" if this is not a null pointer comparison. Callers print the
+// constant as a typecast over 0x0 (PrintC::typecast, breakable inside).
 // Also returns which input index is the constant (to replace it).
 func (s *printCState) nullPtrCastStr(op *PcodeOp) (castStr string, constIdx int) {
 	if op.NumInput() < 2 {
@@ -3909,7 +3915,7 @@ func (s *printCState) nullPtrCastStr(op *PcodeOp) (castStr string, constIdx int)
 				continue
 			}
 		}
-		return "(" + printedTypeString(s.normalizeTypeForDecl(ptrDt)) + ")0x0", cstIdx
+		return printedTypeString(s.normalizeTypeForDecl(ptrDt)), cstIdx
 	}
 	return "", -1
 }
@@ -3927,7 +3933,7 @@ func (s *printCState) renderBinary(op *PcodeOp, token string, prec ExprPrecedenc
 	// C++ parity: PrintC renders pointer comparisons with explicit null pointer casts.
 	if token == "==" || token == "!=" {
 		if castStr, constIdx := s.nullPtrCastStr(op); castStr != "" {
-			nullFrag := s.lang.Atom(castStr)
+			nullFrag := s.lang.CastExpr(castStr, s.lang.Atom("0x0"))
 			if constIdx == 0 {
 				left = nullFrag
 			} else {
