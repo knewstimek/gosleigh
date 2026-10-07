@@ -179,11 +179,10 @@ func (t *typeOpReturn) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) Da
 	if slot == 0 || op.Parent() == nil || op.Parent().GetFuncdata() == nil {
 		return t.typeOpBase.InputTypeLocal(op, slot, tf)
 	}
-	// An unlocked output is void in C++ until ActionOutputPrototype, which runs
-	// after type recovery, and afterwards equals the returned value's own type,
-	// so only a locked output contributes a type.
+	// The output type applies locked or not (C++ has the lock check commented
+	// out); an unlocked output is void until ActionOutputPrototype.
 	fp := op.Parent().GetFuncdata().GetFuncProto() // Prototype of the function we are in
-	if fp == nil || !fp.IsOutputLocked() || fp.GetOutput() == nil {
+	if fp == nil || fp.GetOutput() == nil {
 		return t.typeOpBase.InputTypeLocal(op, slot, tf)
 	}
 	ct := fp.GetOutput().Type()
