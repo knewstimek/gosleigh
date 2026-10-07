@@ -271,14 +271,27 @@ func (a *ActionSetCasts) Apply(data *Funcdata) int {
 			continue
 		}
 		if op.Code() == CPUI_PTRADD {
-			// A PTRADD that no longer fits its pointer reverts to integer math.
+			// A PTRADD that no longer fits its pointer (as the variable is
+			// typed) reverts to integer math.
 			sz := int32(op.Input(2).Offset())
-			ptr, ok := op.Input(0).TypeReadFacing(op).(*Pointer)
+			ptr, ok := op.Input(0).HighTypeReadFacing(op).(*Pointer)
 			if !ok || ptr.Pointee() == nil || ptr.Pointee().AlignSize() != sz*int32(ptr.WordSize()) {
 				data.OpUndoPtradd(op, true)
 			}
+		} else if op.Code() == CPUI_PTRSUB {
+			// Likewise a PTRSUB whose base no longer points at a matching
+			// component: an offset becomes INT_ADD, a zero offset a COPY.
+			base := op.Input(0)
+			if !isPtrsubMatching(data, base.GetSpaceFromConst(), base.TypeReadFacing(op), int64(op.Input(1).Offset()), 0, 0) {
+				if op.Input(1).Offset() == 0 {
+					data.OpRemoveInput(op, 1)
+					data.OpSetOpcode(op, CPUI_COPY)
+				} else {
+					data.OpSetOpcode(op, CPUI_INT_ADD)
+				}
+			}
 		}
-		// TODO known mismatch: the PTRSUB isPtrsubMatching re-check is not ported.
+		// C++ parity: ActionSetCasts::apply (the PTRADD/PTRSUB re-checks).
 		// Do input casts first, as the output token may depend on the inputs.
 		for i := 0; i < op.NumInput(); i++ {
 			a.resolveUnion(op, i, data, cs) // Union resolution must happen before casts are determined
