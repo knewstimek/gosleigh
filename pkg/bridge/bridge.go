@@ -1539,7 +1539,7 @@ func discoverBlockStarts(records []instructionRecord) map[address.Address]bool {
 				mark(record.flow.directTarget)
 			}
 		}
-		if record.flow.terminates {
+		if nextStartsBlock(record.translation.Ops) {
 			if _, exists := known[record.translation.Next]; exists {
 				mark(record.translation.Next)
 			}
@@ -1547,6 +1547,30 @@ func discoverBlockStarts(records []instructionRecord) map[address.Address]bool {
 	}
 
 	return starts
+}
+
+// nextStartsBlock reports whether the instruction after these ops begins a
+// basic block: a relative branch jumps to the end of the instruction, or the
+// last op kept is a branch, return or halt. A branch inside the instruction
+// whose target is another of its ops leaves the following instruction in the
+// same block as the instruction's tail.
+// C++ parity: flow.cc FlowInfo::xrefControlFlow (startbasic after the loop).
+func nextStartsBlock(ops []pcode.RawOp) bool {
+	if len(ops) == 0 {
+		return false
+	}
+	bounds := splitInstruction(ops)
+	n := bounds[len(bounds)-1][1]
+	for i := 0; i < n; i++ {
+		if t, rel := relativeTargetIndex(ops, i); rel && t >= len(ops) {
+			return true // isfallthru: explicit branch to the next instruction
+		}
+	}
+	switch ops[n-1].OpCode {
+	case pcode.CPUI_BRANCH, pcode.CPUI_CBRANCH, pcode.CPUI_BRANCHIND, pcode.CPUI_RETURN:
+		return true
+	}
+	return false
 }
 
 // applyFlowOverride rewrites the instruction's primary branch op as the host

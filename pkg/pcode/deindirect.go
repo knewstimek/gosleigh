@@ -29,7 +29,7 @@ func (fc *FuncCallSpecs) deindirectHost(data *Funcdata, hp HostFunction, entry a
 	fc.entryAddress = entry
 	fc.name = name
 	fc.hostProto = &hp
-	data.OpSetInput(op, data.NewVarnode(1, entry), 0)
+	data.OpSetInput(op, data.NewCodeRef(entry), 0)
 	data.OpSetOpcode(op, CPUI_CALL)
 	data.recordIndirectOverride(op.Addr().Offset, entry)
 	if !hp.NoReturn {
