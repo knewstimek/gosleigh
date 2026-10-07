@@ -8,7 +8,7 @@
 |---|---|---|
 | realexe private-sample seed1 (x86-32) | 200/200 | 골든 재생성(프로그램 옵션, readonly on) |
 | realexe private-sample seed2 (보지 않은 표본) | 200/200 | 일반화 지표 |
-| realexe private-sample (x64 UE4) | 197/200, sim 0.999 | 남은 3개는 버전 차이(아래) |
+| realexe private-sample (x64 UE4) | 200/200 | 골든은 ghidra-ref 코어로 재생성(아래) |
 | 게이트 `tools/gates.py` | 전부 유지 | tree 10/10, corpus2 10/13, x64_auto 108/109 |
 | x64 코퍼스 C++ 코어 대조 `rawcmp.py` | corpus 8/8, corpus2 13/13, x64_auto 109/109 | 같은 바이트를 C++ 하네스로 |
 
@@ -18,9 +18,10 @@ x64 게이트의 남은 불일치는 골든 JSON에 없는 환경 정보 때문�
 호출 대상 이름), `faverage`(전역 심볼 이름), `add_pt`(Java Program DB 스택 변수 이름),
 x64_auto `switch_dense`(전체 이미지의 `__ImageBase`). 같은 바이트의 C++ 코어 출력과는 일치한다.
 
-private-sample [118][122][123]은 버전 차이다: 골든은 C:\ghidra12(12.0.4 PUBLIC)로 만들었고 ghidra-ref HEAD는
-12.2 DEV다. GP-2493(402d10d6cc)이 type-lock된 bool 입력의 nzmask를 1로 두어(funcdata_varnode.cc
-calcNZMask) `(param_2 & 1)`이 사라진다. `Ghidra_12.0.4_build` 태그에는 없는 코드이고, Go와 하네스는 HEAD를 따른다.
+골든 생성 코어는 ghidra-ref와 같아야 한다. C:\ghidra12는 12.0.4, ghidra-ref HEAD는 12.2 DEV라 GP-2493
+(type-lock bool 입력 nzmask=1) 등으로 어긋난다. `tools/cppharness/build_native.py`로 decompile.exe를 빌드해
+설치 사본(local/ghidra12_head)에 넣고 `GHIDRA_HEADLESS=<사본>\supportnalyzeHeadless.bat realexe.py sample`로
+만든다. private-sample는 이렇게 재생성(12.0.4 판은 local/realexe/private-sample/golden_12.0.4). private-sample은 12.0.4 골든 그대로 200.
 
 ## 알려진 큰 미포팅 (known mismatch)
 
