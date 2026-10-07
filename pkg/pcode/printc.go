@@ -3221,7 +3221,7 @@ func (s *printCState) renderVarnodeExpr(vn *Varnode) (ExprFragment, error) {
 // C++ parity: PrintC::pushConstant default printing (pushOp(&typecast)).
 func (s *printCState) castConstantFrag(vn *Varnode, text string) (ExprFragment, bool) {
 	var typeStr string
-	switch typed := vn.TypeReadFacing(nil).(type) {
+	switch typed := vn.TypeReadFacing(vn.LoneDescend()).(type) {
 	case *Pointer:
 		typeStr = printedTypeString(s.normalizeTypeForDecl(typed))
 	case *Array, *Struct, *Union:
@@ -3241,7 +3241,7 @@ func (s *printCState) castConstantFrag(vn *Varnode, text string) (ExprFragment, 
 // C++ parity: PrintC::pushEnumConstant (enum_cat: "|" with no spacing, a
 // token distinct from the bitwise or).
 func (s *printCState) renderEnumConstant(vn *Varnode) (ExprFragment, bool) {
-	e, ok := vn.TypeReadFacing(nil).(*Enum)
+	e, ok := vn.TypeReadFacing(vn.LoneDescend()).(*Enum)
 	if !ok {
 		return ExprFragment{}, false
 	}
@@ -3262,7 +3262,7 @@ func (s *printCState) renderEnumConstant(vn *Varnode) (ExprFragment, bool) {
 }
 
 func (s *printCState) renderConstant(vn *Varnode) string {
-	dt := vn.TypeReadFacing(nil)
+	dt := vn.TypeReadFacing(vn.LoneDescend()) // C++ parity: getHighTypeReadFacing(op) of the reading op
 	if enumType, ok := dt.(*Enum); ok {
 		if name, ok := enumType.Values()[vn.Offset()]; ok {
 			return name

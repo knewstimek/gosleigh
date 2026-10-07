@@ -206,11 +206,47 @@ func regParamSlotOfHigh(hv *HighVariable, sl *ScopeLocal) (int, bool) {
 	return best, true
 }
 
+// overrideSizeLockedGlobals gives a size-locked global Symbol (a locked
+// undefined type locks only the size) the data-type of the variable that
+// holds it whole, so it prints through that type (a single-field structure
+// prints its field).
+// C++ parity: ActionNameVars::linkSymbols (isSizeTypeLocked ->
+// Scope::overrideSizeLockType). Local symbols are not linked here.
+func overrideSizeLockedGlobals(data *Funcdata) {
+	if data.globalScope == nil {
+		return
+	}
+	seen := make(map[*HighVariable]bool)
+	for _, vn := range data.GetVarnodeBank().AllVarnodes() {
+		if vn.IsFree() || vn.IsAnnotation() {
+			continue
+		}
+		hv := vn.High()
+		if hv == nil || seen[hv] {
+			continue
+		}
+		seen[hv] = true
+		e := data.globalEntryOf(vn)
+		if e == nil {
+			continue
+		}
+		sym := e.Symbol()
+		st, ht := sym.Type(), hv.Type()
+		if !sym.IsTypeLocked() || st == nil || st.Metatype() != TYPE_UNKNOWN || ht == nil {
+			continue
+		}
+		if vn.Size() == st.Size() && ht.Size() == st.Size() {
+			sym.SetType(ht)
+		}
+	}
+}
+
 // Apply assigns iVar1/uVar1-style names to unnamed register-space HighVariables.
 // Stack locals already have local_hex names from ScopeLocal and are not touched.
 // Must be called after ActionMergeCopy so all HV merging is complete.
 // C++ parity: ActionNameVars::apply() -> ScopeLocal::assignDefaultNames()
 func (a *ActionNameVars) Apply(data *Funcdata) int {
+	overrideSizeLockedGlobals(data)
 	finalizeLocalHighTypes(data)
 	// Collect unique unnamed register-space HighVariables.
 	type hvEntry struct {
