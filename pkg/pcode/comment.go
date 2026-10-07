@@ -238,14 +238,14 @@ func addrLess(a, b address.Address) bool {
 	return a.Offset < b.Offset
 }
 
-// seqLess reports whether op a sorts before op b in Ghidra's PcodeOpTree order:
-// by address, then by intra-instruction order.
-// C++ parity: op.hh SeqNum::operator< (address then order).
+// seqLess reports whether op a sorts before op b in Ghidra's PcodeOpTree order.
 func seqLess(a, b *PcodeOp) bool {
 	if a.Addr() != b.Addr() {
 		return addrLess(a.Addr(), b.Addr())
 	}
-	return opBlockUIndex(a) < opBlockUIndex(b)
+	// Ops at one address order by creation (SeqNum::uniq), not by their
+	// place in the block. C++ parity: SeqNum::operator< (PcodeOpTree).
+	return a.Seq().Time < b.Seq().Time
 }
 
 // blockContainsAddr reports whether ad falls within bb's address cover (a
