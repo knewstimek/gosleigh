@@ -508,13 +508,12 @@ func (op *PcodeOp) blockNeighbor(d int) *PcodeOp {
 		return nil
 	}
 	ops := op.parent.opSlice()
-	for i, o := range ops {
-		if o == op {
-			if j := i + d; j >= 0 && j < len(ops) {
-				return ops[j]
-			}
-			return nil
-		}
+	i := op.parent.opPosition(op)
+	if i < 0 {
+		return nil
+	}
+	if j := i + d; j >= 0 && j < len(ops) {
+		return ops[j]
 	}
 	return nil
 }

@@ -27,6 +27,35 @@ type BlockBasic struct {
 
 	// data is the function owning the block. C++ parity: BlockBasic::data.
 	data *Funcdata
+
+	// posIndex caches each op's position in ops (rebuilt lazily). It stands
+	// in for the C++ SeqNum order, which the block keeps current.
+	posIndex map[*PcodeOp]int
+}
+
+// opPosition is op's 0-based position in the block, or -1 when absent.
+// A cached position is checked against the slice, so any reordering of ops
+// only costs a rebuild. C++ parity: PcodeOp::getSeqNum().getOrder().
+func (bb *BlockBasic) opPosition(op *PcodeOp) int {
+	if bb.srcDelegate != nil {
+		return bb.srcDelegate.opPosition(op)
+	}
+	if i, ok := bb.posIndex[op]; ok && i < len(bb.ops) && bb.ops[i] == op {
+		return i
+	}
+	if bb.posIndex == nil {
+		bb.posIndex = make(map[*PcodeOp]int, len(bb.ops))
+	} else {
+		clear(bb.posIndex)
+	}
+	pos := -1
+	for i, o := range bb.ops {
+		bb.posIndex[o] = i
+		if o == op {
+			pos = i
+		}
+	}
+	return pos
 }
 
 // GetFuncdata returns the function containing this block.

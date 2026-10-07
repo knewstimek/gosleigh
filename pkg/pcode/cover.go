@@ -87,10 +87,8 @@ func opBlockUIndex(op *PcodeOp) uint64 {
 	if bb == nil {
 		return op.Seq().Order
 	}
-	for i, o := range bb.opSlice() {
-		if o == op {
-			return uint64(i) + 1
-		}
+	if i := bb.opPosition(op); i >= 0 {
+		return uint64(i) + 1
 	}
 	return op.Seq().Order
 }
