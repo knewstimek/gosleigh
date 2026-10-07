@@ -413,15 +413,17 @@ func (vb *VarnodeBank) AllVarnodes() []*Varnode {
 // C++ parity: VarnodeBank loc-tree range queries
 func (vb *VarnodeBank) LocRange(addr address.Address, size int32) []*Varnode {
 	var result []*Varnode
-	endOff := addr.Offset + uint64(size)
+	if size <= 0 {
+		return nil
+	}
+	// Compare last bytes so a range ending at the top of the space does not
+	// wrap. C++ parity: Heritage::collect (endaddr wraparound check).
+	last := addr.Offset + uint64(size) - 1
 	for _, vn := range vb.BySpace(addr.Space) {
-		if vn.loc.Offset >= endOff {
+		if vn.loc.Offset > last {
 			break // sorted by offset: nothing later can overlap
 		}
-		vnEnd := vn.loc.Offset + uint64(vn.size)
-		// Check overlap: vn overlaps [addr, addr+size) if
-		// vn.offset < endOff && vnEnd > addr.offset
-		if vn.loc.Offset < endOff && vnEnd > addr.Offset {
+		if vn.size > 0 && vn.loc.Offset+uint64(vn.size)-1 >= addr.Offset {
 			result = append(result, vn)
 		}
 	}

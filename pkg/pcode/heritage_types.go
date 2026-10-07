@@ -67,11 +67,8 @@ func (lm *LocationMap) Find(addr address.Address) int {
 	// Check if previous entry contains addr
 	if idx > 0 {
 		prev := &lm.entries[idx-1]
-		if prev.Addr.Space == addr.Space {
-			end := prev.Addr.Offset + uint64(prev.SP.Size)
-			if addr.Offset < end {
-				return idx - 1
-			}
+		if prev.Addr.Space == addr.Space && addr.Offset-prev.Addr.Offset < uint64(prev.SP.Size) {
+			return idx - 1
 		}
 	}
 	return -1
@@ -95,8 +92,8 @@ func (lm *LocationMap) FindPass(addr address.Address) int32 {
 //
 // C++ parity: heritage.cc LocationMap::add
 func (lm *LocationMap) Add(addr address.Address, size int32, pass int32) (int, int) {
-	endOff := addr.Offset + uint64(size)
-
+	// Ranges are compared by distance from their start, so a range ending at
+	// the top of the space does not wrap. C++ parity: Address::overlap.
 	idx := lm.findIdx(addr)
 
 	// Check if previous entry overlaps (strictly, not merely adjacent).
@@ -106,12 +103,9 @@ func (lm *LocationMap) Add(addr address.Address, size int32, pass int32) (int, i
 	startIdx := idx
 	if idx > 0 {
 		prev := &lm.entries[idx-1]
-		if prev.Addr.Space == addr.Space {
-			prevEnd := prev.Addr.Offset + uint64(prev.SP.Size)
-			if prevEnd > addr.Offset {
-				// Previous entry overlaps (not merely adjacent)
-				startIdx = idx - 1
-			}
+		if prev.Addr.Space == addr.Space && addr.Offset-prev.Addr.Offset < uint64(prev.SP.Size) {
+			// Previous entry overlaps (not merely adjacent)
+			startIdx = idx - 1
 		}
 	}
 
@@ -121,7 +115,7 @@ func (lm *LocationMap) Add(addr address.Address, size int32, pass int32) (int, i
 	endIdx := startIdx
 	for endIdx < len(lm.entries) {
 		e := &lm.entries[endIdx]
-		if e.Addr.Space != addr.Space || e.Addr.Offset >= endOff {
+		if e.Addr.Space != addr.Space || (e.Addr.Offset >= addr.Offset && e.Addr.Offset-addr.Offset >= uint64(size)) {
 			break
 		}
 		endIdx++
@@ -146,8 +140,7 @@ func (lm *LocationMap) Add(addr address.Address, size int32, pass int32) (int, i
 	if startIdx+1 == endIdx &&
 		first.Addr.Space == addr.Space &&
 		first.Addr.Offset <= addr.Offset {
-		firstEnd := first.Addr.Offset + uint64(first.SP.Size)
-		if firstEnd >= endOff {
+		if addr.Offset-first.Addr.Offset+uint64(size) <= uint64(first.SP.Size) {
 			if first.SP.Pass < pass {
 				return startIdx, 2
 			}
@@ -157,7 +150,7 @@ func (lm *LocationMap) Add(addr address.Address, size int32, pass int32) (int, i
 
 	// Merge: compute unified range
 	mergeStart := addr.Offset
-	mergeEnd := endOff
+	mergeLast := addr.Offset + uint64(size) - 1 // last byte: never wraps
 	minPass := pass
 	intersectCode := 0
 
@@ -166,9 +159,8 @@ func (lm *LocationMap) Add(addr address.Address, size int32, pass int32) (int, i
 		if e.Addr.Offset < mergeStart {
 			mergeStart = e.Addr.Offset
 		}
-		eEnd := e.Addr.Offset + uint64(e.SP.Size)
-		if eEnd > mergeEnd {
-			mergeEnd = eEnd
+		if eLast := e.Addr.Offset + uint64(e.SP.Size) - 1; eLast > mergeLast {
+			mergeLast = eLast
 		}
 		if e.SP.Pass < minPass {
 			minPass = e.SP.Pass
@@ -179,7 +171,7 @@ func (lm *LocationMap) Add(addr address.Address, size int32, pass int32) (int, i
 	// Replace overlapping entries with merged entry
 	merged := locationEntry{
 		Addr: address.Address{Space: addr.Space, Offset: mergeStart},
-		SP:   SizePass{Size: int32(mergeEnd - mergeStart), Pass: minPass},
+		SP:   SizePass{Size: int32(mergeLast - mergeStart + 1), Pass: minPass},
 	}
 	lm.entries[startIdx] = merged
 	if endIdx > startIdx+1 {
@@ -236,17 +228,14 @@ type TaskList struct {
 func (tl *TaskList) Add(addr address.Address, size int32, flags uint32) {
 	if len(tl.tasks) > 0 {
 		last := &tl.tasks[len(tl.tasks)-1]
-		if last.Addr.Space == addr.Space {
-			lastEnd := last.Addr.Offset + uint64(last.Size)
-			if lastEnd > addr.Offset {
-				// Overlapping (not merely adjacent) -- extend
-				newEnd := addr.Offset + uint64(size)
-				if newEnd > lastEnd {
-					last.Size = int32(newEnd - last.Addr.Offset)
-				}
-				last.Flags |= flags
-				return
+		if last.Addr.Space == addr.Space && addr.Offset-last.Addr.Offset < uint64(last.Size) {
+			// Overlapping (not merely adjacent) -- extend. Compared by last
+			// byte so a range ending at the top of the space does not wrap.
+			if newSize := int32(addr.Offset-last.Addr.Offset) + size; newSize > last.Size {
+				last.Size = newSize
 			}
+			last.Flags |= flags
+			return
 		}
 	}
 	tl.tasks = append(tl.tasks, MemRange{

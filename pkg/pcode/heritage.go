@@ -708,7 +708,7 @@ func (h *Heritage) renameRanges(graph *BlockGraph, ranges []renameRange) {
 func inRenameRanges(vn *Varnode, ranges []renameRange) bool {
 	sp, off := vn.Space(), vn.Offset()
 	for _, r := range ranges {
-		if sp == r.addr.Space && off >= r.addr.Offset && off < r.addr.Offset+uint64(r.size) {
+		if sp == r.addr.Space && off >= r.addr.Offset && off-r.addr.Offset < uint64(r.size) {
 			return true
 		}
 	}

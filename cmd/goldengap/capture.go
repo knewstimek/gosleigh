@@ -710,7 +710,7 @@ func captureInjections(fn goldenEntry, host pcode.HostScope, ram *address.Space)
 			}
 		}
 		addr := parseUint(at.attr("offset"))
-		inj.Callee = calleeAt(raw, addr, host, ram)
+		inj.Callee = calleeAt(raw, inj.Name, host, ram)
 		out[addr] = inj
 	}
 	return out
@@ -719,7 +719,7 @@ func captureInjections(fn goldenEntry, host pcode.HostScope, ram *address.Space)
 // calleeAt names the function a call fixup replaced: the call target of the
 // instruction at addr is not decoded here, so the capture's own function list
 // is used -- the injected callee is the one carrying an <inject> prototype.
-func calleeAt(raw []byte, _ uint64, host pcode.HostScope, ram *address.Space) string {
+func calleeAt(raw []byte, injName string, host pcode.HostScope, ram *address.Space) string {
 	var root xnode
 	if xml.Unmarshal(raw, &root) != nil {
 		return ""
@@ -740,7 +740,9 @@ func calleeAt(raw []byte, _ uint64, host pcode.HostScope, ram *address.Space) st
 				continue
 			}
 			fnode := &ms.Kids[0]
-			if p := fnode.child("prototype"); p == nil || p.child("inject") == nil {
+			// The function whose prototype names this injection.
+			p := fnode.child("prototype")
+			if p == nil || p.child("inject") == nil || strings.TrimSpace(p.child("inject").text) != injName {
 				continue
 			}
 			if at := ms.child("addr"); at != nil && host != nil && ram != nil {

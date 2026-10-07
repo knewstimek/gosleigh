@@ -197,6 +197,14 @@ func (fd *Funcdata) recoverJumpTable(op *PcodeOp) (*JumpTable, JumpTableRecovery
 // a rebuild and return the spec bound to op.
 // C++ parity: flow.cc FlowInfo::setupCallindSpecs (flow.cc:704).
 func (fd *Funcdata) setupCallindSpecs(op *PcodeOp) *FuncCallSpecs {
+	// An indirect override (a deindirect before a restart) makes the demoted
+	// jump a direct call; the spec built below then queries the callee.
+	// C++ parity: Override::applyIndirect + queryCall, then
+	// opSetOpcode(op,CPUI_CALL) when the entry address is valid.
+	if target, ok := fd.indirectOverrides[op.Addr().Offset]; ok {
+		fd.OpSetOpcode(op, CPUI_CALL)
+		fd.OpSetInput(op, fd.NewCodeRef(target), 0)
+	}
 	fd.rebuildCallSpecs()
 	for i := 0; i < fd.NumCalls(); i++ {
 		fc := fd.GetCallSpecs(i)
