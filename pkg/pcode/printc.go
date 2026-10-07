@@ -3740,12 +3740,14 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 		return s.renderBinary(op, "+", cPrecAdd, ExprAssocLeft)
 	case CPUI_INT_SUB:
 		return s.renderBinary(op, "-", cPrecAdd, ExprAssocLeft)
+	// The name carries the input size. C++ parity: TypeOpIntCarry /
+	// TypeOpIntScarry / TypeOpIntSborrow::getOperatorName.
 	case CPUI_INT_CARRY:
-		return s.renderPseudoCall("CARRY", op, 0)
+		return s.renderPseudoCall(fmt.Sprintf("CARRY%d", op.Input(0).Size()), op, 0)
 	case CPUI_INT_SCARRY:
-		return s.renderPseudoCall("SCARRY", op, 0)
+		return s.renderPseudoCall(fmt.Sprintf("SCARRY%d", op.Input(0).Size()), op, 0)
 	case CPUI_INT_SBORROW:
-		return s.renderPseudoCall("SBORROW", op, 0)
+		return s.renderPseudoCall(fmt.Sprintf("SBORROW%d", op.Input(0).Size()), op, 0)
 	case CPUI_INT_2COMP:
 		return s.renderUnary(op, "-", cPrecUnary)
 	case CPUI_INT_NEGATE:

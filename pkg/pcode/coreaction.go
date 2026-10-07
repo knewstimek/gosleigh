@@ -3495,9 +3495,6 @@ func (a *ActionConditionalConst) Clone(groups ActionGroupList) Action {
 // full reach / flowTogether / placeCopy analysis from condexe.go. Each hit
 // advances a.count so the main loop will iterate.
 // C++ parity: coreaction.cc ActionConditionalConst::apply (lines 4525-4557)
-// TODO known mismatch:
-//   - pushConstant is limited to the straight-COPY case because
-//     PcodeOp::executeSimple is not ported yet.
 func (a *ActionConditionalConst) Apply(data *Funcdata) int {
 	if data == nil {
 		return 0

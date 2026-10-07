@@ -79,6 +79,32 @@ func evaluateUnary(code OpCode, sizeout, sizein int32, in1 uint64) (uint64, erro
 	return 0, errEvaluation
 }
 
+// executeSimple evaluates op over the given input values; ok is false on an
+// evaluation error. C++ parity: PcodeOp::executeSimple.
+func (op *PcodeOp) executeSimple(in []uint64) (uint64, bool) {
+	sizeout, sizein := op.Output().Size(), op.Input(0).Size()
+	var res uint64
+	var err error
+	switch op.EvalType() {
+	case PcodeOpUnary:
+		res, err = evaluateUnary(op.Code(), sizeout, sizein, in[0])
+	case PcodeOpBinary:
+		res, err = evaluateBinary(op.Code(), sizeout, sizein, in[0], in[1])
+	case PcodeOpTernary:
+		if op.Code() != CPUI_PTRADD {
+			return 0, false
+		}
+		// C++ parity: OpBehaviorPtradd::evaluateTernary.
+		res = (in[0] + in[1]*in[2]) & maskForSize(sizeout)
+	default:
+		return 0, false
+	}
+	if err != nil {
+		return 0, false
+	}
+	return res, true
+}
+
 // evaluateBinary emulates a binary op on constant inputs; sizein is the size
 // of input 0. C++ parity: OpBehavior*::evaluateBinary (opbehavior.cc).
 func evaluateBinary(code OpCode, sizeout, sizein int32, in1, in2 uint64) (uint64, error) {

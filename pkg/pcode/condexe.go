@@ -30,8 +30,6 @@ package pcode
 //     the testRemovability yes-set compared to C++.
 //   - Funcdata::removeFromFlowSplit is not ported; we emit a TODO marker in
 //     execute() but still destroy the iblock ops.
-//   - PcodeOp::executeSimple is not ported; pushConstant is therefore
-//     limited to the literal passthrough case.
 
 // ---------------------------------------------------------------------------
 // PcodeOpNode -- (PcodeOp, slot) tuple used by collectReachable / flowTogether
@@ -867,27 +865,44 @@ func (ctx *condConstContext) placeMultipleConstants(phiEdges []pcodeOpNode, mark
 	}
 }
 
-// pushConstant tries to fold op with the current point's constant input.
-// C++ uses PcodeOp::executeSimple which is not ported yet, so we only
-// cover the literal no-op case: CPUI_COPY of the constant in.
-// TODO known mismatch: restore full executeSimple fold.
+// pushConstant evaluates op with the current point's constant in its slot
+// and every other input constant, and queues the output as a new point.
 // C++ parity: coreaction.cc ActionConditionalConst::pushConstant
 func (ctx *condConstContext) pushConstant(points *[]constPoint, op *PcodeOp) {
 	if op.EvalType()&PcodeOpSpecial != 0 {
 		return
 	}
-	if op.Code() != CPUI_COPY {
+	if isFloatingPointOpcode(op.Code()) {
 		return
 	}
-	// Straight COPY: the new point inherits value.
-	front := (*points)[0]
 	out := op.Output()
-	if out == nil {
+	if out == nil || out.Size() > 8 {
+		return
+	}
+	front := (*points)[0]
+	slot := op.GetSlot(front.vn)
+	if op.NumInput() > 3 {
+		return
+	}
+	var in [3]uint64
+	for i := 0; i < op.NumInput(); i++ {
+		if i == slot {
+			in[i] = front.value
+			continue
+		}
+		inVn := op.Input(i)
+		if inVn.Size() > 8 || !inVn.IsConstant() {
+			return // Not all inputs are constant
+		}
+		in[i] = inVn.Offset()
+	}
+	outval, ok := op.executeSimple(in[:])
+	if !ok {
 		return
 	}
 	*points = append(*points, constPoint{
 		vn:         out,
-		value:      front.value,
+		value:      outval,
 		constBlock: front.constBlock,
 		inSlot:     front.inSlot,
 		blockIsDom: front.blockIsDom,
