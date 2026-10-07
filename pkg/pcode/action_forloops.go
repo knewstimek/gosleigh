@@ -128,15 +128,19 @@ func tryMarkForLoop(data *Funcdata, wdo *BlockWhileDo) {
 
 	// Locate the tail block: last basic-block in the body.
 	// Same wrapper issue applies; use lastOp.Parent() as the authoritative pointer.
-	tailWrapper := lastBasicBlock(bodyBl)
-	if tailWrapper == nil {
-		return
-	}
-	lastOp := lastNonBranchOp(tailWrapper)
+	// The body must have a last op (an if-else body has none).
+	// C++ parity: BlockWhileDo::finalTransform (getBlock(1)->lastOp()).
+	lastOp := bodyBl.finalLastOp()
 	if lastOp == nil {
 		return
 	}
 	tailBasic := lastOp.Parent()
+	if lastOp.IsBranch() { // The iterator must appear before the branch
+		lastOp = lastOp.PreviousOp()
+		if lastOp == nil {
+			return
+		}
+	}
 	// The body's last block must flow straight back to the head.
 	// C++ parity: BlockWhileDo::finalTransform (tail->sizeOut() == 1,
 	// tail->getOut(0) == head).

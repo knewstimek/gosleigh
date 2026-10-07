@@ -266,6 +266,13 @@ func (e *PrettyEmitter) overflow() {
 		return
 	}
 	e.spaceremain = newspaceremain
+	// Spaces already emitted stay before the forced break ("x = " then a
+	// token too long for the line). C++ parity: EmitNoMarkup::spaces writes
+	// immediately, so overflow's tagLine follows them.
+	if e.sink.pendingSpace {
+		e.sink.builder.WriteByte(' ')
+		e.sink.pendingSpace = false
+	}
 	e.sinkTagLine()
 }
 

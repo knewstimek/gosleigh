@@ -1215,8 +1215,28 @@ func (fd *Funcdata) setVarnodeProperties(vn *Varnode) {
 	}
 	if sl := fd.scopeLocal; sl != nil {
 		if entry := sl.FindOverlap(vn.Addr(), vn.Size()); entry != nil {
+			// A type-locked symbol forces its type onto the Varnode.
+			// C++ parity: Varnode::setSymbolProperties -> SymbolEntry::updateType.
+			if sym := entry.Symbol(); sym != nil && sym.IsTypeLocked() {
+				if dt := entry.GetSizedType(vn.Addr(), vn.Size()); dt != nil {
+					vn.UpdateTypeLock(dt, true, true)
+				}
+			} else if t, ok := fd.hostLocalTypes[vn.Offset()]; ok && t != nil && t.Size() == vn.Size() && vn.Space() == sl.SpaceID() {
+				// The host's type-locked symbol stands where Gosleigh placed an
+				// unlocked one; its type applies as the C++ symbol's would.
+				vn.UpdateTypeLock(t, true, true)
+			}
 			vn.SetFlags(entry.AllFlags() &^ VarnodeTypeLock)
 			return
+		}
+		// A host type-locked stack symbol exists in C++ from the start
+		// (the prototype's ProtoStoreSymbol / the decoded scope); Gosleigh
+		// builds the local symbols later, so its type is forced here.
+		// C++ parity: Varnode::setSymbolProperties -> SymbolEntry::updateType.
+		if vn.Space() == sl.SpaceID() {
+			if t, ok := fd.hostLocalTypes[vn.Offset()]; ok && t != nil && t.Size() == vn.Size() {
+				vn.UpdateTypeLock(t, true, true)
+			}
 		}
 		// Inside the local scope but not covered by a symbol.
 		// C++ parity: Scope::queryProperties (found just a scope).
