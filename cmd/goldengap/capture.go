@@ -339,7 +339,11 @@ func (h hostWithData) QueryFunction(addr address.Address) (pcode.HostFunction, b
 var structDescs sync.Map
 
 func typeDesc(n *xnode, types map[string]*xnode, depth int) *pcode.HostTypeDesc {
-	if n == nil || depth > 16 {
+	// Structures close cycles through structDescs, so the depth bound only
+	// guards against malformed input. A low bound cut deep acyclic chains
+	// (a pointer field reached 16 levels down became undefined1 *), and the
+	// host-id struct stub then kept that wrong field for every later function.
+	if n == nil || depth > 4096 {
 		return nil
 	}
 	switch n.XMLName.Local {
