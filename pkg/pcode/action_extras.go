@@ -1116,6 +1116,88 @@ func (fd *Funcdata) SpacebaseConstant(op *PcodeOp, slot int, sym *Symbol, entryS
 // TODO known mismatch: Architecture::resolveConstant is approximated as the
 // identity map (byte offset == address offset), the same simplification
 // ActionConstantPtr.isPointer already makes.
+// spacebaseEntry is the symbol containing addr, global scope first.
+// C++ parity: TypeSpacebase::getMap()->queryContainer(addr,1,nullPoint).
+func (fd *Funcdata) spacebaseEntry(addr address.Address) *SymbolEntry {
+	if g := fd.GetGlobalScope(); g != nil {
+		if e := g.QueryContainer(addr, 1, address.Address{}); e != nil {
+			return e
+		}
+	}
+	if sl := fd.GetScopeLocal(); sl != nil {
+		return sl.QueryContainer(addr, 1, address.Address{})
+	}
+	return nil
+}
+
+// spacebaseSubTypeOps are TypeSpacebase::getSubType and
+// nearestArrayedComponentBackward/Forward for the given space.
+func (fd *Funcdata) spacebaseSubTypeOps(spc *address.Space) subTypeOps {
+	sub := func(off int64) (Datatype, int64) { return fd.ResolveSpacebaseSymbol(spc, off) }
+	return subTypeOps{
+		sub: sub,
+		// C++ parity: TypeSpacebase::nearestArrayedComponentBackward.
+		back: func(off, max int64) (int64, int64, int64) {
+			subType, newoff := sub(off)
+			if subType == nil {
+				return -1, 0, 0
+			}
+			distance, _, elSize := nearestArrayedComponentBackward(subType, newoff, max)
+			if distance < 0 || distance > max {
+				return -1, 0, 0
+			}
+			return distance, newoff, elSize
+		},
+		// C++ parity: TypeSpacebase::nearestArrayedComponentForward.
+		fwd: func(off, max int64) (int64, int64, int64) {
+			if spc == nil {
+				return -1, 0, 0
+			}
+			ws := int64(spc.WordSize)
+			if ws <= 0 {
+				ws = 1
+			}
+			addr := address.Address{Space: spc, Offset: wrapSpaceOffset(spc, uint64(off/ws))}
+			smallest := fd.spacebaseEntry(addr)
+			var nextAddr address.Address
+			if smallest == nil || smallest.Offset() != 0 {
+				nextAddr = address.Address{Space: spc, Offset: wrapSpaceOffset(spc, addr.Offset+32)}
+			} else {
+				symbolType := smallest.Symbol().Type()
+				structOff := int64(addr.Offset) - int64(smallest.Addr().Offset)
+				if symbolType != nil {
+					distance, _, elSize := nearestArrayedComponentForward(symbolType, structOff, max)
+					if distance >= 0 {
+						if distance > max {
+							return -1, 0, 0
+						}
+						return distance, structOff, elSize
+					}
+				}
+				sz := int64(smallest.Size()) / ws
+				nextAddr = address.Address{Space: spc, Offset: wrapSpaceOffset(spc, uint64(int64(smallest.Addr().Offset)+sz))}
+			}
+			if nextAddr.Offset < addr.Offset {
+				return -1, 0, 0 // Don't let the address wrap
+			}
+			smallest = fd.spacebaseEntry(nextAddr)
+			if smallest == nil || smallest.Offset() != 0 || smallest.Symbol() == nil || smallest.Symbol().Type() == nil {
+				return -1, 0, 0
+			}
+			newoff := int64(addr.Offset) - int64(smallest.Addr().Offset)
+			distance, _, elSize := nearestArrayedComponentForward(smallest.Symbol().Type(), 0, max)
+			if distance < 0 {
+				return -1, 0, 0
+			}
+			distance -= newoff
+			if distance > max {
+				return -1, 0, 0
+			}
+			return distance, newoff, elSize
+		},
+	}
+}
+
 func (fd *Funcdata) ResolveSpacebaseSymbol(spc *address.Space, off int64) (Datatype, int64) {
 	tf := fd.TypeFactory()
 	undef1 := tf.GetBase(1, TYPE_UNKNOWN, "undefined")

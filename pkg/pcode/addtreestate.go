@@ -85,6 +85,7 @@ func (vn *Varnode) UpdateType(dt Datatype) {
 //   - an UNKNOWN data-type is never locked
 //   - a previously locked type is not changed unless override is set
 //   - identical (type,lock) is a no-op
+//
 // Returns true if the type or lock setting changed.
 // C++ parity: varnode.cc Varnode::updateType (L474-489).
 func (vn *Varnode) UpdateTypeLock(ct Datatype, lock, override bool) bool {
@@ -492,14 +493,31 @@ func nearestArrayedComponentForward(dt Datatype, off, max int64) (int64, int64, 
 // does not cover). An array hint steers toward a nearby arrayed component.
 // C++ parity: AddTreeState::hasMatchingSubType.
 func hasMatchingSubType(base Datatype, off int64, arrayHint uint64) (int64, bool) {
+	return matchSubType(subTypeOps{
+		sub:  func(off int64) (Datatype, int64) { return datatypeSubType(base, off) },
+		back: func(off, max int64) (int64, int64, int64) { return nearestArrayedComponentBackward(base, off, max) },
+		fwd:  func(off, max int64) (int64, int64, int64) { return nearestArrayedComponentForward(base, off, max) },
+	}, off, arrayHint)
+}
+
+// subTypeOps are a base data-type's getSubType and
+// nearestArrayedComponentBackward/Forward, so a TypeSpacebase (whose
+// components are the scope's symbols) shares hasMatchingSubType.
+type subTypeOps struct {
+	sub       func(off int64) (Datatype, int64)
+	back, fwd func(off, max int64) (int64, int64, int64)
+}
+
+// matchSubType is AddTreeState::hasMatchingSubType over subTypeOps.
+func matchSubType(o subTypeOps, off int64, arrayHint uint64) (int64, bool) {
 	if arrayHint == 0 {
-		sub, newoff := datatypeSubType(base, off)
+		sub, newoff := o.sub(off)
 		return newoff, sub != nil
 	}
-	typeBefore, offBefore, elSizeBefore := nearestArrayedComponentBackward(base, off, 128)
-	typeAfter, offAfter, elSizeAfter := nearestArrayedComponentForward(base, off, 128)
+	typeBefore, offBefore, elSizeBefore := o.back(off, 128)
+	typeAfter, offAfter, elSizeAfter := o.fwd(off, 128)
 	if typeBefore < 0 && typeAfter < 0 {
-		sub, newoff := datatypeSubType(base, off)
+		sub, newoff := o.sub(off)
 		return newoff, sub != nil
 	}
 	if typeBefore < 0 {
@@ -520,7 +538,7 @@ func hasMatchingSubType(base Datatype, off int64, arrayHint uint64) (int64, bool
 			return offAfter, true
 		}
 	}
-	if sub, newoff := datatypeSubType(base, off); sub != nil {
+	if sub, newoff := o.sub(off); sub != nil {
 		if newoff == offBefore || newoff == offAfter {
 			return newoff, true // contained in one of the arrayed components
 		}
@@ -547,15 +565,19 @@ type addTreeMultiple struct {
 	coeff int64
 }
 
+// AddTreeState is the analysis of an additive expression on a pointer that
+// RulePtrArith rewrites into PTRADD/PTRSUB form.
+// C++ parity: class AddTreeState (ruleaction.cc).
 type AddTreeState struct {
 	data                *Funcdata
 	baseOp              *PcodeOp
 	ptr                 *Varnode
-	ptrType             *Pointer
+	ptrType             *Pointer // ct
+	pRelType            *Pointer // the formal relative pointer, if ptrType is one
 	baseType            Datatype
 	ptrSize             int32
 	wordSize            uint32
-	elemSize            uint64
+	elemSize            uint64 // size
 	baseSlot            int
 	ptrMask             uint64
 	offset              uint64
@@ -565,127 +587,165 @@ type AddTreeState struct {
 	biggestNonMultCoeff uint64
 	multiple            []addTreeMultiple
 	nonmult             []*Varnode
+	distributeOp        *PcodeOp // first INT_MULT whose coefficient was distributed
 	valid               bool
+	preventDistribution bool
+	isDistributeUsed    bool
 	isSubtype           bool
 	isDegenerate        bool
 }
 
+// NewAddTreeState prepares the analysis of op with the pointer at slot.
+// C++ parity: AddTreeState::AddTreeState.
 func NewAddTreeState(data *Funcdata, op *PcodeOp, slot int) *AddTreeState {
 	ptr := op.Input(slot)
 	ptrType, _ := ptr.TypeReadFacing(op).(*Pointer)
-	baseType := Datatype(nil)
-	wordSize := uint32(1)
-	if ptrType != nil {
-		baseType = ptrType.Pointee()
-		wordSize = ptrType.WordSize()
-		if wordSize == 0 {
-			wordSize = 1
-		}
+	s := &AddTreeState{
+		data:     data,
+		baseOp:   op,
+		ptr:      ptr,
+		ptrType:  ptrType,
+		ptrSize:  ptr.Size(),
+		baseSlot: slot,
+		ptrMask:  maskForSize(ptr.Size()),
+		valid:    ptrType != nil,
+		wordSize: 1,
 	}
-	elemSize := uint64(0)
-	if baseType != nil && baseType.AlignSize() > 0 {
-		elemSize = bytesToAddressUnits(baseType.AlignSize(), wordSize)
+	if ptrType == nil {
+		return s
 	}
-	isDegenerate := false
-	if baseType != nil {
-		unitSize := addressUnitsToBytes(1, wordSize)
-		isDegenerate = baseType.AlignSize() <= unitSize && baseType.AlignSize() > 0
+	s.wordSize = ptrType.WordSize()
+	if s.wordSize == 0 {
+		s.wordSize = 1
 	}
-	return &AddTreeState{
-		data:         data,
-		baseOp:       op,
-		ptr:          ptr,
-		ptrType:      ptrType,
-		baseType:     baseType,
-		ptrSize:      ptr.Size(),
-		wordSize:     wordSize,
-		elemSize:     elemSize,
-		baseSlot:     slot,
-		ptrMask:      maskForSize(ptr.Size()),
-		valid:        ptrType != nil,
-		isDegenerate: isDegenerate,
+	s.baseType = ptrType.Pointee()
+	if ptrType.IsFormalPointerRel() {
+		s.pRelType = ptrType
+		s.baseType = ptrType.Parent()
+		s.nonmultsum = s.relAddressOffset() & s.ptrMask
 	}
+	s.setBaseSize()
+	return s
 }
 
+// relAddressOffset is TypePointerRel::getAddressOffset.
+func (s *AddTreeState) relAddressOffset() uint64 {
+	return bytesToAddressUnits(s.pRelType.ByteOffset(), s.wordSize)
+}
+
+// setBaseSize computes size and isDegenerate from baseType.
+func (s *AddTreeState) setBaseSize() {
+	s.elemSize = 0
+	if s.baseType != nil && s.baseType.AlignSize() > 0 {
+		s.elemSize = bytesToAddressUnits(s.baseType.AlignSize(), s.wordSize)
+	}
+	unitSize := addressUnitsToBytes(1, s.wordSize)
+	s.isDegenerate = s.baseType != nil && s.baseType.AlignSize() <= unitSize && s.baseType.AlignSize() > 0
+}
+
+// clear resets the accumulated terms. C++ parity: AddTreeState::clear.
 func (s *AddTreeState) clear() {
 	s.multsum = 0
 	s.nonmultsum = 0
 	s.biggestNonMultCoeff = 0
+	if s.pRelType != nil {
+		s.nonmultsum = s.relAddressOffset() & s.ptrMask
+	}
 	s.multiple = s.multiple[:0]
 	s.nonmult = s.nonmult[:0]
 	s.correct = 0
 	s.offset = 0
 	s.valid = s.ptrType != nil
+	s.isDistributeUsed = false
 	s.isSubtype = false
+	s.distributeOp = nil
 }
 
+// initAlternateForm retries a relative pointer as a plain pointer to its
+// pointed-to type. C++ parity: AddTreeState::initAlternateForm.
 func (s *AddTreeState) initAlternateForm() bool {
-	return false
+	if s.pRelType == nil {
+		return false
+	}
+	s.pRelType = nil
+	s.baseType = s.ptrType.Pointee()
+	s.setBaseSize()
+	s.preventDistribution = false
+	s.clear()
+	return true
 }
 
+// checkMultTerm accumulates a term defined by INT_MULT with a constant.
+// C++ parity: AddTreeState::checkMultTerm.
 func (s *AddTreeState) checkMultTerm(vn *Varnode, op *PcodeOp, treeCoeff uint64) bool {
-	if op == nil || op.NumInput() != 2 {
-		return true
-	}
-	constSlot := -1
-	if op.Input(0) != nil && op.Input(0).IsConstant() {
-		constSlot = 0
-	} else if op.Input(1) != nil && op.Input(1).IsConstant() {
-		constSlot = 1
-	}
-	if constSlot < 0 {
-		if treeCoeff > s.biggestNonMultCoeff {
-			s.biggestNonMultCoeff = treeCoeff
-		}
-		return true
-	}
-	term := op.Input(1 - constSlot)
-	if term.IsFree() {
+	vnconst := op.Input(1)
+	vnterm := op.Input(0)
+	if vnterm.IsFree() {
 		s.valid = false
 		return false
 	}
-	multVal := truncateToSize(op.Input(constSlot).Offset()*treeCoeff, vn.Size())
-	signed := signExtendToInt64(multVal, vn.Size())
-	rem := signed
-	if s.elemSize != 0 {
-		rem = signed % int64(s.elemSize)
+	if vnconst.IsConstant() {
+		val := (vnconst.Offset() * treeCoeff) & s.ptrMask
+		sval := signExtendToInt64(val, vn.Size())
+		rem := sval
+		if s.elemSize != 0 {
+			rem = sval % int64(s.elemSize)
+		}
+		if rem != 0 {
+			if val >= s.elemSize && s.elemSize != 0 {
+				s.valid = false // Size is too big: pointer type must be wrong
+				return false
+			}
+			if !s.preventDistribution && vnterm.IsWritten() && vnterm.Def().Code() == CPUI_INT_ADD {
+				if s.distributeOp == nil {
+					s.distributeOp = op
+				}
+				return s.spanAddTree(vnterm.Def(), val)
+			}
+			if vncoeff := uint64(uint32(absInt64(sval))); vncoeff > s.biggestNonMultCoeff {
+				s.biggestNonMultCoeff = vncoeff
+			}
+			return true
+		}
+		if treeCoeff != 1 {
+			s.isDistributeUsed = true
+		}
+		s.multiple = append(s.multiple, addTreeMultiple{vn: vnterm, coeff: sval})
+		return false
 	}
-	if rem != 0 {
-		if s.elemSize != 0 && multVal >= s.elemSize {
-			s.valid = false
-			return false
-		}
-		if term.IsWritten() && term.Def().Code() == CPUI_INT_ADD {
-			return s.spanAddTree(term.Def(), multVal)
-		}
-		if absInt64(signed) > int64(s.biggestNonMultCoeff) {
-			s.biggestNonMultCoeff = uint64(absInt64(signed))
-		}
-		return true
+	if treeCoeff > s.biggestNonMultCoeff {
+		s.biggestNonMultCoeff = treeCoeff
 	}
-	s.multiple = append(s.multiple, addTreeMultiple{vn: term, coeff: signed})
-	return false
+	return true
 }
 
+// checkTerm accumulates one term; it reports true when the sub-tree holds no
+// multiple of the base size. C++ parity: AddTreeState::checkTerm.
 func (s *AddTreeState) checkTerm(vn *Varnode, treeCoeff uint64) bool {
-	if vn == nil {
-		return true
-	}
 	if vn == s.ptr {
 		return false
 	}
 	if vn.IsConstant() {
-		val := truncateToSize(vn.Offset()*treeCoeff, vn.Size())
-		signed := signExtendToInt64(val, vn.Size())
-		rem := signed
+		val := vn.Offset() * treeCoeff
+		sval := signExtendToInt64(truncateToSize(val, vn.Size()), vn.Size())
+		rem := sval
 		if s.elemSize != 0 {
-			rem = signed % int64(s.elemSize)
+			rem = sval % int64(s.elemSize)
 		}
 		if rem != 0 { // Constant is not a multiple of the size
-			s.nonmultsum = truncateToSize(s.nonmultsum+val, s.ptrSize)
+			if treeCoeff != 1 {
+				// An offset into the base data-type needs subcomponents.
+				if m := s.baseType.Metatype(); m == TYPE_ARRAY || m == TYPE_STRUCT {
+					s.isDistributeUsed = true
+				}
+			}
+			s.nonmultsum = (s.nonmultsum + val) & s.ptrMask
 			return true
 		}
-		s.multsum = truncateToSize(s.multsum+val, s.ptrSize)
+		if treeCoeff != 1 {
+			s.isDistributeUsed = true
+		}
+		s.multsum = (s.multsum + val) & s.ptrMask
 		return false
 	}
 	if vn.IsWritten() {
@@ -693,14 +753,13 @@ func (s *AddTreeState) checkTerm(vn *Varnode, treeCoeff uint64) bool {
 		switch def.Code() {
 		case CPUI_INT_ADD:
 			return s.spanAddTree(def, treeCoeff)
-		case CPUI_COPY:
+		case CPUI_COPY: // Not finished reducing yet
 			s.valid = false
 			return false
-		case CPUI_INT_MULT:
+		case CPUI_INT_MULT: // Check for a constant coefficient indicating size
 			return s.checkMultTerm(vn, def, treeCoeff)
 		}
-	}
-	if vn.IsFree() {
+	} else if vn.IsFree() {
 		s.valid = false
 		return false
 	}
@@ -710,29 +769,39 @@ func (s *AddTreeState) checkTerm(vn *Varnode, treeCoeff uint64) bool {
 	return true
 }
 
+// spanAddTree walks the additive sub-tree rooted at op.
+// C++ parity: AddTreeState::spanAddTree.
 func (s *AddTreeState) spanAddTree(op *PcodeOp, treeCoeff uint64) bool {
-	leftNon := s.checkTerm(op.Input(0), treeCoeff)
+	oneIsNon := s.checkTerm(op.Input(0), treeCoeff)
 	if !s.valid {
 		return false
 	}
-	rightNon := s.checkTerm(op.Input(1), treeCoeff)
+	twoIsNon := s.checkTerm(op.Input(1), treeCoeff)
 	if !s.valid {
 		return false
 	}
-	if leftNon && rightNon {
+	if s.pRelType != nil {
+		if s.multsum != 0 || s.nonmultsum >= s.elemSize || len(s.multiple) != 0 {
+			s.valid = false
+			return false
+		}
+	}
+	if oneIsNon && twoIsNon {
 		return true
 	}
-	if leftNon {
+	if oneIsNon {
 		s.nonmult = append(s.nonmult, op.Input(0))
 	}
-	if rightNon {
+	if twoIsNon {
 		s.nonmult = append(s.nonmult, op.Input(1))
 	}
-	return false
+	return false // At least one side contains multiples
 }
 
+// calcSubtype decides whether the sum points into a sub data-type of the
+// base, producing a PTRSUB. C++ parity: AddTreeState::calcSubtype.
 func (s *AddTreeState) calcSubtype() {
-	tmpoff := truncateToSize(s.multsum+s.nonmultsum, s.ptrSize)
+	tmpoff := (s.multsum + s.nonmultsum) & s.ptrMask
 	if s.elemSize == 0 || tmpoff < s.elemSize {
 		s.offset = tmpoff
 	} else {
@@ -740,66 +809,66 @@ func (s *AddTreeState) calcSubtype() {
 		// constant, at this level or lower.
 		stmpoff := signExtendToInt64(tmpoff, s.ptrSize) % int64(s.elemSize)
 		if stmpoff >= 0 {
-			s.offset = uint64(stmpoff) // an array index at this level
+			s.offset = uint64(stmpoff) // An array index at this level
 		} else if s.baseType.Metatype() == TYPE_STRUCT && s.biggestNonMultCoeff != 0 && s.multsum == 0 {
-			s.offset = tmpoff // an array index at a lower level
+			s.offset = tmpoff // An array index at a lower level
 		} else {
-			s.offset = truncateToSize(uint64(stmpoff+int64(s.elemSize)), s.ptrSize)
+			s.offset = uint64(stmpoff+int64(s.elemSize)) & s.ptrMask
 		}
 	}
-	s.correct = s.nonmultsum // non-multiple constants are double counted
-	s.multsum = truncateToSize(tmpoff-s.offset, s.ptrSize)
-	if len(s.nonmult) == 0 {
-		s.valid = s.multsum != 0 || len(s.multiple) != 0
-		s.isSubtype = false // no offsets INTO the pointer
-		return
-	}
+	s.correct = s.nonmultsum // Non-multiple constants are double counted
+	s.multsum = (tmpoff - s.offset) & s.ptrMask
 	ws := int64(s.wordSize)
-	if ws <= 0 {
-		ws = 1
-	}
-	switch s.baseType.Metatype() {
-	case TYPE_STRUCT:
+	switch {
+	case len(s.nonmult) == 0:
+		if s.multsum == 0 && len(s.multiple) == 0 { // Is there anything at all
+			s.valid = false
+			return
+		}
+		s.isSubtype = false // There are no offsets INTO the pointer
+	case s.baseType.Metatype() == TYPE_SPACEBASE:
+		offsetBytes := int64(s.offset) * ws
+		extra, ok := matchSubType(s.data.spacebaseSubTypeOps(s.ptr.GetSpaceFromConst()), offsetBytes, s.biggestNonMultCoeff)
+		if !ok {
+			s.valid = false // Cannot find mapped variable but nonmult is non-empty
+			return
+		}
+		units := uint64(extra / ws)
+		s.offset = (s.offset - units) & s.ptrMask
+		s.correct = (s.correct - units) & s.ptrMask
+		s.isSubtype = true
+	case s.baseType.Metatype() == TYPE_STRUCT:
 		offsetBytes := signExtendToInt64(s.offset, s.ptrSize) * ws
 		extra, ok := hasMatchingSubType(s.baseType, offsetBytes, s.biggestNonMultCoeff)
 		if !ok {
 			if offsetBytes < 0 || offsetBytes >= int64(s.baseType.Size()) {
-				s.valid = false // out of the structure's bounds
+				s.valid = false // Out of structure's bounds
 				return
 			}
-			extra = 0 // no field, but pretend there is something there
+			extra = 0 // No field, but pretend there is something there
 		}
-		extraUnits := uint64(extra / ws)
-		s.offset = truncateToSize(s.offset-extraUnits, s.ptrSize)
-		s.correct = truncateToSize(s.correct-extraUnits, s.ptrSize)
+		units := uint64(extra / ws)
+		s.offset = (s.offset - units) & s.ptrMask
+		s.correct = (s.correct - units) & s.ptrMask
+		if s.pRelType != nil && s.offset == s.relAddressOffset() {
+			// The offset falls within the basic pointed-to type.
+			if !s.pRelType.EvaluateThruParent(0) {
+				s.valid = false // Use the basic (alternate) form
+				return
+			}
+		}
 		s.isSubtype = true
-	case TYPE_ARRAY:
+	case s.baseType.Metatype() == TYPE_ARRAY:
 		s.isSubtype = true
-		s.correct = truncateToSize(s.correct-s.offset, s.ptrSize)
+		s.correct = (s.correct - s.offset) & s.ptrMask
 		s.offset = 0
-	case TYPE_SPACEBASE:
-		// C++ ruleaction.cc:6306-6317. hasMatchingSubType resolves the mapped
-		// variable containing `offset` (TypeSpacebase::getSubType -- Gosleigh's
-		// Funcdata.ResolveSpacebaseSymbol) and passes back the offset within it.
-		// Known mismatch: the arrayHint (biggestNonMultCoeff) branch of
-		// hasMatchingSubType, which searches nearby arrayed components, is not
-		// ported -- only the plain getSubType lookup is.
-		signedOffset := signExtendToInt64(s.offset, s.ptrSize)
-		ws := int64(s.wordSize)
-		if ws <= 0 {
-			ws = 1
-		}
-		symType, extraBytes := s.data.ResolveSpacebaseSymbol(s.ptr.GetSpaceFromConst(), signedOffset*ws)
-		if symType == nil {
-			s.valid = false
-			return
-		}
-		extra := bytesToAddressUnits(int32(extraBytes), s.wordSize)
-		s.offset = truncateToSize(s.offset-extra, s.ptrSize)
-		s.correct = truncateToSize(s.correct-extra, s.ptrSize)
-		s.isSubtype = true
 	default:
-		s.valid = false
+		s.valid = false // There is substructure we don't know about
+	}
+	if s.pRelType != nil {
+		ptrOff := s.relAddressOffset()
+		s.offset = (s.offset - ptrOff) & s.ptrMask
+		s.correct = (s.correct - ptrOff) & s.ptrMask
 	}
 }
 
@@ -927,6 +996,10 @@ func (s *AddTreeState) buildTree() {
 	s.data.OpDestroy(s.baseOp)
 }
 
+// Apply rewrites the expression when the analysis succeeds. A distributed
+// coefficient is reverted when no term needed it; otherwise the INT_MULT is
+// distributed for real and the tree analysed again.
+// C++ parity: AddTreeState::apply.
 func (s *AddTreeState) Apply() bool {
 	if !s.valid || s.ptrType == nil || s.baseOp == nil || s.baseOp.Code() != CPUI_INT_ADD {
 		return false
@@ -934,16 +1007,75 @@ func (s *AddTreeState) Apply() bool {
 	if s.isDegenerate {
 		return s.buildDegenerate()
 	}
-	s.clear()
 	s.spanAddTree(s.baseOp, 1)
 	if !s.valid {
-		return false
+		return false // Were there any show stoppers
+	}
+	if s.distributeOp != nil && !s.isDistributeUsed {
+		s.clear()
+		s.preventDistribution = true
+		s.spanAddTree(s.baseOp, 1)
 	}
 	s.calcSubtype()
 	if !s.valid {
 		return false
 	}
+	for s.valid && s.distributeOp != nil {
+		if !s.data.distributeIntMultAdd(s.distributeOp) {
+			s.valid = false
+			break
+		}
+		// Collapse any z = (x * #c) * #d expressions produced by the distribute
+		s.data.collapseIntMultMult(s.distributeOp.Input(0))
+		s.data.collapseIntMultMult(s.distributeOp.Input(1))
+		s.clear()
+		s.spanAddTree(s.baseOp, 1)
+		if s.distributeOp != nil && !s.isDistributeUsed {
+			s.clear()
+			s.preventDistribution = true
+			s.spanAddTree(s.baseOp, 1)
+		}
+		s.calcSubtype()
+	}
+	if !s.valid {
+		// Distribution transforms were made
+		s.data.warningHeader("Problems distributing in pointer arithmetic at " + PrintRawAddr(s.baseOp.Addr()))
+		return true
+	}
 	s.buildTree()
+	return true
+}
+
+// collapseIntMultMult folds z = (x * #c) * #d into z = x * #(c*d).
+// C++ parity: Funcdata::collapseIntMultMult.
+func (fd *Funcdata) collapseIntMultMult(vn *Varnode) bool {
+	if !vn.IsWritten() {
+		return false
+	}
+	op := vn.Def()
+	if op.Code() != CPUI_INT_MULT {
+		return false
+	}
+	constVnFirst := op.Input(1)
+	if !constVnFirst.IsConstant() || !op.Input(0).IsWritten() {
+		return false
+	}
+	otherMultOp := op.Input(0).Def()
+	if otherMultOp.Code() != CPUI_INT_MULT {
+		return false
+	}
+	constVnSecond := otherMultOp.Input(1)
+	if !constVnSecond.IsConstant() {
+		return false
+	}
+	invn := otherMultOp.Input(0)
+	if invn.IsFree() {
+		return false
+	}
+	sz := invn.Size()
+	val := (constVnFirst.Offset() * constVnSecond.Offset()) & maskForSize(sz)
+	fd.OpSetInput(op, fd.NewConstant(sz, val), 1)
+	fd.OpSetInput(op, invn, 0)
 	return true
 }
 
