@@ -479,11 +479,17 @@ func (b *FlowBlock) IsLoopIn(i int) bool {
 // IsLoopOut returns true if outEdges[i] has EdgeFlagLoop.
 func (b *FlowBlock) IsLoopOut(i int) bool { return b.outEdges[i].Label&EdgeFlagLoop != 0 }
 
-// IsGotoIn returns true if inEdges[i] has EdgeFlagGoto.
-func (b *FlowBlock) IsGotoIn(i int) bool { return b.inEdges[i].Label&EdgeFlagGoto != 0 }
+// IsGotoIn reports an unstructured in-edge: goto or irreducible.
+// C++ parity: block.hh FlowBlock::isGotoIn.
+func (b *FlowBlock) IsGotoIn(i int) bool {
+	return b.inEdges[i].Label&(EdgeFlagIrreducible|EdgeFlagGoto) != 0
+}
 
-// IsGotoOut returns true if outEdges[i] has EdgeFlagGoto.
-func (b *FlowBlock) IsGotoOut(i int) bool { return b.outEdges[i].Label&EdgeFlagGoto != 0 }
+// IsGotoOut reports an unstructured out-edge: goto or irreducible.
+// C++ parity: block.hh FlowBlock::isGotoOut.
+func (b *FlowBlock) IsGotoOut(i int) bool {
+	return b.outEdges[i].Label&(EdgeFlagIrreducible|EdgeFlagGoto) != 0
+}
 
 // Dominates returns true if b dominates sub by walking the immedDom chain.
 // C++ parity: block.cc FlowBlock::dominates

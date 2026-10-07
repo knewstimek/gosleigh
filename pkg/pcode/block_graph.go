@@ -185,22 +185,31 @@ func (bg *BlockGraph) ClearVisitCount() {
 // the blocks in reverse post-order. Every block without in-edges is a root,
 // and so is any block left unvisited; the entry block is traversed last so it
 // gets index 0. Returns the roots, entry first.
-// C++ parity: block.cc BlockGraph::findSpanningTree. Irreducible edges are not
-// modelled, and only the spanning-tree and loop labels are cleared (C++
-// clears every edge flag).
+// C++ parity: block.cc BlockGraph::findSpanningTree. Only the spanning-tree,
+// loop and irreducible labels are cleared (C++ clears every edge flag); the
+// other labels carry no state across a structure reset in C++ either.
 func (bg *BlockGraph) FindSpanningTree() []*FlowBlock {
+	rootlist, _ := bg.findSpanningTree()
+	return rootlist
+}
+
+// findSpanningTree is FindSpanningTree that also returns the blocks in
+// pre-order, which findIrreducible walks.
+func (bg *BlockGraph) findSpanningTree() (rootlist, preorderList []*FlowBlock) {
 	n := len(bg.blocks)
 	if n == 0 {
-		return nil
+		return nil, nil
 	}
 	reset := func() {
 		for _, bl := range bg.blocks {
 			bl.index = -1
 			bl.visitCount = -1
+			bl.copymap = bl
 		}
+		preorderList = preorderList[:0]
 	}
+	preorderList = make([]*FlowBlock, 0, n)
 	reset()
-	var rootlist []*FlowBlock
 	for _, bl := range bg.blocks {
 		if bl.SizeIn() == 0 {
 			rootlist = append(rootlist, bl)
@@ -219,12 +228,18 @@ func (bg *BlockGraph) FindSpanningTree() []*FlowBlock {
 		bl   *FlowBlock
 		edge int
 	}
-	const spanFlags = EdgeFlagTree | EdgeFlagForward | EdgeFlagCross | EdgeFlagBack | EdgeFlagLoop
+	const spanFlags = EdgeFlagTree | EdgeFlagForward | EdgeFlagCross | EdgeFlagBack | EdgeFlagLoop | EdgeFlagIrreducible
 	for repeat := 0; repeat < 2; repeat++ {
 		extraroots := false
 		rpostcount := n
 		rootindex := 0
 		preorder := 0
+		visit := func(bl *FlowBlock) {
+			bl.visitCount = int32(preorder)
+			preorder++
+			preorderList = append(preorderList, bl)
+			bl.numDesc = 1
+		}
 		for _, bl := range bg.blocks {
 			for i := range bl.outEdges {
 				bl.outEdges[i].Label &^= spanFlags
@@ -257,9 +272,7 @@ func (bg *BlockGraph) FindSpanningTree() []*FlowBlock {
 				rootlist = append(rootlist, startbl)
 				rootindex++
 			}
-			startbl.visitCount = int32(preorder)
-			preorder++
-			startbl.numDesc = 1
+			visit(startbl)
 			stack := []frame{{bl: startbl}}
 			for len(stack) > 0 {
 				top := &stack[len(stack)-1]
@@ -276,13 +289,14 @@ func (bg *BlockGraph) FindSpanningTree() []*FlowBlock {
 				}
 				edge := top.edge
 				top.edge++
+				if cur.outEdges[edge].Label&EdgeFlagIrreducible != 0 {
+					continue // pretend irreducible edges don't exist
+				}
 				child := cur.outEdges[edge].Point
 				switch {
 				case child.visitCount == -1:
 					cur.SetOutEdgeFlag(edge, EdgeFlagTree)
-					child.visitCount = int32(preorder)
-					preorder++
-					child.numDesc = 1
+					visit(child)
 					stack = append(stack, frame{bl: child})
 				case child.index == -1: // child is on the stack
 					cur.SetOutEdgeFlag(edge, EdgeFlagBack|EdgeFlagLoop)
@@ -306,7 +320,99 @@ func (bg *BlockGraph) FindSpanningTree() []*FlowBlock {
 		rootlist[0], rootlist[last] = rootlist[last], rootlist[0]
 	}
 	bg.blocks = rpostorder
-	return rootlist
+	return rootlist, preorderList
+}
+
+// findIrreducible labels the irreducible edges of the spanning tree (Tarjan's
+// reachunder collapse, with copymap as the FIND representative). It reports
+// whether a tree edge was irreducible, which forces a new spanning tree.
+// C++ parity: block.cc BlockGraph::findIrreducible.
+func (bg *BlockGraph) findIrreducible(preorder []*FlowBlock, irreduciblecount *int) bool {
+	var reachunder []*FlowBlock
+	needrebuild := false
+	for xi := len(preorder) - 1; xi >= 0; xi-- {
+		x := preorder[xi]
+		for i := 0; i < x.SizeIn(); i++ {
+			if x.inEdges[i].Label&EdgeFlagBack == 0 {
+				continue
+			}
+			y := x.inEdges[i].Point
+			if y == x {
+				continue // the reachunder set does not include the loop head
+			}
+			reachunder = append(reachunder, y.copymap)
+			y.copymap.setMark()
+		}
+		for q := 0; q < len(reachunder); q++ {
+			t := reachunder[q]
+			for i := 0; i < t.SizeIn(); i++ {
+				if t.inEdges[i].Label&EdgeFlagIrreducible != 0 {
+					continue
+				}
+				y := t.inEdges[i].Point
+				yprime := y.copymap
+				if x.visitCount > yprime.visitCount || x.visitCount+x.numDesc <= yprime.visitCount {
+					*irreduciblecount++
+					edgeout := t.InRevIndex(i)
+					y.SetOutEdgeFlag(edgeout, EdgeFlagIrreducible)
+					if t.inEdges[i].Label&EdgeFlagTree != 0 {
+						needrebuild = true
+					} else {
+						y.ClearOutEdgeFlag(edgeout, EdgeFlagCross|EdgeFlagForward)
+					}
+				} else if !yprime.isMark() && yprime != x {
+					reachunder = append(reachunder, yprime)
+					yprime.setMark()
+				}
+			}
+		}
+		for _, s := range reachunder {
+			s.clearMark()
+			s.copymap = x
+		}
+		reachunder = reachunder[:0]
+	}
+	return needrebuild
+}
+
+// calcLoop marks as loop edges a set of edges whose removal leaves no directed
+// cycle; a failsafe once irreducible edges exist.
+// C++ parity: block.cc BlockGraph::calcLoop.
+func (bg *BlockGraph) calcLoop() {
+	if len(bg.blocks) == 0 {
+		return
+	}
+	type frame struct {
+		bl   *FlowBlock
+		edge int
+	}
+	front := bg.blocks[0]
+	path := []frame{{bl: front}}
+	front.SetFlag(BlockFlagMark | BlockFlagMark2)
+	for len(path) > 0 {
+		top := &path[len(path)-1]
+		bl := top.bl
+		if top.edge >= bl.SizeOut() {
+			bl.ClearFlag(BlockFlagMark2)
+			path = path[:len(path)-1]
+			continue
+		}
+		i := top.edge
+		top.edge++
+		if bl.isLoopOut(i) {
+			continue
+		}
+		next := bl.outEdges[i].Point
+		if next.flags&BlockFlagMark2 != 0 {
+			bl.SetOutEdgeFlag(i, EdgeFlagLoop) // BlockGraph::addLoopEdge
+		} else if next.flags&BlockFlagMark == 0 {
+			next.SetFlag(BlockFlagMark | BlockFlagMark2)
+			path = append(path, frame{bl: next})
+		}
+	}
+	for _, bl := range bg.blocks {
+		bl.ClearFlag(BlockFlagMark | BlockFlagMark2)
+	}
 }
 
 // CalcForwardDominator computes immediate dominators with the
@@ -416,10 +522,31 @@ func (bg *BlockGraph) CalcForwardDominator(rootlist []*FlowBlock) {
 
 // StructureLoops builds the spanning tree and dominators and returns the
 // roots of the graph, entry first.
-// C++ parity: block.cc BlockGraph::structureLoops (irreducible-edge
-// detection is not ported) followed by calcForwardDominator.
+// C++ parity: block.cc BlockGraph::structureLoops followed by
+// calcForwardDominator. C++ loops until no tree edge is irreducible; the
+// spanning tree clears the irreducible labels it would need to make progress,
+// so the rebuild is capped rather than allowed to spin.
 func (bg *BlockGraph) StructureLoops() []*FlowBlock {
-	rootlist := bg.FindSpanningTree()
+	var rootlist []*FlowBlock
+	irreduciblecount := 0
+	for attempt := 0; attempt < 8; attempt++ {
+		var preorder []*FlowBlock
+		rootlist, preorder = bg.findSpanningTree()
+		if !bg.findIrreducible(preorder, &irreduciblecount) {
+			break
+		}
+		for _, bl := range bg.blocks {
+			for i := range bl.outEdges {
+				bl.outEdges[i].Label &^= EdgeFlagTree | EdgeFlagForward | EdgeFlagCross | EdgeFlagBack | EdgeFlagLoop
+			}
+			for i := range bl.inEdges {
+				bl.inEdges[i].Label &^= EdgeFlagTree | EdgeFlagForward | EdgeFlagCross | EdgeFlagBack | EdgeFlagLoop
+			}
+		}
+	}
+	if irreduciblecount > 0 {
+		bg.calcLoop()
+	}
 	bg.CalcForwardDominator(rootlist)
 	return rootlist
 }
