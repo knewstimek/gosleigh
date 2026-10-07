@@ -555,8 +555,20 @@ func highIsolated(h *HighVariable) bool {
 		return false
 	}
 	for _, vn := range h.Instances() {
-		if vn.IsInput() && vn.Space() != nil && vn.Space().Kind == address.SpaceKindStack && fd.hostIsolated[vn.Offset()] {
+		if vn.Space() == nil || vn.Space().Kind != address.SpaceKindStack {
+			continue
+		}
+		if vn.IsInput() && fd.hostIsolated[vn.Offset()] {
 			return true
+		}
+		// A piece of an isolated stack parameter maps to its Symbol too.
+		if fp := fd.GetFuncProto(); fp != nil && vn.IsAddrTied() {
+			for _, slot := range fp.selfLocked {
+				if slot.Addr.Space == vn.Space() && fd.hostIsolated[slot.Addr.Offset] &&
+					vn.Offset() >= slot.Addr.Offset && vn.Offset()+uint64(vn.Size()) <= slot.Addr.Offset+uint64(slot.Size) {
+					return true
+				}
+			}
 		}
 	}
 	return false
