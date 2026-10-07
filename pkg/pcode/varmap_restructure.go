@@ -743,6 +743,22 @@ func (sl *ScopeLocal) restructureMap(ms *mapState) bool {
 // parameter area resolve (&param_1).
 // C++ parity: ScopeLocal::fakeInputSymbols. Symbols of a locked prototype
 // (function_parameter) are not modelled, so lockedinputs is always 0.
+// addLockedParamSymbol gives a type-locked stack input its function_parameter
+// Symbol. C++ parity: ProtoStoreSymbol::setInput (the Symbol a locked
+// prototype keeps in the local scope).
+func (sl *ScopeLocal) addLockedParamSymbol(vn *Varnode) {
+	ct := vn.Type()
+	if ct == nil {
+		ct = sharedTypeFactory.GetBase(vn.Size(), TYPE_UNKNOWN, "")
+	}
+	sym := NewSymbol("", ct)
+	sym.SetFlags(VarnodeAddrTied)
+	sym.SetCategory(SymbolFunctionParameter, -1)
+	entry := NewSymbolEntry(sym, 0, vn.Addr(), vn.Size(), 0)
+	sym.attachEntry(entry)
+	sl.ext().entries = append(sl.ext().entries, entry)
+}
+
 func (sl *ScopeLocal) fakeInputSymbols(fd *Funcdata) {
 	space := sl.SpaceID()
 	var inputs []*Varnode
@@ -773,6 +789,16 @@ func (sl *ScopeLocal) fakeInputSymbols(fd *Funcdata) {
 			locked = locked || inputs[i].IsTypeLock()
 		}
 		if locked {
+			// C++ keeps the locked prototype's function_parameter Symbols in
+			// the scope across restructure (ProtoStoreSymbol::setInput put them
+			// there); Gosleigh rebuilds the entries each time, so re-seat them
+			// for markUnaliased to see.
+			for _, in := range inputs {
+				if in.IsTypeLock() && in.Offset() >= start && in.Offset() <= endpoint &&
+					sl.FindOverlap(in.Addr(), in.Size()) == nil {
+					sl.addLockedParamSymbol(in)
+				}
+			}
 			continue
 		}
 		size := int32(endpoint-start) + 1
