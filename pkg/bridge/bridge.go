@@ -1760,18 +1760,29 @@ func addCFGEdges(graph *pcode.BlockGraph, blockByAddr map[address.Address]*pcode
 		}
 		return nil
 	}
-	// Visit blocks in ascending source-op-address order. Ghidra builds CFG edges
-	// by walking the dead op list in ascending address order (FlowInfo::collectEdges,
-	// flow.cc:906) and calling bblocks.addEdge in that order (connectBasic,
-	// flow.cc:1021); FlowBlock::addInEdge appends without sorting (block.cc:73). So a
-	// merge block's in-edges land ordered by predecessor source-op address. Iterating
-	// a Go map here instead would randomize predecessor order and permute phi input
-	// slots run-to-run; sorting the keys ascending reproduces Ghidra's order exactly.
+	// Visit blocks in dead-list order. Ghidra builds CFG edges by walking the dead
+	// op list (FlowInfo::collectEdges, flow.cc:906) and calling bblocks.addEdge in
+	// that order (connectBasic, flow.cc:1021); FlowBlock::addInEdge appends without
+	// sorting (block.cc:73). The dead list is p-code generation order, which
+	// assignFlowTimes reproduced as op times, so a merge block's in-edges land
+	// ordered by when flow generated each predecessor, not by its address.
 	addrs := make([]address.Address, 0, len(blockByAddr))
 	for addr := range blockByAddr {
 		addrs = append(addrs, addr)
 	}
-	sort.Slice(addrs, func(i, j int) bool { return addrs[i].Less(addrs[j]) })
+	firstTime := func(addr address.Address) uint64 {
+		if op := blockByAddr[addr].FirstOp(); op != nil {
+			return op.Seq().Time
+		}
+		return ^uint64(0)
+	}
+	sort.Slice(addrs, func(i, j int) bool {
+		ti, tj := firstTime(addrs[i]), firstTime(addrs[j])
+		if ti != tj {
+			return ti < tj
+		}
+		return addrs[i].Less(addrs[j])
+	})
 	for _, addr := range addrs {
 		block := blockByAddr[addr]
 		// Blocks split inside one instruction: each falls through to the next
