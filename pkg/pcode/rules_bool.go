@@ -802,7 +802,7 @@ type RuleLessNotEqualBoolAnd struct{ batchRule }
 
 func NewRuleLessNotEqualBoolAnd(group string) *RuleLessNotEqualBoolAnd {
 	r := &RuleLessNotEqualBoolAnd{}
-	r.batchRule = newBatchRule(group, "lessnotequalbooland", []OpCode{CPUI_BOOL_AND}, r.apply, func(g string) Rule { return NewRuleLessNotEqualBoolAnd(g) })
+	r.batchRule = newBatchRule(group, "lessnotequal", []OpCode{CPUI_BOOL_AND}, r.apply, func(g string) Rule { return NewRuleLessNotEqualBoolAnd(g) })
 	return r
 }
 

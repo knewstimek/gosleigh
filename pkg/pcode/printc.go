@@ -4092,7 +4092,9 @@ func (s *printCState) tryRenderSubscript(addrVn *Varnode) (ExprFragment, bool, e
 		defer func() { s.opStack = s.opStack[:len(s.opStack)-1] }()
 		baseVn := def.Input(0)
 		idxVn := def.Input(1)
-		if _, ok := baseVn.TypeReadFacing(nil).(*Pointer); !ok {
+		// The base as the PTRADD reads it: a one-field structure resolves to
+		// its pointer field.
+		if _, ok := baseVn.TypeReadFacing(def).(*Pointer); !ok {
 			return ExprFragment{}, false, nil
 		}
 		baseExpr, err := s.renderVarnodeExpr(baseVn)
@@ -4327,10 +4329,16 @@ func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode, valueon bo
 		}
 	}
 	// Drop the '&' when the symbol is a code or array type (its name already
-	// denotes the address). C++ parity: opPtrsub sets valueon for TYPE_CODE /
-	// TYPE_ARRAY.
+	// denotes the address); the value of an array is its first element.
+	// C++ parity: opPtrsub TYPE_SPACEBASE (valueon / arrayvalue).
 	if st := sym.Type(); st != nil {
-		if m := st.Metatype(); m == TYPE_CODE || m == TYPE_ARRAY {
+		switch st.Metatype() {
+		case TYPE_ARRAY:
+			if valueon {
+				return s.lang.SubscriptExpr(name, s.lang.Atom("0")), true
+			}
+			return name, true
+		case TYPE_CODE:
 			return name, true
 		}
 	}

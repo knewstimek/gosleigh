@@ -2255,7 +2255,7 @@ type RulePushMultiME struct{ batchRule }
 
 func NewRulePushMultiME(group string) *RulePushMultiME {
 	r := &RulePushMultiME{}
-	r.batchRule = newBatchRule(group, "push_multi_me", []OpCode{CPUI_MULTIEQUAL}, r.apply, func(g string) Rule { return NewRulePushMultiME(g) })
+	r.batchRule = newBatchRule(group, "push_multi", []OpCode{CPUI_MULTIEQUAL}, r.apply, func(g string) Rule { return NewRulePushMultiME(g) })
 	return r
 }
 

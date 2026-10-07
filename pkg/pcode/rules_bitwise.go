@@ -85,17 +85,25 @@ func NewRuleOrCollapse(group string) *RuleOrCollapse {
 	return r
 }
 
+// apply collapses V | c to c when c already covers every bit V can have.
+// (V | V and V | 0 belong to RuleTrivialArith and RuleIdentityEl.)
+// C++ parity: ruleaction.cc RuleOrCollapse::applyOp.
 func (r *RuleOrCollapse) apply(op *PcodeOp, data *Funcdata) int {
-	if sameValue(op.Input(0), op.Input(1)) {
-		return rewriteToCopy(data, op, op.Input(0))
+	vn := op.Input(1)
+	if !vn.IsConstant() {
+		return 0
 	}
-	if isZeroConst(op.Input(0)) {
-		return rewriteToCopy(data, op, op.Input(1))
+	if op.Output().Size() > 8 {
+		return 0
 	}
-	if isZeroConst(op.Input(1)) {
-		return rewriteToCopy(data, op, op.Input(0))
+	mask := op.Input(0).NZMask()
+	val := vn.Offset()
+	if mask|val != val {
+		return 0 // first param may turn on other bits
 	}
-	return 0
+	data.OpSetOpcode(op, CPUI_COPY)
+	data.OpRemoveInput(op, 0)
+	return 1
 }
 
 type RuleAndOrLump struct{ batchRule }
