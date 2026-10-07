@@ -110,7 +110,63 @@ func (f *TypeFactory) GetBase(size int32, meta metatype, name string) Datatype {
 	value.alignSize = primitiveAlignSize(size)
 	value.alignment = primitiveAlignment(value.alignSize)
 	key := fmt.Sprintf("base:%d:%d:%s", value.Size(), value.Metatype(), value.Name())
+	if core, ok := coreBaseName(size, meta, name); ok {
+		// An unnamed request and the core type's own name are one cache
+		// slot: getBase(4,TYPE_INT) is the "int" core type, so two values
+		// typed through either spelling share the identical data-type.
+		// C++ parity: TypeFactory::getBase (typecache[size][meta]).
+		key = fmt.Sprintf("base:%d:%d:core", size, meta)
+		if value.Name() == "" {
+			value.name = core
+		}
+	}
 	return f.internBase(key, value)
+}
+
+// coreBaseName reports whether name ("" for unnamed) spells the core type in
+// the (size, meta) cache slot, and the name that type carries. Known
+// mismatch: the 8-byte long/longlong slot depends on the data organization
+// and is left keyed by name.
+func coreBaseName(size int32, meta metatype, name string) (string, bool) {
+	var names []string
+	switch meta {
+	case TYPE_INT:
+		switch size {
+		case 2:
+			names = []string{"short"}
+		case 4:
+			names = []string{"int"}
+		}
+	case TYPE_UINT:
+		switch size {
+		case 1:
+			names = []string{"byte"}
+		case 2:
+			names = []string{"ushort"}
+		case 4:
+			names = []string{"uint"}
+		}
+	case TYPE_UNKNOWN:
+		if size >= 1 && size <= 8 {
+			names = []string{fmt.Sprintf("undefined%d", size)}
+		}
+	case TYPE_BOOL:
+		if size == 1 {
+			names = []string{"bool"}
+		}
+	}
+	if len(names) == 0 {
+		return "", false
+	}
+	if name == "" {
+		return names[0], true
+	}
+	for _, n := range names {
+		if n == name {
+			return names[0], true
+		}
+	}
+	return "", false
 }
 
 // primitiveAlignMap is the alignment of a primitive by size. The x86 cspecs'
