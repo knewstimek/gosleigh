@@ -8,7 +8,7 @@
 |---|---|---|
 | realexe private-sample seed1 (x86-32) | 200/200 | 골든 재생성(프로그램 옵션, readonly on) |
 | realexe private-sample seed2 (보지 않은 표본) | 195/200 | 일반화 지표 |
-| realexe private-sample (x64 UE4) | 189/200, sim 0.995 | ENGINE-ERR 0, TIMEOUT 0 |
+| realexe private-sample (x64 UE4) | 190/200, sim 0.996 | ENGINE-ERR 0, TIMEOUT 0 |
 | 게이트 `tools/gates.py` | 전부 유지 | tree 10/10, corpus2 10/13, x64_auto 108/109 |
 
 측정: `realexe.py measure --work local/realexe/<name>` (표본 200, 위치 기준 짝짓기).
@@ -25,7 +25,8 @@
 | 단일 필드 구조체 COPY의 whole/field resolution | unionresolve.go, cast 단계 | private-sample [147] |
 | TypePartialUnion, Go typedef의 원형 링크 | unionresolve.go, typefactory.go | 부분 유니온, isOpIdentical |
 | 지역 스코프 자체 이름의 isNameUsed | printlanguage.go | `::` 한정은 호스트 질의만 반영 |
-| 타입 전파 not settling: 스택 PTRSUB 타입이 패스마다 바뀌어 ptrarith/ptraddundo 진동 | addtreestate.go, action_infertypes.go | private-sample [173][177][194][199] |
+| 타입 전파 not settling (잔여) | action_infertypes.go | private-sample [194][199] |
+| TypePartialUnion 부분 읽기, INDIRECT 기반 스택 힌트 | unionresolve.go, varmap_restructure.go | private-sample [173] |
 | 8바이트 long/longlong 코어 타입 슬롯 | typefactory.go `coreBaseName` | 이름별 인터닝 유지 |
 | heritage 조각(R8D) 생성 순서 -> 이름 대표/동적 심볼 | heritage.go | private-sample [193] |
 | merge 커버 교차로 C++만 넣는 trim COPY | merge.go | seed2 [192] 문장 순서 |
