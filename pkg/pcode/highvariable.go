@@ -554,9 +554,18 @@ func (hv *HighVariable) finalizeDatatype(tf *TypeFactory, sym *Symbol, off int64
 	if sym == nil || sym.Type() == nil || len(hv.instances) == 0 {
 		return
 	}
-	tp := tf.exactPiece(sym.Type(), off, hv.instances[0].Size())
+	sz := hv.instances[0].Size()
+	tp := tf.exactPiece(sym.Type(), off, sz)
 	if tp == nil || tp.Metatype() == TYPE_UNKNOWN {
 		return
+	}
+	// A piece of a bigger structure or union Symbol (a symbol offset other
+	// than -1) keeps its partial type. C++ parity: HighVariable::stripType.
+	if m := tp.Metatype(); m == TYPE_PARTIALSTRUCT || m == TYPE_PARTIALUNION {
+		if sm := sym.Type().Metatype(); (sm == TYPE_STRUCT || sm == TYPE_UNION) && (off != 0 || sz != sym.Type().Size()) {
+			hv.finalType = tp
+			return
+		}
 	}
 	hv.finalType = hv.stripType(tp)
 }

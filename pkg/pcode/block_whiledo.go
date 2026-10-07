@@ -30,15 +30,6 @@ func (b *FlowBlock) finalTransform(data *Funcdata) {
 	}
 }
 
-// structLastOp is the last op of the block's final basic block.
-// C++ parity: FlowBlock::lastOp (BlockGraph/BlockCopy/BlockBasic).
-func structLastOp(bl *FlowBlock) *PcodeOp {
-	if bb := lastBasicBlock(bl); bb != nil {
-		return bb.LastOp()
-	}
-	return nil
-}
-
 // C++ parity: BlockWhileDo::finalTransform.
 func (w *BlockWhileDo) finalTransform(data *Funcdata) {
 	if w.HasOverflowSyntax() {
@@ -48,7 +39,7 @@ func (w *BlockWhileDo) finalTransform(data *Funcdata) {
 	if len(children) < 2 {
 		return
 	}
-	cbranch := structLastOp(children[0])
+	cbranch := children[0].finalLastOp()
 	if cbranch == nil || cbranch.Code() != CPUI_CBRANCH {
 		return
 	}
@@ -59,7 +50,7 @@ func (w *BlockWhileDo) finalTransform(data *Funcdata) {
 		return
 	}
 	head := front.FirstOp().Parent()
-	lastOp := structLastOp(children[1])
+	lastOp := children[1].finalLastOp() // An if-else body has none
 	if lastOp == nil || head == nil {
 		return
 	}
@@ -76,6 +67,7 @@ func (w *BlockWhileDo) finalTransform(data *Funcdata) {
 	if iterateOp == nil {
 		return
 	}
+	w.loopDef, w.iterateOp = loopDef, iterateOp
 	if iterateOp != lastOp {
 		data.OpUninsert(iterateOp)
 		data.OpInsertAfter(iterateOp, lastOp)
@@ -84,6 +76,7 @@ func (w *BlockWhileDo) finalTransform(data *Funcdata) {
 	if initLast == nil || !initOp.isMoveable(initLast) {
 		return
 	}
+	w.initializeOp = initOp
 	if initOp != initLast {
 		data.OpUninsert(initOp)
 		data.OpInsertAfter(initOp, initLast)

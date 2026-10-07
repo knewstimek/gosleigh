@@ -552,21 +552,7 @@ func parenText(text string, paren bool) string {
 // whole, e.g. A<T>::operator()<U>).
 // C++ parity: PrintC::pushSymbolScope with PrintC::scope (spacing 0).
 func scopedNameExpr(name string) ExprFragment {
-	depth := 0
-	cut := -1
-	for i := 0; i+1 < len(name); i++ {
-		switch name[i] {
-		case '<', '(':
-			depth++
-		case '>', ')':
-			depth--
-		case ':':
-			if depth == 0 && name[i+1] == ':' {
-				cut = i
-				i++
-			}
-		}
-	}
+	cut := lastScopeCut(name)
 	// Only the base name is a function-name token; the scope names are syntax
 	// and stay raw. Java parity: PrettyPrinter cleans ClangFuncNameToken.
 	if cut < 0 || cut+2 >= len(name) { // cut 0: the global scope, whose display name is empty
@@ -581,21 +567,7 @@ func scopedNameExpr(name string) ExprFragment {
 // scopedNameExprScope is scopedNameExpr for the scope part of a name, whose
 // tokens are printed raw.
 func scopedNameExprScope(name string) ExprFragment {
-	depth := 0
-	cut := -1
-	for i := 0; i+1 < len(name); i++ {
-		switch name[i] {
-		case '<', '(':
-			depth++
-		case '>', ')':
-			depth--
-		case ':':
-			if depth == 0 && name[i+1] == ':' {
-				cut = i
-				i++
-			}
-		}
-	}
+	cut := lastScopeCut(name)
 	if cut < 0 || cut+2 >= len(name) { // cut 0: the global scope, whose display name is empty
 		return ExprFragment{Text: name, Precedence: ExprPrecPrimary}
 	}
@@ -917,8 +889,33 @@ func mostNaturalBase(val uint64) int {
 // (template and call-operator brackets stay whole).
 func splitScopePath(name string) []string {
 	var parts []string
-	depth, start := 0, 0
+	start := 0
+	for _, cut := range scopeCuts(name) {
+		parts = append(parts, name[start:cut])
+		start = cut + 2
+	}
+	return append(parts, name[start:])
+}
+
+// scopeCuts lists the positions of the top-level "::" separators of a
+// qualified name. Template and call-operator brackets nest; the symbol of
+// an operator name (operator<<, operator()) is no bracket.
+func scopeCuts(name string) []int {
+	var cuts []int
+	depth := 0
 	for i := 0; i+1 < len(name); i++ {
+		if strings.HasPrefix(name[i:], "operator") {
+			j := i + len("operator")
+			if strings.HasPrefix(name[j:], "()") || strings.HasPrefix(name[j:], "[]") {
+				j += 2
+			} else {
+				for j < len(name) && strings.IndexByte("<>=!+-*/%^&|~,", name[j]) >= 0 {
+					j++
+				}
+			}
+			i = j - 1
+			continue
+		}
 		switch name[i] {
 		case '<', '(':
 			depth++
@@ -926,13 +923,20 @@ func splitScopePath(name string) []string {
 			depth--
 		case ':':
 			if depth == 0 && name[i+1] == ':' {
-				parts = append(parts, name[start:i])
-				start = i + 2
+				cuts = append(cuts, i)
 				i++
 			}
 		}
 	}
-	return append(parts, name[start:])
+	return cuts
+}
+
+// lastScopeCut is the position of the last top-level "::", or -1.
+func lastScopeCut(name string) int {
+	if cuts := scopeCuts(name); len(cuts) > 0 {
+		return cuts[len(cuts)-1]
+	}
+	return -1
 }
 
 // minimalScopedName qualifies a symbol name only as far as needed to resolve

@@ -356,6 +356,9 @@ type BlockWhileDo struct {
 	// May be nil (produces "for(; cond; iter)").
 	// C++ parity: BlockWhileDo::initializeOp
 	initializeOp *PcodeOp
+	// loopDef is the MULTIEQUAL at the loop head holding the loop variable.
+	// C++ parity: BlockWhileDo::loopDef
+	loopDef *PcodeOp
 }
 
 // SetOverflowSyntax marks this while-do as requiring overflow (while(true)) syntax.
