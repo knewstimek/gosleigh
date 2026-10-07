@@ -2299,7 +2299,7 @@ func (s *printCState) renderForPartFrag(op *PcodeOp) (ExprFragment, error) {
 	if op.Output() == nil {
 		return rhs, nil
 	}
-	return s.lang.AssignExpr(s.printName(op.Output()), rhs), nil
+	return s.lang.AssignExprFrag(s.printNameExpr(op.Output()), rhs), nil
 }
 
 // emitDoWhileBlock renders a BlockDoWhile as do { body } while (cond);.
@@ -2887,9 +2887,13 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 			})
 			return nil
 		}
-		lhs := s.printName(op.Output())
+		lhs := s.printNameExpr(op.Output())
 		s.lang.Statement(func() {
-			s.emitAssign(lhs, frag, expr)
+			if expr != frag.Text {
+				s.emitAssign(lhs.Text, frag, expr)
+				return
+			}
+			s.lang.EmitAssignFragments(lhs, frag)
 		})
 		return nil
 	}
@@ -4800,6 +4804,27 @@ func (s *printCState) printName(vn *Varnode) string {
 	return name
 }
 
+// printNameExpr is printName as an expression: a whole global symbol keeps
+// its namespace path as separate tokens, so a long line may break after a
+// '::'. C++ parity: PrintC::pushSymbol -> pushSymbolScope.
+func (s *printCState) printNameExpr(vn *Varnode) ExprFragment {
+	name := s.printName(vn)
+	return s.globalNameExpr(vn, name)
+}
+
+// globalNameExpr returns the scoped expression of vn's global symbol when
+// name prints that whole symbol, else name as a single atom.
+func (s *printCState) globalNameExpr(vn *Varnode, name string) ExprFragment {
+	if e := s.fd.globalEntryOf(vn); e != nil {
+		if sym := e.Symbol(); sym != nil && name == s.globalSymbolName(sym) {
+			if expr := s.globalSymbolExpr(sym); expr.Text == name {
+				return expr
+			}
+		}
+	}
+	return s.lang.Atom(name)
+}
+
 // readExpr is a variable read: like printName, but a truncating piece of a
 // symbol prints as a cast of the symbol to the variable's type.
 // C++ parity: PrintC::pushVnExplicit -> pushSymbolDetail(vn,op,true).
@@ -4826,7 +4851,7 @@ func (s *printCState) readExpr(vn *Varnode) ExprFragment {
 	if cast != nil {
 		return s.lang.CastExpr(printedTypeString(s.normalizeTypeForDecl(cast)), s.lang.Atom(name))
 	}
-	return s.lang.Atom(name)
+	return s.globalNameExpr(vn, name)
 }
 
 // renderSubpieceField prints a SUBPIECE that RuleSubRight marked as a field

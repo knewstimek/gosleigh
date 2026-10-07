@@ -678,9 +678,12 @@ func (pl *PrintLanguage) CondJoinExpr(left ExprFragment, op string, right ExprFr
 // AssignExpr is "lhs = rhs" with the assignment token's break points.
 // C++ parity: PrintC::assignment (spacing 1, bump 5).
 func (pl *PrintLanguage) AssignExpr(lhs string, rhs ExprFragment) ExprFragment {
+	return pl.AssignExprFrag(ExprFragment{Text: lhs, Precedence: ExprPrecPrimary}, rhs)
+}
 
-	l := ExprFragment{Text: lhs, Precedence: ExprPrecPrimary}
-	return ExprFragment{Text: lhs + " = " + rhs.Text, Precedence: ExprPrecAssign, node: &fragNode{
+// AssignExprFrag is AssignExpr with a structured left side (a primary).
+func (pl *PrintLanguage) AssignExprFrag(l, rhs ExprFragment) ExprFragment {
+	return ExprFragment{Text: l.Text + " = " + rhs.Text, Precedence: ExprPrecAssign, node: &fragNode{
 		kind: fragBinary, print1: "=", spacing: binaryOpSpacing, bump: assignOpBump,
 		kids: []ExprFragment{l, rhs}, parens: []bool{false, false}}}
 }
