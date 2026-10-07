@@ -129,19 +129,18 @@ func NewRuleSlessToLess(group string) *RuleSlessToLess {
 	return r
 }
 
+// apply turns a signed comparison unsigned when neither side can have its
+// sign bit set. C++ parity: RuleSlessToLess::applyOp.
 func (r *RuleSlessToLess) apply(op *PcodeOp, data *Funcdata) int {
-	left := definedBy(op.Input(0), CPUI_INT_ZEXT)
-	right := definedBy(op.Input(1), CPUI_INT_ZEXT)
-	if left == nil || right == nil {
-		return 0
-	}
-	if left.Input(0).Size() != right.Input(0).Size() {
+	vn := op.Input(0)
+	sz := vn.Size()
+	if signbitNegative(vn.NZMask(), sz) || signbitNegative(op.Input(1).NZMask(), sz) {
 		return 0
 	}
 	if op.Code() == CPUI_INT_SLESS {
-		rewriteOp(data, op, CPUI_INT_LESS, left.Input(0), right.Input(0))
+		data.OpSetOpcode(op, CPUI_INT_LESS)
 	} else {
-		rewriteOp(data, op, CPUI_INT_LESSEQUAL, left.Input(0), right.Input(0))
+		data.OpSetOpcode(op, CPUI_INT_LESSEQUAL)
 	}
 	return 1
 }

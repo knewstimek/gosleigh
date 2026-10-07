@@ -305,6 +305,17 @@ func parseCaptureProto(fn *xnode, types map[string]*xnode) captureProto {
 		out := pcode.HostParam{}
 		if at := ret.child("addr"); at != nil {
 			out.Space, out.Offset, out.Size = at.attr("space"), parseUint(at.attr("offset")), int32(parseUint(at.attr("size")))
+			// A single-piece join is that piece, truncated to the logical
+			// size (an 8-byte value in the 10-byte ST0).
+			// C++ parity: AddrSpaceManager::findAddJoin (one piece).
+			if out.Space == "join" && at.attr("piece2") == "" {
+				if parts := strings.Split(at.attr("piece1"), ":"); len(parts) == 3 {
+					out.Space, out.Offset, out.Size = parts[0], parseUint(parts[1]), int32(parseUint(parts[2]))
+					if ls := int32(parseUint(at.attr("logicalsize"))); ls > 0 && ls < out.Size {
+						out.Size = ls
+					}
+				}
+			}
 		}
 		for i := range ret.Kids {
 			if t := typeDesc(&ret.Kids[i], types, 0); t != nil {
