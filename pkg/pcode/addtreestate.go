@@ -952,6 +952,24 @@ func (s *AddTreeState) buildDegenerate() bool {
 	return true // The output keeps its data-type
 }
 
+// assignPropagatedType types the output of a new PTRADD or PTRSUB from its
+// pointer input once type propagation has stopped settling, as no later
+// propagation pass will. C++ parity: AddTreeState::assignPropagatedType
+// (called when Funcdata::isTypeRecoveryExceeded).
+func (s *AddTreeState) assignPropagatedType(op *PcodeOp) {
+	if !s.data.HasFlag(FuncTypeRecoveryExceeded) {
+		return
+	}
+	vn := op.Input(0)
+	inType := vn.TypeReadFacing(op)
+	if inType == nil {
+		return
+	}
+	if nt := inferPropagateEdge(s.data, sharedTypeFactory, op, vn, op.Output(), 0, -1, inType); nt != nil {
+		op.Output().UpdateType(nt)
+	}
+}
+
 func (s *AddTreeState) buildTree() {
 	oldOut := s.baseOp.Output()
 	if oldOut == nil {
@@ -971,6 +989,7 @@ func (s *AddTreeState) buildTree() {
 	var newop *PcodeOp
 	if multNode != nil {
 		newop = s.data.newUntypedOpBefore(s.baseOp, CPUI_PTRADD, s.ptrSize, s.ptr, multNode, s.data.NewConstant(s.ptrSize, s.elemSize))
+		s.assignPropagatedType(newop)
 		current = newop.Output()
 	}
 	if s.isSubtype {
@@ -979,6 +998,7 @@ func (s *AddTreeState) buildTree() {
 		// data-type has a size (size != 0). For a spacebase base (size 0) the
 		// PTRSUB output must stay open to TypeOpPtrsub::propagateType so it can
 		// be refined to the mapped symbol's type.
+		s.assignPropagatedType(newop)
 		if s.elemSize != 0 {
 			newop.SetStopTypePropagation()
 		}

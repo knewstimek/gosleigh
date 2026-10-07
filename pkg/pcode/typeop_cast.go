@@ -677,7 +677,7 @@ func (t *typeOpPtradd) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Da
 
 // GetInputCast slot 0 of a PTRSUB, as for PTRADD but the pointed-to types
 // (arrays by element) must be the same.
-// C++ parity: TypeOpPtrsub::getInputCast. Typedefs are not modelled.
+// C++ parity: TypeOpPtrsub::getInputCast.
 func (t *typeOpPtrsub) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
 	if slot != 0 {
 		return baseGetInputCast(t, op, slot, cs)
@@ -698,6 +698,7 @@ func (t *typeOpPtrsub) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Da
 			reqbase, curbase = ra.Element(), ca.Element()
 		}
 	}
+	reqbase, curbase = stripTypedef(reqbase), stripTypedef(curbase)
 	if curbase == reqbase {
 		return nil
 	}

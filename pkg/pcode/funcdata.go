@@ -24,6 +24,9 @@ const (
 	// FuncDoublePrecisOn enables the ActionParamDouble join path.
 	// C++ parity: funcdata.hh Funcdata::double_precis_on (0x2000)
 	FuncDoublePrecisOn uint32 = 0x2000
+	// FuncTypeRecoveryExceeded is set once type propagation stops settling.
+	// C++ parity: funcdata.hh Funcdata::typerecovery_exceeded (0x4000)
+	FuncTypeRecoveryExceeded uint32 = 0x4000
 )
 
 // Funcdata is the central container for all data structures associated

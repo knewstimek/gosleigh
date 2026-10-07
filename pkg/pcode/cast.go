@@ -369,7 +369,6 @@ func typeOrderBool(a, b Datatype) int {
 // C++ parity: cast.cc CastStrategyC::castStandard (lines 300-392).
 //
 // Simplifications vs C++ (documented Gosleigh type-system gaps):
-//   - typedef resolution (getTypedef loop) is skipped: typedefs are not modelled.
 //   - variable-length / hasSameVariableBase short-circuit is skipped.
 //   - pointer address-space comparison is skipped: *Pointer carries no AddrSpace.
 //   - TypeCode prototype comparison is skipped: two CODE types of equal size are
@@ -407,8 +406,10 @@ func (cs *CastStrategyC) CastStandard(reqtype, curtype Datatype, careUintInt, ca
 		}
 	}
 
+	reqbase = stripTypedef(reqbase)
+	curbase = stripTypedef(curbase)
 	if curbase == reqbase {
-		return nil // same underlying type
+		return nil // different typedefs could point to the same type
 	}
 	if reqbase.Metatype() == TYPE_VOID || curbase.Metatype() == TYPE_VOID {
 		return nil // don't cast to or from a void pointer

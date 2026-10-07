@@ -83,8 +83,7 @@ func (a *ActionInferTypes) Apply(data *Funcdata) int {
 	if a.localcount >= 7 { // This constant arrived at empirically (C++ coreaction.cc:5401)
 		if a.localcount == 7 {
 			data.warningHeader("Type propagation algorithm not settling")
-			// C++ also calls data.setTypeRecoveryExceeded(); that flag is not
-			// modelled in Gosleigh yet (only gates a downstream warning path).
+			data.SetFlag(FuncTypeRecoveryExceeded)
 			a.localcount++
 		}
 		return 0
