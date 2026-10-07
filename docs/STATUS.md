@@ -7,7 +7,7 @@
 | 측정 | 결과 | 비고 |
 |---|---|---|
 | realexe private-sample seed1 (x86-32) | 200/200 | 골든 재생성(프로그램 옵션, readonly on) |
-| realexe private-sample seed2 (보지 않은 표본) | 198/200 | 일반화 지표, 남은 [155][198] |
+| realexe private-sample seed2 (보지 않은 표본) | 200/200 | 일반화 지표 |
 | realexe private-sample (x64 UE4) | 192/200, sim 0.996 | ENGINE-ERR 0, TIMEOUT 0 |
 | 게이트 `tools/gates.py` | 전부 유지 | tree 10/10, corpus2 10/13, x64_auto 108/109 |
 | x64 코퍼스 C++ 코어 대조 `rawcmp.py` | corpus 8/8, corpus2 13/13, x64_auto 109/109 | 같은 바이트를 C++ 하네스로 |
