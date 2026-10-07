@@ -4297,7 +4297,13 @@ func (s *printCState) renderPtrSubField(op *PcodeOp, valueon bool) (ExprFragment
 	if base == nil || off == nil || !off.IsConstant() {
 		return ExprFragment{}, false
 	}
+	// The pointer as this PTRSUB reads it: a one-field structure variable
+	// resolves to its field here. C++ parity: opPtrsub
+	// (in0->getHighTypeReadFacing(op)).
 	ptrType, ok := base.TypeReadFacing(nil).(*Pointer)
+	if !ok {
+		ptrType, ok = base.HighTypeReadFacing(op).(*Pointer)
+	}
 	if !ok {
 		return ExprFragment{}, false
 	}
@@ -4377,6 +4383,13 @@ func (s *printCState) renderMemberField(base *Varnode, field TypeField, valueon 
 		baseExpr, err := s.renderVarnodeExpr(base)
 		if err != nil {
 			return ExprFragment{}, false
+		}
+		if baseExpr.member == "" && baseExpr.node == nil && hasTopLevelMember(baseExpr.Text) {
+			// A variable printed as a piece (FVar1.ReferenceController) is an
+			// object_member expression; under pointer_member it takes parens.
+			// C++ parity: PrintLanguage::parentheses (binary tokens of equal
+			// precedence, different token).
+			baseExpr.member = "."
 		}
 		expr = s.lang.MemberExpr(baseExpr, "->", field.Name) // EMIT ( )->name
 	}
@@ -5068,4 +5081,25 @@ func (s *printCState) applySelfLockedParams() {
 		}
 	}
 	s.params = params
+}
+
+// hasTopLevelMember reports a '.' member selection outside template
+// arguments and parentheses: the text is an object_member expression.
+func hasTopLevelMember(text string) bool {
+	depth := 0
+	for _, c := range text {
+		switch c {
+		case '<', '(', '[':
+			depth++
+		case '>', ')', ']':
+			if depth > 0 {
+				depth--
+			}
+		case '.':
+			if depth == 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
