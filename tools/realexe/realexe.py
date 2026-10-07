@@ -15,7 +15,8 @@ decompiled output must not be committed.
 
 Usage:
     py -3 tools/realexe/realexe.py analyze <exe> [--work DIR]
-    py -3 tools/realexe/realexe.py sample  [--work DIR] [--n 200] [--seed 1] [--max-bytes 4096]
+    py -3 tools/realexe/realexe.py sample  [--work DIR] [--n 200] [--seed 1] [--max-bytes 4096] [--allow-seen]
+        (functions other works of the same program already sampled are excluded)
     py -3 tools/realexe/realexe.py run     [--work DIR] [--timeout 30]
     py -3 tools/realexe/realexe.py report  [--work DIR]
 
@@ -153,14 +154,43 @@ def do_analyze(exe, work):
 	return rc == 0
 
 
-def do_sample(work, n, seed, max_bytes):
+def seen_entries(work):
+	"""Entries already sampled by the other works of the same program (same
+	program file hash), so a new seed draws only functions not golden yet."""
+	meta = load_meta(work)
+	key = meta.get("sha256", {}).get(meta["program"])
+	here = os.path.normcase(os.path.abspath(work))
+	seen = set()
+	parent = os.path.dirname(here)
+	for name in sorted(os.listdir(parent)):
+		other = os.path.join(parent, name)
+		if os.path.normcase(other) == here:
+			continue
+		mpath, gpath = os.path.join(other, "meta.json"), os.path.join(other, "goldens.json")
+		if not (os.path.isfile(mpath) and os.path.isfile(gpath)):
+			continue
+		with open(mpath, encoding="utf-8") as f:
+			om = json.load(f)
+		if om.get("program") != meta["program"] or om.get("sha256", {}).get(om["program"]) != key:
+			continue
+		with open(gpath, encoding="utf-8") as f:
+			seen.update(fn["entry"] for fn in json.load(f)["functions"])
+	return seen
+
+
+def do_sample(work, n, seed, max_bytes, allow_seen=False):
 	meta = load_meta(work)
 	out = os.path.join(work, "goldens.json")
+	exclude = os.path.join(work, "exclude.txt")
+	seen = set() if allow_seen else seen_entries(work)
+	with open(exclude, "w", encoding="ascii") as f:
+		f.write("".join("0x%x\n" % e for e in sorted(seen)))
+	print("sample: excluding %d entries already sampled by other works" % len(seen))
 	rc = headless([
 		HEADLESS, os.path.join(work, "ghidra"), PROJ_NAME,
 		"-process", meta["program"], "-noanalysis", "-readOnly",
 		"-scriptPath", HERE,
-		"-postScript", "GenSample.java", out, str(n), str(seed), str(max_bytes),
+		"-postScript", "GenSample.java", out, str(n), str(seed), str(max_bytes), exclude,
 	], os.path.join(work, "sample.log"), timeout=3 * 3600)
 	ok = rc == 0 and os.path.isfile(out)
 	print("sample: %s -- %s" % ("OK" if ok else "FAILED", out))
@@ -380,6 +410,8 @@ def main():
 	ps.add_argument("--n", type=int, default=200)
 	ps.add_argument("--seed", type=int, default=1)
 	ps.add_argument("--max-bytes", type=int, default=4096)
+	ps.add_argument("--allow-seen", action="store_true",
+		help="do not exclude functions other works of the same program already sampled")
 	pr = sub.add_parser("run")
 	pr.add_argument("--work")
 	pr.add_argument("--timeout", type=int, default=10, help="per-function seconds")
@@ -403,7 +435,7 @@ def main():
 		work = os.path.abspath(args.work) if args.work else default_work(args.exe)
 		ok = do_analyze(args.exe, work)
 	elif args.cmd == "sample":
-		ok = do_sample(resolve_work(args), args.n, args.seed, args.max_bytes)
+		ok = do_sample(resolve_work(args), args.n, args.seed, args.max_bytes, args.allow_seen)
 	elif args.cmd == "run":
 		ok = do_run(resolve_work(args), args.timeout, args.mem_mb, args.fresh)
 	elif args.cmd == "capture":

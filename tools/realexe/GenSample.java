@@ -30,6 +30,10 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Random;
+import java.util.HashSet;
+import java.util.Set;
+import java.nio.file.Files;
+import java.nio.file.Paths;
 
 public class GenSample extends GhidraScript {
 
@@ -44,6 +48,18 @@ public class GenSample extends GhidraScript {
 		int n = Integer.parseInt(arg(args, 1, "200"));
 		long seed = Long.parseLong(arg(args, 2, "1"));
 		long maxBytes = Long.parseLong(arg(args, 3, "4096"));
+		// Optional file of entry addresses (one 0x... per line) that earlier
+		// samples already hold; they are not drawn again.
+		Set<Long> exclude = new HashSet<>();
+		String excludePath = arg(args, 4, "");
+		if (!excludePath.isEmpty()) {
+			for (String line : Files.readAllLines(Paths.get(excludePath))) {
+				line = line.trim();
+				if (!line.isEmpty()) {
+					exclude.add(Long.decode(line));
+				}
+			}
+		}
 
 		List<Function> cands = new ArrayList<>();
 		int total = 0;
@@ -56,11 +72,14 @@ public class GenSample extends GhidraScript {
 			if (span <= 0 || span > maxBytes) {
 				continue;
 			}
+			if (exclude.contains(f.getEntryPoint().getOffset())) {
+				continue;
+			}
 			cands.add(f);
 		}
 		cands.sort(Comparator.comparingLong(GenSample::span)
 				.thenComparing(f -> f.getEntryPoint().getOffset()));
-		println("GenSample: " + total + " functions, " + cands.size() + " candidates");
+		println("GenSample: " + total + " functions, " + cands.size() + " candidates (" + exclude.size() + " excluded)");
 
 		List<Function> picked = new ArrayList<>();
 		Random rnd = new Random(seed);
