@@ -597,76 +597,57 @@ func NewRuleEqual2Zero(group string) *RuleEqual2Zero {
 }
 
 func (r *RuleEqual2Zero) apply(op *PcodeOp, data *Funcdata) int {
-	lhs, _, val, ok := normalizeCompareConst(op)
-	if !ok || val != 0 {
-		return 0
-	}
-	// All descendants of lhs must produce bool output; non-bool consumers
-	// mean the expression value is used outside a comparison context.
-	// C++ parity: RuleEqual2Zero::applyOp ruleaction.cc:5884-5887
-	for _, desc := range lhs.DescendIter() {
-		if !desc.IsBoolOutput() {
+	vn := op.Input(0)
+	var addvn *Varnode
+	if vn.IsConstant() && vn.Offset() == 0 {
+		addvn = op.Input(1)
+	} else {
+		addvn = vn
+		if vn = op.Input(1); !vn.IsConstant() || vn.Offset() != 0 {
 			return 0
 		}
 	}
-	// Pattern: INT_ADD(a, INT_MULT(b, -1)) == 0  =>  a == b
-	// This is the normal form produced by RuleSub2Add from INT_SUB(a,b).
-	// Also: INT_ADD(a, c) == 0  =>  a == -c  (constant rhs).
-	// C++ parity: RuleEqual2Zero::applyOp ruleaction.cc:5890-5923
-	add := definedBy(lhs, CPUI_INT_ADD)
-	if add != nil && add.Input(0) != nil && add.Input(1) != nil {
-		a, b := add.Input(0), add.Input(1)
-		if bval, bok := constantValue(b); bok {
-			// INT_ADD(a, c) == 0  =>  a == -c
-			sz := b.Size()
-			negC := truncateToSize(^bval+1, sz)
-			data.OpSetInput(op, a, 0)
-			data.OpSetInput(op, data.NewConstant(sz, negC), 1)
-			return 1
-		}
-		// Try: one operand is INT_MULT(x, -1) -- identifies the negated operand.
-		for slot := 0; slot < 2; slot++ {
-			negvn := add.Input(slot)
-			posvn := add.Input(1 - slot)
-			mult := definedBy(negvn, CPUI_INT_MULT)
-			if mult == nil || mult.Input(0) == nil || mult.Input(1) == nil {
-				continue
-			}
-			mval, mok := constantValue(mult.Input(1))
-			if !mok {
-				continue
-			}
-			allOnes := truncateToSize(^uint64(0), negvn.Size())
-			if mval != allOnes {
-				continue
-			}
-			unnegvn := mult.Input(0)
-			data.OpSetInput(op, posvn, 0)
-			data.OpSetInput(op, unnegvn, 1)
-			return 1
+	for _, boolop := range addvn.DescendIter() {
+		if !boolop.IsBoolOutput() {
+			return 0 // the sum is used outside a comparison
 		}
 	}
-	// Pattern: INT_SUB(a, b) == 0  =>  a == b (pre-Sub2Add form)
-	sub := definedBy(lhs, CPUI_INT_SUB)
-	if sub != nil && sub.Input(0) != nil && sub.Input(1) != nil {
-		rewriteOp(data, op, op.Code(), sub.Input(0), sub.Input(1))
-		return 1
-	}
-	// Pattern: INT_XOR(a, c) == 0  =>  a == c
-	xor := definedBy(lhs, CPUI_INT_XOR)
-	if xor == nil {
+	addop := addvn.Def()
+	if addop == nil || addop.Code() != CPUI_INT_ADD {
 		return 0
 	}
-	for slot := 0; slot < 2; slot++ {
-		cval, cok := constantValue(xor.Input(slot))
-		if !cok {
-			continue
+	vn, vn2 := addop.Input(0), addop.Input(1)
+	var posvn, unnegvn *Varnode
+	if vn2.IsConstant() {
+		unnegvn = data.NewConstant(vn2.Size(), truncateToSize(-vn2.Offset(), vn2.Size()))
+		posvn = vn
+	} else {
+		// Input 0 is tested first: a product there is taken as the negation
+		// even when its multiplier then fails the check.
+		var negvn *Varnode
+		switch {
+		case vn.IsWritten() && vn.Def().Code() == CPUI_INT_MULT:
+			negvn, posvn = vn, vn2
+		case vn2.IsWritten() && vn2.Def().Code() == CPUI_INT_MULT:
+			negvn, posvn = vn2, vn
+		default:
+			return 0
 		}
-		other := xor.Input(1 - slot)
-		rewriteOp(data, op, op.Code(), other, data.NewConstant(other.Size(), cval))
-		return 1
+		mult := negvn.Def()
+		if !mult.Input(1).IsConstant() {
+			return 0
+		}
+		unnegvn = mult.Input(0)
+		if mult.Input(1).Offset() != truncateToSize(^uint64(0), unnegvn.Size()) {
+			return 0
+		}
 	}
-	return 0
+	if !posvn.IsHeritageKnown() || !unnegvn.IsHeritageKnown() {
+		return 0
+	}
+	data.OpSetInput(op, posvn, 0)
+	data.OpSetInput(op, unnegvn, 1)
+	return 1
 }
 
 // RuleSborrow simplifies INT_SBORROW expressions.
