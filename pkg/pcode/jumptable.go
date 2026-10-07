@@ -1732,13 +1732,15 @@ func (jt *JumpTable) FoldInNormalization(fd *Funcdata) {
 	if switchVn == nil {
 		return
 	}
-	// C++ uses minimalmask/calc_mask to compute switchVarConsume. Those
-	// helpers live in pcode support code; until they are wired up we
-	// default to "all bits" which matches the C++ fallback arm.
-	jt.switchVarConsume = ^uint64(0)
-	_ = switchVn
-	// TODO mismatch: minimalmask + calc_mask integration for
-	// subvariable-flow hints after INT_SEXT is not implemented yet.
+	// Mark the switch variable as not fully consumed where possible, so
+	// subvariable flow can truncate it.
+	jt.switchVarConsume = minimalMask(switchVn.NZMask())
+	if jt.switchVarConsume >= maskForSize(switchVn.Size()) { // The mask covers everything
+		if def := switchVn.Def(); def != nil && def.Code() == CPUI_INT_SEXT {
+			// Assume the sign extension is not consumed
+			jt.switchVarConsume = maskForSize(def.Input(0).Size())
+		}
+	}
 }
 
 // FoldInGuards hides guard code paths.

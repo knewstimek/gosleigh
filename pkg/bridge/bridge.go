@@ -205,9 +205,13 @@ type edgeKey struct {
 type spaceSummary struct {
 	constSpace     *address.Space
 	uniqueSpace    *address.Space
-	uniqueBase     uint64
 	heritageSpaces []*address.Space
 }
+
+// analysisUniqueBase is where temporaries made during analysis start, past
+// every temporary a translation uses. C++ parity: VarnodeBank::VarnodeBank
+// (getUniqueStart(Translate::ANALYSIS) = 0x10000000).
+const analysisUniqueBase = 0x10000000
 
 func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	if engine == nil {
@@ -283,7 +287,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	fixFlowOverrideReturns(records, summary.constSpace)
 	applyIndirectOverrides(records, cfg.IndirectOverrides)
 	injectWarnings := applyInjections(records, cfg.Injections, summary.constSpace)
-	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, summary.uniqueBase, summary.constSpace)
+	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, analysisUniqueBase, summary.constSpace)
 	fd.UserOps().RegisterNames(engine.UserOpNames())
 	fd.SetRegisterNames(engine.RegisterNamesByLocation())
 	if len(cfg.IndirectOverrides) != 0 {
@@ -1561,10 +1565,6 @@ func (s *spaceSummary) observe(vn *pcode.VarnodeData) {
 		s.constSpace = vn.Space
 	case address.SpaceKindUnique:
 		s.uniqueSpace = vn.Space
-		end := vn.Offset + uint64(vn.Size)
-		if end > s.uniqueBase {
-			s.uniqueBase = end
-		}
 	}
 }
 

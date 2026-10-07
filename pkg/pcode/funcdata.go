@@ -1445,7 +1445,7 @@ func (fd *Funcdata) NewOp(numInputs int, addr address.Address) *PcodeOp {
 // C++ parity: Funcdata::opSetOpcode
 func (fd *Funcdata) OpSetOpcode(op *PcodeOp, opc OpCode) {
 	if int(opc) < len(fd.typeOps) && fd.typeOps[opc] != nil {
-		op.SetOpcode(fd.typeOps[opc])
+		fd.obank.ChangeOpcode(op, fd.typeOps[opc])
 	}
 }
 

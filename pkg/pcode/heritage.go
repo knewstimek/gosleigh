@@ -32,6 +32,11 @@ type Heritage struct {
 	// insertion.  nil means no guardCalls pass (leaf-function safe default).
 	// C++ parity: Heritage uses fd->getFuncProto()->getModel() for guardCalls.
 	proto *ProtoModel
+	// guardPieces are partial Varnodes a guard built inside the range being
+	// heritaged; only the whole-range Varnode they join into is a write of
+	// the range. C++ parity: guardOutputOverlap pushes only vnCollect onto
+	// the write list (Gosleigh collects the writes after guarding instead).
+	guardPieces map[*Varnode]bool
 }
 
 const (
@@ -109,7 +114,9 @@ func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 					effecttype = EffectKilledByCall
 				}
 				if outputCharacter == retOutContainedBy {
-					// TODO known mismatch: tryOutputOverlapGuard is not ported.
+					if h.tryOutputOverlapGuard(fc, addr, transAddr, size) {
+						effecttype = EffectUnaffected // The range is handled
+					}
 				} else if active := fc.GetActiveOutput(); active != nil && active.WhichTrial(transAddr, size) < 0 {
 					active.RegisterTrial(transAddr, size)
 					possibleoutput = true
@@ -144,6 +151,78 @@ func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 			h.fd.NewIndirectCreation(op, addr, size, possibleoutput).Output().SetActiveHeritage()
 		}
 	}
+}
+
+// guardOutputOverlap guards a range that properly contains a call's possible
+// return storage: the return storage and the bytes on either side are each
+// an indirect creation, concatenated back into a Varnode of the whole range.
+// C++ parity: Heritage::guardOutputOverlap.
+func (h *Heritage) guardOutputOverlap(callOp *PcodeOp, addr address.Address, size int32, retAddr address.Address, retSize int32) {
+	sizeFront := int32(retAddr.Offset - addr.Offset)
+	sizeBack := size - retSize - sizeFront
+	if h.guardPieces == nil {
+		h.guardPieces = make(map[*Varnode]bool)
+	}
+	indOp := h.fd.NewIndirectCreation(callOp, retAddr, retSize, true)
+	vnCollect := indOp.Output()
+	h.guardPieces[vnCollect] = true
+	insertPoint := callOp
+	if sizeFront != 0 {
+		newFront := h.fd.NewIndirectCreation(indOp, addr, sizeFront, false).Output()
+		h.guardPieces[newFront] = true
+		concatFront := h.fd.NewOp(2, indOp.Addr())
+		slotNew := 1
+		if retAddr.Space.BigEndian {
+			slotNew = 0
+		}
+		h.fd.OpSetOpcode(concatFront, CPUI_PIECE)
+		h.fd.OpSetInput(concatFront, newFront, slotNew)
+		h.fd.OpSetInput(concatFront, vnCollect, 1-slotNew)
+		vnCollect = h.fd.NewVarnodeOut(sizeFront+retSize, addr, concatFront)
+		h.guardPieces[vnCollect] = true
+		h.fd.OpInsertAfter(concatFront, insertPoint)
+		insertPoint = concatFront
+	}
+	if sizeBack != 0 {
+		addrBack := retAddr
+		addrBack.Offset += uint64(retSize)
+		newBack := h.fd.NewIndirectCreation(callOp, addrBack, sizeBack, false).Output()
+		h.guardPieces[newBack] = true
+		concatBack := h.fd.NewOp(2, indOp.Addr())
+		slotNew := 0
+		if retAddr.Space.BigEndian {
+			slotNew = 1
+		}
+		h.fd.OpSetOpcode(concatBack, CPUI_PIECE)
+		h.fd.OpSetInput(concatBack, newBack, slotNew)
+		h.fd.OpSetInput(concatBack, vnCollect, 1-slotNew)
+		vnCollect = h.fd.NewVarnodeOut(size, addr, concatBack)
+		h.fd.OpInsertAfter(concatBack, insertPoint)
+	}
+	delete(h.guardPieces, vnCollect)
+	vnCollect.SetActiveHeritage()
+}
+
+// tryOutputOverlapGuard guards a range bigger than any one possible return
+// storage of the call, registering the biggest contained storage as an
+// output trial. C++ parity: Heritage::tryOutputOverlapGuard.
+func (h *Heritage) tryOutputOverlapGuard(fc *FuncCallSpecs, addr, transAddr address.Address, size int32) bool {
+	trunc, tsize, ok := fc.getBiggestContainedOutput(transAddr, size)
+	if !ok {
+		return false
+	}
+	active := fc.GetActiveOutput()
+	if active == nil {
+		return false
+	}
+	truncAddr := addr
+	truncAddr.Offset += trunc.Offset - transAddr.Offset // To the caller's perspective
+	if active.WhichTrial(truncAddr, size) >= 0 {
+		return false // Trial already exists
+	}
+	h.guardOutputOverlap(fc.op, addr, size, truncAddr, tsize)
+	active.RegisterTrial(truncAddr, tsize)
+	return true
 }
 
 // ForceRestructure marks the ADT as needing rebuild.
@@ -1534,7 +1613,7 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			reads, writes, inputs = h.Collect(task.Addr, task.Size)
 			guardWrites := append([]*Varnode(nil), normWrites...)
 			for _, vn := range writes {
-				if !preGuard[vn] {
+				if !preGuard[vn] && !h.guardPieces[vn] {
 					guardWrites = append(guardWrites, vn)
 				}
 			}

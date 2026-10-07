@@ -17,6 +17,9 @@ type PcodeOpBank struct {
 	// by SeqNum), maintained on create/destroy. Iterating the Go map would
 	// make the order, and so the output, vary from run to run.
 	sorted []*PcodeOp
+	// codeCounter stamps each opcode change, so CodeList can rebuild the
+	// C++ per-opcode lists, which append an op whenever its opcode is set.
+	codeCounter uint64
 }
 
 // NewPcodeOpBank creates an empty PcodeOpBank.
@@ -142,6 +145,29 @@ func (b *PcodeOpBank) NextAfter(seq SeqNum, strict bool) *PcodeOp {
 		return b.sorted[i]
 	}
 	return nil
+}
+
+// ChangeOpcode sets op's opcode and moves it to the end of its opcode
+// list. C++ parity: PcodeOpBank::changeOpcode (removeFromCodeList, then
+// addToCodeList, even for an unchanged opcode).
+func (b *PcodeOpBank) ChangeOpcode(op *PcodeOp, t TypeOp) {
+	op.SetOpcode(t)
+	op.codeOrder = b.codeCounter
+	b.codeCounter++
+}
+
+// CodeList returns the ops with opcode opc, dead ones included, in the
+// order they joined that opcode. C++ parity: PcodeOpBank::begin(opc) over
+// returnlist / storelist / loadlist / useroplist.
+func (b *PcodeOpBank) CodeList(opc OpCode) []*PcodeOp {
+	var out []*PcodeOp
+	for _, op := range b.sorted {
+		if op.Code() == opc {
+			out = append(out, op)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool { return out[i].codeOrder < out[j].codeOrder })
+	return out
 }
 
 // AliveOps returns a copy of the alive list.

@@ -399,6 +399,33 @@ func (pl *ParamListStandard) characterizeAsParam(loc address.Address, size int32
 	return peNoContainment
 }
 
+// getBiggestContainedParam returns the storage of the biggest entry lying
+// inside [loc, loc+size); that entry must hold a single value (exclusion).
+// C++ parity: ParamListStandard::getBiggestContainedParam (its resolver walk
+// goes in address order and only a strictly bigger entry replaces the last).
+func (pl *ParamListStandard) getBiggestContainedParam(loc address.Address, size int32) (address.Address, int32, bool) {
+	if pl == nil || loc.Space == nil || size <= 0 {
+		return address.Address{}, 0, false
+	}
+	if loc.Offset+uint64(size)-1 < loc.Offset {
+		return address.Address{}, 0, false // Assume no parameter when the range wraps
+	}
+	var maxEntry *paramEntry
+	for _, pe := range pl.entry {
+		if !pe.containedBy(loc, size) {
+			continue
+		}
+		if maxEntry == nil || pe.size > maxEntry.size ||
+			(pe.size == maxEntry.size && pe.addressbase < maxEntry.addressbase) {
+			maxEntry = pe
+		}
+	}
+	if maxEntry == nil || !maxEntry.isExclusion() {
+		return address.Address{}, 0, false
+	}
+	return address.Address{Space: loc.Space, Offset: maxEntry.addressbase}, maxEntry.size, true
+}
+
 // ParamListStandard is the faithful port of the standard parameter list model:
 // an ordered list of ParamEntry plus the resource-section boundaries. It maps a
 // set of Varnode trials (ParamActive) onto formal parameter storage.

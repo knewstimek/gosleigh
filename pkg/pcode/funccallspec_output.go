@@ -53,6 +53,29 @@ func (fc *FuncCallSpecs) IsOutputActive() bool {
 // function's own return. Gosleigh has not ported the ParamEntry output model, so
 // only the one configured return register participates.
 // C++ parity: fspec.cc FuncProto::characterizeAsOutput (register subset).
+// getBiggestContainedOutput returns the biggest possible return storage
+// lying inside [loc, loc+size). C++ parity: FuncProto::getBiggestContainedOutput.
+func (fc *FuncCallSpecs) getBiggestContainedOutput(loc address.Address, size int32) (address.Address, int32, bool) {
+	if fc.IsOutputLocked() {
+		if out := fc.FuncProto.output; out != nil && out.Type() != nil && out.Type().Metatype() == TYPE_VOID {
+			return address.Address{}, 0, false
+		}
+		iaddr, isz, ok := fc.FuncProto.OutputStorage()
+		if !ok || iaddr.Space == nil || loc.Space == nil || iaddr.Space.Index != loc.Space.Index {
+			return address.Address{}, 0, false
+		}
+		if iaddr.Offset >= loc.Offset && iaddr.Offset+uint64(isz) <= loc.Offset+uint64(size) {
+			return iaddr, isz, true
+		}
+		return address.Address{}, 0, false
+	}
+	m := fc.Model()
+	if m == nil || m.OutputParams == nil {
+		return address.Address{}, 0, false
+	}
+	return m.OutputParams.getBiggestContainedParam(loc, size)
+}
+
 func (fc *FuncCallSpecs) CharacterizeAsOutput(addr address.Address, size int32) int {
 	m := fc.Model()
 	if m != nil && m.OutputParams != nil {

@@ -985,7 +985,10 @@ func (s *AddTreeState) buildTree() {
 		current = newop.Output()
 	}
 	if extra != nil {
-		newop = s.data.NewOpBefore(s.baseOp, CPUI_INT_ADD, current, extra)
+		// newOpBefore gives it a fresh unique even though baseOp's output
+		// replaces it below; the allocation keeps later temporaries at the
+		// C++ offsets (printed unnamed locations such as unique0x1000083a).
+		newop = s.data.newUntypedOpBefore(s.baseOp, CPUI_INT_ADD, current.Size(), current, extra)
 	}
 	if newop == nil {
 		// C++ emits a "ptrarith problems" warning here and leaves baseOp alone.

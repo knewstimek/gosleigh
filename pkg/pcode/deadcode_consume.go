@@ -314,7 +314,13 @@ func (c *consumeAnalysis) computeConsumed(data *Funcdata) {
 					c.push(returnConsume, op.Input(i))
 				}
 			case CPUI_BRANCHIND:
-				c.push(^uint64(0), op.Input(0))
+				// A switch consumes only the bits its jump table reads.
+				// C++ parity: ActionDeadCode::apply (getSwitchVarConsume).
+				mask := ^uint64(0)
+				if jt := data.FindJumpTable(op); jt != nil {
+					mask = jt.SwitchVarConsume()
+				}
+				c.push(mask, op.Input(0))
 			default:
 				for i := 0; i < op.NumInput(); i++ {
 					c.push(^uint64(0), op.Input(i))

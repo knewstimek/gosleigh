@@ -242,21 +242,29 @@ func (fd *Funcdata) ApplyHostSelfPrototype(model *ProtoModel) {
 	if ok && hf.Inline {
 		fd.warningHeader("This is an inlined function")
 	}
-	if !ok || (!hf.InputLocked && !hf.OutputLocked) {
+	if !ok {
+		return
+	}
+	// A locked model is the prototype's own, whether or not any parameter
+	// is locked. C++ parity: FuncProto::decode (model + modellock).
+	if hf.ModelLock {
+		if m := fd.ModelByName(hf.Model); m != nil {
+			fp := fd.GetFuncProto()
+			if fp == nil {
+				fp = NewFuncProto(model)
+				fd.SetFuncProto(fp)
+			}
+			fp.SetModel(m)
+			fp.SetModelLock(true)
+		}
+	}
+	if !hf.InputLocked && !hf.OutputLocked {
 		return
 	}
 	fp := fd.GetFuncProto()
 	if fp == nil {
 		fp = NewFuncProto(model)
 		fd.SetFuncProto(fp)
-	}
-	// A locked model is the prototype's own. C++ parity: FuncProto::decode
-	// (model + modellock).
-	if hf.ModelLock {
-		if m := fd.ModelByName(hf.Model); m != nil {
-			fp.SetModel(m)
-			fp.SetModelLock(true)
-		}
 	}
 	if hf.OutputLocked && hf.Output != nil && hf.Output.Type != nil && hf.Output.Type.Metatype() == TYPE_VOID {
 		// A locked void return: the function returns nothing, so no return

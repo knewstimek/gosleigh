@@ -1781,7 +1781,9 @@ func (s *printCState) emitConditionLead(bl *FlowBlock) error {
 	if bl == nil {
 		return nil
 	}
-	if bl.Type() == BlockConditionType {
+	if bl.Type() == BlockConditionType || bl.Type() == BlockMultiGotoType {
+		// A multi-goto block emits as its inner block.
+		// C++ parity: BlockMultiGoto::emit (getBlock(0)->emit).
 		children := bl.StructuredChildren()
 		if len(children) > 0 {
 			return s.emitConditionLead(children[0])
@@ -4983,11 +4985,12 @@ func (s *printCState) localPieceName(vn *Varnode, name string, castTo Datatype, 
 	// (pt.y). C++ parity: pushSymbolDetail -> pushPartialSymbol with
 	// HighVariable::getSymbolOffset.
 	sl := s.fd.GetScopeLocal()
-	// A variable whose type is a structure with one field filling it prints
-	// through the field. C++ parity: pushSymbolDetail (symboloff -1 with a
-	// needsResolution Symbol type -> pushPartialSymbol at offset 0).
+	// A variable whose type needs resolution (a union, or a structure with
+	// one field filling it) prints through the field resolved for this use.
+	// C++ parity: pushSymbolDetail (symboloff -1 with a needsResolution
+	// Symbol type -> pushPartialSymbol at offset 0).
 	if hv := vn.High(); hv != nil && groupRootOf(hv) == nil && (sl == nil || vn.Space() != sl.SpaceID()) {
-		if ht := hv.Type(); ht != nil && ht.Metatype() == TYPE_STRUCT && ht.NeedsResolution() && ht.Size() == vn.Size() {
+		if ht := hv.Type(); ht != nil && (ht.Metatype() == TYPE_STRUCT || ht.Metatype() == TYPE_UNION) && ht.NeedsResolution() && ht.Size() == vn.Size() {
 			stackInst := false
 			for _, in := range hv.Instances() {
 				if sl != nil && in.Space() == sl.SpaceID() {
@@ -5067,7 +5070,16 @@ func (s *printCState) localPieceName(vn *Varnode, name string, castTo Datatype, 
 			return name, nil
 		}
 	}
-	return symbolPieceName(name, e.Symbol().Type(), int32(at.Offset()-e.Addr().Offset), vn.Size(), castTo, sl.SpaceID().BigEndian, rop, rslot)
+	off := int32(at.Offset() - e.Addr().Offset)
+	if off != 0 && off+vn.Size() > e.Symbol().Type().Size() {
+		// A piece past its symbol's end, not at its start, prints as the
+		// varnode's own raw location (unique0x1000083a).
+		// C++ parity: PrintC::pushMismatchSymbol -> pushUnnamedLocation.
+		if sp := vn.Space(); sp != nil {
+			return sp.Name + PrintRawAddr(vn.Addr()), nil
+		}
+	}
+	return symbolPieceName(name, e.Symbol().Type(), off, vn.Size(), castTo, sl.SpaceID().BigEndian, rop, rslot)
 }
 
 func (s *printCState) isKnownRegisterName(name string) bool {

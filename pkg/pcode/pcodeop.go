@@ -317,6 +317,9 @@ type PcodeOp struct {
 	// callSpec is the call site's prototype (C++ encodes it in the CALL's
 	// fspec-space input 0, FuncCallSpecs::getFspecFromConst).
 	callSpec *FuncCallSpecs
+	// codeOrder is when the op last joined its per-opcode list.
+	// C++ parity: PcodeOpBank::addToCodeList (codeiter).
+	codeOrder uint64
 }
 
 // NewPcodeOp creates a PcodeOp with the given number of input slots.

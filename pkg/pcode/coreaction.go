@@ -1541,8 +1541,10 @@ func (a *ActionReturnRecovery) Apply(data *Funcdata) int {
 	if active == nil {
 		return 0
 	}
-	for _, op := range data.GetPcodeOpBank().AllOps() {
-		if op == nil || op.IsDead() || op.Code() != CPUI_RETURN || op.HaltType() != 0 {
+	// RETURNs in the order they were created: the first one evaluated sets
+	// a trial's IndCreateFormed/RemFormed flags. C++ parity: beginOp(CPUI_RETURN).
+	for _, op := range data.GetPcodeOpBank().CodeList(CPUI_RETURN) {
+		if op.IsDead() || op.HaltType() != 0 {
 			continue
 		}
 		for i := 0; i < active.NumTrials(); i++ {
@@ -1569,8 +1571,8 @@ func (a *ActionReturnRecovery) Apply(data *Funcdata) int {
 	}
 	if active.IsFullyChecked() {
 		fp.deriveOutputMap(active)
-		for _, op := range data.GetPcodeOpBank().AllOps() {
-			if op == nil || op.IsDead() || op.Code() != CPUI_RETURN || op.HaltType() != 0 {
+		for _, op := range data.GetPcodeOpBank().CodeList(CPUI_RETURN) {
+			if op.IsDead() || op.HaltType() != 0 {
 				continue
 			}
 			buildReturnOutput(active, op, data)
