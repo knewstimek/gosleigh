@@ -1193,6 +1193,7 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	actmainloop.AddAction(NewActionForceGoto("blockrecovery"))
 	actmainloop.AddAction(NewActionDirectWrite("protorecovery_a", true))
 	actmainloop.AddAction(NewActionDirectWrite("protorecovery_b", false))
+	actmainloop.AddAction(NewActionActiveParam("protorecovery"))
 	// Wire the function return value (Heritage::guardReturns + dominance rename) once
 	// per function, after the first ActionHeritage pass resolved register/stack SSA.
 	// In C++ guardReturns runs inside ActionHeritage every pass; Gosleigh isolates it
@@ -1204,12 +1205,11 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	// Current-function input prototype recovery runs AFTER deadcode, matching C++
 	// where this work lives in ActionInputPrototype (coreaction.cc:4718, fixateproto
 	// group) which fires only after many deadcode passes -- NOT in the call-site-only
-	// ActionActiveParam (coreaction.cc:1726). Placing it here structurally guarantees
-	// "deadcode ran at least once" before ApplyActiveParamModel locks the prototype,
-	// so a dead phi over a free input register (e.g. a phantom R8) is already removed
-	// and its input therefore has hasNoDescend()==true -> not promoted to a parameter.
-	// Running it before deadcode (its former slot) fixated on the still-live dead phi.
-	actmainloop.AddAction(NewActionActiveParam("protorecovery"))
+	// ActionActiveParam (coreaction.cc:1726, in its C++ slot above). Placing it here
+	// guarantees "deadcode ran at least once" before ApplyActiveParamModel locks the
+	// prototype, so a dead phi over a free input register (e.g. a phantom R8) is
+	// already removed and its input has hasNoDescend()==true.
+	actmainloop.AddAction(NewActionCurrentInputs("protorecovery"))
 	actmainloop.AddAction(NewActionDynamicMapping("dynamic")) // before restructure / infertypes
 	actmainloop.AddAction(NewActionRestructureVarnode("localrecovery"))
 	actmainloop.AddAction(NewActionSpacebase("base")) // before infertypes / nonzeromask

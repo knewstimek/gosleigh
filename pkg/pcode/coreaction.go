@@ -1392,6 +1392,7 @@ func (a *ActionActiveParam) Apply(data *Funcdata) int {
 		if !activeinput.IsFullyChecked() {
 			fc.checkInputTrialUse(data, aliascheck)
 		}
+
 		activeinput.FinishPass()
 		if activeinput.NumPasses() > activeinput.MaxPass() {
 			activeinput.MarkFullyChecked()
@@ -1409,7 +1410,36 @@ func (a *ActionActiveParam) Apply(data *Funcdata) int {
 			a.count++
 		}
 	}
-	if ApplyActiveParamModel(data) {
+	return 0
+}
+
+// ActionCurrentInputs is Gosleigh's provisional recovery of the current
+// function's own input parameters inside the main loop (ApplyActiveParamModel).
+// C++ has no such main-loop action: its current-function inputs are derived
+// once by ActionInputPrototype. It runs after dead code, so a dead phi over a
+// free input register is gone before the inputs are fixed.
+type ActionCurrentInputs struct{ ActionBase }
+
+var _ Action = (*ActionCurrentInputs)(nil)
+
+// NewActionCurrentInputs constructs ActionCurrentInputs.
+func NewActionCurrentInputs(group string) *ActionCurrentInputs {
+	act := &ActionCurrentInputs{}
+	act.ActionBase = NewActionBase(act, 0, "currentinputs", group)
+	return act
+}
+
+// Clone clones ActionCurrentInputs for the provided group list.
+func (a *ActionCurrentInputs) Clone(groups ActionGroupList) Action {
+	if !a.MatchGroup(groups) {
+		return nil
+	}
+	return NewActionCurrentInputs(a.GetGroup())
+}
+
+// Apply locks the current function's input prototype from its inputs.
+func (a *ActionCurrentInputs) Apply(data *Funcdata) int {
+	if data != nil && ApplyActiveParamModel(data) {
 		a.count++
 	}
 	return 0

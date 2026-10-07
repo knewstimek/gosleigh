@@ -1504,6 +1504,12 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			if len(reads) == 0 && len(writes) == 0 && len(inputs) == 0 {
 				continue
 			}
+			// Nothing reads the range: an internal (unique) range, or one an
+			// earlier pass already covered, needs no MULTIEQUALs.
+			// C++ parity: heritage.cc Heritage::placeMultiequals (2619-2625).
+			if len(reads) == 0 && (task.Addr.Space.IsUnique() || task.OldAddresses()) {
+				continue
+			}
 			subSize := refinedSubTaskSize(reads, writes, inputs, task.Addr, task.Size)
 			if subSize < task.Size {
 				for off := int32(0); off < task.Size; off += subSize {

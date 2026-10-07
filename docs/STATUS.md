@@ -24,7 +24,6 @@ x64_auto `switch_dense`(전체 이미지의 `__ImageBase`). 같은 바이트의 
 |---|---|---|
 | 잠긴 프로토타입의 function_parameter 심볼 | scopelocal*.go | 호스트 스택 인자가 있으면 ScopeLocal을 늦게 만들지 않음 |
 | heritage 쓰기 정규화 순서 / Go 고유 subtask 분할 | heritage.go `refinedSubTaskSize` | guard 전 쓰기 정규화 시 seed1/2 퇴행 |
-| ActionActiveParam 위치 + 입력 프로토타입 조기 잠금 | action.go, paramactive.go | C++ 위치로 옮기면 seed2 [180] 퇴행 |
 | guardReturns를 heritage 밖에서 1회만 | coreaction.go ActionReturnRecovery | 출력 trial 수가 C++과 다름(actcmp로 확인) |
 | TypePartialUnion, Go typedef의 원형 링크 | unionresolve.go, typefactory.go | 부분 유니온, isOpIdentical |
 | 지역 스코프 자체 이름의 isNameUsed | printlanguage.go | `::` 한정은 호스트 질의만 반영 |
