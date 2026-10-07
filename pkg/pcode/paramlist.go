@@ -393,6 +393,63 @@ type ParamListStandard struct {
 	resourceStart []int32
 }
 
+// metatypeTypeClass is the storage class a data-type of metatype m draws on.
+// C++ parity: metatype2typeclass.
+func metatypeTypeClass(m metatype) typeClass {
+	switch m {
+	case TYPE_FLOAT:
+		return typeclassFloat
+	case TYPE_PTR:
+		return typeclassPtr
+	}
+	return typeclassGeneral
+}
+
+// assignAddressFallback gives tp the first entry of the resource class (or
+// of the general class) with a slot left in its group, consuming the slot
+// (or every group of an exclusion entry). status holds the next slot per
+// group, -1 once the group is used up.
+// C++ parity: ParamListStandard::assignAddressFallback.
+func (pl *ParamListStandard) assignAddressFallback(resource typeClass, tp Datatype, status []int32) (address.Address, bool) {
+	for _, pe := range pl.entry {
+		grp := pe.getGroup()
+		if status[grp] < 0 {
+			continue
+		}
+		if resource != pe.tclass && pe.tclass != typeclassGeneral {
+			continue // Wrong type
+		}
+		addr := pe.getAddrBySlot(&status[grp], tp.AlignSize())
+		if addr.Space == nil {
+			continue // tp does not fit
+		}
+		if pe.isExclusion() {
+			for _, g := range pe.getAllGroups() {
+				status[g] = -1 // An exclusion entry takes up its groups
+			}
+		}
+		return addr, true
+	}
+	return address.Address{}, false
+}
+
+// assignMap assigns storage to each input type in order.
+// C++ parity: ParamListStandard::assignMap (no hidden return parameter).
+// Known mismatch: model rules (<rule>) are not ported, so only the
+// fallback assignment runs.
+func (pl *ParamListStandard) assignMap(intypes []Datatype) ([]address.Address, bool) {
+	status := make([]int32, pl.numgroup)
+	res := make([]address.Address, 0, len(intypes))
+	for _, dt := range intypes {
+		addr, ok := pl.assignAddressFallback(metatypeTypeClass(dt.Metatype()), dt, status)
+		if !ok {
+			return nil, false // ParamUnassignedError
+		}
+		res = append(res, addr)
+	}
+	return res, true
+}
+
 // ParamEntrySpec is the resolved description of one <pentry> that the caller
 // (bridge, which owns the register/stack address spaces) hands to
 // NewParamListStandard. It decouples cspec/register resolution (sla) from the

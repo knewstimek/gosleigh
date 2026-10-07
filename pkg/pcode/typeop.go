@@ -146,7 +146,29 @@ func (t *typeOpCallind) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) D
 		}
 		return tf.GetPointer(op.Input(0).Size(), code, ws)
 	}
+	// A locked parameter types its argument. C++ parity:
+	// TypeOpCallind::getInputLocal (no size check, unlike TypeOpCall).
+	if fc := op.callSpec; slot > 0 && fc != nil && fc.IsInputLocked() {
+		if p, ok := fc.LockedParam(slot - 1); ok && p.Type != nil && p.Type.Metatype() != TYPE_VOID {
+			return p.Type
+		}
+	}
 	return t.typeOpBase.InputTypeLocal(op, slot, tf)
+}
+
+// OutputTypeLocal is the locked return type of the call, if any.
+// C++ parity: TypeOpCallind::getOutputLocal.
+func (t *typeOpCallind) OutputTypeLocal(op *PcodeOp, tf *TypeFactory) Datatype {
+	if fc := op.callSpec; fc != nil && fc.IsOutputLocked() && fc.lockedOut != nil &&
+		fc.lockedOut.Type != nil && fc.lockedOut.Type.Metatype() != TYPE_VOID {
+		return fc.lockedOut.Type
+	}
+	return t.typeOpBase.OutputTypeLocal(op, tf)
+}
+
+// GetOutputToken must dispatch through typeOpCallind's OutputTypeLocal.
+func (t *typeOpCallind) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	return t.OutputTypeLocal(op, cs.tlst)
 }
 
 // typeOpReturn types the returned value by the function's own output type

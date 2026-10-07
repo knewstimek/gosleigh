@@ -84,6 +84,8 @@ type HostFunction struct {
 	InputLocked, OutputLocked bool
 	// ModelLock: the prototype's model is fixed (modellock).
 	ModelLock bool
+	// Dotdotdot: the prototype takes variable arguments.
+	Dotdotdot bool
 	Params    []HostParam
 	Output    *HostParam
 }
@@ -112,6 +114,15 @@ func newFuncCallSpecs(fd *Funcdata, op *PcodeOp) *FuncCallSpecs {
 		stackPlaceholderSlot: -1,
 	}
 	op.callSpec = fc
+	defer func() {
+		// A prototype forced on this call site by an earlier pass applies from
+		// the start. C++ parity: Override::applyPrototype (FlowInfo::setupCallSpecs).
+		if fd != nil {
+			if hp := fd.protoOverrides[op.Addr().Offset]; hp != nil {
+				fc.hostProto = hp
+			}
+		}
+	}()
 	if op.Code() == CPUI_CALL && op.NumInput() > 0 && op.Input(0) != nil {
 		if in0 := op.Input(0); !in0.IsConstant() {
 			fc.entryAddress = in0.Addr()

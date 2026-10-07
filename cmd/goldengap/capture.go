@@ -416,6 +416,11 @@ func typeDesc(n *xnode, types map[string]*xnode, depth int) *pcode.HostTypeDesc 
 	if len(n.Kids) > 0 && (d.Meta == "ptr" || d.Meta == "array") {
 		d.Elem = typeDesc(&n.Kids[0], types, depth+1)
 	}
+	if d.Meta == "code" {
+		if proto := n.child("prototype"); proto != nil {
+			d.Proto = codeTypeProto(proto, types, depth+1)
+		}
+	}
 	if d.Meta == "struct" || d.Meta == "union" {
 		// One description per host structure, shared before its fields are
 		// read so a field pointing back to it closes the cycle.
@@ -436,6 +441,53 @@ func typeDesc(n *xnode, types map[string]*xnode, depth int) *pcode.HostTypeDesc 
 		}
 	}
 	return d
+}
+
+// codeTypeProto reads the <prototype> of a function data-type: typed
+// parameters without storage and the return type.
+// C++ parity: TypeCode::decodeStub/decodePrototype -> FuncProto::decode.
+func codeTypeProto(proto *xnode, types map[string]*xnode, depth int) *pcode.HostCodeProto {
+	cp := &pcode.HostCodeProto{Model: proto.attr("model"), ModelLock: proto.attr("modellock") == "true",
+		ExtraPop: pcode.ExtrapopUnknown, NoReturn: proto.attr("noreturn") == "true",
+		Dotdotdot: proto.attr("dotdotdot") == "true"}
+	if ep := proto.attr("extrapop"); ep != "" && ep != "unknown" {
+		cp.ExtraPop = int32(parseUint(ep))
+	}
+	firstType := func(n *xnode) *pcode.HostTypeDesc {
+		for i := range n.Kids {
+			if n.Kids[i].XMLName.Local == "addr" {
+				continue
+			}
+			if t := typeDesc(&n.Kids[i], types, depth+1); t != nil {
+				return t
+			}
+		}
+		return nil
+	}
+	if ret := proto.child("returnsym"); ret != nil && ret.attr("typelock") == "true" {
+		cp.OutLocked = true
+		if t := firstType(ret); t != nil && t.Meta != "void" {
+			cp.Ret = t
+		}
+	}
+	cp.InputLocked = proto.attr("voidlock") == "true"
+	if list := proto.child("internallist"); list != nil {
+		for i := range list.Kids {
+			pn := &list.Kids[i]
+			if pn.XMLName.Local != "param" {
+				continue
+			}
+			t := firstType(pn)
+			if t == nil {
+				return nil
+			}
+			if i == 0 && pn.attr("typelock") == "true" {
+				cp.InputLocked = true
+			}
+			cp.Params = append(cp.Params, t)
+		}
+	}
+	return cp
 }
 
 // captureDir is the -host-captures directory: <entry as %08x>.xml per golden.

@@ -78,6 +78,24 @@ type HostTypeDesc struct {
 	// EnumValues are an enumeration's names by value (the first name of a
 	// value wins). C++ parity: TypeEnum::decode.
 	EnumValues map[uint64]string
+	// Proto is the prototype a function (code) type carries.
+	// C++ parity: TypeCode::proto.
+	Proto *HostCodeProto
+}
+
+// HostCodeProto is the prototype of a function data-type as the host
+// encodes it: parameter types only, storage comes from the model.
+// C++ parity: FuncProto::decode of a <prototype> without addresses.
+type HostCodeProto struct {
+	Model       string
+	ModelLock   bool
+	ExtraPop    int32
+	NoReturn    bool
+	Dotdotdot   bool
+	InputLocked bool
+	OutLocked   bool
+	Ret         *HostTypeDesc // nil for void
+	Params      []*HostTypeDesc
 }
 
 // HostFieldDesc is one member of a host structure.
@@ -199,6 +217,9 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 	}
 	if m, ok := hostMetatypes[d.Meta]; ok {
 		bt := tf.GetBase(d.Size, m, d.Name)
+		if d.Proto != nil && d.Name != "" && tf.codeProto(bt) == nil {
+			tf.setCodeProto(bt, resolveCodeProto(d.Proto))
+		}
 		// Base types intern by name, so an internally made type sharing the
 		// name also prints it -- which is the core name anyway.
 		if b, ok := bt.(*Base); ok && d.Name != "" && b.Name() == d.Name {
@@ -207,4 +228,28 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 		return bt
 	}
 	return tf.GetBase(d.Size, TYPE_UNKNOWN, "")
+}
+
+// resolveCodeProto turns a host function-type prototype into a HostFunction
+// whose parameters carry types but no storage yet.
+func resolveCodeProto(cp *HostCodeProto) *HostFunction {
+	hf := &HostFunction{Model: cp.Model, ModelLock: cp.ModelLock, ExtraPop: cp.ExtraPop,
+		NoReturn: cp.NoReturn, InputLocked: cp.InputLocked, OutputLocked: cp.OutLocked, Dotdotdot: cp.Dotdotdot}
+	for _, pd := range cp.Params {
+		t := ResolveHostType(pd)
+		if t == nil {
+			return nil
+		}
+		hf.Params = append(hf.Params, HostParam{Type: t, Size: t.Size()})
+	}
+	if cp.OutLocked {
+		out := HostParam{Type: sharedTypeFactory.GetVoid()}
+		if cp.Ret != nil {
+			if t := ResolveHostType(cp.Ret); t != nil {
+				out = HostParam{Type: t, Size: t.Size()}
+			}
+		}
+		hf.Output = &out
+	}
+	return hf
 }

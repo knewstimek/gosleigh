@@ -42,6 +42,72 @@ func (fc *FuncCallSpecs) deindirectHost(data *Funcdata, hp HostFunction, entry a
 	data.rebuildRequested = true // Funcdata::setRestartPending
 }
 
+// forceSet applies the prototype of a function-pointer data-type to this
+// call site: immediately when the data-flow still allows it, otherwise by a
+// restart. The prototype is recorded as an override either way, and the call
+// site's input is locked so it is applied only once.
+// C++ parity: fspec.cc FuncCallSpecs::forceSet.
+func (fc *FuncCallSpecs) forceSet(data *Funcdata, proto *HostFunction) {
+	hp, ok := data.assignCodeProtoStorage(proto)
+	if !ok {
+		return // C++ fails to decode such a prototype (ParamUnassignedError)
+	}
+	if data.protoOverrides == nil {
+		data.protoOverrides = make(map[uint64]*HostFunction)
+	}
+	data.protoOverrides[fc.op.Addr().Offset] = hp
+	if newinput, newoutput, ok := fc.lateRestriction(data, hp); ok {
+		fc.commitNewInputs(data, newinput)
+		fc.commitNewOutputs(data, newoutput)
+	} else {
+		data.rebuildRequested = true // Too late to restrict: restart
+	}
+	fc.SetInputLocked(true)
+}
+
+// assignCodeProtoStorage gives the parameters of a function data-type's
+// prototype their storage under its model.
+// C++ parity: FuncProto::decode -> ProtoModel::assignParameterStorage.
+func (fd *Funcdata) assignCodeProtoStorage(proto *HostFunction) (*HostFunction, bool) {
+	model := fd.ModelByName(proto.Model)
+	if model == nil {
+		model = fd.DefaultModel()
+	}
+	if model == nil || model.InputParams == nil {
+		return nil, false
+	}
+	hp := *proto
+	if hp.ExtraPop == ExtrapopUnknown {
+		hp.ExtraPop = model.GetExtraPop()
+	}
+	types := make([]Datatype, len(proto.Params))
+	for i, p := range proto.Params {
+		types[i] = p.Type
+	}
+	addrs, ok := model.InputParams.assignMap(types)
+	if !ok {
+		return nil, false
+	}
+	hp.Params = make([]HostParam, len(proto.Params))
+	for i, p := range proto.Params {
+		p.Space, p.Offset = addrs[i].Space.Name, addrs[i].Offset
+		hp.Params[i] = p
+	}
+	if out := proto.Output; out != nil && out.Type != nil && out.Type.Metatype() != TYPE_VOID {
+		if model.OutputParams == nil {
+			return nil, false
+		}
+		oaddr, ok := model.OutputParams.assignMap([]Datatype{out.Type})
+		if !ok {
+			return nil, false
+		}
+		o := *out
+		o.Space, o.Offset = oaddr[0].Space.Name, oaddr[0].Offset
+		hp.Output = &o
+	}
+	return &hp, true
+}
+
 // lateRestriction checks whether this call site, still mid-recovery, can take
 // the given locked prototype without losing data-flow, and if so converts to
 // it. It passes back the CALL's new inputs (nil entries for stack parameters
@@ -63,6 +129,9 @@ func (fc *FuncCallSpecs) lateRestriction(data *Funcdata, hp *HostFunction) (newi
 		return nil, nil, true
 	}
 	if !fc.isCompatibleHost(hp, model) {
+		return nil, nil, false
+	}
+	if hp.Dotdotdot && !fc.IsInputActive() {
 		return nil, nil, false
 	}
 	var params []ProtoSlot

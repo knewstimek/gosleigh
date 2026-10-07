@@ -18,6 +18,8 @@ type TypeFactory struct {
 	// idempotent, so a canonical instance comes straight back instead of
 	// rebuilding the key of its whole (possibly huge) structure graph.
 	canon map[Datatype]struct{}
+	// codeProtos are the prototypes of named function types.
+	codeProtos map[Datatype]*HostFunction
 }
 
 func NewTypeFactory() *TypeFactory {
@@ -307,6 +309,25 @@ func (f *TypeFactory) GetPartialStruct(container Datatype, offset int64, size in
 	v := &PartialStruct{datatypeBase: base, container: container, offset: offset, stripped: stripped}
 	f.intern[key] = v
 	return v
+}
+
+// setCodeProto attaches the prototype of a named function type.
+// C++ parity: TypeCode::setPrototype.
+func (f *TypeFactory) setCodeProto(code Datatype, proto *HostFunction) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if f.codeProtos == nil {
+		f.codeProtos = make(map[Datatype]*HostFunction)
+	}
+	f.codeProtos[code] = proto
+}
+
+// codeProto is the prototype a function type carries, or nil.
+// C++ parity: TypeCode::getPrototype.
+func (f *TypeFactory) codeProto(code Datatype) *HostFunction {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.codeProtos[code]
 }
 
 // GetPartialUnion returns the piece of size bytes at offset of container.

@@ -2113,13 +2113,15 @@ func (a *ActionDeindirect) Apply(data *Funcdata) int {
 			}
 		}
 		if data.HasTypeRecoveryStarted() {
-			// Typed function-pointer branch: if input[0] has a TypeCode
-			// attached and its FuncProto is not yet locked, forceSet it.
-			// C++ parity: coreaction.cc ActionDeindirect::apply lines 1259-1277.
-			// TODO known mismatch: TypePointer / TypeCode / FuncProto extract
-			// from Varnode::getTypeReadFacing is not yet ported; the check
-			// below is a placeholder conservatively leaving the call alone.
-			_ = fc
+			// A function pointer whose type carries a prototype: apply it once
+			// (an input lock marks it as applied).
+			// C++ parity: coreaction.cc ActionDeindirect::apply (forceSet).
+			if p, ok := op.Input(0).TypeReadFacing(op).(*Pointer); ok && p.Pointee() != nil && p.Pointee().Metatype() == TYPE_CODE {
+				if hp := sharedTypeFactory.codeProto(p.Pointee()); hp != nil && !fc.IsInputLocked() {
+					fc.forceSet(data, hp)
+					a.count++
+				}
+			}
 		}
 	}
 	return 0

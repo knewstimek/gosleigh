@@ -118,6 +118,9 @@ type Funcdata struct {
 	// target during this run; rebuildRequested asks the driver to restart.
 	// C++ parity: Override indirect overrides + Funcdata restartPending.
 	indirectOverrides map[uint64]address.Address
+	// protoOverrides are the prototypes forced onto call sites (instruction
+	// offset). C++ parity: Override::protoover.
+	protoOverrides map[uint64]*HostFunction
 	rebuildRequested  bool
 	// trackedSet are the register values known at entry (ActionConstbase).
 	trackedSet []constbaseTrackedContext
@@ -2283,6 +2286,12 @@ func (fd *Funcdata) SetIndirectOverrides(ov map[uint64]address.Address) {
 
 // IndirectOverrides returns the indirect-call overrides recorded so far.
 func (fd *Funcdata) IndirectOverrides() map[uint64]address.Address { return fd.indirectOverrides }
+
+// SetProtoOverrides installs the call-site prototypes a restart keeps.
+func (fd *Funcdata) SetProtoOverrides(po map[uint64]*HostFunction) { fd.protoOverrides = po }
+
+// ProtoOverrides returns the call-site prototypes forced so far.
+func (fd *Funcdata) ProtoOverrides() map[uint64]*HostFunction { return fd.protoOverrides }
 
 // RebuildRequested reports whether a new indirect override needs a restart.
 func (fd *Funcdata) RebuildRequested() bool { return fd.rebuildRequested }

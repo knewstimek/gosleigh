@@ -15,6 +15,9 @@ type BuildConfig struct {
 	// address offset) into a CALL to the given target.
 	// C++ parity: Override::insertIndirectOverride (applied by FlowInfo).
 	IndirectOverrides map[uint64]address.Address
+	// ProtoOverrides are the prototypes forced onto call sites (keyed by
+	// instruction offset). C++ parity: Override::insertProtoOverride.
+	ProtoOverrides map[uint64]*pcode.HostFunction
 
 	Name            string
 	Entry           address.Address
@@ -163,7 +166,7 @@ type Result struct {
 	// CspecData is set when BuildConfig.CspecPath is non-empty.
 	CspecData *pcode.CspecData
 	// rebuild re-runs Build with indirect-call overrides (a decompiler restart).
-	rebuild func(map[uint64]address.Address) (*Result, error)
+	rebuild func(map[uint64]address.Address, map[uint64]*pcode.HostFunction) (*Result, error)
 }
 
 type instructionRecord struct {
@@ -292,6 +295,13 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 			ov[k] = v
 		}
 		fd.SetIndirectOverrides(ov) // a restart keeps earlier overrides
+	}
+	if len(cfg.ProtoOverrides) != 0 {
+		po := make(map[uint64]*pcode.HostFunction, len(cfg.ProtoOverrides))
+		for k, v := range cfg.ProtoOverrides {
+			po[k] = v
+		}
+		fd.SetProtoOverrides(po)
 	}
 	if err := attachEnvironment(fd, cfg); err != nil {
 		return nil, err
@@ -525,9 +535,10 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		Instructions:   translations,
 		HeritageSpaces: summary.heritageSpaces,
 		Warnings:       warnings,
-		rebuild: func(ov map[uint64]address.Address) (*Result, error) {
+		rebuild: func(ov map[uint64]address.Address, po map[uint64]*pcode.HostFunction) (*Result, error) {
 			next := cfg
 			next.IndirectOverrides = ov
+			next.ProtoOverrides = po
 			return Build(engine, next)
 		},
 	}
