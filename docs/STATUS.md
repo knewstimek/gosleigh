@@ -9,6 +9,8 @@
 | realexe private-sample seed1/2/3 (x86-32) | 200/200/200 | 전부 HEAD 코어 골든(12.0.4판은 golden_12.0.4) |
 | realexe private-sample seed1 (x64 UE4) | 200/200 | HEAD 코어 골든 |
 | realexe private-sample seed2 | 200/200 | |
+| realexe private-sample seed4 (새 표본) | 198/200 | [110] 변수 번호 순서, [195] ST0 반환 복구 |
+| realexe private-sample seed3 (새 표본) | 199/200 | [194] 스택 입력 변수 타입(int vs longlong) |
 | 게이트 `tools/gates.py` | 전부 유지 | tree 10/10, corpus2 10/13, x64_auto 108/109 |
 | x64 코퍼스 C++ 코어 대조 `rawcmp.py` | corpus 8/8, corpus2 13/13, x64_auto 109/109 | 같은 바이트를 C++ 하네스로 |
 
