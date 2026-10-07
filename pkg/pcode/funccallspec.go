@@ -108,6 +108,16 @@ type HostParam struct {
 	// NameLock and Isolate are the symbol's namelock and merge="false"
 	// attributes. C++ parity: Symbol::decode (ATTRIB_NAMELOCK, ATTRIB_MERGE).
 	NameLock, Isolate bool
+	// JoinPieces is the storage of a "join" Space, most significant first.
+	// C++ parity: JoinSpace::decodeAttributes (piece1..pieceN).
+	JoinPieces []HostStorage
+}
+
+// HostStorage is one piece of join storage.
+type HostStorage struct {
+	Space  string
+	Offset uint64
+	Size   int32
 }
 
 // C++ parity: FuncCallSpecs::FuncCallSpecs + FlowInfo::queryCall/setFuncdata:

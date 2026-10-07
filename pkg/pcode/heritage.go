@@ -1340,6 +1340,7 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 	if h.maxDepth == -1 {
 		h.BuildADT(graph)
 	}
+	h.processJoins() // C++ parity: Heritage::heritage (processJoins before the spaces)
 
 	// Ranges of every space are placed first, then renamed in one walk.
 	// C++ parity: Heritage::heritage (placeMultiequals(); rename()).

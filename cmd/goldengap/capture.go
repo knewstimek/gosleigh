@@ -308,6 +308,18 @@ func parseCaptureProto(fn *xnode, types map[string]*xnode) captureProto {
 			// A single-piece join is that piece, truncated to the logical
 			// size (an 8-byte value in the 10-byte ST0).
 			// C++ parity: AddrSpaceManager::findAddJoin (one piece).
+			if out.Space == "join" && at.attr("piece2") != "" {
+				// A multi-piece join: the pieces, most significant first.
+				// C++ parity: JoinSpace::decodeAttributes.
+				for k := 1; ; k++ {
+					parts := strings.Split(at.attr(fmt.Sprintf("piece%d", k)), ":")
+					if len(parts) != 3 {
+						break
+					}
+					out.JoinPieces = append(out.JoinPieces, pcode.HostStorage{Space: parts[0], Offset: parseUint(parts[1]), Size: int32(parseUint(parts[2]))})
+					out.Size += int32(parseUint(parts[2]))
+				}
+			}
 			if out.Space == "join" && at.attr("piece2") == "" {
 				if parts := strings.Split(at.attr("piece1"), ":"); len(parts) == 3 {
 					out.Space, out.Offset, out.Size = parts[0], parseUint(parts[1]), int32(parseUint(parts[2]))

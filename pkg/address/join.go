@@ -82,6 +82,90 @@ func FindAddJoin(joinSpace *Space, pieces []VarnodeData, logicalsize int32) *Joi
 	return rec
 }
 
+// findJoinInternal returns the record whose unified range contains offset.
+// C++ parity: AddrSpaceManager::findJoinInternal.
+func findJoinInternal(offset uint64) *JoinRecord {
+	joins.mu.Lock()
+	defer joins.mu.Unlock()
+	for _, rec := range joins.list {
+		if rec.Unified.Offset <= offset && offset < rec.Unified.Offset+uint64(rec.Unified.Size) {
+			return rec
+		}
+	}
+	return nil
+}
+
+// equivalentAddress maps a join-space offset to the address within the
+// piece that holds it, and that piece's index (-1 when out of range).
+// C++ parity: JoinRecord::getEquivalentAddress.
+func (j *JoinRecord) equivalentAddress(offset uint64) (Address, int) {
+	if offset < j.Unified.Offset {
+		return Address{}, -1 // offset comes before this range
+	}
+	smallOff := int32(offset - j.Unified.Offset)
+	pos := 0
+	if j.Pieces[0].Space.BigEndian {
+		for ; pos < len(j.Pieces); pos++ {
+			if smallOff < j.Pieces[pos].Size {
+				break
+			}
+			smallOff -= j.Pieces[pos].Size
+		}
+		if pos == len(j.Pieces) {
+			return Address{}, -1 // offset comes after this range
+		}
+	} else {
+		for pos = len(j.Pieces) - 1; pos >= 0; pos-- {
+			if smallOff < j.Pieces[pos].Size {
+				break
+			}
+			smallOff -= j.Pieces[pos].Size
+		}
+		if pos < 0 {
+			return Address{}, -1
+		}
+	}
+	return Address{Space: j.Pieces[pos].Space, Offset: j.Pieces[pos].Offset + uint64(smallOff)}, pos
+}
+
+// renormalizeJoin rewrites a join address of the given size to the real
+// storage it covers: a single piece's address, or the join record of the
+// covered pieces. C++ parity: AddrSpaceManager::renormalizeJoinAddress.
+func renormalizeJoin(addr *Address, size int32) {
+	rec := findJoinInternal(addr.Offset)
+	if rec == nil {
+		return // C++ throws: join address not covered by a JoinRecord
+	}
+	if addr.Offset == rec.Unified.Offset && size == rec.Unified.Size {
+		return // JoinRecord matches perfectly, no change necessary
+	}
+	addr1, pos1 := rec.equivalentAddress(addr.Offset)
+	addr2, pos2 := rec.equivalentAddress(addr.Offset + uint64(size-1))
+	if pos1 < 0 || pos2 < 0 {
+		return // C++ throws: join address range not covered
+	}
+	if pos1 == pos2 {
+		*addr = addr1
+		return
+	}
+	sizeTrunc1 := int32(addr1.Offset - rec.Pieces[pos1].Offset)
+	sizeTrunc2 := rec.Pieces[pos2].Size - int32(addr2.Offset-rec.Pieces[pos2].Offset) - 1
+	var newPieces []VarnodeData
+	if pos2 < pos1 { // Little endian
+		newPieces = append(newPieces, rec.Pieces[pos2:pos1+1]...)
+		newPieces[len(newPieces)-1].Offset = addr1.Offset
+		newPieces[len(newPieces)-1].Size -= sizeTrunc1
+		newPieces[0].Size -= sizeTrunc2
+	} else {
+		newPieces = append(newPieces, rec.Pieces[pos1:pos2+1]...)
+		newPieces[0].Offset = addr1.Offset
+		newPieces[0].Size -= sizeTrunc1
+		newPieces[len(newPieces)-1].Size -= sizeTrunc2
+	}
+	nrec := FindAddJoin(rec.Unified.Space, newPieces, 0)
+	*addr = Address{Space: nrec.Unified.Space, Offset: nrec.Unified.Offset}
+}
+
 // FindJoin returns the record whose unified range starts at offset, or nil.
 // C++ parity: AddrSpaceManager::findJoin.
 func FindJoin(offset uint64) *JoinRecord {

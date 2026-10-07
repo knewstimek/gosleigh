@@ -1265,24 +1265,12 @@ func (s *printCState) mergeScopeOnlyDecls(decls []localDecl, declared map[string
 		return decls
 	}
 	space := sl.SpaceID()
-	covered := s.stackOffsetsWithVarnodes(space)
 	for _, e := range sl.Entries() {
 		if e == nil || e.IsDynamic() || e.Offset() != 0 {
 			continue // Don't do a partial entry
 		}
 		sym := e.Symbol()
 		if sym == nil || sym.Name() == "" {
-			continue
-		}
-		// Only Symbols that own no Varnode are supplied here. Every Symbol that
-		// does have one is already reached through the Varnode-driven loop above,
-		// which carries the naming/suppression rules (prologue slots, merged SSA
-		// versions, return carriers) that decide whether it is declared at all.
-		// Re-declaring those from the scope would resurrect slots the Varnode loop
-		// deliberately dropped -- e.g. a stack spill whose value was later merged
-		// into a register HighVariable, where Ghidra's own restructure pass drops
-		// the Symbol along with the Varnode but Gosleigh's ScopeLocal keeps it.
-		if s.entryCoversVarnode(e, covered) {
 			continue
 		}
 		name := sym.Name()
@@ -1316,47 +1304,6 @@ func (s *printCState) mergeScopeOnlyDecls(decls []localDecl, declared map[string
 		decls[pos] = rec
 	}
 	return decls
-}
-
-// stackOffsetsWithVarnodes collects the start offsets of every live Varnode in
-// the scope's stack space. Used to tell a Symbol that owns storage of its own
-// from one that ScopeLocal::restructure synthesized out of an open RangeHint.
-func (s *printCState) stackOffsetsWithVarnodes(space *address.Space) map[uint64]struct{} {
-	covered := map[uint64]struct{}{}
-	if s.fd == nil || space == nil {
-		return covered
-	}
-	bank := s.fd.GetVarnodeBank()
-	if bank == nil {
-		return covered
-	}
-	for _, vn := range bank.AllVarnodes() {
-		if vn == nil || vn.IsFree() || vn.Space() != space {
-			continue
-		}
-		covered[vn.Addr().Offset] = struct{}{}
-	}
-	return covered
-}
-
-// entryCoversVarnode reports whether any live stack Varnode starts inside the
-// SymbolEntry's address range.
-func (s *printCState) entryCoversVarnode(e *SymbolEntry, covered map[uint64]struct{}) bool {
-	if len(covered) == 0 {
-		return false
-	}
-	size := int64(e.Size())
-	if size < 1 {
-		size = 1
-	}
-	start := e.Addr().Offset
-	end := start + uint64(size)
-	for off := range covered {
-		if off >= start && off < end {
-			return true
-		}
-	}
-	return false
 }
 
 // stackSymbolType returns the declaration data-type for a stack Varnode taken

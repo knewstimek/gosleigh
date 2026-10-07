@@ -279,6 +279,7 @@ func (r *RulePieceStructure) apply(op *PcodeOp, data *Funcdata) int {
 		vn := node.varnode()
 		addr := baseAddr
 		addr.Offset += uint64(node.typeOffset)
+		addr.Renormalize(vn.Size()) // Allow for possible join address
 		if vn.Addr() == addr {
 			if !node.leaf || !separateSymbol(outvn, vn) {
 				// Already at its storage and part of the root's symbol.

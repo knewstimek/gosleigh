@@ -14,6 +14,26 @@ type ProtoSlot struct {
 }
 
 // spaceByName finds one of the function's address spaces by name.
+// hostJoinAddress returns the join address of the given pieces (most
+// significant first). C++ parity: AddrSpaceManager::findAddJoin.
+func (fd *Funcdata) hostJoinAddress(pieces []HostStorage) (address.Address, int32, bool) {
+	if fd.joinSpace == nil {
+		return address.Address{}, 0, false
+	}
+	vds := make([]address.VarnodeData, 0, len(pieces))
+	var size int32
+	for _, p := range pieces {
+		sp := fd.spaceByName(p.Space)
+		if sp == nil {
+			return address.Address{}, 0, false
+		}
+		vds = append(vds, address.VarnodeData{Space: sp, Offset: p.Offset, Size: p.Size})
+		size += p.Size
+	}
+	rec := address.FindAddJoin(fd.joinSpace, vds, 0)
+	return rec.Unified.Addr(), size, true
+}
+
 func (fd *Funcdata) spaceByName(name string) *address.Space {
 	if name == "" {
 		return nil
@@ -237,6 +257,13 @@ func (fd *Funcdata) ApplyHostSelfPrototype(model *ProtoModel) {
 		fp.output = out
 		fp.outputHasAddr = false
 		fp.SetOutputLock(true)
+	} else if hf.OutputLocked && hf.Output != nil && hf.Output.Type != nil && len(hf.Output.JoinPieces) > 1 {
+		// Join storage (EDX:EAX) resolves to its join-space record.
+		// C++ parity: AddrSpaceManager::findAddJoin (Address::decode of a join).
+		if addr, size, ok := fd.hostJoinAddress(hf.Output.JoinPieces); ok {
+			fp.SetLockedReturn(addr, size, hf.Output.Type)
+			fp.SetOutputLock(true)
+		}
 	} else if hf.OutputLocked && hf.Output != nil && hf.Output.Type != nil {
 		if sp := fd.spaceByName(hf.Output.Space); sp != nil {
 			fp.SetLockedReturn(address.Address{Space: sp, Offset: hf.Output.Offset}, hf.Output.Size, hf.Output.Type)
