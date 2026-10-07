@@ -1342,34 +1342,6 @@ func (tl *TaskList) ReplaceAt(idx int, ranges []MemRange) {
 }
 
 // ---------------------------------------------------------------------------
-// refinedSubTaskSize computes the sub-task granularity for a merged address range.
-// Returns the max varnode size that starts exactly at addr.Offset; if that max is
-// smaller than size, the caller should split the task into sub-tasks of that size.
-// If all varnodes at addr.Offset already fill the full range (max >= size), returns
-// size unchanged (no split needed).
-// C++ parity: heritage.cc Heritage::refinement -- condition max_vn < task.size.
-func refinedSubTaskSize(reads, writes, inputs []*Varnode, addr address.Address, size int32) int32 {
-	maxSz := int32(0)
-	for _, vn := range reads {
-		if vn.Offset() == addr.Offset && vn.Size() > maxSz {
-			maxSz = vn.Size()
-		}
-	}
-	for _, vn := range writes {
-		if vn.Offset() == addr.Offset && vn.Size() > maxSz {
-			maxSz = vn.Size()
-		}
-	}
-	for _, vn := range inputs {
-		if vn.Offset() == addr.Offset && vn.Size() > maxSz {
-			maxSz = vn.Size()
-		}
-	}
-	if maxSz == 0 || maxSz >= size {
-		return size
-	}
-	return maxSz
-}
 
 // ---------------------------------------------------------------------------
 // Heritage -- main entry point for SSA construction.
@@ -1462,15 +1434,8 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			}
 		}
 
-		// Place multiequals and rename for each range.
-		// Simplified Heritage::refinement(): when the max varnode size at the task
-		// start offset is smaller than the task size (caused by adjacent-register
-		// merging in TaskList.Add), split the task into sub-tasks so each register
-		// gets its own correctly-sized phi.  Without splitting, renameRecurse would
-		// rename a 4-byte EAX read to a 12-byte phi -- wrong size for downstream ops
-		// (RuleSignForm, IDIV, etc.) and causes incorrect copy propagation.
-		// C++ parity: heritage.cc Heritage::refinement (simplified -- no PIECE/SUBPIECE
-		// physical splits; x86 register varnodes don't straddle sub-task boundaries).
+		// Place multiequals for each range (refined first when no write fills
+		// it), then rename. C++ parity: Heritage::placeMultiequals.
 		for i := 0; i < h.disjoint.Len(); i++ {
 			task := h.disjoint.Get(i)
 			// A range wider than 4 bytes whose largest write does not fill it is
@@ -1538,30 +1503,11 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			if !hasFreeRead(reads) && (task.Addr.Space.IsUnique() || task.OldAddresses()) {
 				continue
 			}
-			subSize := refinedSubTaskSize(reads, writes, inputs, task.Addr, task.Size)
-			if subSize < task.Size {
-				for off := int32(0); off < task.Size; off += subSize {
-					subAddr := task.Addr
-					subAddr.Offset += uint64(off)
-					curSize := subSize
-					if off+curSize > task.Size {
-						curSize = task.Size - off
-					}
-					subR, subW, subI := h.Collect(subAddr, curSize)
-					if len(subR)+len(subW)+len(subI) == 0 {
-						continue
-					}
-					subR, subW = h.normalizeRange(subAddr, curSize, subR, subW)
-					h.placeMultiequals(graph, subAddr, curSize, subR, subW, subI)
-					ranges = append(ranges, renameRange{subAddr, curSize})
-				}
-			} else {
-				// Bring sub-register reads/writes (EAX inside RAX) up to the range size
-				// so renaming does not collide them on their shared start offset.
-				reads, writes = h.normalizeRange(task.Addr, task.Size, reads, writes)
-				h.placeMultiequals(graph, task.Addr, task.Size, reads, writes, inputs)
-				ranges = append(ranges, renameRange{task.Addr, task.Size})
-			}
+			// Bring sub-register reads/writes (EAX inside RAX) up to the range size
+			// so renaming does not collide them on their shared start offset.
+			reads, writes = h.normalizeRange(task.Addr, task.Size, reads, writes)
+			h.placeMultiequals(graph, task.Addr, task.Size, reads, writes, inputs)
+			ranges = append(ranges, renameRange{task.Addr, task.Size})
 		}
 	}
 	h.renameRanges(graph, ranges)
