@@ -249,6 +249,24 @@ func namedGroupRoot(hv *HighVariable, sl *ScopeLocal) *variablePiece {
 			return nil
 		}
 	}
+	// The whole variable lends its Symbol only when that Symbol holds all
+	// of it; a bigger write over smaller Symbols is a mismatch (_local_8)
+	// and each piece keeps the Symbol at its own address (local_8). An input
+	// piece (a parameter) shares the Symbol the mismatch prints through.
+	for _, vn := range hv.Instances() {
+		if vn.IsInput() {
+			return root
+		}
+	}
+	for _, rvn := range root.high.Instances() {
+		if rvn.Space() != sl.SpaceID() {
+			continue
+		}
+		if sl.QueryContainer(rvn.Addr(), rvn.Size(), address.Address{}) == nil {
+			return nil
+		}
+		break
+	}
 	return root
 }
 
