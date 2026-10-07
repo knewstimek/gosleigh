@@ -1200,7 +1200,9 @@ func (fd *Funcdata) spacebaseSubTypeOps(spc *address.Space) subTypeOps {
 
 func (fd *Funcdata) ResolveSpacebaseSymbol(spc *address.Space, off int64) (Datatype, int64) {
 	tf := fd.TypeFactory()
-	undef1 := tf.GetBase(1, TYPE_UNKNOWN, "undefined")
+	// An offset with no symbol is a byte of unknown type.
+	// C++ parity: TypeSpacebase::getSubType (getBase(1,TYPE_UNKNOWN)).
+	undef1 := tf.GetBase(1, TYPE_UNKNOWN, "")
 	if spc == nil {
 		return undef1, 0
 	}

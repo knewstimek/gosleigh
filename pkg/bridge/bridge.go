@@ -285,7 +285,6 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 
 	summary := summarizeSpaces(records, cfg.Entry.Space)
 	fixFlowOverrideReturns(records, summary.constSpace)
-	applyIndirectOverrides(records, cfg.IndirectOverrides)
 	injectWarnings := applyInjections(records, cfg.Injections, summary.constSpace)
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, analysisUniqueBase, summary.constSpace)
 	fd.UserOps().RegisterNames(engine.UserOpNames())
@@ -1443,6 +1442,11 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 			if t, ok := cfg.FlowOverrides[cur.Offset]; ok {
 				translation = applyFlowOverride(translation, t)
 			}
+			// An overridden CALLIND is a direct CALL before the no-return
+			// check, so a call through an import to ExitProcess halts.
+			// C++ parity: FlowInfo::setupCallindSpecs (applyIndirect, then
+			// queryCall and checkForFlowModification).
+			translation = applyIndirectOverride(translation, cfg.IndirectOverrides)
 			translation = haltAfterNoReturnCall(translation, cfg.HostScope)
 			// An instruction may legitimately emit no p-code (NOP, multi-byte
 			// NOP alignment padding). It is kept for flow; references to its
@@ -1714,28 +1718,25 @@ func fixFlowOverrideReturns(records []instructionRecord, constSpace *address.Spa
 	}
 }
 
-// applyIndirectOverrides rewrites an overridden CALLIND into a direct CALL.
+// applyIndirectOverride rewrites an overridden CALLIND into a direct CALL.
 // C++ parity: FlowInfo::setupCallindSpecs (Override::getIndirectOverride).
-func applyIndirectOverrides(records []instructionRecord, ov map[uint64]address.Address) {
-	if len(ov) == 0 {
-		return
+func applyIndirectOverride(tr sla.InstructionTranslation, ov map[uint64]address.Address) sla.InstructionTranslation {
+	target, ok := ov[tr.Address.Offset]
+	if !ok {
+		return tr
 	}
-	for i := range records {
-		target, ok := ov[records[i].translation.Address.Offset]
-		if !ok {
+	ops := append([]pcode.RawOp(nil), tr.Ops...)
+	for j := range ops {
+		if ops[j].OpCode != pcode.CPUI_CALLIND || len(ops[j].Inputs) == 0 {
 			continue
 		}
-		ops := records[i].translation.Ops
-		for j := range ops {
-			if ops[j].OpCode != pcode.CPUI_CALLIND || len(ops[j].Inputs) == 0 {
-				continue
-			}
-			in := &ops[j].Inputs[0]
-			ops[j].OpCode = pcode.CPUI_CALL
-			in.Space = target.Space
-			in.Offset = target.Offset
-		}
+		ops[j].Inputs = append([]pcode.VarnodeData(nil), ops[j].Inputs...)
+		ops[j].OpCode = pcode.CPUI_CALL
+		ops[j].Inputs[0].Space = target.Space
+		ops[j].Inputs[0].Offset = target.Offset
 	}
+	tr.Ops = ops
+	return tr
 }
 
 // zeroOpRedirect maps each instruction that emitted no p-code to the first

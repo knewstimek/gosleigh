@@ -2503,18 +2503,23 @@ func likelyTrashCountMarks(op *PcodeOp) uint32 {
 	var n uint32
 	for i := 0; i < op.NumInput(); i++ {
 		vn := op.Input(i)
-		if vn == nil {
-			continue
-		}
-		if vn.IsMark() {
-			n++
-			continue
-		}
-		if vn.IsWritten() && vn.Def() != nil && vn.Def().Code() == CPUI_COPY {
-			src := vn.Def().Input(0)
-			if src != nil && src.IsMark() {
+		for vn != nil {
+			if vn.IsMark() {
 				n++
+				break
 			}
+			if !vn.IsWritten() {
+				break
+			}
+			def := vn.Def()
+			if def == op { // Looped all the way around
+				n++
+				break
+			}
+			if def.Code() != CPUI_INDIRECT { // Chain up through INDIRECTs
+				break
+			}
+			vn = def.Input(0)
 		}
 	}
 	return n
@@ -2612,11 +2617,6 @@ func likelyTrashTrace(vn *Varnode, indlist *[]*PcodeOp) bool {
 // proves the value is effectively unused rewrite each downstream INDIRECT
 // or masking INT_AND into a zero constant (marking INDIRECTs as indirect
 // creations).
-//
-// TODO known mismatch: FuncProto.TrashBegin currently returns an empty
-// slice because the .sla compiler-spec loader does not yet emit trash
-// register records. The loop therefore exits immediately in practice; the
-// structural port keeps the rewrite ready for when trash lists are loaded.
 func (a *ActionLikelyTrash) Apply(data *Funcdata) int {
 	if data == nil {
 		return 0
