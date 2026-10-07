@@ -1668,9 +1668,19 @@ func (h *Heritage) characterizeReturnOutput(addr address.Address, size int32) in
 }
 
 // characterizeReturnOutput classifies [addr,addr+size) against the model's
-// integer return register. C++ parity: FuncProto::characterizeAsOutput
-// (register subset).
+// output storage: the output ParamList when the cspec provided one, else the
+// single integer return register.
+// C++ parity: ProtoModel::characterizeAsOutput -> output->characterizeAsParam.
 func (m *ProtoModel) characterizeReturnOutput(addr address.Address, size int32) int {
+	if m != nil && m.OutputParams != nil {
+		switch m.OutputParams.characterizeAsParam(addr, size) {
+		case peNoContainment:
+			return retOutNoContainment
+		case peContainedBy:
+			return retOutContainedBy
+		}
+		return retOutOther
+	}
 	if m == nil || m.ReturnRegSpaceIndex < 0 || m.ReturnRegSize == 0 {
 		return retOutNoContainment
 	}

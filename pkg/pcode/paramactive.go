@@ -945,6 +945,11 @@ func isParamLocation(vn *Varnode, model *ProtoModel) bool {
 	if model.StackSpace != nil && vn.Space() == model.StackSpace {
 		return model.IsParamOffset(vn.Offset())
 	}
+	// Register storage follows the cspec input list, float entries included.
+	// C++ parity: FuncProto::possibleInputParam -> ParamListStandard::possibleParam.
+	if model.InputParams != nil {
+		return model.InputParams.possibleParam(vn.Addr(), vn.Size())
+	}
 	if len(model.RegParamOffsets) > 0 {
 		if vn.Space().Name != "register" {
 			return false
