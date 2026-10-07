@@ -452,9 +452,15 @@ func (ms *mapState) gatherVarnodes(fd *Funcdata) {
 
 // addFixedType adds the hint for a Varnode of data-type ct. A piece of a
 // structure (array) moved in whole fields is an open reference to its parent
-// (element). C++ parity: MapState::addFixedType. TypePartialUnion is not
-// modelled (known mismatch).
+// (element); the initial piece of a union is an open reference to the union.
+// C++ parity: MapState::addFixedType.
 func (ms *mapState) addFixedType(start uint64, ct Datatype, flags uint32) {
+	if tpu, ok := ct.(*PartialUnion); ok {
+		if tpu.Offset() == 0 { // If the initial fields of TYPE_UNION are moved here
+			ms.addRange(start, tpu.Container(), 0, rhOpen, -1)
+		}
+		return
+	}
 	tps, ok := ct.(*PartialStruct)
 	if !ok {
 		ms.addRange(start, ct, flags, rhFixed, -1)

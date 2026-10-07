@@ -298,8 +298,59 @@ func (s *printCState) collectSymbols() {
 		// ActionMergeCopy into a param HighVariable can still appear in locals.
 		seenHV := make(map[*HighVariable]bool)
 		markerOnly := make(map[*HighVariable]*Varnode)
+		// A register the convention preserves, read for its incoming value
+		// (an SEH funclet's EBP): unaff_<reg>, declared as a local. The name
+		// belongs to the whole variable (the input is its name representative),
+		// so an instance merged through an INDIRECT (a stack argument slot
+		// holding the incoming ESI) prints as unaff_ESI too. Only real reads
+		// count -- the prologue save and INDIRECT guards do not.
+		// C++ parity: HighVariable::getNameRepresentative (unaffected first) +
+		// ScopeInternal::buildVariableName (Varnode::unaffected branch).
+		unaffHigh := make(map[*HighVariable]bool)
+		for _, vn := range all {
+			if vn == nil || !vn.IsInput() || !vn.IsUnaffected() || vn.IsSpaceBase() || !isRegisterSpace(vn) ||
+				vn.HasFlags(VarnodeReturnAddress) {
+				continue
+			}
+			key := fmt.Sprintf("%d:%d:%d", vn.Space().Index, vn.Offset(), vn.Size())
+			rn := regNameByLoc[key]
+			if rn == "" {
+				continue
+			}
+			insts := []*Varnode{vn}
+			if hv := vn.High(); hv != nil {
+				insts = insts[:0]
+				for i := 0; i < hv.NumInstances(); i++ {
+					if inst := hv.GetInstance(i); inst != nil {
+						if _, live := liveSet[inst]; live {
+							insts = append(insts, inst)
+						}
+					}
+				}
+			}
+			printed := false
+			for _, inst := range insts {
+				if s.hasPrintedUse(inst) {
+					printed = true
+					break
+				}
+			}
+			if !printed {
+				continue
+			}
+			for _, inst := range insts {
+				s.names[inst] = "unaff_" + rn
+			}
+			if hv := vn.High(); hv != nil {
+				unaffHigh[hv] = true
+			}
+			locals = append(locals, vn)
+		}
 		for _, vn := range all {
 			if vn == nil || vn.IsConstant() || vn.IsAnnotation() {
+				continue
+			}
+			if hv := vn.High(); hv != nil && unaffHigh[hv] {
 				continue
 			}
 			// A global variable prints by its global symbol name and is never
@@ -313,20 +364,6 @@ func (s *printCState) collectSymbols() {
 					s.inline[vn.Def()] = true
 				}
 				continue
-			}
-			// A register the convention preserves, read for its incoming value
-			// (an SEH funclet's EBP): unaff_<reg>, declared as a local. Only real
-			// reads count -- the prologue save and INDIRECT guards do not.
-			// C++ parity: HighVariable::hasName (unaffected input) +
-			// ScopeInternal::buildVariableName (Varnode::unaffected branch).
-			if vn.IsInput() && vn.IsUnaffected() && !vn.IsSpaceBase() && isRegisterSpace(vn) &&
-				!vn.HasFlags(VarnodeReturnAddress) && s.hasPrintedUse(vn) {
-				key := fmt.Sprintf("%d:%d:%d", vn.Space().Index, vn.Offset(), vn.Size())
-				if rn := regNameByLoc[key]; rn != "" {
-					s.names[vn] = "unaff_" + rn
-					locals = append(locals, vn)
-					continue
-				}
 			}
 			// Irregular input register: a live-on-entry argument register that was
 			// read but not recovered as a parameter (entry-point functions under the
