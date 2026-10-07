@@ -3752,7 +3752,7 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	case CPUI_FLOAT_LESSEQUAL:
 		return s.renderBinary(op, "<=", cPrecRelational, ExprAssocLeft)
 	case CPUI_FLOAT_NAN:
-		return s.renderPseudoCall("isnan", op, 0)
+		return s.renderPseudoCall("NAN", op, 0) // C++ parity: opFunc prints the TypeOp name
 	case CPUI_FLOAT_ADD:
 		return s.renderBinary(op, "+", cPrecAdd, ExprAssocLeft)
 	case CPUI_FLOAT_DIV:
@@ -3764,9 +3764,9 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	case CPUI_FLOAT_NEG:
 		return s.renderUnary(op, "-", cPrecUnary)
 	case CPUI_FLOAT_ABS:
-		return s.renderPseudoCall("fabs", op, 0)
+		return s.renderPseudoCall("ABS", op, 0)
 	case CPUI_FLOAT_SQRT:
-		return s.renderPseudoCall("sqrt", op, 0)
+		return s.renderPseudoCall("SQRT", op, 0)
 	case CPUI_FLOAT_INT2FLOAT:
 		return s.renderCast(op)
 	case CPUI_FLOAT_FLOAT2FLOAT:
@@ -3774,11 +3774,11 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	case CPUI_FLOAT_TRUNC:
 		return s.renderCast(op)
 	case CPUI_FLOAT_CEIL:
-		return s.renderPseudoCall("ceil", op, 0)
+		return s.renderPseudoCall("CEIL", op, 0)
 	case CPUI_FLOAT_FLOOR:
-		return s.renderPseudoCall("floor", op, 0)
+		return s.renderPseudoCall("FLOOR", op, 0)
 	case CPUI_FLOAT_ROUND:
-		return s.renderPseudoCall("round", op, 0)
+		return s.renderPseudoCall("ROUND", op, 0)
 	case CPUI_MULTIEQUAL:
 		return s.renderPseudoCall("MULTIEQUAL", op, 0)
 	case CPUI_INDIRECT:

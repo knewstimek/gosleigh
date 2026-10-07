@@ -103,6 +103,9 @@ func (f *TypeFactory) GetBase(size int32, meta metatype, name string) Datatype {
 	if size > maxBasetypeSize && meta != TYPE_FLOAT && isGenericBaseName(name, size) {
 		return f.GetArray(size, f.GetBase(1, TYPE_UNKNOWN, ""))
 	}
+	if meta == TYPE_FLOAT {
+		name = coreFloatName(name, size)
+	}
 	value := NewBase(size, meta, name)
 	value.alignSize = primitiveAlignSize(size)
 	value.alignment = primitiveAlignment(value.alignSize)
@@ -144,6 +147,31 @@ const maxBasetypeSize = 10
 
 // isGenericBaseName reports whether name is one TypeFactory itself would
 // give a base of this size (no host-supplied name).
+// coreFloatName is the core floating-point type of a size, which a generic
+// float request resolves to (float/8 is double). Other names stay.
+// C++ parity: TypeFactory::getBase looks the core type up by size and
+// metatype (cacheCoreTypes).
+func coreFloatName(name string, size int32) string {
+	switch name {
+	case "", "float", "double", "float2", "float10", "float16", "unknown", fmt.Sprintf("undefined%d", size):
+	default:
+		return name
+	}
+	switch size {
+	case 2:
+		return "float2"
+	case 4:
+		return "float"
+	case 8:
+		return "double"
+	case 10:
+		return "float10"
+	case 16:
+		return "float16"
+	}
+	return name
+}
+
 func isGenericBaseName(name string, size int32) bool {
 	switch name {
 	case "", "unknown", "int", "uint", "bool", fmt.Sprintf("undefined%d", size), fmt.Sprintf("int%d", size), fmt.Sprintf("uint%d", size):
