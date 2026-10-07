@@ -419,6 +419,12 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 	// collapse into one variable if a prior merge over-merged them.
 	claimedHigh := make(map[*HighVariable]bool)
 	for _, g := range localList {
+		// Storage cut out of the local scope (a call's stack parameters,
+		// markNotMapped) is no local variable: syncVarnodesWithSymbols has
+		// cleared its address tie and it stays an ordinary variable.
+		if len(g.varnodes) > 0 && !sl.inScopeRange(g.offset, g.varnodes[0].Size()) {
+			continue
+		}
 		name := sl.stackLocalName(g.offset)
 		// Reuse the existing HighVariable the stack varnodes already belong to,
 		// rather than creating a fresh one and re-adding only the stack varnodes.
