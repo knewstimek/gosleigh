@@ -2915,16 +2915,65 @@ func (a *ActionParamDouble) Apply(data *Funcdata) int {
 			}
 		}
 	}
-	// Function-level locked-parameter scan.
+	// Locked parameters split only into hi and lo halves are double-precision
+	// wholes. A locked parameter is the type-locked input Varnode at its
+	// storage (C++: findVarnodeInput(type size, param address)).
 	// C++ parity: coreaction.cc ActionParamDouble::apply lines 1668-1723.
-	// TODO known mismatch: Datatype.isPrimitiveWhole and the TypeFactory
-	// default-size query are not yet ported, so this block is a
-	// structural placeholder. Enabling it once primitive-whole classification
-	// lands will walk each locked parameter, collect SUBPIECE decompositions,
-	// and tag each half as precis-lo / precis-hi.
-	_ = data.GetFuncProto()
+	if data.IsDoublePrecisOn() {
+		minDoubleSize := int32(0)
+		if cs := data.BaseAddr().Space; cs != nil {
+			minDoubleSize = int32(cs.AddrSize) // AddrSpaceManager::getDefaultSize
+		}
+		for _, vn := range data.GetVarnodeBank().AllVarnodes() {
+			if vn == nil || !vn.IsInput() || !vn.IsTypeLock() || vn.Type() == nil {
+				continue
+			}
+			if !isPrimitiveWhole(vn.Type()) || vn.Type().Size() != vn.Size() || vn.Size() < minDoubleSize {
+				continue
+			}
+			halfSize := vn.Size() / 2
+			var lovec, hivec []*Varnode
+			otherUse := false
+			for _, subop := range vn.DescendIter() {
+				if subop.Code() != CPUI_SUBPIECE {
+					continue
+				}
+				outvn := subop.Output()
+				if outvn.Size() != halfSize {
+					continue
+				}
+				switch subop.Input(1).Offset() {
+				case 0:
+					lovec = append(lovec, outvn)
+				case uint64(halfSize):
+					hivec = append(hivec, outvn)
+				default:
+					otherUse = true
+				}
+				if otherUse {
+					break
+				}
+			}
+			if otherUse || len(lovec) == 0 || len(hivec) == 0 {
+				continue
+			}
+			for _, piece := range lovec {
+				if !piece.IsPrecisLo() {
+					piece.SetPrecisLo()
+					a.count++
+				}
+			}
+			for _, piece := range hivec {
+				if !piece.IsPrecisHi() {
+					piece.SetPrecisHi()
+					a.count++
+				}
+			}
+		}
+	}
 	return 0
 }
+
 
 // ActionRestructureVarnode rebuilds the local symbol map from discovered
 // varnodes and protects switch paths from INDIRECT collapse.
