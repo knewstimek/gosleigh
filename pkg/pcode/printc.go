@@ -1351,7 +1351,7 @@ func (s *printCState) stackSymbolType(vn *Varnode) Datatype {
 	if st.Metatype() == TYPE_UNKNOWN {
 		// The declaration is the symbol's, whatever piece of it vn is.
 		// C++ parity: PrintC::emitVarDecl prints sym->getType().
-		return sharedTypeFactory.GetBase(st.Size(), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", st.Size()))
+		return sharedTypeFactory.GetBase(st.Size(), TYPE_UNKNOWN, unknownTypeName(st.Size()))
 	}
 	return s.normalizeTypeForDecl(st)
 }
@@ -1523,7 +1523,7 @@ func normalizedBaseType(base *Base, longSize int) Datatype {
 		// C++ parity: Ghidra uses TYPE_UNKNOWN for untyped bytes; prints as undefined1/2/4/8.
 		// normalizeTypeForDecl must NOT coerce this to TYPE_UINT -- that would lose the
 		// distinction between a typed unsigned and an untyped/undefined slot.
-		return sharedTypeFactory.GetBase(base.Size(), TYPE_UNKNOWN, fmt.Sprintf("undefined%d", base.Size()))
+		return sharedTypeFactory.GetBase(base.Size(), TYPE_UNKNOWN, unknownTypeName(base.Size()))
 	case TYPE_UINT:
 		// Ghidra prints dt->getName() for its interned core types; the Java-side
 		// <coretypes> element names the unsigned bases with short forms, not the
@@ -3283,18 +3283,6 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 	if lit, ok := s.fd.stringLiteral(vn, dt); ok {
 		return lit
 	}
-	// When the constant carries only a generic TYPE_UINT (the default for untyped
-	// constants), check if any consumer's storage location is signed. If so, the
-	// constant lives in a signed context and should be rendered as a signed literal.
-	// This handles e.g. MOV EAX, 0xFFFFFFFF -> "-1" when EAX is used in INT_SLESS.
-	// Ghidra C++ propagates TYPE_INT into constant varnodes directly; Go's metatype
-	// ordering (TYPE_UINT=13 < TYPE_INT=14) prevents that path, so we infer from context.
-	// Only triggers when signed vs unsigned representations differ (i.e. high bit set).
-	if base, ok := dt.(*Base); ok && base.Metatype() == TYPE_UINT {
-		if signedDt := s.inferSignedConstType(vn); signedDt != nil {
-			dt = signedDt
-		}
-	}
 	// force_unsigned_token: a constant marked by CastStrategy::markExplicitUnsigned
 	// (an operand of a sign-inheriting op that would otherwise read as signed) is
 	// printed with a trailing 'U'. C++ parity: PrintC::push_integer (printc.cc:1425).
@@ -3517,72 +3505,6 @@ func printCharHexEscapeC(c int) string {
 	default:
 		return fmt.Sprintf("\\x%08x", c)
 	}
-}
-
-// inferSignedConstType returns a TYPE_INT base type for a constant varnode whose
-// committed type is generic TYPE_UINT, when the constant's high bit is set AND
-// at least one consumer op writes to a storage location that is signed anywhere in
-// the function. This resolves the signed rendering gap:
-//
-// The metatype ordering TYPE_UINT(13) < TYPE_INT(14) is NOT a bug: it is a faithful
-// copy of C++ type.hh:84-85 ("signed is considered less specific than unsigned in
-// C"), verified against datatype.go:14-15, and other code (action_seed_signed.go,
-// action_infertypes_legacy.go) correctly relies on it. Do not "fix" the ordering.
-//
-// The real gap is that Gosleigh does not reproduce C++ TypeOpCopy::propagateType,
-// which pushes TYPE_INT into the constant. Instead the constant's TYPE_UINT
-// propagates forward (COPY/MULTIEQUAL) and, being the more specific metatype, wins --
-// so the output varnode (e.g. EAX_1) stays TYPE_UINT even though another SSA version
-// of the same register (e.g. EAX_0, input to INT_SLESS) carries TYPE_INT.
-//
-// Solution: check if ANY varnode at the same storage location (same space/offset/
-// size) as the consumer's output has TYPE_INT committed. If yes, the storage
-// location is signed in this function context and the constant should render signed.
-//
-// C++ parity: a rendering-time compensation for the unported TypeOpCopy TYPE_INT
-// propagation -- NOT a reason to change the metatype ordering.
-func (s *printCState) inferSignedConstType(vn *Varnode) Datatype {
-	// Only matters when signed and unsigned representations differ (high bit set).
-	highBitSet := false
-	switch vn.Size() {
-	case 1:
-		highBitSet = int8(vn.Offset()) < 0
-	case 2:
-		highBitSet = int16(vn.Offset()) < 0
-	case 4:
-		highBitSet = int32(vn.Offset()) < 0
-	case 8:
-		highBitSet = int64(vn.Offset()) < 0
-	}
-	if !highBitSet {
-		return nil
-	}
-	for _, op := range vn.DescendIter() {
-		if op == nil || op.IsDead() {
-			continue
-		}
-		out := op.Output()
-		if out == nil {
-			continue
-		}
-		// Check only the direct committed type of the consumer output, not a
-		// location-wide scan. The location-wide scan (locationIsSigned) is too
-		// broad: it matches other SSA versions of the same register (e.g. EAX_0
-		// used in INT_SLESS with TYPE_INT) and incorrectly forces TYPE_INT onto a
-		// constant whose consumer output (e.g. EAX_1 from COPY) is TYPE_UINT.
-		// C++ parity: Ghidra propagates TYPE_INT into constants directly; this
-		// fallback must only trigger when the immediate consumer output is signed.
-		dt := out.Type()
-		if dt != nil && dt.Metatype() == TYPE_INT {
-			return sharedTypeFactory.GetExactType(vn.Size(), TYPE_INT)
-		}
-		if hv := out.High(); hv != nil {
-			if hvdt := hv.Type(); hvdt != nil && hvdt.Metatype() == TYPE_INT {
-				return sharedTypeFactory.GetExactType(vn.Size(), TYPE_INT)
-			}
-		}
-	}
-	return nil
 }
 
 // locationIsSigned returns true if any varnode at the same storage location
@@ -5007,8 +4929,10 @@ func (s *printCState) renderSubpieceField(op *PcodeOp) (ExprFragment, bool) {
 		// C++ parity: opSubpiece -> pushPartialSymbol(sym, byteOff + symbol
 		// offset, ..., op, slot).
 		symType := ct
+		symName := s.nameOf(vn)
 		if e := s.fd.globalEntryOf(vn); e != nil && e.Symbol() != nil && e.Symbol().Type() != nil && vn.Space() == e.Addr().Space {
 			symType = e.Symbol().Type()
+			symName = s.globalSymbolName(e.Symbol()) // The path starts at the symbol itself
 			byteOff += int32(vn.Offset() - e.Addr().Offset)
 		}
 		slot := 0
@@ -5021,7 +4945,7 @@ func (s *printCState) renderSubpieceField(op *PcodeOp) (ExprFragment, bool) {
 		if hv := op.Output().High(); hv != nil {
 			castTo = hv.Type()
 		}
-		name, cast := symbolPieceName(s.nameOf(vn), symType, byteOff, sz, castTo, be, op, slot)
+		name, cast := symbolPieceName(symName, symType, byteOff, sz, castTo, be, op, slot)
 		if cast != nil {
 			return s.lang.CastExpr(printedTypeString(s.normalizeTypeForDecl(cast)), s.globalNameExpr(vn, name)), true
 		}

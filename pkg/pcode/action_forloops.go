@@ -137,6 +137,12 @@ func tryMarkForLoop(data *Funcdata, wdo *BlockWhileDo) {
 		return
 	}
 	tailBasic := lastOp.Parent()
+	// The body's last block must flow straight back to the head.
+	// C++ parity: BlockWhileDo::finalTransform (tail->sizeOut() == 1,
+	// tail->getOut(0) == head).
+	if tailBasic == nil || tailBasic.SizeOut() != 1 || tailBasic.getOut(0) != &headBasic.FlowBlock {
+		return
+	}
 
 	iterateOp, loopDef, tailSlot := findLoopVariable(cbranch, headBasic, tailBasic, lastOp)
 	if iterateOp == nil {
@@ -303,6 +309,10 @@ func findLoopVariable(cbranch *PcodeOp, head, tail *BlockBasic, lastOp *PcodeOp)
 	}
 
 	condDef := condVn.Def()
+	if condDef.IsCall() || condDef.IsMarker() {
+		return nil, nil, -1
+	}
+	slot := tail.OutRevIndex(0) // The tail's edge into the head
 
 	// Breadth-limited search (depth 4 like C++) from cbranch condition upward.
 	type frame struct {
@@ -350,26 +360,27 @@ func findLoopVariable(cbranch *PcodeOp, head, tail *BlockBasic, lastOp *PcodeOp)
 			continue
 		}
 
-		if defOp.Code() == CPUI_MULTIEQUAL && defOp.Parent() == head {
-			// Found a MULTIEQUAL at the head. Scan all its inputs for one
-			// that is defined in the tail block.
-			for s := 0; s < defOp.NumInput(); s++ {
-				tailInputVn := defOp.Input(s)
-				if tailInputVn == nil || !tailInputVn.IsWritten() {
-					continue
-				}
-				possibleIter := tailInputVn.Def()
-				if possibleIter.Parent() != tail {
-					continue
-				}
-				if possibleIter.IsMarker() {
-					continue
-				}
-				if isMoveable(possibleIter, lastOp) {
-					return possibleIter, defOp, s
-				}
+		if defOp.Code() == CPUI_MULTIEQUAL {
+			// Only the head MULTIEQUAL's input along the tail edge can be the
+			// iterated value; no MULTIEQUAL is searched through.
+			if defOp.Parent() != head || slot >= defOp.NumInput() {
+				continue
 			}
-			continue // don't recurse into MULTIEQUAL inputs
+			itvn := defOp.Input(slot)
+			if itvn == nil || !itvn.IsWritten() {
+				continue
+			}
+			possibleIter := itvn.Def()
+			if possibleIter.Parent() == tail { // Proper head/tail configuration
+				if possibleIter.IsMarker() {
+					continue // No iteration in tail
+				}
+				if !isMoveable(possibleIter, lastOp) {
+					continue // Not an iterating statement
+				}
+				return possibleIter, defOp, slot
+			}
+			continue
 		}
 
 		if defOp.IsCall() || defOp.IsMarker() {

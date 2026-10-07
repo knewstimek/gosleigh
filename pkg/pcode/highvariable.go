@@ -358,30 +358,60 @@ func (hv *HighVariable) Type() Datatype {
 	if rep == nil {
 		return hv.datatype
 	}
-	// A variable never keeps a partial type. C++ parity:
-	// HighVariable::updateType (getStripped).
-	switch t := rep.Type().(type) {
+	return hv.stripType(rep.Type())
+}
+
+// stripType drops the partial or relative form of a variable's data-type,
+// except a piece of a structure or union backed by a bigger symbol, and a
+// partial enumeration on a lone constant.
+// C++ parity: HighVariable::stripType.
+func (hv *HighVariable) stripType(tp Datatype) Datatype {
+	keepPartial := func() bool {
+		if sym := hv.GetSymbol(); sym != nil && sym.Type() != nil && hv.GetSymbolOffset() != -1 {
+			m := sym.Type().Metatype()
+			return m == TYPE_STRUCT || m == TYPE_UNION // A bigger backing symbol
+		}
+		// A global variable's symbol is kept by the global scope.
+		if fd := hv.funcdata(); fd != nil {
+			for _, vn := range hv.instances {
+				e := fd.globalEntryOf(vn)
+				if e == nil || e.Symbol() == nil || e.Symbol().Type() == nil {
+					continue
+				}
+				st := e.Symbol().Type()
+				if vn.Space() == e.Addr().Space && vn.Offset() == e.Addr().Offset && vn.Size() == st.Size() {
+					return false // The whole symbol (symbol offset -1)
+				}
+				m := st.Metatype()
+				return m == TYPE_STRUCT || m == TYPE_UNION
+			}
+		}
+		return false
+	}
+	switch t := tp.(type) {
 	case *Enum:
 		if t.parent != nil {
+			if len(hv.instances) == 1 && hv.instances[0].IsConstant() {
+				return t // Only preserve a partial enum on a constant
+			}
 			return t.stripped
 		}
 	case *PartialStruct:
+		if keepPartial() {
+			return t
+		}
 		return t.stripped
 	case *PartialUnion:
-		// A piece of a union keeps resolving per use unless the variable is
-		// mapped into a Symbol that is no structure or union.
-		if sym := hv.GetSymbol(); sym != nil && sym.Type() != nil && hv.GetSymbolOffset() != -1 {
-			if m := sym.Type().Metatype(); m != TYPE_STRUCT && m != TYPE_UNION {
-				return t.stripped
-			}
+		if keepPartial() {
+			return t
 		}
-		return t
+		return t.stripped
 	case *Pointer:
 		if t.relStripped != nil {
 			return t.relStripped
 		}
 	}
-	return rep.Type()
+	return tp
 }
 
 // SetType sets the type annotation for this high variable.
@@ -502,19 +532,23 @@ func (hv *HighVariable) finalizeDatatype(tf *TypeFactory, sym *Symbol, off int64
 	if tp == nil || tp.Metatype() == TYPE_UNKNOWN {
 		return
 	}
-	switch t := tp.(type) { // stripType
-	case *Enum:
-		if t.parent != nil {
-			tp = t.stripped
+	hv.finalType = hv.stripType(tp)
+}
+
+// funcdata is the function holding the variable, found through an op of one
+// of its instances.
+func (hv *HighVariable) funcdata() *Funcdata {
+	for _, vn := range hv.instances {
+		if op := vn.Def(); op != nil {
+			if fd := opFuncdata(op); fd != nil {
+				return fd
+			}
 		}
-	case *PartialStruct:
-		tp = t.stripped
-	case *PartialUnion:
-		tp = t.stripped
-	case *Pointer:
-		if t.relStripped != nil {
-			tp = t.relStripped
+		for _, op := range vn.DescendIter() {
+			if fd := opFuncdata(op); fd != nil {
+				return fd
+			}
 		}
 	}
-	hv.finalType = tp
+	return nil
 }

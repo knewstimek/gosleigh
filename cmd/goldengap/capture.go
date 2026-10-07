@@ -605,6 +605,57 @@ func withCapture(host pcode.HostScope, fn goldenEntry, ram *address.Space) pcode
 }
 
 // captureComments returns fn's comment database from its capture, or nil.
+// captureFlowOverrides reads the savefile's <flowoverridelist>: the flow
+// overrides the C++ core receives for the function, which may be more than
+// the golden records. C++ parity: Override::decode (ELEM_FLOW).
+func captureFlowOverrides(fn goldenEntry) map[uint64]string {
+	if captureDir == "" {
+		return nil
+	}
+	raw, err := os.ReadFile(fmt.Sprintf("%s/%08x.xml", captureDir, fn.Entry))
+	if err != nil {
+		return nil
+	}
+	var root xnode
+	if xml.Unmarshal(raw, &root) != nil {
+		return nil
+	}
+	var list *xnode
+	var find func(n *xnode)
+	find = func(n *xnode) {
+		for i := range n.Kids {
+			if list != nil {
+				return
+			}
+			if n.Kids[i].XMLName.Local == "flowoverridelist" {
+				list = &n.Kids[i]
+				return
+			}
+			find(&n.Kids[i])
+		}
+	}
+	find(&root)
+	if list == nil {
+		return nil
+	}
+	names := map[string]string{"branch": "BRANCH", "call": "CALL", "callreturn": "CALL_RETURN", "return": "RETURN"}
+	m := map[uint64]string{}
+	for i := range list.Kids {
+		f := &list.Kids[i]
+		var addrs []*xnode
+		for j := range f.Kids {
+			if f.Kids[j].XMLName.Local == "addr" {
+				addrs = append(addrs, &f.Kids[j])
+			}
+		}
+		if f.XMLName.Local != "flow" || len(addrs) < 2 || names[f.attr("type")] == "" {
+			continue
+		}
+		m[parseUint(addrs[1].attr("offset"))] = names[f.attr("type")]
+	}
+	return m
+}
+
 func captureComments(fn goldenEntry) []bridge.HostComment {
 	if captureDir == "" {
 		return nil

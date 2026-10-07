@@ -381,6 +381,9 @@ func displayName(fn goldenEntry) string {
 }
 
 func flowOverrides(fn goldenEntry) map[uint64]string {
+	if m := captureFlowOverrides(fn); m != nil {
+		return m // The capture holds every override the core receives
+	}
 	if len(fn.FlowOverrides) == 0 {
 		return nil
 	}

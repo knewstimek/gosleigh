@@ -233,7 +233,7 @@ func (r *CDeclRenderer) typeSpecifier(dt Datatype) string {
 		if name := dt.Name(); name != "" {
 			return name
 		}
-		return fmt.Sprintf("undefined%d", dt.Size())
+		return unknownTypeName(dt.Size())
 	}
 }
 
@@ -266,7 +266,7 @@ func baseTypeName(dt Datatype) string {
 	case TYPE_UINT:
 		return fmt.Sprintf("uint%d_t", dt.Size()*8)
 	case TYPE_UNKNOWN:
-		return fmt.Sprintf("undefined%d", dt.Size())
+		return unknownTypeName(dt.Size())
 	default:
 		return fmt.Sprintf("type_%d", dt.ID())
 	}
@@ -429,4 +429,14 @@ func sanitizeIdentifier(text string) string {
 		return "_" + out
 	}
 	return out
+}
+
+// unknownTypeName names an undefined data-type of the given size: a core
+// undefinedN type up to 8 bytes, else the generic name a nameless type
+// prints with. C++ parity: PrintC::genericTypeName (unkbyteN).
+func unknownTypeName(size int32) string {
+	if size >= 1 && size <= 8 {
+		return fmt.Sprintf("undefined%d", size)
+	}
+	return fmt.Sprintf("unkbyte%d", size)
 }
