@@ -44,7 +44,9 @@ REPO_ROOT = os.path.dirname(os.path.dirname(HERE))
 sys.path.insert(0, os.path.join(REPO_ROOT, "tools", "goldengap"))
 import goldengap  # noqa: E402
 
-HEADLESS = r"C:\ghidra12\support\analyzeHeadless.bat"
+# GHIDRA_HEADLESS selects another install, e.g. a copy whose decompile.exe is
+# built from ghidra-ref (tools/cppharness/build_native.py).
+HEADLESS = os.environ.get("GHIDRA_HEADLESS", r"C:\ghidra12\support\analyzeHeadless.bat")
 PROJ_NAME = "realexe"
 
 # PE machine -> (sla, pspec, cspec), relative to REPO_ROOT.
