@@ -3718,23 +3718,6 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 		}
 		return s.renderPseudoCall(fmt.Sprintf("SEXT%d%d", op.Input(0).Size(), op.Output().Size()), op, 0)
 	case CPUI_INT_ADD:
-		// C++ parity: cleanup-phase Rule2Comp2Sub converts INT_ADD(x, INT_2COMP(y))
-		// to INT_SUB(x, y) before rendering. Mirror this at render time: when the
-		// right-hand input is an inline INT_2COMP, fold into subtraction so we emit
-		// "x - y" instead of "x + -y".
-		if rhs := op.Input(1); rhs != nil {
-			if def := rhs.Def(); def != nil && s.inline[def] && def.Code() == CPUI_INT_2COMP {
-				left, err := s.renderVarnodeExpr(op.Input(0))
-				if err != nil {
-					return ExprFragment{}, err
-				}
-				inner, err := s.renderVarnodeExpr(def.Input(0))
-				if err != nil {
-					return ExprFragment{}, err
-				}
-				return s.lang.BinaryExpr(left, "-", inner, cPrecAdd, ExprAssocLeft), nil
-			}
-		}
 		return s.renderBinary(op, "+", cPrecAdd, ExprAssocLeft)
 	case CPUI_INT_SUB:
 		return s.renderBinary(op, "-", cPrecAdd, ExprAssocLeft)
@@ -5038,6 +5021,11 @@ func (s *printCState) localPieceName(vn *Varnode, name string, castTo Datatype, 
 		}
 	}
 	e := sl.QueryContainer(at.Addr(), vn.Size(), address.Address{})
+	if e == nil {
+		// A variable bigger than its symbol prints as a mismatch (_name).
+		// C++ parity: PrintC::pushSymbolDetail -> pushMismatchSymbol.
+		e = sl.QueryContainer(at.Addr(), 1, address.Address{})
+	}
 	if e == nil || e.Symbol() == nil || e.Symbol().Type() == nil || e.Symbol().Name() != name {
 		return name, nil
 	}
