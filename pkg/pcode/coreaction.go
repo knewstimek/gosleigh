@@ -3903,7 +3903,57 @@ func (a *ActionUnjustifiedParams) Clone(groups ActionGroupList) Action {
 // without them there is no way to detect or widen mis-sized input slots.
 // C++ parity: coreaction.cc ActionUnjustifiedParams::apply
 func (a *ActionUnjustifiedParams) Apply(data *Funcdata) int {
-	_ = data
+	if data == nil {
+		return 0
+	}
+	inputs := data.sortedInputVarnodes()
+	for i := 0; i < len(inputs); i++ {
+		vn := inputs[i]
+		caddr, csize, ok := data.unjustifiedInputParam(vn.Addr(), vn.Size())
+		if !ok {
+			continue
+		}
+		for {
+			// An earlier input overlapping the container widens it.
+			overlaps := false
+			for j := i; j >= 0; j-- {
+				w := inputs[j]
+				if w.Space() != caddr.Space {
+					continue
+				}
+				last := w.Offset() + uint64(w.Size()) - 1
+				if last >= caddr.Offset && w.Offset() < caddr.Offset {
+					overlaps = true
+					end := caddr.Offset + uint64(csize)
+					caddr.Offset = w.Offset()
+					csize = int32(end - caddr.Offset)
+				}
+			}
+			if !overlaps {
+				break
+			}
+			// The widened container may no longer be justified.
+			na, ns, again := data.unjustifiedInputParam(caddr, csize)
+			if !again {
+				break
+			}
+			caddr, csize = na, ns
+		}
+		if !data.adjustInputVarnodes(caddr, csize) {
+			continue
+		}
+		// Restart at the new input, as additions and deletions moved things.
+		inputs = data.sortedInputVarnodes()
+		i = len(inputs)
+		for k, w := range inputs {
+			if w.Space() == caddr.Space && w.Offset() >= caddr.Offset {
+				i = k
+				break
+			}
+		}
+		i-- // the loop increment lands on the new input
+		a.count++
+	}
 	return 0
 }
 

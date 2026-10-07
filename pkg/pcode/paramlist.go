@@ -399,6 +399,58 @@ func (pl *ParamListStandard) characterizeAsParam(loc address.Address, size int32
 	return peNoContainment
 }
 
+// getContainer returns the slot-aligned storage of this entry holding the
+// given range. C++ parity: ParamEntry::getContainer.
+func (pe *paramEntry) getContainer(addr address.Address, sz int32) (address.Address, int32, bool) {
+	endaddr := addr
+	endaddr.Offset += uint64(sz - 1)
+	if pe.joinrec != nil {
+		for i := len(pe.joinrec.Pieces) - 1; i >= 0; i-- { // least significant first
+			v := pe.joinrec.Pieces[i]
+			if overlaps(addr, 1, v.Addr(), v.Size) && overlaps(endaddr, 1, v.Addr(), v.Size) {
+				return v.Addr(), v.Size, true
+			}
+		}
+		return address.Address{}, 0, false
+	}
+	entry := address.Address{Space: pe.space, Offset: pe.addressbase}
+	if !overlaps(addr, 1, entry, pe.size) || !overlaps(endaddr, 1, entry, pe.size) {
+		return address.Address{}, 0, false
+	}
+	if pe.alignment == 0 {
+		return entry, pe.size, true
+	}
+	al := (addr.Offset - pe.addressbase) % uint64(pe.alignment)
+	res := address.Address{Space: pe.space, Offset: addr.Offset - al}
+	size := int32(endaddr.Offset-res.Offset) + 1
+	if al2 := size % pe.alignment; al2 != 0 {
+		size += pe.alignment - al2 // up to the next alignment
+	}
+	return res, size, true
+}
+
+// unjustifiedContainer returns the container of a range an entry holds
+// improperly justified. C++ parity: ParamListStandard::unjustifiedContainer.
+func (pl *ParamListStandard) unjustifiedContainer(loc address.Address, size int32) (address.Address, int32, bool) {
+	if pl == nil {
+		return address.Address{}, 0, false
+	}
+	for _, pe := range pl.entry {
+		if pe.minsize > size {
+			continue
+		}
+		just := pe.justifiedContain(loc, size)
+		if just < 0 {
+			continue
+		}
+		if just == 0 {
+			return address.Address{}, 0, false
+		}
+		return pe.getContainer(loc, size)
+	}
+	return address.Address{}, 0, false
+}
+
 // getBiggestContainedParam returns the storage of the biggest entry lying
 // inside [loc, loc+size); that entry must hold a single value (exclusion).
 // C++ parity: ParamListStandard::getBiggestContainedParam (its resolver walk

@@ -1420,6 +1420,108 @@ func (fd *Funcdata) DeleteVarnode(vn *Varnode) {
 	fd.vbank.Destroy(vn)
 }
 
+// sortedInputVarnodes lists the input Varnodes by address, then size.
+// C++ parity: VarnodeBank beginDef(Varnode::input) ordering.
+func (fd *Funcdata) sortedInputVarnodes() []*Varnode {
+	var out []*Varnode
+	for _, vn := range fd.vbank.AllVarnodes() {
+		if vn.IsInput() {
+			out = append(out, vn)
+		}
+	}
+	sort.SliceStable(out, func(i, j int) bool {
+		a, b := out[i], out[j]
+		if a.Addr() != b.Addr() {
+			return a.Addr().Less(b.Addr())
+		}
+		return a.Size() < b.Size()
+	})
+	return out
+}
+
+// unjustifiedInputParam reports the container of an input range that a
+// parameter holds improperly justified. C++ parity:
+// FuncProto::unjustifiedInputParam (locked parameters first, then the model).
+func (fd *Funcdata) unjustifiedInputParam(addr address.Address, size int32) (address.Address, int32, bool) {
+	fp := fd.GetFuncProto()
+	if fp == nil {
+		return address.Address{}, 0, false
+	}
+	if !fp.dotdotdot && fd.hostScope != nil {
+		if hf, ok := fd.hostScope.QueryFunction(fd.baseAddr); ok && hf.InputLocked {
+			if len(hf.Params) == 0 {
+				return address.Address{}, 0, false // a locked void input list
+			}
+			for _, p := range hf.Params {
+				s, ok := fd.resolveHostParam(p)
+				if !ok {
+					continue
+				}
+				just := addressJustifiedContain(s.Addr, s.Size, addr, size, false)
+				if just == 0 {
+					return address.Address{}, 0, false // contained, properly justified
+				}
+				if just > 0 {
+					return s.Addr, s.Size, true
+				}
+			}
+			return address.Address{}, 0, false
+		}
+	}
+	if m := fp.Model(); m != nil && m.InputParams != nil {
+		return m.InputParams.unjustifiedContainer(addr, size)
+	}
+	return address.Address{}, 0, false
+}
+
+// adjustInputVarnodes replaces the inputs inside [addr, addr+sz) with
+// SUBPIECEs of one new input covering the whole range. It reports false,
+// changing nothing, where the C++ throws.
+// C++ parity: Funcdata::adjustInputVarnodes.
+func (fd *Funcdata) adjustInputVarnodes(addr address.Address, sz int32) bool {
+	end := addr.Offset + uint64(sz) - 1
+	var inlist []*Varnode
+	for _, vn := range fd.sortedInputVarnodes() {
+		if vn.Space() != addr.Space || vn.Offset() < addr.Offset || vn.Offset() > end {
+			continue
+		}
+		if vn.Offset()+uint64(vn.Size())-1 > end {
+			return false // Cannot properly adjust input varnodes
+		}
+		if addressJustifiedContain(addr, sz, vn.Addr(), vn.Size(), false) < 0 || sz <= vn.Size() {
+			return false // Bad adjustment to input varnode
+		}
+		inlist = append(inlist, vn)
+	}
+	bg := fd.GetBasicBlocks()
+	if bg == nil || bg.GetSize() == 0 {
+		return false
+	}
+	entry, ok := bg.GetBlock(0).Concrete().(*BlockBasic)
+	if !ok {
+		return false
+	}
+	for i, vn := range inlist {
+		sa := addressJustifiedContain(addr, sz, vn.Addr(), vn.Size(), false)
+		subop := fd.NewOp(2, fd.baseAddr)
+		fd.OpSetOpcode(subop, CPUI_SUBPIECE)
+		fd.OpSetInput(subop, fd.NewConstant(4, uint64(sa)), 1)
+		newvn := fd.NewVarnodeOut(vn.Size(), vn.Addr(), subop)
+		// newvn must not be free, to take all of vn's descendants
+		fd.OpInsertBegin(subop, entry)
+		fd.TotalReplace(vn, newvn)
+		fd.DeleteVarnode(vn) // the old input goes before the new one is made
+		inlist[i] = newvn
+	}
+	invn := fd.SetInputVarnode(fd.NewVarnode(sz, addr))
+	// Heritage ignores the new input (no "Heritage AFTER dead removal").
+	invn.SetAddlFlags(VarnodeWriteMask)
+	for _, v := range inlist {
+		fd.OpSetInput(v.Def(), invn, 0)
+	}
+	return true
+}
+
 // FindVarnodeInput finds an input varnode matching the given size and location.
 // C++ parity: Funcdata::findVarnodeInput
 func (fd *Funcdata) FindVarnodeInput(size int32, loc address.Address) *Varnode {
