@@ -8,7 +8,7 @@
 |---|---|---|
 | realexe private-sample seed1 (x86-32) | 200/200 | 골든 재생성(프로그램 옵션, readonly on) |
 | realexe private-sample seed2 (보지 않은 표본) | 200/200 | 일반화 지표 |
-| realexe private-sample (x64 UE4) | 192/200, sim 0.996 | ENGINE-ERR 0, TIMEOUT 0 |
+| realexe private-sample (x64 UE4) | 197/200, sim 0.999 | 남은 3개는 버전 차이(아래) |
 | 게이트 `tools/gates.py` | 전부 유지 | tree 10/10, corpus2 10/13, x64_auto 108/109 |
 | x64 코퍼스 C++ 코어 대조 `rawcmp.py` | corpus 8/8, corpus2 13/13, x64_auto 109/109 | 같은 바이트를 C++ 하네스로 |
 
@@ -18,19 +18,20 @@ x64 게이트의 남은 불일치는 골든 JSON에 없는 환경 정보 때문�
 호출 대상 이름), `faverage`(전역 심볼 이름), `add_pt`(Java Program DB 스택 변수 이름),
 x64_auto `switch_dense`(전체 이미지의 `__ImageBase`). 같은 바이트의 C++ 코어 출력과는 일치한다.
 
+private-sample [118][122][123]은 버전 차이다: 골든은 C:\ghidra12(12.0.4 PUBLIC)로 만들었고 ghidra-ref HEAD는
+12.2 DEV다. GP-2493(402d10d6cc)이 type-lock된 bool 입력의 nzmask를 1로 두어(funcdata_varnode.cc
+calcNZMask) `(param_2 & 1)`이 사라진다. `Ghidra_12.0.4_build` 태그에는 없는 코드이고, Go와 하네스는 HEAD를 따른다.
+
 ## 알려진 큰 미포팅 (known mismatch)
 
 | 항목 | 위치 | 영향 |
 |---|---|---|
-| 잠긴 프로토타입의 function_parameter 심볼 | scopelocal*.go | 호스트 스택 인자가 있으면 ScopeLocal을 늦게 만들지 않음 |
 | heritage 쓰기 정규화 순서 / Go 고유 subtask 분할 | heritage.go `refinedSubTaskSize` | guard 전 쓰기 정규화 시 seed1/2 퇴행 |
 | guardReturns를 heritage 밖에서 1회만 | coreaction.go ActionReturnRecovery | 출력 trial 수가 C++과 다름(actcmp로 확인) |
-| TypePartialUnion, Go typedef의 원형 링크 | unionresolve.go, typefactory.go | 부분 유니온, isOpIdentical |
 | 지역 스코프 자체 이름의 isNameUsed | printlanguage.go | `::` 한정은 호스트 질의만 반영 |
-| 호출 주변 스택 조각 INDIRECT의 mergeIndirect COPY | merge.go | private-sample [194] |
-| TypePartialUnion 부분 읽기, INDIRECT 기반 스택 힌트 | unionresolve.go, varmap_restructure.go | private-sample [173] |
 | 8바이트 long/longlong 코어 타입 슬롯 | typefactory.go `coreBaseName` | 이름별 인터닝 유지 |
-| heritage 조각(R8D) 생성 순서 -> 이름 대표/동적 심볼 | heritage.go | private-sample [193] |
+| Go typedef의 원형 링크 | typefactory.go | isOpIdentical |
+| 모델 규칙(<rule>) 미포팅 | paramlist.go assignMap | 함수 타입 프로토타입은 fallback 배정만 |
 
 ## 도구
 
