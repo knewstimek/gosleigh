@@ -470,9 +470,9 @@ func inferPropagateEdge(data *Funcdata, tf *TypeFactory, op *PcodeOp, invn, outv
 			return nil // Must propagate input <-> output
 		}
 		if invn.IsSpaceBase() {
-			// C++ turns a spacebase into a pointer-to-unknown here. Spacebase
-			// type propagation is not modelled in this slice (TODO).
-			return nil
+			// A spacebase passes on as a pointer to unknown.
+			// C++ parity: TypeOpCopy/TypeOpMulti::propagateType.
+			return tf.GetPointer(alttype.Size(), tf.GetBase(1, TYPE_UNKNOWN, ""), 1)
 		}
 		return alttype
 	case CPUI_INDIRECT:
@@ -486,7 +486,8 @@ func inferPropagateEdge(data *Funcdata, tf *TypeFactory, op *PcodeOp, invn, outv
 			return nil // Must propagate input <-> output
 		}
 		if invn.IsSpaceBase() {
-			return nil // spacebase pointer not modelled (TODO)
+			// C++ parity: TypeOpIndirect::propagateType.
+			return tf.GetPointer(alttype.Size(), tf.GetBase(1, TYPE_UNKNOWN, ""), 1)
 		}
 		return alttype
 	case CPUI_LOAD:
@@ -609,7 +610,8 @@ func inferPropagateAcrossCompare(tf *TypeFactory, invn, outvn *Varnode, inslot, 
 		return nil
 	}
 	if invn.IsSpaceBase() {
-		return nil // spacebase pointer not modelled (TODO)
+		// C++ parity: TypeOpEqual::propagateAcrossCompare.
+		return tf.GetPointer(alttype.Size(), tf.GetBase(1, TYPE_UNKNOWN, ""), 1)
 	}
 	if p, ok := alttype.(*Pointer); ok && p.IsPointerRel() && !outvn.IsConstant() {
 		// A pointer known to sit in the middle of a structure does not cross
