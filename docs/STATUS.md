@@ -13,7 +13,6 @@
 | x64 코퍼스 C++ 코어 대조 `rawcmp.py` | corpus 8/8, corpus2 13/13, x64_auto 109/109 | 같은 바이트를 C++ 하네스로 |
 
 측정: `realexe.py measure --work local/realexe/<name>` (표본 200, 위치 기준 짝짓기).
-캡처 부가파일은 `realexe.py capture`가 함께 만든다(기존 캡처는 `realexe.py names`).
 
 x64 게이트의 남은 불일치는 골든 JSON에 없는 환경 정보 때문이다: corpus2 `caller`(재배치된
 호출 대상 이름), `faverage`(전역 심볼 이름), `add_pt`(Java Program DB 스택 변수 이름),
