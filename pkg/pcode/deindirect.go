@@ -84,26 +84,47 @@ func (fd *Funcdata) assignCodeProtoStorage(proto *HostFunction) (*HostFunction, 
 	for i, p := range proto.Params {
 		types[i] = p.Type
 	}
-	addrs, ok := model.InputParams.assignMap(types)
+	var outType Datatype = sharedTypeFactory.GetVoid()
+	if out := proto.Output; out != nil && out.Type != nil {
+		outType = out.Type
+	}
+	pieces, ok := model.assignParameterStorage(outType, types)
 	if !ok {
 		return nil, false
 	}
-	hp.Params = make([]HostParam, len(proto.Params))
-	for i, p := range proto.Params {
-		p.Space, p.Offset = addrs[i].Space.Name, addrs[i].Offset
-		hp.Params[i] = p
+	// The pieces carry the assigned data-types (a pointer for a converted or
+	// hidden-return parameter); a hidden return pointer becomes the input
+	// "rethidden". C++ parity: FuncProto::decode (setInput loop).
+	hp.Params = make([]HostParam, 0, len(pieces)-1)
+	j := 0
+	for _, pc := range pieces[1:] {
+		var p HostParam
+		if pc.flags&pieceHiddenRetParm != 0 {
+			p = HostParam{Name: "rethidden"}
+		} else {
+			p = proto.Params[j]
+			j++
+		}
+		if pc.typ != p.Type {
+			p.Size = pc.typ.Size()
+		}
+		p.Type = pc.typ
+		p.Space, p.Offset = pc.addr.Space.Name, pc.addr.Offset
+		hp.Params = append(hp.Params, p)
 	}
 	if out := proto.Output; out != nil && out.Type != nil && out.Type.Metatype() != TYPE_VOID {
-		if model.OutputParams == nil {
-			return nil, false
+		if pieces[0].addr.Space == nil {
+			// No valid storage for the output: an unlocked void.
+			hp.Output, hp.OutputLocked = nil, false
+		} else {
+			o := *out
+			if pieces[0].typ != o.Type {
+				o.Size = pieces[0].typ.Size()
+			}
+			o.Type = pieces[0].typ
+			o.Space, o.Offset = pieces[0].addr.Space.Name, pieces[0].addr.Offset
+			hp.Output = &o
 		}
-		oaddr, ok := model.OutputParams.assignMap([]Datatype{out.Type})
-		if !ok {
-			return nil, false
-		}
-		o := *out
-		o.Space, o.Offset = oaddr[0].Space.Name, oaddr[0].Offset
-		hp.Output = &o
 	}
 	return &hp, true
 }

@@ -37,10 +37,11 @@ import (
 type typeClass int32
 
 const (
-	typeclassGeneral typeClass = 0   // TYPECLASS_GENERAL
-	typeclassFloat   typeClass = 1   // TYPECLASS_FLOAT
-	typeclassPtr     typeClass = 2   // TYPECLASS_PTR
-	typeclassClass4  typeClass = 103 // TYPECLASS_CLASS4 sentinel
+	typeclassGeneral   typeClass = 0   // TYPECLASS_GENERAL
+	typeclassFloat     typeClass = 1   // TYPECLASS_FLOAT
+	typeclassPtr       typeClass = 2   // TYPECLASS_PTR
+	typeclassHiddenret typeClass = 3   // TYPECLASS_HIDDENRET
+	typeclassClass4    typeClass = 103 // TYPECLASS_CLASS4 sentinel
 )
 
 // ParamEntry boolean property flags (subset of ParamEntry enum, fspec.hh:86-99).
@@ -391,6 +392,11 @@ type ParamListStandard struct {
 	entry         []*paramEntry
 	numgroup      int32
 	resourceStart []int32
+	// modelRules are the list's <rule>s (plus the pointermax rule).
+	// C++ parity: ParamListStandard::modelRules.
+	modelRules []modelRule
+	// pointerSize is the size of a pointer a rule converts a parameter to.
+	pointerSize int32
 }
 
 // metatypeTypeClass is the storage class a data-type of metatype m draws on.
@@ -431,23 +437,6 @@ func (pl *ParamListStandard) assignAddressFallback(resource typeClass, tp Dataty
 		return addr, true
 	}
 	return address.Address{}, false
-}
-
-// assignMap assigns storage to each input type in order.
-// C++ parity: ParamListStandard::assignMap (no hidden return parameter).
-// Known mismatch: model rules (<rule>) are not ported, so only the
-// fallback assignment runs.
-func (pl *ParamListStandard) assignMap(intypes []Datatype) ([]address.Address, bool) {
-	status := make([]int32, pl.numgroup)
-	res := make([]address.Address, 0, len(intypes))
-	for _, dt := range intypes {
-		addr, ok := pl.assignAddressFallback(metatypeTypeClass(dt.Metatype()), dt, status)
-		if !ok {
-			return nil, false // ParamUnassignedError
-		}
-		res = append(res, addr)
-	}
-	return res, true
 }
 
 // ParamEntrySpec is the resolved description of one <pentry> that the caller

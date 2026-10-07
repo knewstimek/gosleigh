@@ -934,11 +934,17 @@ func buildModel(engine *sla.Engine, cspec *pcode.CspecData, fd *pcode.Funcdata, 
 		// (ActionInputPrototype) so stack parameters that only materialize after
 		// ActionSpacebase are still recovered. Requires model.StackSpace so the
 		// stack <pentry> resolves; built here after StackSpace is set.
+		ptrSize := int32(cspec.PointerSize())
 		if specs := buildInputPentrySpecs(xr, cspec, model, fd); len(specs) > 0 {
-			model.SetInputParams(pcode.NewParamListStandard(specs))
+			pl := pcode.NewParamListStandard(specs)
+			in := cspec.DefaultProto.Input
+			pl.SetModelRules(pcode.RuleSpecs(in.Rules), in.PointerMax, ptrSize)
+			model.SetInputParams(pl)
 		}
 		if specs := buildOutputPentrySpecs(xr, cspec, fd); len(specs) > 0 {
-			model.SetOutputParams(pcode.NewParamListStandard(specs))
+			pl := pcode.NewParamListStandard(specs)
+			pl.SetModelRules(pcode.RuleSpecs(cspec.DefaultProto.Output.Rules), 0, ptrSize)
+			model.SetOutputParams(pl)
 		}
 	}
 	// Entry-point functions use the stack-based processEntry convention: register

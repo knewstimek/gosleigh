@@ -73,13 +73,54 @@ type CspecGroup struct {
 // CspecInput holds the <input> block of a prototype.
 // Groups are flattened into Pentries during XML unmarshalling.
 type CspecInput struct {
-	Pentries []CspecPentry `xml:"pentry"`
-	Groups   []CspecGroup  `xml:"group"`
+	Pentries   []CspecPentry `xml:"pentry"`
+	Groups     []CspecGroup  `xml:"group"`
+	PointerMax int32         `xml:"pointermax,attr"`
+	Rules      []CspecRule   `xml:"rule"`
+}
+
+// CspecRule is a <rule> of a parameter list: a <datatype> filter followed by
+// the action. C++ parity: ModelRule::decode.
+type CspecRule struct {
+	Datatype struct {
+		Name    string `xml:"name,attr"`
+		MinSize int32  `xml:"minsize,attr"`
+		MaxSize int32  `xml:"maxsize,attr"`
+		Sizes   string `xml:"sizes,attr"`
+	} `xml:"datatype"`
+	ConvertToPtr *struct{} `xml:"convert_to_ptr"`
+	HiddenReturn *struct {
+		VoidLock string `xml:"voidlock,attr"`
+		Strategy string `xml:"strategy,attr"`
+	} `xml:"hidden_return"`
+	Other []struct {
+		XMLName xml.Name
+	} `xml:",any"`
+}
+
+// RuleSpecs converts the decoded rules for ParamListStandard.SetModelRules.
+func RuleSpecs(rules []CspecRule) []CspecRuleSpec {
+	var res []CspecRuleSpec
+	for _, r := range rules {
+		rs := CspecRuleSpec{TypeName: r.Datatype.Name, MinSize: r.Datatype.MinSize, MaxSize: r.Datatype.MaxSize, Sizes: r.Datatype.Sizes}
+		rs.ConvertToPtr = r.ConvertToPtr != nil
+		if h := r.HiddenReturn; h != nil {
+			rs.HiddenReturn = true
+			rs.VoidLock = h.VoidLock == "true"
+			rs.Strategy = h.Strategy
+		}
+		if len(r.Other) > 0 {
+			rs.Unsupported = r.Other[0].XMLName.Local
+		}
+		res = append(res, rs)
+	}
+	return res
 }
 
 // CspecOutput holds the <output> block of a prototype.
 type CspecOutput struct {
 	Pentries []CspecPentry `xml:"pentry"`
+	Rules    []CspecRule   `xml:"rule"`
 	// KilledByCall marks every register output entry as killed by a call.
 	// C++ parity: ParamListStandard autoKilledByCall (ATTRIB_KILLEDBYCALL).
 	KilledByCall bool `xml:"killedbycall,attr"`
