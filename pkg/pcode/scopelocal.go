@@ -445,8 +445,16 @@ func (sl *ScopeLocal) BuildFromVarnodes(varnodes []*Varnode, fp *FuncProto) {
 		}
 		hv.SetName(name)
 		claimedHigh[hv] = true
+		// All instances of a variable have one size: a piece at the same
+		// offset (local_8._0_1_) stays its own variable.
+		var size int32
+		if insts := hv.Instances(); len(insts) > 0 {
+			size = insts[0].Size()
+		} else if len(g.varnodes) > 0 {
+			size = g.varnodes[0].Size()
+		}
 		for _, vn := range g.varnodes {
-			if vn.High() != hv {
+			if vn.High() != hv && vn.Size() == size {
 				hv.AddInstance(vn)
 			}
 			sl.localByVn[vn] = hv
