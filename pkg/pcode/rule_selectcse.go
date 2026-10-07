@@ -44,9 +44,6 @@ type cseEntry struct {
 // isHeritaged reports whether vn's storage has been through heritage.
 // C++ parity: Funcdata::isHeritaged.
 func (fd *Funcdata) isHeritaged(vn *Varnode) bool {
-	if vn.Space() != nil && vn.Space().IsUnique() {
-		return true
-	}
 	h := fd.heritage
 	return h != nil && h.globalDisjoint.FindPass(vn.Addr()) >= 0
 }
