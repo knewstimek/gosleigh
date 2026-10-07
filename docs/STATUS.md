@@ -7,7 +7,7 @@
 | 측정 | 결과 | 비고 |
 |---|---|---|
 | realexe private-sample seed1 (x86-32) | 200/200 | 골든 재생성(프로그램 옵션, readonly on) |
-| realexe private-sample seed2 (보지 않은 표본) | 195/200 | 일반화 지표 |
+| realexe private-sample seed2 (보지 않은 표본) | 196/200 | 일반화 지표 |
 | realexe private-sample (x64 UE4) | 191/200, sim 0.996 | ENGINE-ERR 0, TIMEOUT 0 |
 | 게이트 `tools/gates.py` | 전부 유지 | tree 10/10, corpus2 10/13, x64_auto 108/109 |
 
