@@ -2779,6 +2779,10 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 	if op.IsMarker() {
 		return nil
 	}
+	// The statement's op is the reader of its inputs (a value that resolves
+	// per use reads through it). C++ parity: PrintC::emitStatement -> op->push.
+	s.opStack = append(s.opStack, op)
+	defer func() { s.opStack = s.opStack[:len(s.opStack)-1] }()
 	switch op.Code() {
 	case CPUI_STORE:
 		lhsFrag, err := s.renderStoreLHSFrag(storePointer(op))

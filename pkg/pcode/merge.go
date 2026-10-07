@@ -668,45 +668,22 @@ func (m *Merge) TrimOpInput(op *PcodeOp, slot int) {
 		return
 	}
 	if op.Code() == CPUI_MULTIEQUAL {
-		pred := op.Parent().InEdge(slot).Point
-		bb, ok := pred.Concrete().(*BlockBasic)
+		bb, ok := op.Parent().InEdge(slot).Point.Concrete().(*BlockBasic)
 		if !ok || bb == nil {
 			return
 		}
-		var addr = op.Addr()
+		addr := op.Addr()
 		if last := bb.LastOp(); last != nil {
 			addr = last.Addr()
 		}
-		copyOp := m.fd.NewOp(1, addr)
-		m.fd.OpSetOpcode(copyOp, CPUI_COPY)
-		if dt := vn.Type(); dt != nil {
-			SetVarnodeType(m.fd.NewUniqueOut(vn.Size(), copyOp), dt)
-		} else {
-			m.fd.NewUniqueOut(vn.Size(), copyOp)
-		}
-		m.fd.OpSetInput(copyOp, vn, 0)
-		// Assign a HighVariable to the new unique output so merge Phase 3 can find it.
-		trimHigh := NewHighVariable("")
-		trimHigh.AddInstance(copyOp.Output())
-		// Wire the new unique output as the MULTIEQUAL input.
+		copyOp := m.allocateCopyTrim(vn, addr, op)
 		m.fd.OpSetInput(op, copyOp.Output(), slot)
 		m.fd.OpInsertEnd(copyOp, bb)
-		m.copyTrims = append(m.copyTrims, copyOp) // C++ allocateCopyTrim records it
-	} else {
-		copyOp := m.fd.NewOp(1, op.Addr())
-		m.fd.OpSetOpcode(copyOp, CPUI_COPY)
-		if dt := vn.Type(); dt != nil {
-			SetVarnodeType(m.fd.NewUniqueOut(vn.Size(), copyOp), dt)
-		} else {
-			m.fd.NewUniqueOut(vn.Size(), copyOp)
-		}
-		m.fd.OpSetInput(copyOp, vn, 0)
-		trimHigh := NewHighVariable("")
-		trimHigh.AddInstance(copyOp.Output())
-		m.fd.OpSetInput(op, copyOp.Output(), slot)
-		m.fd.OpInsertBefore(copyOp, op)
-		m.copyTrims = append(m.copyTrims, copyOp)
+		return
 	}
+	copyOp := m.allocateCopyTrim(vn, op.Addr(), op)
+	m.fd.OpSetInput(op, copyOp.Output(), slot)
+	m.fd.OpInsertBefore(copyOp, op)
 }
 
 // TrimOpOutput inserts a COPY immediately after op to separate the long-lived output
@@ -737,6 +714,10 @@ func (m *Merge) TrimOpOutput(op *PcodeOp) {
 	// Create the COPY op that carries the original output forward.
 	copyOp := m.fd.NewOp(1, op.Addr())
 	m.fd.OpSetOpcode(copyOp, CPUI_COPY)
+	if ct := vn.Type(); ct != nil && ct.NeedsResolution() {
+		fieldNum := m.fd.inheritResolution(ct, copyOp, -1, op, -1)
+		m.fd.forceFacingType(ct, fieldNum, copyOp, 0)
+	}
 
 	// Reassign outputs:
 	//   op    -> uniq (tiny cover, immediately consumed by copyOp)
@@ -942,7 +923,10 @@ func (m *Merge) mergeIndirect(indop *PcodeOp) {
 			return
 		}
 	}
-	newop := m.allocateCopyTrim(invn0, indop.Addr())
+	newop := m.allocateCopyTrim(invn0, indop.Addr(), indop)
+	if e := outvn.GetSymbolEntry(); e != nil && e.Symbol() != nil && e.Symbol().Type() != nil && e.Symbol().Type().NeedsResolution() {
+		m.fd.inheritResolution(e.Symbol().Type(), newop, -1, indop, -1)
+	}
 	m.fd.OpSetInput(indop, newop.Output(), 0)
 	m.fd.OpInsertBefore(newop, indop)
 	if !mergeTestRequired(outvn.High(), newop.Output().High()) || !m.mergePair(newop.Output().High(), outvn.High()) {
@@ -984,7 +968,7 @@ func (m *Merge) snipOutputInterference(indop *PcodeOp) bool {
 	// Every collected read is an instance of the one output variable, so a
 	// single COPY (placed before the first reader) serves them all.
 	first := correctable[0]
-	snip := m.allocateCopyTrim(first.op.Input(first.slot), first.op.Addr())
+	snip := m.allocateCopyTrim(first.op.Input(first.slot), first.op.Addr(), first.op)
 	m.fd.OpInsertBefore(snip, first.op)
 	for _, c := range correctable {
 		m.fd.OpSetInput(c.op, snip.Output(), c.slot)
@@ -1395,9 +1379,21 @@ func (m *Merge) HideShadows(high *HighVariable) bool {
 // A COPY is allocated with the given input, placed at addr, and recorded in copyTrims.
 // The COPY output is a fresh unique Varnode that gets its own HighVariable.
 // C++ parity: merge.cc Merge::allocateCopyTrim (lines 411-434)
-func (m *Merge) allocateCopyTrim(inVn *Varnode, addr address.Address) *PcodeOp {
+func (m *Merge) allocateCopyTrim(inVn *Varnode, addr address.Address, trimOp *PcodeOp) *PcodeOp {
 	copyOp := m.fd.NewOp(1, addr)
 	m.fd.OpSetOpcode(copyOp, CPUI_COPY)
+	// The COPY reads inVn the way it was read (or written) before the trim.
+	if ct := inVn.Type(); ct != nil && ct.NeedsResolution() {
+		fieldNum := -1
+		if inVn.IsWritten() {
+			fieldNum = m.fd.inheritResolution(ct, copyOp, -1, inVn.Def(), -1)
+		} else if trimOp != nil {
+			if res := m.fd.getUnionField(ct, trimOp, trimOp.GetSlot(inVn)); res != nil {
+				fieldNum = res.fieldNum
+			}
+		}
+		m.fd.forceFacingType(ct, fieldNum, copyOp, 0)
+	}
 	outVn := m.fd.NewUniqueOut(inVn.Size(), copyOp)
 	if dt := inVn.Type(); dt != nil {
 		SetVarnodeType(outVn, dt)
@@ -1477,7 +1473,11 @@ func (m *Merge) snipReads(vn *Varnode, markedOps []*PcodeOp) {
 		}
 	}
 
-	copyOp := m.allocateCopyTrim(vn, pc)
+	var trimOp *PcodeOp
+	if len(markedOps) > 0 {
+		trimOp = markedOps[0]
+	}
+	copyOp := m.allocateCopyTrim(vn, pc, trimOp)
 	if afterop == nil {
 		m.fd.OpInsertBegin(copyOp, bl)
 	} else {
