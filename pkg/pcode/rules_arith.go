@@ -579,43 +579,21 @@ func evaluateBinaryConst(opc OpCode, a, b uint64, size int32) uint64 {
 	}
 }
 
-// RuleSubRight carries two independent bodies under one registration:
-//
-//   - CPUI_SUBPIECE: the true C++ RuleSubRight (ruleaction.cc:7265-7331), which
-//     rewrites a non-least-significant SUBPIECE into a right shift feeding a
-//     least-significant SUBPIECE.
-//   - CPUI_INT_SUB: a pre-existing local algebraic simplification (x-x -> 0,
-//     x-(-y) -> x+y) that has no C++ rule of this name. It is kept here so the
-//     single actcleanup registration slot (action.go, mirroring
-//     coreaction.cc:5711) does not have to change.
+// RuleSubRight rewrites a non-least-significant SUBPIECE into a right shift
+// feeding a least-significant SUBPIECE. C++ parity: RuleSubRight.
 type RuleSubRight struct{ batchRule }
 
 func NewRuleSubRight(group string) *RuleSubRight {
 	r := &RuleSubRight{}
-	opcodes := []OpCode{CPUI_SUBPIECE, CPUI_INT_SUB}
+	opcodes := []OpCode{CPUI_SUBPIECE}
 	r.batchRule = newBatchRule(group, "subright", opcodes, r.apply, func(g string) Rule { return NewRuleSubRight(g) })
 	return r
 }
 
 func (r *RuleSubRight) apply(op *PcodeOp, data *Funcdata) int {
-	if op.Code() == CPUI_SUBPIECE {
-		return r.applySubpieceRight(op, data)
-	}
-	return r.applyIntSub(op, data)
+	return r.applySubpieceRight(op, data)
 }
 
-// applyIntSub: local INT_SUB simplification, no C++ counterpart. See the type
-// comment above.
-func (r *RuleSubRight) applyIntSub(op *PcodeOp, data *Funcdata) int {
-	if sameValue(op.Input(0), op.Input(1)) {
-		return rewriteToConst(data, op, 0)
-	}
-	if neg := definedBy(op.Input(1), CPUI_INT_2COMP); neg != nil {
-		rewriteOp(data, op, CPUI_INT_ADD, op.Input(0), neg.Input(0))
-		return 1
-	}
-	return 0
-}
 
 // applySubpieceRight is the Go port of C++ RuleSubRight::applyOp
 // (ruleaction.cc:7271-7331). A SUBPIECE reading above the least significant

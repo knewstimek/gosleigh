@@ -29,16 +29,6 @@ func boolFlipOpcode(opc OpCode) (OpCode, bool, bool) {
 	}
 }
 
-func isNegatedBoolPair(a *Varnode, b *Varnode) bool {
-	if neg := definedBy(a, CPUI_BOOL_NEGATE); neg != nil && sameValue(neg.Input(0), b) {
-		return true
-	}
-	if neg := definedBy(b, CPUI_BOOL_NEGATE); neg != nil && sameValue(neg.Input(0), a) {
-		return true
-	}
-	return false
-}
-
 type RuleTrivialBool struct{ batchRule }
 
 func NewRuleTrivialBool(group string) *RuleTrivialBool {
@@ -210,18 +200,103 @@ type RuleBooleanDedup struct{ batchRule }
 
 func NewRuleBooleanDedup(group string) *RuleBooleanDedup {
 	r := &RuleBooleanDedup{}
-	r.batchRule = newBatchRule(group, "booleandedup", []OpCode{CPUI_BOOL_AND, CPUI_BOOL_OR, CPUI_BOOL_XOR}, r.apply, func(g string) Rule { return NewRuleBooleanDedup(g) })
+	r.batchRule = newBatchRule(group, "booleandedup", []OpCode{CPUI_BOOL_AND, CPUI_BOOL_OR}, r.apply, func(g string) Rule { return NewRuleBooleanDedup(g) })
 	return r
 }
 
+// apply removes a clause shared by both sides of a boolean expression:
+// (A && B) || (A && C) => A && (B || C), (A || B) && (A || C) =>
+// A || (B && C), (A || B) || (!A && C) => A || (B || C), and the same-op
+// forms; a complementary clause under the same op makes the whole value
+// constant. C++ parity: RuleBooleanDedup::applyOp.
 func (r *RuleBooleanDedup) apply(op *PcodeOp, data *Funcdata) int {
-	if !isNegatedBoolPair(op.Input(0), op.Input(1)) {
+	vn0, vn1 := op.Input(0), op.Input(1)
+	if !vn0.IsWritten() || !vn1.IsWritten() {
 		return 0
 	}
-	if op.Code() == CPUI_BOOL_AND {
-		return rewriteToConst(data, op, 0)
+	op0, op1 := vn0.Def(), vn1.Def()
+	opc0, opc1 := op0.Code(), op1.Code()
+	if (opc0 != CPUI_BOOL_AND && opc0 != CPUI_BOOL_OR) || (opc1 != CPUI_BOOL_AND && opc1 != CPUI_BOOL_OR) {
+		return 0
 	}
-	return rewriteToConst(data, op, 1)
+	ins := [4]*Varnode{op0.Input(0), op0.Input(1), op1.Input(0), op1.Input(1)}
+	for _, vn := range ins {
+		if vn.IsFree() {
+			return 0
+		}
+	}
+	isMatch := func(a, b *Varnode) (bool, bool) {
+		switch BoolEvaluate(a, b, 1) {
+		case BoolMatchSame:
+			return true, false
+		case BoolMatchComplementary:
+			return true, true
+		}
+		return false, false
+	}
+	var leftA, rightA, leftO, rightO *Varnode
+	isflipped := false
+	pairs := [4][4]int{{0, 2, 1, 3}, {0, 3, 1, 2}, {1, 2, 0, 3}, {1, 3, 0, 2}}
+	found := false
+	for _, pr := range pairs {
+		if ok, flip := isMatch(ins[pr[0]], ins[pr[1]]); ok {
+			leftA, rightA, leftO, rightO = ins[pr[0]], ins[pr[1]], ins[pr[2]], ins[pr[3]]
+			isflipped, found = flip, true
+			break
+		}
+	}
+	if !found {
+		return 0
+	}
+	centralOpc := op.Code()
+	var bcOpc, finalOpc OpCode
+	var finalA *Varnode
+	if isflipped {
+		switch {
+		case centralOpc == CPUI_BOOL_AND && opc0 == CPUI_BOOL_AND && opc1 == CPUI_BOOL_AND:
+			// (A && B) && (!A && C): the whole expression is false
+			data.OpSetOpcode(op, CPUI_COPY)
+			data.OpRemoveInput(op, 1)
+			data.OpSetInput(op, data.NewConstant(1, 0), 0)
+			return 1
+		case centralOpc == CPUI_BOOL_OR && opc0 == CPUI_BOOL_OR && opc1 == CPUI_BOOL_OR:
+			// (A || B) || (!A || C): the whole expression is true
+			data.OpSetOpcode(op, CPUI_COPY)
+			data.OpRemoveInput(op, 1)
+			data.OpSetInput(op, data.NewConstant(1, 1), 0)
+			return 1
+		case centralOpc == CPUI_BOOL_OR && opc0 != opc1:
+			// (A || B) || (!A && C)
+			finalA = rightA
+			if opc0 == CPUI_BOOL_OR {
+				finalA = leftA
+			}
+			finalOpc, bcOpc = CPUI_BOOL_OR, CPUI_BOOL_OR
+		default:
+			return 0
+		}
+	} else {
+		switch {
+		case centralOpc == opc0 && centralOpc == opc1:
+			// (A && B) && (A && C) or (A || B) || (A || C)
+			finalA, finalOpc, bcOpc = leftA, centralOpc, centralOpc
+		case opc0 == opc1 && centralOpc != opc0:
+			// (A && B) || (A && C) or (A || B) && (A || C)
+			finalA, finalOpc, bcOpc = leftA, opc0, centralOpc
+		default:
+			return 0
+		}
+	}
+	bcOp := data.NewOp(2, op.Addr())
+	tmp := data.NewUniqueOut(1, bcOp)
+	data.OpSetOpcode(bcOp, bcOpc)
+	data.OpSetInput(bcOp, leftO, 0)
+	data.OpSetInput(bcOp, rightO, 1)
+	data.OpInsertBefore(bcOp, op)
+	data.OpSetOpcode(op, finalOpc)
+	data.OpSetInput(op, finalA, 0)
+	data.OpSetInput(op, tmp, 1)
+	return 1
 }
 
 type RuleLogic2Bool struct{ batchRule }
