@@ -1439,7 +1439,14 @@ func (c *CollapseStructure) checkSwitchSkips(switchbl, exitblock *FlowBlock) boo
 			defaultNotToExit = true
 		}
 	}
-	if !anySkipToExit || !defaultNotToExit {
+	if !anySkipToExit {
+		return true
+	}
+	// A default edge already made a goto counts as not going to the exit.
+	if !defaultNotToExit && switchbl.Type() == BlockMultiGotoType && getBlockStructInfo(switchbl).defaultGoto {
+		defaultNotToExit = true
+	}
+	if !defaultNotToExit {
 		return true
 	}
 	for i := 0; i < switchbl.SizeOut(); i++ {

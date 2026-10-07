@@ -100,6 +100,13 @@ func (fc *FuncCallSpecs) applyHostLocks(data *Funcdata, hp *HostFunction) {
 		if hp.Output.Type != nil && hp.Output.Type.Metatype() == TYPE_VOID {
 			fc.lockedOut = &ProtoSlot{Type: hp.Output.Type}
 			fc.SetOutputLock(true)
+		} else if len(hp.Output.JoinPieces) > 1 {
+			// Join storage (EDX:EAX) resolves to its join-space record.
+			// C++ parity: AddrSpaceManager::findAddJoin (Address::decode).
+			if addr, size, ok := data.hostJoinAddress(hp.Output.JoinPieces); ok {
+				fc.lockedOut = &ProtoSlot{Addr: addr, Size: size, Type: hp.Output.Type, Name: hp.Output.Name}
+				fc.SetOutputLock(true)
+			}
 		} else if s, ok := data.resolveHostParam(*hp.Output); ok {
 			fc.lockedOut = &s
 			fc.SetOutputLock(true)
