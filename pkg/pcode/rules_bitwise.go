@@ -197,15 +197,79 @@ type RuleShiftBitops struct{ batchRule }
 
 func NewRuleShiftBitops(group string) *RuleShiftBitops {
 	r := &RuleShiftBitops{}
-	r.batchRule = newBatchRule(group, "shiftbitops", []OpCode{CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT}, r.apply, func(g string) Rule { return NewRuleShiftBitops(g) })
+	r.batchRule = newBatchRule(group, "shiftbitops", []OpCode{CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_SUBPIECE, CPUI_INT_MULT}, r.apply, func(g string) Rule { return NewRuleShiftBitops(g) })
 	return r
 }
 
+// apply drops an input of a bitwise op whose bits a following shift (or
+// truncation, or multiply by a power of two) pushes out entirely:
+// (V & 0xf000) << 4 => #0 << 4, (V + 0xf000) << 4 => V << 4.
+// A shift by zero is RuleTrivialShift's.
+// C++ parity: RuleShiftBitops::applyOp.
 func (r *RuleShiftBitops) apply(op *PcodeOp, data *Funcdata) int {
-	if isZeroConst(op.Input(1)) {
-		return rewriteToCopy(data, op, op.Input(0))
+	constvn := op.Input(1)
+	if !constvn.IsConstant() {
+		return 0 // Must be a constant shift
 	}
-	return 0
+	vn := op.Input(0)
+	if !vn.IsWritten() || vn.Size() > 8 {
+		return 0
+	}
+	var sa uint64
+	leftshift := false
+	switch op.Code() {
+	case CPUI_INT_LEFT:
+		sa, leftshift = constvn.Offset(), true
+	case CPUI_INT_RIGHT:
+		sa = constvn.Offset()
+	case CPUI_SUBPIECE:
+		sa = constvn.Offset() * 8
+	case CPUI_INT_MULT:
+		bit := leastSigBitSet(constvn.Offset())
+		if bit == -1 {
+			return 0
+		}
+		sa, leftshift = uint64(bit), true
+	default:
+		return 0
+	}
+	bitop := vn.Def()
+	switch bitop.Code() {
+	case CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR:
+	case CPUI_INT_MULT, CPUI_INT_ADD:
+		if !leftshift {
+			return 0
+		}
+	default:
+		return 0
+	}
+	mask := maskForSize(op.Output().Size())
+	i := 0
+	for ; i < bitop.NumInput(); i++ {
+		nzm := bitop.Input(i).NZMask()
+		if leftshift {
+			nzm = pcodeLeft(nzm, sa)
+		} else {
+			nzm = pcodeRight(nzm, sa)
+		}
+		if nzm&mask == 0 {
+			break
+		}
+	}
+	if i == bitop.NumInput() {
+		return 0
+	}
+	switch bitop.Code() {
+	case CPUI_INT_MULT, CPUI_INT_AND:
+		data.OpSetInput(op, data.NewConstant(vn.Size(), 0), 0) // Result will be zero
+	case CPUI_INT_ADD, CPUI_INT_XOR, CPUI_INT_OR:
+		other := bitop.Input(1 - i)
+		if !other.IsHeritageKnown() {
+			return 0
+		}
+		data.OpSetInput(op, other, 0)
+	}
+	return 1
 }
 
 type RuleRightShiftAnd struct{ batchRule }
