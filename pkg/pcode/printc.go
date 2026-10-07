@@ -4270,6 +4270,9 @@ func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode, valueon bo
 			entry = sl.QueryContainer(probe, 1, address.Address{})
 		}
 	}
+	if entry != nil && entry.Symbol() != nil && entry.Symbol().linkedByName {
+		entry = nil // C++ links references before ActionNameVars adds Symbols
+	}
 	if entry == nil || entry.Symbol() == nil {
 		// A location with no symbol (e.g. a saved-register slot the scope
 		// does not map) prints as its raw address: "&stack0xfffffffc".

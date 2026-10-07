@@ -159,7 +159,7 @@ func coreBaseName(size int32, meta metatype, name string) (string, bool) {
 	case TYPE_INT:
 		switch size {
 		case 2:
-			names = []string{"short"}
+			names = []string{"short", "int"}
 		case 4:
 			names = []string{"int"}
 		case 8:
@@ -168,9 +168,9 @@ func coreBaseName(size int32, meta metatype, name string) (string, bool) {
 	case TYPE_UINT:
 		switch size {
 		case 1:
-			names = []string{"byte"}
+			names = []string{"byte", "uint"}
 		case 2:
-			names = []string{"ushort"}
+			names = []string{"ushort", "uint"}
 		case 4:
 			names = []string{"uint"}
 		case 8:

@@ -2285,11 +2285,12 @@ func (fd *Funcdata) ClearJumpTables() {
 // C++ parity: Architecture glb->types / glb->userops (userop.hh, architecture.hh)
 // ---------------------------------------------------------------------------
 
-// TypeFactory returns the lazily-constructed type factory for this function.
-// C++ parity: Funcdata::glb->types.
+// TypeFactory returns the type factory for this function: the architecture's
+// one factory, so a data-type built here is identical to the same data-type
+// built anywhere else. C++ parity: Funcdata::glb->types.
 func (fd *Funcdata) TypeFactory() *TypeFactory {
 	if fd.typeFactory == nil {
-		fd.typeFactory = NewTypeFactory()
+		return sharedTypeFactory
 	}
 	return fd.typeFactory
 }

@@ -552,6 +552,18 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 					a.count++
 					continue
 				}
+				// A stack variable no Symbol covers gets a new local Symbol
+				// of its own type, named from its storage.
+				// C++ parity: Funcdata::linkSymbol (localmap->addSymbol) ->
+				// Scope::buildDefaultName -> ScopeLocal::buildVariableName.
+				if nr.Space() == sl.SpaceID() && nr.IsAddrTied() && !nr.IsPersist() {
+					name := makeNameUnique(sl.addrTiedLinkName(nr.Addr(), c.hv.Type()), used)
+					used[name] = true
+					sl.AddSymbol(name, c.hv.Type(), nr.Addr(), nr.Size()).Symbol().linkedByName = true
+					c.hv.SetName(name)
+					a.count++
+					continue
+				}
 			}
 		}
 		// A variable passed to a locked callee parameter inherits its name.

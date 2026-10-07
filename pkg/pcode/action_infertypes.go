@@ -775,7 +775,7 @@ func pointerDownChain(tf *TypeFactory, p *Pointer, off *int64, par **Pointer, pa
 	}
 	ptrtoSize := int64(ptrto.AlignSize())
 	if *off < 0 || *off >= ptrtoSize {
-		if ptrtoSize != 0 {
+		if ptrtoSize != 0 && !isVariableLength(ptrto) {
 			if !allowArrayWrap {
 				return nil
 			}
@@ -811,11 +811,35 @@ func pointerDownChain(tf *TypeFactory, p *Pointer, off *int64, par **Pointer, pa
 	return tf.GetPointer(p.Size(), pt, p.WordSize())
 }
 
+// isVariableLength reports a data-type that other data-types of the same name
+// may share at different lengths; such a type is never wrapped as an array
+// element. Only a function with a prototype is modelled.
+// C++ parity: Datatype::isVariableLength (TypeCode::setPrototype).
+func isVariableLength(dt Datatype) bool {
+	switch t := dt.(type) {
+	case *Code:
+		return t.HasPrototype()
+	case *Base:
+		// A host function type is a TYPE_CODE base with its prototype kept
+		// by the factory.
+		return t.Metatype() == TYPE_CODE && sharedTypeFactory.codeProto(t) != nil
+	}
+	return false
+}
+
 // datatypeSubType is the data-type one level down at byte offset off and the
 // offset remaining within it, or nil.
 // C++ parity: Datatype/TypeArray/TypeStruct::getSubType.
 func datatypeSubType(dt Datatype, off int64) (Datatype, int64) {
 	switch t := dt.(type) {
+	case *Code, *Base:
+		// Any byte of a function is a code byte unattached to the prototype.
+		// C++ parity: TypeCode::getSubType (only a TypeCode with a prototype
+		// has its factory set).
+		if !isVariableLength(t) {
+			return nil, off
+		}
+		return sharedTypeFactory.GetCode("code", nil, nil, false), 0
 	case *PartialStruct:
 		// C++ parity: TypePartialStruct::getSubType.
 		sizeLeft := int64(t.Size()) - off

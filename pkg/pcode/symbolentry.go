@@ -42,6 +42,10 @@ type Symbol struct {
 	category  int
 	catIndex  int
 	symbolId  uint64
+	// linkedByName marks a Symbol ActionNameVars created for a variable no
+	// Symbol covered. Spacebase references were linked before it existed.
+	// C++ parity: ActionNameVars::linkSymbols (constant-space loop first).
+	linkedByName bool
 
 	// mapEntry is the list of storage locations that resolve to this symbol.
 	// C++ parity: Symbol::mapentry (list<list<SymbolEntry>::iterator>).
