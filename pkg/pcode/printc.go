@@ -3868,7 +3868,13 @@ func (s *printCState) nullPtrCastStr(op *PcodeOp) (castStr string, constIdx int)
 		// the other side prints as (its CAST's output type when cast).
 		// C++ parity: ActionSetCasts types the constant with the required
 		// input type; PrintC::pushConstant prints (T *)0x0 from it.
-		ptrDt := ptrVn.TypeDefFacing()
+		// A constant already typed as a pointer keeps its own type: a cast
+		// between typedef-equivalent pointers (CHAR * vs char *) is not
+		// needed, so castInput leaves it alone.
+		ptrDt := cstVn.TypeReadFacing(nil)
+		if _, isPtr := ptrDt.(*Pointer); !isPtr {
+			ptrDt = ptrVn.TypeDefFacing()
+		}
 		if _, isPtr := ptrDt.(*Pointer); !isPtr {
 			ptrDt = ptrVn.TypeReadFacing(nil)
 			if _, isPtr := ptrDt.(*Pointer); !isPtr {
