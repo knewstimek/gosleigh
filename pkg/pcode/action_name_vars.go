@@ -350,13 +350,31 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 		}
 	}
 
-	// Visit the variables in creation order, as C++ walks its HighVariable
-	// keyed maps (recmap renames in that order).
 	cands := make([]*hvCandidate, 0, len(hvMap))
 	for _, c := range hvMap {
 		cands = append(cands, c)
 	}
-	sort.Slice(cands, func(i, j int) bool { return cands[i].hv.serial < cands[j].hv.serial })
+	// Names are handed out walking the variables by name representative in
+	// location order (the namerec list linkSymbols builds); a variable
+	// without one keeps its creation order behind them.
+	// C++ parity: ActionNameVars::lookForFuncParamNames (varlist order).
+	repOf := make(map[*HighVariable]*Varnode, len(cands))
+	for _, c := range cands {
+		repOf[c.hv] = highNameRepresentative(c.hv)
+	}
+	sort.SliceStable(cands, func(i, j int) bool {
+		a, b := repOf[cands[i].hv], repOf[cands[j].hv]
+		if a == nil || b == nil {
+			if (a == nil) != (b == nil) {
+				return b == nil
+			}
+			return cands[i].hv.serial < cands[j].hv.serial
+		}
+		if c := CompareLocDef(a, b); c != 0 {
+			return c < 0
+		}
+		return cands[i].hv.serial < cands[j].hv.serial
+	})
 	var toName []hvEntry
 	for _, c := range cands {
 		rep := c.bestVn
