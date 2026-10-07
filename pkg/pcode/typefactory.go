@@ -343,7 +343,10 @@ func (f *TypeFactory) GetPartialEnum(parent *Enum, offset int64, size int32) *En
 	if v, ok := f.intern[key].(*Enum); ok {
 		return v
 	}
-	base := newDatatypeBase(size, 1, TYPE_PARTIALENUM, stripped.Name())
+	// The sub-metatype marks the piece; the metatype is TYPE_UINT, as for
+	// every enumeration not built signed. C++ parity: TypePartialEnum ->
+	// TypeEnum(sz, TYPE_PARTIALENUM) (metatype = TYPE_UINT).
+	base := newDatatypeBase(size, 1, TYPE_UINT, stripped.Name())
 	base.submeta = subMetaForMetatype(TYPE_PARTIALENUM)
 	base.flags |= datatypeEnumType
 	v := &Enum{datatypeBase: base, parent: parent, offset: offset, stripped: stripped}
