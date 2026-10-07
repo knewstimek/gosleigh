@@ -177,11 +177,8 @@ func (b *FlowBlock) setGotoBranch(i int) {
 	b.SetOutEdgeFlag(i, EdgeFlagGoto)
 	b.SetFlag(BlockFlagGotoGoto)
 	if i >= 0 && i < b.SizeOut() {
-		tgt := b.getOut(i)
-		if tgt.Parent() == b.Parent() {
-			b.SetFlag(BlockFlagInteriorGotoOut)
-			tgt.SetFlag(BlockFlagInteriorGotoIn)
-		}
+		b.SetFlag(BlockFlagInteriorGotoOut)
+		b.getOut(i).SetFlag(BlockFlagInteriorGotoIn)
 	}
 }
 
@@ -214,16 +211,10 @@ func (b *FlowBlock) isSwitchOut() bool {
 	return b.HasFlag(BlockFlagSwitchOut)
 }
 
+// isInteriorGotoTarget reports an unstructured goto into this block or its
+// interior. C++ parity: FlowBlock::isInteriorGotoTarget (the flag only).
 func (b *FlowBlock) isInteriorGotoTarget() bool {
-	if b.HasFlag(BlockFlagInteriorGotoIn) {
-		return true
-	}
-	for i := 0; i < b.SizeIn(); i++ {
-		if b.isGotoIn(i) {
-			return true
-		}
-	}
-	return false
+	return b.HasFlag(BlockFlagInteriorGotoIn)
 }
 
 // isComplex reports whether this block is too complex to be emitted as a single
@@ -558,6 +549,9 @@ func (bg *BlockGraph) collapseRegion(nodes []*FlowBlock, tp BlockType) *FlowBloc
 
 	for _, node := range nodes {
 		node.SetParent(newBlock)
+		// A goto into or out of a component is one into or out of the
+		// interior of the new block. C++ parity: BlockGraph::identifyInternal.
+		newBlock.SetFlag(node.Flags() & (BlockFlagInteriorGotoOut | BlockFlagInteriorGotoIn))
 	}
 
 	// C++ parity: BlockGraph::identifyInternal drops the nodes from the list
