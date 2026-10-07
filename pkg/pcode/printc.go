@@ -4182,7 +4182,7 @@ func (s *printCState) renderPtrAdd(op *PcodeOp) (ExprFragment, error) {
 func (s *printCState) renderPtrSub(op *PcodeOp) (ExprFragment, error) {
 	base := op.Input(0)
 	off := op.Input(1)
-	if symExpr, ok := s.renderPtrSubSpacebaseSymbol(base, off); ok {
+	if symExpr, ok := s.renderPtrSubSpacebaseSymbol(base, off, false); ok {
 		return symExpr, nil
 	}
 	if fieldExpr, ok := s.renderPtrSubField(op, false); ok {
@@ -4214,7 +4214,7 @@ func (s *printCState) renderPtrSub(op *PcodeOp) (ExprFragment, error) {
 // is not a spacebase, the offset is not constant, or no symbol covers the
 // address -- so every non-symbol path is unchanged.
 // C++ parity: printc.cc PrintC::opPtrsub, TYPE_SPACEBASE branch (printc.cc:1076-1116).
-func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode) (ExprFragment, bool) {
+func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode, valueon bool) (ExprFragment, bool) {
 	if base == nil || off == nil || !base.IsSpaceBase() || !off.IsConstant() {
 		return ExprFragment{}, false
 	}
@@ -4248,6 +4248,9 @@ func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode) (ExprFragm
 		// C++ parity: PrintC::opPtrsub symbol==null -> pushUnnamedLocation.
 		if sl := s.fd.GetScopeLocal(); sl != nil && sl.SpaceID() == spc {
 			raw := fmt.Sprintf("%s0x%0*x", spc.Name, 2*spc.AddrSize, off.Offset())
+			if valueon {
+				return s.lang.Atom(raw), true
+			}
 			return s.lang.UnaryExpr("&", cPrecUnary, s.lang.Atom(raw)), true
 		}
 		return ExprFragment{}, false
@@ -4275,6 +4278,9 @@ func (s *printCState) renderPtrSubSpacebaseSymbol(base, off *Varnode) (ExprFragm
 		if m := st.Metatype(); m == TYPE_CODE || m == TYPE_ARRAY {
 			return name, true
 		}
+	}
+	if valueon { // The symbol's value itself: no '&'
+		return name, true
 	}
 	return s.lang.UnaryExpr("&", cPrecUnary, name), true
 }
@@ -4468,6 +4474,11 @@ func (s *printCState) renderPointerValue(vn *Varnode) (ExprFragment, bool) {
 		}
 		return frag, true
 	case CPUI_PTRSUB:
+		// The value form of a symbol reference off a spacebase is the
+		// symbol itself. C++ parity: opPtrsub TYPE_SPACEBASE with valueon.
+		if expr, ok := s.renderPtrSubSpacebaseSymbol(def.Input(0), def.Input(1), true); ok {
+			return expr, true
+		}
 		s.opStack = append(s.opStack, def)
 		defer func() { s.opStack = s.opStack[:len(s.opStack)-1] }()
 		return s.renderPtrSubField(def, true)
