@@ -1313,12 +1313,6 @@ func (db *ActionDatabase) BuildUniversalAction(extraPoolRules []Rule) Action {
 	actprop.AddRule(NewRuleDivOpt("analysis"))
 	actprop.AddRule(NewRuleSignForm("analysis"))
 	actprop.AddRule(NewRuleSignForm2("analysis"))
-	// RuleOrSextForm collapses the packed-.sla CDQ dividend INT_OR(shifted-sign, zext)
-	// back to INT_SEXT, the Gosleigh equivalent of Ghidra's PIECE(EDX,EAX) ->
-	// RulePiece2Sext. Needed once a 64-bit IDIV dividend survives (does not get
-	// truncated by RuleSubCommute) so it renders as `(longlong)x` instead of the raw
-	// OR expansion. Runs after RuleSignForm produces the INT_SRIGHT sign term.
-	actprop.AddRule(NewRuleOrSextForm("analysis"))
 	actprop.AddRule(NewRuleSignDiv2("analysis"))
 	actprop.AddRule(NewRuleDivChain("analysis"))
 	actprop.AddRule(NewRuleSignNearMult("analysis"))
