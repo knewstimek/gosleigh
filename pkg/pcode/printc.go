@@ -4366,10 +4366,13 @@ func compareMapOrder(a, b *Varnode) int {
 		if rep == nil {
 			rep = highNameRepresentative(hv)
 		}
-		if rep == nil || rep.Space() == nil || rep.IsAddrTied() {
+		if rep == nil || rep.Space() == nil {
 			return mapKey{}, false
 		}
 		k := mapKey{spc: spaceOrder(rep.Space()), off: rep.Offset() + uint64(rep.Size()) - 1}
+		if rep.IsAddrTied() {
+			return k, true // An address-tied symbol has no use point: minimal subsort
+		}
 		if def := rep.Def(); def != nil && def.Addr().Space != nil {
 			k.useSpc, k.useOff = spaceOrder(def.Addr().Space), def.Addr().Offset
 		}
