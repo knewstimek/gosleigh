@@ -14,6 +14,8 @@
 
 package pcode
 
+import "sort"
+
 // cover.go -- live-range tracking for Varnodes across basic blocks.
 // C++ parity: cover.hh / cover.cc Cover, CoverBlock
 
@@ -283,6 +285,65 @@ func (cb *CoverBlock) Merge(op2 *CoverBlock) {
 // C++ parity: cover.hh Cover
 type Cover struct {
 	blocks map[int32]*CoverBlock // block Index -> CoverBlock (nil map = empty)
+}
+
+// intersectOpSet reports whether an op of the set lies strictly inside this
+// cover (not on a boundary). The walk is the C++ one: after a block with
+// ops in it, the next block of the set is reached only through the
+// "cover block past the set block" branch, so a set block directly after
+// a matched one can be stepped over.
+// C++ parity: Cover::intersect(const PcodeOpSet &,Varnode *) with
+// StackAffectingOps::affectsTest true for a CALL.
+func (c *Cover) intersectOpSet(opList []*PcodeOp, blockStart []int) bool {
+	if len(opList) == 0 || len(blockStart) == 0 {
+		return false
+	}
+	setBlock := 0
+	opIndex := blockStart[setBlock]
+	setIndex := int32(opList[opIndex].Parent().Index())
+	first := int32(opList[0].Parent().Index())
+	var keys []int32
+	for k := range c.blocks {
+		if k >= first {
+			keys = append(keys, k)
+		}
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	for k := 0; k < len(keys); {
+		coverIndex := keys[k]
+		if coverIndex < setIndex {
+			k++
+		} else if coverIndex > setIndex {
+			setBlock++
+			if setBlock >= len(blockStart) {
+				break
+			}
+			opIndex = blockStart[setBlock]
+			setIndex = int32(opList[opIndex].Parent().Index())
+		} else {
+			cb := c.blocks[coverIndex]
+			k++
+			opMax := len(opList)
+			setBlock++
+			if setBlock < len(blockStart) {
+				opMax = blockStart[setBlock]
+			}
+			for {
+				op := opList[opIndex]
+				if cb != nil && cb.Contain(op) && cb.Boundary(op) == 0 {
+					return true // a CALL always affects
+				}
+				opIndex++
+				if opIndex >= opMax {
+					break
+				}
+			}
+			if setBlock >= len(blockStart) {
+				break
+			}
+		}
+	}
+	return false
 }
 
 // ensureMap initialises the map lazily.

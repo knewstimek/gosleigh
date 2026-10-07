@@ -98,17 +98,36 @@ func (t *HighIntersectTest) untiedCallIntersection(tied, untied *HighVariable) b
 	if cov == nil {
 		return false
 	}
+	ops, starts := t.stackAffectingOpSet()
+	return cov.intersectOpSet(ops, starts)
+}
+
+// stackAffectingOpSet orders the affecting ops by block, then by position
+// in the block, and marks where each block's ops start.
+// C++ parity: PcodeOpSet::finalize (compareByBlock).
+func (t *HighIntersectTest) stackAffectingOpSet() ([]*PcodeOp, []int) {
+	var ops []*PcodeOp
 	for _, op := range t.stackAffectingOps() {
-		bl := op.Parent()
-		if bl == nil {
-			continue
-		}
-		cb := cov.GetCoverBlock(bl.Index())
-		if cb.Contain(op) && cb.Boundary(op) == 0 {
-			return true
+		if op.Parent() != nil {
+			ops = append(ops, op)
 		}
 	}
-	return false
+	sort.SliceStable(ops, func(i, j int) bool {
+		bi, bj := ops[i].Parent().Index(), ops[j].Parent().Index()
+		if bi != bj {
+			return bi < bj
+		}
+		return opBlockUIndex(ops[i]) < opBlockUIndex(ops[j])
+	})
+	var starts []int
+	last := int32(-1)
+	for i, op := range ops {
+		if idx := int32(op.Parent().Index()); idx > last {
+			starts = append(starts, i)
+			last = idx
+		}
+	}
+	return ops, starts
 }
 
 // UpdateHigh rebuilds the Cover for a HighVariable and purges any stale cached

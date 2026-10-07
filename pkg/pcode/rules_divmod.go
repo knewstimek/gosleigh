@@ -52,7 +52,7 @@ func NewRuleDivOpt(group string) *RuleDivOpt {
 type divOptForm struct {
 	base   *Varnode
 	n      uint64
-	coeff  uint64
+	coeff  *big.Int // up to 128 bits
 	xsize  int
 	extopc OpCode
 }
@@ -639,8 +639,6 @@ func (r *RuleSignMod2nOpt2) apply(op *PcodeOp, data *Funcdata) int {
 // findDivOptForm matches sub(ext(V)*c, d) >> e and its variants, returning
 // the Varnode to divide (resVn), the power n, the coefficient and the bit
 // size of V. C++ parity: RuleDivOpt::findForm.
-// TODO known mismatch: C++ isConstantExtended also accepts a 128-bit
-// coefficient built by PIECE; only a plain constant is recognized here.
 func findDivOptForm(op *PcodeOp) (*divOptForm, bool) {
 	curOp := op
 	shiftopc := curOp.Code()
@@ -681,15 +679,15 @@ func findDivOptForm(op *PcodeOp) (*divOptForm, bool) {
 	if !inVn.IsWritten() {
 		return nil, false
 	}
-	var y uint64
-	if inVn.IsConstant() { // never true for a written Varnode; kept for parity
-		y = inVn.Offset()
+	var y *big.Int
+	if v, ok := constantExtended(inVn); ok {
+		y = v
 		inVn = curOp.Input(1)
 		if !inVn.IsWritten() {
 			return nil, false
 		}
-	} else if c := curOp.Input(1); c.IsConstant() {
-		y = c.Offset()
+	} else if v, ok := constantExtended(curOp.Input(1)); ok {
+		y = v
 	} else {
 		return nil, false // there MUST be a constant
 	}
@@ -734,11 +732,52 @@ func findDivOptForm(op *PcodeOp) (*divOptForm, bool) {
 	return &divOptForm{base: resVn, n: n, coeff: y, xsize: xsize, extopc: extopc}, true
 }
 
-func calcMagicDivisor(n uint64, coeff uint64, xsize int) uint64 {
-	if n > 127 || xsize <= 0 || xsize > 64 || coeff <= 1 {
+// constantExtended returns the value of a constant, or of a wider Varnode
+// built from constants by INT_ZEXT, INT_SEXT or PIECE (up to 128 bits).
+// C++ parity: Varnode::isConstantExtended.
+func constantExtended(vn *Varnode) (*big.Int, bool) {
+	if vn.IsConstant() {
+		return new(big.Int).SetUint64(vn.Offset()), true
+	}
+	if !vn.IsWritten() || vn.Size() <= 8 || vn.Size() > 16 {
+		return nil, false
+	}
+	def := vn.Def()
+	switch def.Code() {
+	case CPUI_INT_ZEXT:
+		if in := def.Input(0); in.IsConstant() {
+			return new(big.Int).SetUint64(in.Offset()), true
+		}
+	case CPUI_INT_SEXT:
+		if in := def.Input(0); in.IsConstant() {
+			lo := in.Offset()
+			if in.Size() < 8 {
+				lo = signExtendSize(lo, in.Size(), 8)
+			}
+			v := new(big.Int).SetUint64(lo)
+			if lo&(1<<63) != 0 { // upper word all ones
+				v.Or(v, new(big.Int).Lsh(new(big.Int).SetUint64(^uint64(0)), 64))
+			}
+			return v, true
+		}
+	case CPUI_PIECE:
+		lo, hi := def.Input(1), def.Input(0)
+		if lo.IsConstant() && hi.IsConstant() {
+			v := new(big.Int).SetUint64(hi.Offset())
+			v.Lsh(v, uint(8*lo.Size()))
+			v.Or(v, new(big.Int).SetUint64(lo.Offset()))
+			mask := new(big.Int).Sub(new(big.Int).Lsh(big.NewInt(1), 128), big.NewInt(1))
+			return v.And(v, mask), true
+		}
+	}
+	return nil, false
+}
+
+func calcMagicDivisor(n uint64, coeff *big.Int, xsize int) uint64 {
+	if n > 127 || xsize <= 0 || xsize > 64 || coeff == nil || coeff.Cmp(big.NewInt(1)) <= 0 {
 		return 0
 	}
-	y := new(big.Int).SetUint64(coeff)
+	y := new(big.Int).Set(coeff)
 	y.Sub(y, big.NewInt(1))
 	if y.Sign() <= 0 {
 		return 0

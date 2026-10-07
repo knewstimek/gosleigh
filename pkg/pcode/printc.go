@@ -2560,6 +2560,11 @@ func caseLabelText(val uint64, ct Datatype) string {
 			return name
 		}
 	}
+	// A char switch variable prints character literals.
+	// C++ parity: PrintC::pushConstant -> pushCharConstant.
+	if txt, ok := charConstantText(val, ct); ok {
+		return txt
+	}
 	// A pointer-typed switch variable prints its labels as cast hex
 	// constants. C++ parity: PrintC::pushConstant TYPE_PTR default path.
 	if _, ok := ct.(*Pointer); ok {
@@ -2605,9 +2610,11 @@ func (s *printCState) emitGotoBlock(bl *FlowBlock) error {
 			return err
 		}
 	}
-	s.lang.Statement(func() {
-		s.emitGotoStatement(bl)
-	})
+	if bl.gotoPrints() {
+		s.lang.Statement(func() {
+			s.emitGotoStatement(bl)
+		})
+	}
 	return nil
 }
 
@@ -3390,6 +3397,11 @@ func formatIntegerLiteral(val uint64, sz int32, sign bool) string {
 // size-1 ("byte") is not char and is intentionally excluded so byte constants
 // keep printing as integers.
 func renderCharConstant(vn *Varnode, dt Datatype) (string, bool) {
+	return charConstantText(vn.Offset(), dt)
+}
+
+// charConstantText is renderCharConstant for a bare value.
+func charConstantText(offset uint64, dt Datatype) (string, bool) {
 	if dt == nil {
 		return "", false
 	}
@@ -3401,14 +3413,14 @@ func renderCharConstant(vn *Varnode, dt Datatype) (string, bool) {
 		}
 		// The value is taken as a unicode code-point, printed as UTF-8 or
 		// as an escape. C++ parity: PrintC::printUnicode.
-		val := vn.Offset() & maskForSize(dt.Size())
+		val := offset & maskForSize(dt.Size())
 		return "L'" + escapeCharForC(int(val)) + "'", true
 	}
 	charLike := isCharPrintLike(dt)
 	if !charLike {
 		return "", false
 	}
-	val := vn.Offset() & 0xff
+	val := offset & 0xff
 	// C++: a size-1 value >= 0x80 is not a valid unicode code-point and (with no
 	// forced display format) prints via the integer path (printc.cc:1693-1701).
 	if val >= 0x80 {
