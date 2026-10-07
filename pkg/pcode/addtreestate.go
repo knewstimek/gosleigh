@@ -238,7 +238,14 @@ func (fd *Funcdata) NewSpaceIDConst(spc *address.Space) *Varnode {
 	if spc != nil && spc.AddrSize > 0 {
 		size = int32(spc.AddrSize)
 	}
-	vn := fd.NewConstant(size, 0)
+	// The offset is the space index, the encoding the bridge gives every raw
+	// LOAD/STORE space id, so two ids of one space compare equal by offset as
+	// C++ AddrSpace pointers do (checkImpliedCover, CSE).
+	var off uint64
+	if spc != nil {
+		off = uint64(spc.Index)
+	}
+	vn := fd.NewConstant(size, off)
 	BindSpaceConstant(vn, spc)
 	return vn
 }
