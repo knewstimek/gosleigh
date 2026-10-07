@@ -479,7 +479,7 @@ func (ms *mapState) addFixedType(start uint64, ct Datatype, flags uint32) {
 // initialize appends the bounding endpoint, sorts and reconciles. Returns
 // false when there is nothing to map. C++ parity: MapState::initialize.
 func (ms *mapState) initialize() bool {
-	ranges := ms.sl.scopeRanges()
+	ranges := ms.sl.mapRanges()
 	if len(ranges) == 0 || len(ms.hints) == 0 {
 		return false
 	}
@@ -562,6 +562,30 @@ func (sl *ScopeLocal) scopeRanges() [][2]uint64 {
 // inParamRange: [st, st+sz) touches the parameter range, which MapState
 // removes from its range (stack inputs get their symbols elsewhere).
 // C++ parity: MapState::MapState (range.removeRange over the param range).
+// mapRanges is the scope's range with the parameter range removed: the
+// storage MapState sweeps, whose last range bounds a final open hint.
+// C++ parity: MapState::MapState (range.removeRange for each param range).
+func (sl *ScopeLocal) mapRanges() [][2]uint64 {
+	pieces := sl.scopeRanges()
+	for _, hole := range sl.model.ParamRanges() {
+		var next [][2]uint64
+		for _, p := range pieces {
+			if hole[1] < p[0] || hole[0] > p[1] {
+				next = append(next, p)
+				continue
+			}
+			if hole[0] > p[0] {
+				next = append(next, [2]uint64{p[0], hole[0] - 1})
+			}
+			if hole[1] < p[1] {
+				next = append(next, [2]uint64{hole[1] + 1, p[1]})
+			}
+		}
+		pieces = next
+	}
+	return pieces
+}
+
 func (sl *ScopeLocal) inParamRange(st uint64, sz int32) bool {
 	last := st + uint64(sz) - 1
 	for _, r := range sl.model.ParamRanges() {

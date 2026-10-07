@@ -98,7 +98,7 @@ func declExpr(typeText, ident string) ExprFragment {
 	flat := ExprFragment{Text: typeText + ident, Precedence: ExprPrecPrimary}
 	stars := len(typeText) - len(strings.TrimRight(typeText, "*"))
 	base := typeText[:len(typeText)-stars]
-	if stars == 0 && ident == "" && !strings.ContainsAny(base, "()[]") {
+	if stars == 0 && ident == "" && !hasTopLevelDeclParen(base) {
 		// A bare type name: type_expr_nospace over the type and a blank
 		// identifier, which is its own printing group.
 		// C++ parity: PrintC::pushType -> pushTypeStart(ct,true).
@@ -107,7 +107,7 @@ func declExpr(typeText, ident string) ExprFragment {
 			kids:   []ExprFragment{{Text: base, Precedence: ExprPrecPrimary}, blankExpr},
 			parens: []bool{false, false}}}
 	}
-	if !strings.HasSuffix(base, " ") || strings.ContainsAny(base, "()[]") {
+	if !strings.HasSuffix(base, " ") || hasTopLevelDeclParen(base) {
 		return flat
 	}
 	base = base[:len(base)-1]
@@ -120,4 +120,26 @@ func declExpr(typeText, ident string) ExprFragment {
 		kind: fragSpace, spacing: 1,
 		kids:   []ExprFragment{{Text: base, Precedence: ExprPrecPrimary}, inner},
 		parens: []bool{false, false}}}
+}
+
+// hasTopLevelDeclParen reports a parenthesis or bracket outside template
+// arguments: a function-pointer or array declarator, which stays one token.
+// A template argument list (function<void(int)>) is part of the type name.
+func hasTopLevelDeclParen(s string) bool {
+	depth := 0
+	for _, c := range s {
+		switch c {
+		case '<':
+			depth++
+		case '>':
+			if depth > 0 {
+				depth--
+			}
+		case '(', ')', '[', ']':
+			if depth == 0 {
+				return true
+			}
+		}
+	}
+	return false
 }
