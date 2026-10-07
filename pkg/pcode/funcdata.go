@@ -1067,7 +1067,8 @@ func (fd *Funcdata) syncVarnodeFlags(vn *Varnode, fl uint32, ct Datatype) bool {
 		vn.SetFlags(fl)
 		vn.ClearFlags((^fl) & mask)
 	}
-	if ct != nil && vn.Type() == nil {
+	// Varnode::updateType: a type-locked Varnode keeps its type.
+	if ct != nil && !vn.IsTypeLock() && vn.Type() != ct {
 		SetVarnodeType(vn, ct)
 		updated = true
 	}
