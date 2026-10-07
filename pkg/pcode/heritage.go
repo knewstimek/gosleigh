@@ -764,8 +764,8 @@ func (h *Heritage) renameRecurse(bl *BlockBasic, graph *BlockGraph,
 				// it is already on varStack and does not need renaming as a use.
 				// C++ parity: isHeritageKnown() filters out insert/constant/annotation varnodes
 				// from the free set before Heritage processes them.
-				if inp.IsWritten() || inp.IsAnnotation() {
-					continue
+				if inp.IsHeritageKnown() {
+					continue // an input or a definition is not a free read
 				}
 				// Clear ActiveHeritage flag to avoid double-processing if this varnode
 				// is shared across multiple ops (e.g. multiple LOADs with same fresh input vn).
