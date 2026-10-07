@@ -751,7 +751,11 @@ func (fd *Funcdata) MapGlobals() {
 		}
 		entry := fd.resolveGlobal(addr)
 		if entry == nil {
-			entry = fd.globalScope.AddSymbol(defaultGlobalName(addr, ct), ct, addr, ct.Size(), 0)
+			nm := defaultGlobalName(addr, ct)
+			if rn := fd.registerNames[fmt.Sprintf("%d:%d:%d", addr.Space.Index, addr.Offset, ct.Size())]; rn != "" {
+				nm = rn // C++ parity: buildVariableName persist branch (getRegisterName)
+			}
+			entry = fd.globalScope.AddSymbol(nm, ct, addr, ct.Size(), 0)
 		} else if addr.Offset+uint64(ct.Size())-1 > entry.Addr().Offset+uint64(entry.Size())-1 {
 			inconsistentuse = true
 			// Interior Varnodes with no Symbol of their own get one.

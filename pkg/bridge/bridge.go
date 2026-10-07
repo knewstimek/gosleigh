@@ -303,7 +303,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		}
 		fd.SetProtoOverrides(po)
 	}
-	if err := attachEnvironment(fd, cfg); err != nil {
+	if err := attachEnvironment(engine, fd, cfg, summary.heritageSpaces); err != nil {
 		return nil, err
 	}
 	installLanedRegisters(engine, fd)
@@ -618,7 +618,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 // known mismatch.
 // C++ parity: Architecture::addToGlobalScope (the global scope exists before
 // any function is decompiled).
-func attachEnvironment(fd *pcode.Funcdata, cfg BuildConfig) error {
+func attachEnvironment(engine *sla.Engine, fd *pcode.Funcdata, cfg BuildConfig, spaces []*address.Space) error {
 	fd.SetHostScope(cfg.HostScope)
 	for _, c := range cfg.HostComments {
 		if tp, ok := hostCommentTypes[c.Type]; ok && cfg.Entry.Space != nil {
@@ -659,6 +659,24 @@ func attachEnvironment(fd *pcode.Funcdata, cfg BuildConfig) error {
 			last = *r.Last
 		}
 		ranges = append(ranges, pcode.GlobalRange{Space: ram, First: first, Last: last})
+	}
+	// A <register> in <global> puts that register's storage in the global
+	// scope, so it is a persistent variable printed by its name (MXCSR).
+	// C++ parity: Architecture::decodeGlobal (register -> addRange).
+	if engine != nil {
+		xr := engine.XRefs()
+		for _, name := range cs.GlobalRegisters {
+			si, off, sz, ok := xr.RegisterByName(name)
+			if !ok || sz <= 0 {
+				continue
+			}
+			for _, space := range spaces {
+				if space != nil && int64(space.Index) == si {
+					ranges = append(ranges, pcode.GlobalRange{Space: space, First: off, Last: off + uint64(sz) - 1})
+					break
+				}
+			}
+		}
 	}
 	fd.SetGlobalRanges(ranges)
 	return nil

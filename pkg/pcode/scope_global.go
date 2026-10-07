@@ -285,7 +285,7 @@ func (fd *Funcdata) globalEntryOf(vn *Varnode) *SymbolEntry {
 
 // defaultGlobalName names a persistent location that has no symbol.
 // C++ parity: ScopeInternal::buildVariableName, Varnode::persist branch
-// (a register name if the location is one is not needed for ram).
+// (the caller tries the register name first).
 func defaultGlobalName(addr address.Address, ct Datatype) string {
 	sp := addr.Space.Name
 	if sp != "" {

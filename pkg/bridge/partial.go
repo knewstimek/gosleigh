@@ -72,7 +72,7 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 	summary := summarizeSpaces(records, cfg.Entry.Space)
 	fixFlowOverrideReturns(records, summary.constSpace)
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, summary.uniqueBase, summary.constSpace)
-	if err := attachEnvironment(fd, cfg); err != nil {
+	if err := attachEnvironment(engine, fd, cfg, summary.heritageSpaces); err != nil {
 		return nil, err
 	}
 	installLanedRegisters(engine, fd)
