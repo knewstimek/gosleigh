@@ -82,6 +82,11 @@ func Decompile(engine *sla.Engine, result *Result, cfg DecompileConfig) (string,
 		if err != nil || next == nil || next.Funcdata == nil {
 			break
 		}
+		// Funcdata::clear keeps typerecovery_exceeded, so a restarted run
+		// types new PTRADD/PTRSUB outputs from the start.
+		if fd.HasFlag(pcode.FuncTypeRecoveryExceeded) {
+			next.Funcdata.SetFlag(pcode.FuncTypeRecoveryExceeded)
+		}
 		result = next
 		fd = result.Funcdata
 	}
