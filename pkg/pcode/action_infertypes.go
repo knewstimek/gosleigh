@@ -653,14 +653,9 @@ func inferPropagateIntAdd(data *Funcdata, tf *TypeFactory, op *PcodeOp, invn, ou
 // L1217-1255) for the case a pointer flows from input slot inslot of an
 // add-like op (PTRSUB/PTRADD/INT_ADD) to the op output.
 //
-// Ported: the "propagates through untransformed" command (no downChain needed),
-// and the spacebase downChain -- the referenced symbol is resolved
-// (TypeSpacebase::getSubType) and a stripped pointer to the symbol's data-type
-// is returned; a still-spacebase result degrades to unknown1 * (C++ L1250-1253).
-//
-// Not ported: non-spacebase downChain navigation into struct/array fields and
-// the TypePointerRel it builds (also the `within != 0` spacebase sub-object
-// case below). Those return nil, i.e. no propagation -- a known mismatch.
+// A spacebase input resolves the referenced symbol first
+// (TypeSpacebase::getSubType); a still-spacebase result degrades to
+// unknown1 * (C++ L1250-1253).
 func inferPropagateAddIn2Out(data *Funcdata, tf *TypeFactory, alt *Pointer, op *PcodeOp, inslot int) Datatype {
 	ptrTo := alt.Pointee()
 	if ptrTo == nil {
@@ -694,14 +689,34 @@ func inferPropagateAddIn2Out(data *Funcdata, tf *TypeFactory, alt *Pointer, op *
 	if symType == nil {
 		return nil
 	}
-	if within != 0 {
-		// Offset lands in the interior of a struct/array symbol; C++ would build
-		// a TypePointerRel here. Not ported for this slice -- leave the output at
-		// its locally-derived type (TODO).
+	// The spacebase level of the downChain loop; the rest of the offset then
+	// walks down into the symbol's data-type like any other pointer.
+	// C++ parity: TypePointer::downChain (TypeSpacebase::getSubType) inside
+	// the TypeOpIntAdd::propagateAddIn2Out loop.
+	pointer := tf.GetPointerStripArray(alt.Size(), symType, alt.WordSize())
+	typeOffset = within
+	var parent *Pointer
+	var parentOff int64
+	allowWrap := op.Code() != CPUI_PTRSUB
+	for pointer != nil && typeOffset != 0 {
+		pointer = pointerDownChain(tf, pointer, &typeOffset, &parent, &parentOff, allowWrap)
+	}
+	if parent != nil {
+		var pt Datatype
+		if pointer == nil {
+			pt = tf.GetBase(1, TYPE_UNKNOWN, "") // Offset does not point at a proper sub-type
+		} else {
+			pt = pointer.Pointee()
+		}
+		pointer = tf.GetPointerRelEphemeral(parent, pt, int32(parentOff))
+	}
+	if pointer == nil {
+		if command == 0 {
+			return alt
+		}
 		return nil
 	}
-	res := tf.GetPointerStripArray(alt.Size(), symType, alt.WordSize())
-	return inferSpacebaseDegrade(tf, res, op, inslot)
+	return inferSpacebaseDegrade(tf, pointer, op, inslot)
 }
 
 // inferAddIn2OutPointer walks an ordinary (non-spacebase) pointer down to the
