@@ -383,9 +383,23 @@ func findCompatibleResolve(dt, ct Datatype) int {
 		comp = t.fields[0].Type
 	case *Array:
 		comp = t.Element()
-	case *Union:
+	case *Union: // C++ parity: TypeUnion::findCompatibleResolve
+		if !ct.NeedsResolution() {
+			for i, f := range t.fields {
+				if f.Type == ct && f.Offset == 0 {
+					return i
+				}
+			}
+			return -1
+		}
 		for i, f := range t.fields {
-			if f.Type == ct {
+			if f.Offset != 0 || f.Type == nil {
+				continue
+			}
+			if f.Type.Size() != ct.Size() || f.Type.NeedsResolution() {
+				continue
+			}
+			if findCompatibleResolve(ct, f.Type) >= 0 {
 				return i
 			}
 		}
