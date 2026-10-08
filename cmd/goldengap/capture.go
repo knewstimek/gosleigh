@@ -76,6 +76,8 @@ type captureData struct {
 	namesUsed map[string][]int
 	// nsIDs maps a symbol address to its scope-id path (outermost first).
 	nsIDs map[uint64][]uint64
+	// nsNames maps a symbol address to its scope-name path (outermost first).
+	nsNames map[uint64][]string
 	syms      []pcode.HostData
 	// readonly are the ram ranges with the read-only property: the load
 	// image's read-only chunks and the read-only symbols' storage.
@@ -188,7 +190,7 @@ func loadCaptureData(path string, ram *address.Space) (*captureData, error) {
 		}
 		return append(append([]uint64(nil), parent...), parseUint(id))
 	}
-	cd := &captureData{nsIDs: map[uint64][]uint64{}}
+	cd := &captureData{nsIDs: map[uint64][]uint64{}, nsNames: map[uint64][]string{}}
 	for id, s := range scopes {
 		ns := nsPath(id)
 		nsl := nsList(id)
@@ -210,6 +212,7 @@ func loadCaptureData(path string, ram *address.Space) (*captureData, error) {
 			// global scope; it must not hide the function's own scope path.
 			if sym.XMLName.Local != "externrefsymbol" {
 				cd.nsIDs[parseUint(at.attr("offset"))] = ids
+				cd.nsNames[parseUint(at.attr("offset"))] = nsl
 			}
 			hd := pcode.HostData{
 				Name:          sym.attr("name"),
@@ -849,6 +852,11 @@ func (cd *captureData) Property(addr address.Address) uint32 {
 // NamespaceIDsAt implements pcode.HostNamespaceIDs.
 func (cd *captureData) NamespaceIDsAt(addr address.Address) []uint64 {
 	return cd.nsIDs[addr.Offset]
+}
+
+// NamespacePathAt implements pcode.HostNamespacePath.
+func (cd *captureData) NamespacePathAt(addr address.Address) []string {
+	return cd.nsNames[addr.Offset]
 }
 
 func (cd *captureData) IsNameUsed(name string, depth int) bool {

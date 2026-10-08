@@ -77,7 +77,7 @@ func (s *printCState) emitSignature(sig string) {
 		ge.Spaces(1, 0)
 	}
 	id1 := ge.OpenGroup()
-	s.lang.EmitFragment(scopedNameExpr(l.name))
+	s.lang.EmitFragment(s.functionNameExpr(l.name))
 	ge.Spaces(0, 10)
 	id2 := ge.OpenParen("(")
 	ge.Spaces(0, 10)
@@ -147,4 +147,32 @@ func hasTopLevelDeclParen(s string) bool {
 		}
 	}
 	return false
+}
+
+// functionNameExpr is the function's qualified name, split at the scopes the
+// host names: a scope name may itself contain "::" (`f::g'), so when the
+// host knows the path the name is not re-parsed.
+// C++ parity: PrintC::emitFunctionDeclaration -> pushSymbolScope.
+func (s *printCState) functionNameExpr(name string) ExprFragment {
+	h, ok := s.fd.HostScope().(HostNamespacePath)
+	if !ok {
+		return scopedNameExpr(name)
+	}
+	path := h.NamespacePathAt(s.fd.baseAddr)
+	prefix := strings.Join(path, "::") + "::"
+	if len(path) == 0 || !strings.HasPrefix(name, prefix) || len(name) == len(prefix) {
+		return scopedNameExpr(name)
+	}
+	expr := ExprFragment{Text: path[0], Precedence: ExprPrecPrimary}
+	parts := append(append([]string(nil), path[1:]...), name[len(prefix):])
+	for i, part := range parts {
+		text := part
+		if i == len(parts)-1 {
+			text = cppDisplayName(part) // Only the base name is a function-name token
+		}
+		right := ExprFragment{Text: text, Precedence: ExprPrecPrimary}
+		expr = ExprFragment{Text: expr.Text + "::" + right.Text, Precedence: ExprPrecPrimary, node: &fragNode{
+			kind: fragBinary, print1: "::", kids: []ExprFragment{expr, right}, parens: []bool{false, false}}}
+	}
+	return expr
 }

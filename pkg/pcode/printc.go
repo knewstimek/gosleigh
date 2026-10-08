@@ -4344,6 +4344,13 @@ func (s *printCState) renderPtrSubField(op *PcodeOp, valueon bool) (ExprFragment
 	if !ok {
 		return ExprFragment{}, false
 	}
+	// The variable typed as a pointer to an array reads its first element
+	// through the array, whatever its instance here was typed.
+	if hp, ok := base.HighTypeReadFacing(op).(*Pointer); ok {
+		if _, isArr := hp.Pointee().(*Array); isArr {
+			ptrType = hp
+		}
+	}
 	if _, isArr := ptrType.Pointee().(*Array); isArr && off.Offset() == 0 {
 		// PTRSUB(p,0) on a pointer to an array switches to a pointer to its
 		// element: the array value itself, which decays. Even without valueon

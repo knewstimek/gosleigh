@@ -44,6 +44,13 @@ type HostNamespaceIDs interface {
 	NamespaceIDsAt(addr address.Address) []uint64
 }
 
+// HostNamespacePath gives the scope-name path (outermost first, global
+// excluded) of the symbol at addr, nil when unknown. A scope name may itself
+// contain "::", so a qualified name cannot be split back into its scopes.
+type HostNamespacePath interface {
+	NamespacePathAt(addr address.Address) []string
+}
+
 // HostNameUsed answers ScopeGhidraNamespace::isNameUsed.
 type HostNameUsed interface {
 	IsNameUsed(name string, depth int) bool
