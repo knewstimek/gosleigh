@@ -76,8 +76,14 @@ func (vn *Varnode) TypeDefFacing() Datatype {
 	return ct
 }
 
-func (vn *Varnode) UpdateType(dt Datatype) {
+// UpdateType changes the data-type unless it is locked.
+// C++ parity: Varnode::updateType(Datatype *).
+func (vn *Varnode) UpdateType(dt Datatype) bool {
+	if vn == nil || vn.Type() == dt || vn.IsTypeLock() {
+		return false
+	}
 	SetVarnodeType(vn, dt)
+	return true
 }
 
 // UpdateTypeLock changes the Varnode's data-type and lock state under the same

@@ -3236,7 +3236,9 @@ func (a *ActionRestructureVarnode) Apply(data *Funcdata) int {
 	if data.SyncVarnodesWithSymbols(sl, false, aliasyes) {
 		a.count++
 	}
-	restructureProtectSwitchPaths(data)
+	if data.IsJumptableRecoveryOn() {
+		restructureProtectSwitchPaths(data)
+	}
 	a.numpass++
 	return 0
 }

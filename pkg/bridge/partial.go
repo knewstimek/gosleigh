@@ -289,6 +289,9 @@ func recoverLiveJumpTables(engine *sla.Engine, cfg BuildConfig) (map[uint64]*pco
 	// perform(partial) reused across the tablelist.
 	heritaged := func() bool {
 		defer func() { _ = recover() }()
+		// This Funcdata object is dedicated to jumptable recovery.
+		// C++ parity: Funcdata::stageJumpTable (flags |= jumptablerecovery_on).
+		partial.Funcdata.SetJumptableRecoveryOn(true)
 		db := pcode.NewActionDatabase()
 		db.BuildUniversalAction(nil)
 		db.BuildDefaultGroups()
