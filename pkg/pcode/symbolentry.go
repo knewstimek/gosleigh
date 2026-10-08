@@ -215,7 +215,24 @@ const (
 	// other Varnodes (required merges still happen). Ghidra sets this when a
 	// committed prototype's parameter is serialized with merge="false".
 	SymbolIsolate uint32 = 16
+	// SymbolSizeTypeLock marks a Symbol whose locked type is undefined: only
+	// its size is locked, and its type may be overridden.
+	// C++ parity: Symbol::size_typelock (Symbol::checkSizeTypeLock).
+	SymbolSizeTypeLock uint32 = 8
 )
+
+// IsSizeTypeLocked reports whether only the Symbol's size is locked.
+// C++ parity: database.hh Symbol::isSizeTypeLocked.
+func (s *Symbol) IsSizeTypeLocked() bool { return s != nil && s.dispFlags&SymbolSizeTypeLock != 0 }
+
+// checkSizeTypeLock sets size_typelock when the Symbol is type-locked to an
+// undefined type. C++ parity: database.cc Symbol::checkSizeTypeLock.
+func (s *Symbol) checkSizeTypeLock() {
+	s.dispFlags &^= SymbolSizeTypeLock
+	if s.IsTypeLocked() && s.dataType != nil && s.dataType.Metatype() == TYPE_UNKNOWN {
+		s.dispFlags |= SymbolSizeTypeLock
+	}
+}
 
 // SetIsolated marks (or clears) whether this Symbol should be excluded from
 // speculative merging. Setting it also type-locks the Symbol, mirroring the C++

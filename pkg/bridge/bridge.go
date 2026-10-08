@@ -31,6 +31,9 @@ type BuildConfig struct {
 	// partialTables are the tables an earlier recovery round already found:
 	// the partial wires their case edges and does not recover them again.
 	partialTables map[uint64]*pcode.JumpTable
+	// sizeLockTypes are the size-locked global types a previous run overrode;
+	// the symbol Database survives a restart.
+	sizeLockTypes map[address.Address]pcode.Datatype
 
 	Name            string
 	Entry           address.Address
@@ -179,7 +182,7 @@ type Result struct {
 	// CspecData is set when BuildConfig.CspecPath is non-empty.
 	CspecData *pcode.CspecData
 	// rebuild re-runs Build with indirect-call overrides (a decompiler restart).
-	rebuild func(map[uint64]address.Address, map[uint64]*pcode.HostFunction, map[string]int32, map[uint64]bool) (*Result, error)
+	rebuild func(map[uint64]address.Address, map[uint64]*pcode.HostFunction, map[string]int32, map[uint64]bool, map[address.Address]pcode.Datatype) (*Result, error)
 }
 
 type instructionRecord struct {
@@ -342,6 +345,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	fixFlowOverrideReturns(records, summary.constSpace)
 	injectWarnings := applyInjections(records, cfg.Injections, summary.constSpace)
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, analysisUniqueBase, summary.constSpace)
+	fd.SetSizeLockTypes(cfg.sizeLockTypes) // before any global Symbol is resolved
 	fd.SetArchSpaces(engine.Spaces())
 	fd.UserOps().RegisterNames(engine.UserOpNames())
 	fd.SetRegisterNames(engine.RegisterNamesByLocation())
@@ -606,8 +610,9 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		Instructions:   translations,
 		HeritageSpaces: summary.heritageSpaces,
 		Warnings:       warnings,
-		rebuild: func(ov map[uint64]address.Address, po map[uint64]*pcode.HostFunction, dd map[string]int32, ms map[uint64]bool) (*Result, error) {
+		rebuild: func(ov map[uint64]address.Address, po map[uint64]*pcode.HostFunction, dd map[string]int32, ms map[uint64]bool, sl map[address.Address]pcode.Datatype) (*Result, error) {
 			next := cfg
+			next.sizeLockTypes = sl
 			next.IndirectOverrides = ov
 			next.ProtoOverrides = po
 			next.DeadcodeDelays = dd

@@ -232,14 +232,25 @@ func overrideSizeLockedGlobals(data *Funcdata) {
 		}
 		sym := e.Symbol()
 		st, ht := sym.Type(), hv.Type()
-		if !sym.IsTypeLocked() || st == nil || st.Metatype() != TYPE_UNKNOWN || ht == nil {
+		if !sym.IsSizeTypeLocked() || st == nil || ht == nil {
 			continue
 		}
 		if vn.Size() == st.Size() && ht.Size() == st.Size() {
 			sym.SetType(ht)
+			if data.sizeLockTypes == nil {
+				data.sizeLockTypes = make(map[address.Address]Datatype)
+			}
+			data.sizeLockTypes[e.Addr()] = ht
 		}
 	}
 }
+
+// SizeLockTypes returns the size-locked global types overridden so far, by
+// symbol address; a restart hands them to the next Funcdata.
+func (fd *Funcdata) SizeLockTypes() map[address.Address]Datatype { return fd.sizeLockTypes }
+
+// SetSizeLockTypes installs overrides from a previous run (see SizeLockTypes).
+func (fd *Funcdata) SetSizeLockTypes(m map[address.Address]Datatype) { fd.sizeLockTypes = m }
 
 // Apply assigns iVar1/uVar1-style names to unnamed register-space HighVariables.
 // Stack locals already have local_hex names from ScopeLocal and are not touched.

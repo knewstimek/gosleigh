@@ -349,6 +349,12 @@ func (fd *Funcdata) resolveGlobal(addr address.Address) *SymbolEntry {
 		fl |= VarnodeReadOnly
 	}
 	e := gs.AddSymbol(hd.Name, dt, hd.Addr, hd.Size, fl)
+	e.Symbol().checkSizeTypeLock()
+	// The Database outlives a restart: a size-locked type overridden by the
+	// previous run is still in force.
+	if ct := fd.sizeLockTypes[hd.Addr]; ct != nil && e.Symbol().IsSizeTypeLocked() && ct.Size() == dt.Size() {
+		e.Symbol().SetType(ct)
+	}
 	e.Symbol().namespace = hd.Namespace
 	e.Symbol().nsPath = hd.NamespacePath
 	if hd.Isolate {

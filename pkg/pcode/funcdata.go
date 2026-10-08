@@ -73,6 +73,9 @@ type Funcdata struct {
 	// (e.g. __ImageBase); ActionConstantPtr queries it to promote a constant to a
 	// global symbol pointer. C++ parity: Funcdata::localmap->getParent() (global).
 	globalScope *GlobalScope
+	// sizeLockTypes are the size-locked global Symbol types ActionNameVars
+	// overrode (Scope::overrideSizeLockType), kept across a restart.
+	sizeLockTypes map[address.Address]Datatype
 
 	// defaultModel is the architecture evaluation prototype model (the C++
 	// Architecture::defaultfp equivalent). The universal-action tree reads it in

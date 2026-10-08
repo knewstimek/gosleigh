@@ -238,6 +238,11 @@ func namedGroupRoot(hv *HighVariable, sl *ScopeLocal) *variablePiece {
 	}
 	for _, vn := range hv.Instances() {
 		if vn.IsProtoPartial() {
+			// A piece already holding a Symbol of its own keeps it.
+			// C++ parity: Funcdata::linkProtoPartial (high->getSymbol()).
+			if hasOwnLocalSymbol(hv, sl) {
+				return nil
+			}
 			return root
 		}
 	}
@@ -268,6 +273,23 @@ func namedGroupRoot(hv *HighVariable, sl *ScopeLocal) *variablePiece {
 		break
 	}
 	return root
+}
+
+// hasOwnLocalSymbol reports whether an address-tied stack member of hv is exactly
+// the storage of a local Symbol, which the variable then already holds.
+// C++ parity: Varnode::setSymbolProperties at creation, read back by
+// HighVariable::getSymbol.
+func hasOwnLocalSymbol(hv *HighVariable, sl *ScopeLocal) bool {
+	for _, vn := range hv.Instances() {
+		if vn.Space() != sl.SpaceID() || !vn.IsAddrTied() {
+			continue
+		}
+		if e := sl.QueryContainer(vn.Addr(), vn.Size(), address.Address{}); e != nil &&
+			e.Addr().Offset == vn.Offset() && e.Size() == vn.Size() {
+			return true
+		}
+	}
+	return false
 }
 
 // size returns the storage size of the variable.
