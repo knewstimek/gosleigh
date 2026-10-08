@@ -160,6 +160,11 @@ func (s *printCState) globalVarnodeName(vn *Varnode, e *SymbolEntry, castTo Data
 		return name, nil
 	}
 	off := int32(at.Offset() - e.Addr().Offset)
+	if off == 0 && vn.Size() > ct.Size() {
+		// A mismatch prints the bare name, without its scopes.
+		// C++ parity: PrintC::pushMismatchSymbol ('_' + getDisplayName).
+		return "_" + cppDisplayName(sym.Name()), nil
+	}
 	return symbolPieceName(name, ct, off, vn.Size(), castTo, e.Addr().Space.BigEndian, rop, rslot)
 }
 
