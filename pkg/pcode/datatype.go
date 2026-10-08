@@ -743,6 +743,21 @@ func typeOrderLevel(a, b Datatype, level int) int {
 			return 0
 		}
 		return compareFieldLists(a, b, ta.fields, tb.fields, level, false)
+	case *PartialStruct: // C++ parity: TypePartialStruct::compare
+		tb, ok := b.(*PartialStruct)
+		if !ok {
+			return 0
+		}
+		if ta.offset != tb.offset {
+			if ta.offset < tb.offset {
+				return -1
+			}
+			return 1
+		}
+		if level--; level < 0 {
+			return compareTypeID(a, b)
+		}
+		return typeOrderLevel(ta.container, tb.container, level)
 	case *PartialUnion: // C++ parity: TypePartialUnion::compare
 		tb, ok := b.(*PartialUnion)
 		if !ok {
