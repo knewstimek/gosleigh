@@ -7,9 +7,9 @@ import (
 	"runtime"
 	"testing"
 
-	"gosleigh/pkg/bridge"
-	"gosleigh/pkg/loader"
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/bridge"
+	"github.com/knewstimek/gosleigh/pkg/loader"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 // TestX64SwitchGoldenMap (X64_SWITCH=1) is the track B / B1 end-to-end harness:

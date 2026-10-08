@@ -3,7 +3,7 @@ package pcode
 import (
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 func newStoreRuleOp(data *Funcdata, inputs ...*Varnode) *PcodeOp {

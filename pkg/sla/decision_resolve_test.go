@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 func TestResolveSubtableDecisionUsesInstructionBits(t *testing.T) {

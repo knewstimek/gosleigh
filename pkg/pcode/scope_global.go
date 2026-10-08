@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"strings"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // GlobalScope is the minimal stand-in for the parent (global) Scope that a

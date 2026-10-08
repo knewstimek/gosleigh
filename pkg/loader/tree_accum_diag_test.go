@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"gosleigh/pkg/bridge"
-	"gosleigh/pkg/loader"
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/bridge"
+	"github.com/knewstimek/gosleigh/pkg/loader"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 // TestTreeAccumDiag (ACCUM_DIAG=1) runs the universal-action tree on counted_loop

@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // VarnodeXrefEntry mirrors one entry in C++ SleighBase::varnode_xref.

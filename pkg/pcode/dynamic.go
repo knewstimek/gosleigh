@@ -14,7 +14,7 @@
 
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 // DynamicHash is a robust identifier for Varnodes whose storage is ephemeral
 // (temporaries, constants). The hash is computed by walking a bounded portion

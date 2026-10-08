@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"sort"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // This file ports Ghidra's high-level comment subsystem (comment.hh/comment.cc)

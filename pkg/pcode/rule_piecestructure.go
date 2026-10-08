@@ -14,7 +14,7 @@
 
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 // pieceNode is one Varnode of a CONCAT tree: the PIECE op reading it, its
 // input slot, its byte offset within the root's data-type, and whether it is

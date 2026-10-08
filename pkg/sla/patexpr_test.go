@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 func TestGetPatternExpressionValueArithmeticShell(t *testing.T) {

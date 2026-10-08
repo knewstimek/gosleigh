@@ -3,7 +3,7 @@ package sla
 import (
 	"fmt"
 
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 // buildEmpty is a conservative fallback used when walker state is unavailable.

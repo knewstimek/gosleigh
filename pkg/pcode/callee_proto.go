@@ -1,6 +1,6 @@
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 // ProtoSlot is one storage slot of a locked prototype: a parameter or the
 // return value. A stack slot's offset is relative to the callee's stack

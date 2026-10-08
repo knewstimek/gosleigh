@@ -5,10 +5,10 @@ import (
 	"runtime"
 	"testing"
 
-	"gosleigh/pkg/bridge"
-	"gosleigh/pkg/loader"
-	"gosleigh/pkg/pcode"
-	"gosleigh/pkg/sla"
+	"github.com/knewstimek/gosleigh/pkg/bridge"
+	"github.com/knewstimek/gosleigh/pkg/loader"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/sla"
 )
 
 // buildGcd builds the MSVC x86-32 gcd function to a fresh (pre-analysis) bridge

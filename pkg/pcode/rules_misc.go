@@ -5,7 +5,7 @@ import (
 	"sort"
 	"math/bits"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 type RuleSwitchSingle struct{ batchRule }

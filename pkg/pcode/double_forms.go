@@ -17,7 +17,7 @@
 package pcode
 
 import (
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // C++ parity: double.cc Form classes -- pattern-match and rewrite logic for

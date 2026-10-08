@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 const (

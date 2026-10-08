@@ -1,6 +1,6 @@
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 var sharedTypeFactory = NewTypeFactory()
 

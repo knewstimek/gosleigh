@@ -4,7 +4,7 @@ import (
 	"errors"
 	"fmt"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 var ErrResolveHandlesUnimplemented = errors.New("resolveHandles shell is unimplemented")

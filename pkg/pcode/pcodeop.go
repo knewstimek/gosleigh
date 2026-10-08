@@ -5,7 +5,7 @@ import (
 	"math/bits"
 	"strings"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // mostSigBitSet returns the index of the most significant set bit, or -1 if val

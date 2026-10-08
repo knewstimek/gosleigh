@@ -1,8 +1,8 @@
 package bridge
 
 import (
-	"gosleigh/pkg/pcode"
-	"gosleigh/pkg/sla"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/sla"
 )
 
 // noReturnHaltValue is the constant input of an artificial halt RETURN.

@@ -1,6 +1,6 @@
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 // HostData is a global symbol the host reports at an address: a data
 // variable (DAT_..., a named global, a vftable) or a code label (LAB_...).

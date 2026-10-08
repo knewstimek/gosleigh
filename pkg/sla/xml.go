@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 var xmlUTF8BOM = []byte{0xef, 0xbb, 0xbf}

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"math/bits"
 
-	"gosleigh/pkg/address"
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 var ErrLoweringUnimplemented = errors.New("lowering semantics are unimplemented")

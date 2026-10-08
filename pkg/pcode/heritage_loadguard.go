@@ -3,7 +3,7 @@
 
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 // Indexed stack access guards. A LOAD or STORE whose pointer is the stack
 // pointer plus a non-constant index (or a MULTIEQUAL of such) may touch any

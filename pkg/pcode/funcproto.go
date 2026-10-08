@@ -16,7 +16,7 @@ package pcode
 
 import (
 	"fmt"
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // FuncProto holds the calling convention information attached to a single

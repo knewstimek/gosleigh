@@ -47,10 +47,10 @@ import (
 	"strings"
 	"time"
 
-	"gosleigh/pkg/address"
-	"gosleigh/pkg/bridge"
-	"gosleigh/pkg/loader"
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/bridge"
+	"github.com/knewstimek/gosleigh/pkg/loader"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 // goldenEntry mirrors one function in a GenGoldens.java-produced golden JSON:

@@ -4,7 +4,7 @@ import (
 	"math/big"
 	"math/bits"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 type RulePositiveDiv struct{ batchRule }

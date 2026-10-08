@@ -9,10 +9,10 @@ import (
 	"strings"
 	"testing"
 
-	"gosleigh/pkg/address"
-	"gosleigh/pkg/bridge"
-	"gosleigh/pkg/pcode"
-	"gosleigh/pkg/sla"
+	"github.com/knewstimek/gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/bridge"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/sla"
 )
 
 type candidateProgram struct {

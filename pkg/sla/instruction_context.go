@@ -3,7 +3,7 @@ package sla
 import (
 	"fmt"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // ObtainPcodeContextRequest wraps the original obtainContext(..., pcode) plus the

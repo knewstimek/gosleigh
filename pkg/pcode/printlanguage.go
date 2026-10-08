@@ -3,7 +3,7 @@ package pcode
 import (
 	"strings"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // ExprPrecedence uses larger numbers for tighter binding.

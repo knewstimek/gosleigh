@@ -3,7 +3,7 @@ package pcode
 import (
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // RuleXorCollapse -- ruleaction.cc:4058. Covers both C++ forms plus the guards.

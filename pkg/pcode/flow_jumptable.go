@@ -17,7 +17,7 @@ package pcode
 import (
 	"errors"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // This file ports Ghidra's raw-flow jump-table recovery driver and its failure

@@ -3,7 +3,7 @@ package pcode
 import (
 	"sort"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // Heritage performs SSA construction on a Funcdata.

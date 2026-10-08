@@ -22,7 +22,7 @@ import (
 	"runtime"
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // TestJumpValuesRangeEnumeratesDenseRange is the B2a gate: a [0,8) step-1

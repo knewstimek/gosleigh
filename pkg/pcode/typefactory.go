@@ -7,7 +7,7 @@ import (
 	"strings"
 	"sync"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // TypeFactory interns structurally identical data-types into canonical instances.

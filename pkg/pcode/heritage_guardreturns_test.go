@@ -3,7 +3,7 @@ package pcode
 import (
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // guardReturnsFixture builds a minimal Funcdata with a single live RETURN op

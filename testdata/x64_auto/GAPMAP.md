@@ -15,7 +15,7 @@ goldengap.py 자동 생성 문서 (수동 편집 금지 -- `py -3 tools/goldenga
 | `loop_forever_break` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `nested_while_matrix` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `while_countdown` | MATCH | MATCH: byte-identical (indent-insensitive) |
-| `switch_dense` | TYPECAST | TYPECAST: cast (int): want=1 got=0<br>TYPECAST: cast (uint): want=1 got=2<br>TYPECAST: cast (ulonglong): want=0 got=1 |
+| `switch_dense` | TYPECAST | TYPECAST: cast (ulonglong): want=0 got=1 |
 | `switch_sparse` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `switch_no_default` | MATCH | MATCH: byte-identical (indent-insensitive) |
 | `switch_fallthrough` | MATCH | MATCH: byte-identical (indent-insensitive) |

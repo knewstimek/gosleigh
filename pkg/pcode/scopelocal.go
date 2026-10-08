@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"sort"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // localHexName returns a hex-offset default name for a non-stack storage

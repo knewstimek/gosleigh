@@ -1,6 +1,6 @@
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 // ancestorRealistic determines whether a Varnode (read as a particular input to a
 // CALL, CALLIND, or RETURN op) makes sense as parameter-passing or return-value

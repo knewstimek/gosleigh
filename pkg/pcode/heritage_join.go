@@ -14,7 +14,7 @@
 
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 // processJoins splits every join-space Varnode into its real pieces, so
 // join addresses take no part in heritage: a read becomes a PIECE of the

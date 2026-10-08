@@ -18,7 +18,7 @@ import (
 	"encoding/xml"
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // parseRules decodes the <rule> elements of a parameter list snippet.

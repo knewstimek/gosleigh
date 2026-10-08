@@ -6,7 +6,7 @@ import (
 	"os"
 	"sync"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 const (

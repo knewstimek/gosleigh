@@ -4,8 +4,8 @@ import (
 	"errors"
 	"testing"
 
-	"gosleigh/pkg/address"
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 func assertDynamicSpaceSelector(t *testing.T, got pcode.VarnodeData, constSpace *address.Space, targetSpace *address.Space) {

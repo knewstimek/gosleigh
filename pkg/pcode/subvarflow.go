@@ -17,7 +17,7 @@ package pcode
 import (
 	"math/bits"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // SubvariableFlow::ReplaceVarnode -- subflow.cc.

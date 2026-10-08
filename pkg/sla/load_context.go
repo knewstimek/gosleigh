@@ -6,7 +6,7 @@ import (
 	"math"
 	"sync"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 var ErrLoadContextUnimplemented = errors.New("loadContext shell is unimplemented")

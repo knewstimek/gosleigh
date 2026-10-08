@@ -7,7 +7,7 @@ import (
 	"runtime"
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // testdataSLAPath returns the path to the 6502 .sla test file.

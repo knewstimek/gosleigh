@@ -17,7 +17,7 @@ package pcode
 import (
 	"sort"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // This file extends ScopeLocal (scopelocal.go) with the real symbol-map

@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"gosleigh/pkg/address"
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 var ErrRawBuildUnresolved = errors.New("raw build must be resolved before emit")

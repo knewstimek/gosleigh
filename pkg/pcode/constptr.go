@@ -3,7 +3,7 @@ package pcode
 import (
 	"strings"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // bitTransitions counts the 0/1 transitions in the low sz bytes of val.

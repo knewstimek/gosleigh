@@ -18,7 +18,7 @@ import (
 	"sort"
 	"strconv"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // EffectKind describes how a CALL instruction affects a register or memory location.

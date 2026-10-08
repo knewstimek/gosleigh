@@ -17,7 +17,7 @@ package pcode
 import (
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // win64Model builds a ParamListStandard approximating the x86-64 Windows

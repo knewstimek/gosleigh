@@ -3,9 +3,9 @@ package bridge
 import (
 	"fmt"
 
-	"gosleigh/pkg/address"
-	"gosleigh/pkg/pcode"
-	"gosleigh/pkg/sla"
+	"github.com/knewstimek/gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/sla"
 )
 
 // PartialResult holds a jump-table recovery partial Funcdata: a second Funcdata

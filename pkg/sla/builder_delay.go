@@ -3,7 +3,7 @@ package sla
 import (
 	"fmt"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 func (b *SleighBuilder) delaySlotFromWalker() (bool, error) {

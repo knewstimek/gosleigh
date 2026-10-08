@@ -17,7 +17,7 @@
 package pcode
 
 import (
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // C++ parity: double.hh / double.cc -- SplitVarnode and friends.

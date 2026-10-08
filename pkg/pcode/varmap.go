@@ -17,7 +17,7 @@ package pcode
 import (
 	"fmt"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // AliasChecker + MapState::gatherOpen subset.

@@ -17,7 +17,7 @@ package pcode
 import (
 	"fmt"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // This file ports the single-op execution surface of Ghidra's EmulatePcodeOp

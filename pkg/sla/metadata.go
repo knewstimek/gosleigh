@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"math"
 
-	"gosleigh/pkg/address"
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 const (

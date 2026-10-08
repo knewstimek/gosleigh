@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 func TestObtainPcodeContextAppliesCommitsAfterCachedPcodeLookup(t *testing.T) {

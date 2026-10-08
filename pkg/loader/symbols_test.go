@@ -9,7 +9,7 @@ import (
 	"runtime"
 	"testing"
 
-	"gosleigh/pkg/loader"
+	"github.com/knewstimek/gosleigh/pkg/loader"
 )
 
 // TestSymbolTableBasic verifies Add, Lookup, All, and Len.

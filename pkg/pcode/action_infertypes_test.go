@@ -17,7 +17,7 @@ package pcode
 import (
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // makeInferTestFuncdata builds a minimal Funcdata for inference tests.

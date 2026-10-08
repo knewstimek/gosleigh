@@ -3,7 +3,7 @@ package sla
 import (
 	"fmt"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 func (b *SleighBuilder) appendCrossBuild(op OpTplBoundary, sectionID int64) error {

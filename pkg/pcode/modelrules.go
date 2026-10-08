@@ -20,7 +20,7 @@ import (
 	"strconv"
 	"strings"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // This file ports modelrules.cc: the <rule> elements of a cspec parameter

@@ -4,7 +4,7 @@ import (
 	"testing"
 	"time"
 
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 // TestUniversalActionTreeConverges is an H8-debt-2 regression guard: the full

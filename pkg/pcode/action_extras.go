@@ -18,7 +18,7 @@ import (
 	"sort"
 	"sync"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // This file collects the small helpers that Actions upgraded from A1

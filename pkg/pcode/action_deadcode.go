@@ -17,7 +17,7 @@ package pcode
 import (
 	"os"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // ActionDeadCode is a general dead store eliminator. It removes ops whose

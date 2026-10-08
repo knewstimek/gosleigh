@@ -1,6 +1,6 @@
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 // MarkNotMapped removes a stack range from the storage the local scope owns:
 // symbols under it are dropped (unless type-locked) and no symbol is created

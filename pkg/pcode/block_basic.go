@@ -1,6 +1,6 @@
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 // BlockBasic is a basic block containing PcodeOps.
 // C++ parity: block.hh BlockBasic

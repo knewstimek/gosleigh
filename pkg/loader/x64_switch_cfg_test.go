@@ -20,9 +20,9 @@ import (
 	"runtime"
 	"testing"
 
-	"gosleigh/pkg/bridge"
-	"gosleigh/pkg/loader"
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/bridge"
+	"github.com/knewstimek/gosleigh/pkg/loader"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 // TestX64SwitchCFGIntegration is the B2 phase-3b CFG gate. Unlike the phase-3a

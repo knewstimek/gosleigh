@@ -5,7 +5,7 @@ import (
 	"hash/fnv"
 	"sort"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // Funcdata flags -- processing state bitmask.

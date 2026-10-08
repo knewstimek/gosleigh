@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"strings"
 
-	"gosleigh/pkg/address"
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 // MatchInput is the minimum byte-oriented state needed to resolve a constructor.

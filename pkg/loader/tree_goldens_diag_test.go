@@ -7,9 +7,9 @@ import (
 	"strings"
 	"testing"
 
-	"gosleigh/pkg/bridge"
-	"gosleigh/pkg/loader"
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/bridge"
+	"github.com/knewstimek/gosleigh/pkg/loader"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 // runTreeGhidra builds an x86-32 function from prog bytes and runs the faithful

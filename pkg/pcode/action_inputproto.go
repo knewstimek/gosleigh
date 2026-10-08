@@ -18,7 +18,7 @@ import (
 	"sort"
 	"strings"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // recoverMissingStackParams recovers formal stack input parameters that the main

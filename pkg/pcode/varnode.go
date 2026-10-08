@@ -3,7 +3,7 @@ package pcode
 import (
 	"fmt"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // VarnodeData is the minimal storage triple used by raw p-code emission.

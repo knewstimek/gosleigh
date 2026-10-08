@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 func TestResolveRejectsNilContext(t *testing.T) {

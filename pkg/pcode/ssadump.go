@@ -20,7 +20,7 @@ import (
 	"sort"
 	"strings"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // DumpSSA renders the final SSA p-code of fd in the same textual convention as

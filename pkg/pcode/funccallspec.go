@@ -14,7 +14,7 @@
 
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 // FuncCallSpecs holds per-call prototype state.
 // C++ parity: fspec.hh FuncCallSpecs (partial)

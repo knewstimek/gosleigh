@@ -14,7 +14,7 @@
 
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 // This file ports the call-site input ("parameter") recovery machinery from
 // Ghidra's FuncCallSpecs. It is the mirror image of funccallspec_output.go:

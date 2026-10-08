@@ -1,6 +1,6 @@
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 // cloneBlockOps duplicates the p-code of a basic block into its split copy,
 // performing the SSA surgery that keeps data-flow consistent: each cloned op

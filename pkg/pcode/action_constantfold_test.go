@@ -17,7 +17,7 @@ package pcode
 import (
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // makeConstFoldFuncdata creates a minimal Funcdata for constant-fold tests.

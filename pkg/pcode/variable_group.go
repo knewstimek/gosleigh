@@ -14,7 +14,7 @@
 
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 // variableGroup collects HighVariables whose storage mutually overlaps (pieces
 // of one address-tied variable, e.g. a 4-byte global and a 1-byte read of its

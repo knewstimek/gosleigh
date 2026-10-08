@@ -23,8 +23,8 @@ import (
 	"runtime"
 	"testing"
 
-	"gosleigh/pkg/address"
-	"gosleigh/pkg/sla"
+	"github.com/knewstimek/gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/sla"
 )
 
 // aarch64PspecPath returns the absolute path to testdata/sla/AARCH64.pspec.

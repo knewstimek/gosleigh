@@ -9,9 +9,9 @@ import (
 	"strings"
 	"sync"
 
-	"gosleigh/pkg/address"
-	"gosleigh/pkg/bridge"
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/bridge"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 // xnode is a generic XML element tree for reading Ghidra decompiler savefiles.

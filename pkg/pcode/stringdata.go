@@ -4,7 +4,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // maxStringChars bounds how far a string is searched for its terminator.

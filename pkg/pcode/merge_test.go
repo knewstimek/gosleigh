@@ -17,7 +17,7 @@ package pcode
 import (
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // makeTestMergeEnv builds a minimal Funcdata plus two BlockBasic blocks connected

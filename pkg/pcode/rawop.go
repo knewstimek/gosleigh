@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // SeqNum identifies a p-code op within the translation of a machine instruction.

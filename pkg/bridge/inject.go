@@ -2,8 +2,8 @@ package bridge
 
 import (
 	"math/bits"
-	"gosleigh/pkg/address"
-	"gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
 // HostVarnode names a storage location by space name.

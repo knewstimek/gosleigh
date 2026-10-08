@@ -14,7 +14,7 @@
 
 package pcode
 
-import "gosleigh/pkg/address"
+import "github.com/knewstimek/gosleigh/pkg/address"
 
 // deindirectHost converts this CALLIND into a direct call of the function the
 // host describes at entry. The callee's prototype is merged into the call site

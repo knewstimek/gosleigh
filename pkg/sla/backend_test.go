@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 func TestBackendPayloadLoaderLoadsInstructionAndContextByAddress(t *testing.T) {

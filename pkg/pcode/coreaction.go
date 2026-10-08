@@ -18,7 +18,7 @@ import (
 	"fmt"
 	"sort"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // ActionStart gathers raw p-code for a function.

@@ -22,7 +22,7 @@ import (
 	"runtime"
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // buildBranchless creates an alive op with the given inputs and no output

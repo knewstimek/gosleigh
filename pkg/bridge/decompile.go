@@ -1,8 +1,8 @@
 package bridge
 
 import (
-	"gosleigh/pkg/pcode"
-	"gosleigh/pkg/sla"
+	"github.com/knewstimek/gosleigh/pkg/pcode"
+	"github.com/knewstimek/gosleigh/pkg/sla"
 )
 
 // DecompileConfig controls the decompiler output formatting.

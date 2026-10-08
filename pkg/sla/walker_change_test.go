@@ -3,7 +3,7 @@ package sla
 import (
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 func TestParserWalkerChangeResetsAndAllocatesOperands(t *testing.T) {

@@ -23,8 +23,8 @@ import (
 	"runtime"
 	"testing"
 
-	"gosleigh/pkg/address"
-	"gosleigh/pkg/sla"
+	"github.com/knewstimek/gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/sla"
 )
 
 // x8664PspecPath returns the absolute path to testdata/sla/x86-64.pspec.

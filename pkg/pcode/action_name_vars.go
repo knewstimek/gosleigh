@@ -19,7 +19,7 @@ import (
 	"sort"
 	"strings"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // ActionNameVars assigns human-readable Ghidra-style names to unnamed register-space

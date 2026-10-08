@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 func TestDecodeMetadataPayload(t *testing.T) {

@@ -22,7 +22,7 @@ import (
 	"math/bits"
 	"sort"
 
-	"gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/address"
 )
 
 // This file ports the JumpTable / JumpModel infrastructure from Ghidra's
