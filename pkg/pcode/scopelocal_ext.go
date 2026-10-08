@@ -583,8 +583,12 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 		sl.fakeInputSymbols(fd)
 	}
 
+	alias := sl.gatherAlias(fd)
 	if aliasyes {
-		sl.markUnaliased(sl.gatherAlias(fd))
+		sl.markUnaliased(alias)
+	}
+	if len(alias) > 0 && alias[0] == 0 { // A zero offset use of the stack pointer exists
+		sl.annotateRawStackPtr(fd)
 	}
 	// Re-stamp existing stack Varnodes with their (just-built) SymbolEntry flags --
 	// chiefly addrtied. The Varnodes were created by StackPtrFlow before any symbol
@@ -606,6 +610,36 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 	// overlapProblems == false because the per-offset grouping cannot
 	// produce overlaps by construction.
 	return false
+}
+
+// annotateRawStackPtr routes every direct (non-additive) use of the raw stack
+// pointer through a placeholder PTRSUB(sp,#0), so the use is typed and printed
+// as a reference to the stack frame.
+// C++ parity: varmap.cc ScopeLocal::annotateRawStackPtr.
+func (sl *ScopeLocal) annotateRawStackPtr(fd *Funcdata) {
+	if !fd.HasTypeRecoveryStarted() {
+		return
+	}
+	spVn := fd.findSpacebaseInput(sl.SpaceID())
+	if spVn == nil {
+		return
+	}
+	var refOps []*PcodeOp
+	for _, op := range spVn.DescendIter() {
+		if op.EvalType() == PcodeOpSpecial && !op.IsCall() {
+			continue
+		}
+		switch op.Code() {
+		case CPUI_INT_ADD, CPUI_PTRSUB, CPUI_PTRADD:
+			continue
+		}
+		refOps = append(refOps, op)
+	}
+	for _, op := range refOps {
+		slot := op.GetSlot(spVn)
+		ptrsub := fd.newUntypedOpBefore(op, CPUI_PTRSUB, spVn.Size(), spVn, fd.NewConstant(spVn.Size(), 0))
+		fd.OpSetInput(op, ptrsub.Output(), slot)
+	}
 }
 
 // gatherAlias returns the sorted stack offsets at which a pointer into the
