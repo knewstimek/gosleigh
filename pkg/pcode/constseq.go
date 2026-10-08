@@ -262,16 +262,26 @@ func (s *arraySequence) formByteArray(sz int, slot int, rootOff uint64, bigEndia
 // is narrower but still picks the correct strncpy/wcsncpy/memcpy builtin for
 // the shapes decoded in testdata.
 func (s *arraySequence) selectStringCopyFunction() (builtinID uint32, index int) {
-	elSize := int(s.charType.Size())
+	// Only the core character types (charcache) select a string copy: a
+	// typedef of char (CHAR) is a plain memory copy.
+	core := false
+	if b, ok := s.charType.(*Base); ok && b.Flags()&datatypeTypedef == 0 {
+		switch b.SubMeta() {
+		case SUB_INT_CHAR, SUB_UINT_CHAR, SUB_INT_UNICODE, SUB_UINT_UNICODE:
+			core = true
+		}
+	}
+	if core {
+		switch s.charType.Size() {
+		case 1: // getTypeChar(sizeOfChar)
+			return BUILTIN_STRNCPY, s.numElements
+		case 2: // getTypeChar(sizeOfWChar)
+			return BUILTIN_WCSNCPY, s.numElements
+		}
+	}
 	alignSize := int(s.charType.AlignSize())
 	if alignSize <= 0 {
-		alignSize = elSize
-	}
-	switch elSize {
-	case 1:
-		return BUILTIN_STRNCPY, s.numElements
-	case 2:
-		return BUILTIN_WCSNCPY, s.numElements
+		alignSize = int(s.charType.Size())
 	}
 	return BUILTIN_MEMCPY, s.numElements * alignSize
 }
