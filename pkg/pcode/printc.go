@@ -668,6 +668,13 @@ func (s *printCState) collectSymbols() {
 				if idx, ok := sl.model.IsRegParam(vn.Offset()); ok {
 					return idx
 				}
+				// A register parameter of another class (a float in XMM2)
+				// takes its entry's group: the ParamEntry order.
+				if pl := sl.model.InputParams; pl != nil {
+					if e := pl.findEntry(vn.Addr(), vn.Size(), true); e != nil && len(e.groupSet) > 0 {
+						return int(e.groupSet[0])
+					}
+				}
 			}
 			// Stack params sort after register params, in ascending frame offset.
 			return regParamSlotBase + int(vn.Offset()&0xffff)
@@ -5042,6 +5049,19 @@ func (s *printCState) localPieceName(vn *Varnode, name string, castTo Datatype, 
 							rt = e.Symbol().Type()
 							off += int32(w.Offset() - e.Addr().Offset)
 						}
+						break
+					}
+				}
+				// A group whose whole variable is a global maps into the
+				// global's Symbol. C++ parity: HighVariable::getSymbol /
+				// getSymbolOffset for a piece of a global.
+				for _, w := range rvn {
+					if e := s.fd.globalEntryOf(w); e != nil && e.Symbol() != nil && e.Symbol().Type() != nil &&
+						w.Space() == e.Addr().Space && w.Offset() >= e.Addr().Offset {
+						rname = s.globalSymbolName(e.Symbol())
+						rt = e.Symbol().Type()
+						off += int32(w.Offset() - e.Addr().Offset)
+						be = e.Addr().Space.BigEndian
 						break
 					}
 				}
