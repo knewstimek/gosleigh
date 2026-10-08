@@ -84,12 +84,14 @@ func replaceLessequal(fd *Funcdata, op *PcodeOp) bool {
 	sz := vn.Size()
 
 	if isSigned {
-		minVal := int64(-1) << (uint(sz)*8 - 1)
-		maxVal := (int64(1) << (uint(sz)*8 - 1)) - 1
-		if diff == -1 && val == minVal {
+		// The constant is compared as the raw (unsigned) offset, like
+		// calc_int_min/calc_int_max against uintb in C++.
+		minVal := uint64(1) << (uint(sz)*8 - 1)
+		maxVal := minVal - 1
+		if diff == -1 && vn.Offset() == minVal {
 			return false
 		}
-		if diff == 1 && val == maxVal {
+		if diff == 1 && vn.Offset() == maxVal {
 			return false
 		}
 		// C++ parity: res = (val+diff) & calc_mask(size). NewConstant does not
