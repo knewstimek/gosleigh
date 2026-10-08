@@ -326,7 +326,7 @@ def do_run(work, timeout_s, mem_mb, fresh):
 	# Shard the functions over one process per core: each process decodes the
 	# .sla and loads the image once, then streams a result line per function.
 	todo = [i for i in range(len(fns)) if i not in done]
-	workers = max(1, min(len(todo), (os.cpu_count() or 4) - 2))
+	workers = max(1, min(len(todo), int(os.environ.get("REALEXE_WORKERS", 0)) or (os.cpu_count() or 4) - 2))
 	shards = [todo[k::workers] for k in range(workers)]
 	lock = threading.Lock()
 	with open(jsonl, "a", encoding="utf-8") as f, \

@@ -436,6 +436,9 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 			}
 		}
 	}
+	// Instructions were translated in worklist order; the alive list follows
+	// p-code generation order as in C++ (assignFlowTimes set the times).
+	fd.GetPcodeOpBank().SortAliveByTime()
 	markNoReturnHalts(fd)
 	for _, w := range injectWarnings {
 		fd.WarningHeader(w)

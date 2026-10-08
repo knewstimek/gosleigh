@@ -177,6 +177,16 @@ func (b *PcodeOpBank) AliveOps() []*PcodeOp {
 	return out
 }
 
+// SortAliveByTime orders the alive list by op creation time.
+// C++ parity: FlowInfo::splitBasic inserts the ops into their blocks walking
+// the dead list, which flow fills in generation (time) order, so the alive
+// list starts out in that order.
+func (b *PcodeOpBank) SortAliveByTime() {
+	sort.SliceStable(b.aliveList, func(i, j int) bool {
+		return b.aliveList[i].seq.Time < b.aliveList[j].seq.Time
+	})
+}
+
 // DeadOps returns a copy of the dead list.
 func (b *PcodeOpBank) DeadOps() []*PcodeOp {
 	out := make([]*PcodeOp, len(b.deadList))
