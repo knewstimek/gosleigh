@@ -113,6 +113,15 @@ func cloneFlowBlock(src *FlowBlock) *FlowBlock {
 	}
 }
 
+// mapEdges copies an edge list with every endpoint moved to its clone.
+func mapEdges(edges []BlockEdge, mapping map[*FlowBlock]*FlowBlock) []BlockEdge {
+	out := make([]BlockEdge, len(edges))
+	for i, e := range edges {
+		out[i] = BlockEdge{Label: e.Label, Point: mapping[e.Point], ReverseIndex: e.ReverseIndex}
+	}
+	return out
+}
+
 func cloneBlockGraph(src *BlockGraph) *BlockGraph {
 	if src == nil {
 		return NewBlockGraph()
@@ -140,9 +149,12 @@ func cloneBlockGraph(src *BlockGraph) *BlockGraph {
 		}
 		dup.setGotoEdgeIndex(orig.GotoEdgeIndex())
 		dup.setOverflowSyntax(orig.HasOverflowSyntax())
-		for j := 0; j < orig.SizeOut(); j++ {
-			clone.AddEdge(dup, mapping[orig.getOut(j)], orig.OutEdge(j).Label)
-		}
+		// Both edge lists are copied as they are, so a merge block keeps the
+		// order of its in-edges (TraceDAG and LoopBody walk them in order).
+		// C++ parity: FlowBlock::replaceUsingMap (replaceEdgeMap on intothis
+		// and outofthis).
+		dup.inEdges = mapEdges(orig.inEdges, mapping)
+		dup.outEdges = mapEdges(orig.outEdges, mapping)
 	}
 	return clone
 }
