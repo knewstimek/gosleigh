@@ -726,7 +726,10 @@ func (sl *ScopeLocal) createEntry(a *mapHint) {
 	if locked {
 		sym.SetFlags(VarnodeTypeLock | VarnodeNameLock)
 	}
-	entry := NewSymbolEntry(sym, 0, addr, a.size, 0)
+	// The entry is as big as its data-type, which can be smaller than the
+	// fitted range (a structure followed by loose words).
+	// C++ parity: ScopeLocal::createEntry -> addSymbol (ct->getSize()).
+	entry := NewSymbolEntry(sym, 0, addr, ct.Size(), 0)
 	sym.attachEntry(entry)
 	sl.ext().entries = append(sl.ext().entries, entry)
 }
