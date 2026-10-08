@@ -4966,6 +4966,17 @@ func (s *printCState) renderSubpieceField(op *PcodeOp) (ExprFragment, bool) {
 			symType = e.Symbol().Type()
 			symName = s.globalSymbolName(e.Symbol()) // The path starts at the symbol itself
 			byteOff += int32(vn.Offset() - e.Addr().Offset)
+		} else if sl := s.fd.GetScopeLocal(); sl != nil && vn.Space() == sl.SpaceID() {
+			// A stack variable that is part of its Symbol (a field of a
+			// structure on the stack) starts the path at the Symbol, found
+			// at the variable's base address.
+			// C++ parity: high->getSymbol / getSymbolOffset (Funcdata::linkSymbol
+			// queryProperties size 1).
+			if e := sl.QueryContainer(vn.Addr(), 1, address.Address{}); e != nil && e.Symbol() != nil &&
+				e.Symbol().Type() != nil && s.symbolDisplayName(e) == symName {
+				symType = e.Symbol().Type()
+				byteOff += int32(vn.Offset()-e.Addr().Offset) + e.Offset()
+			}
 		}
 		slot := 0
 		if ct.NeedsResolution() {
