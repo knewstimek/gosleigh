@@ -6,8 +6,8 @@
 
 | 측정 | 결과 | 비고 |
 |---|---|---|
-| realexe private-sample seed1..39 (x86-32) | 39개 모두 200/200 | |
-| realexe private-sample seed1..38 (x64 UE4) | 38개 중 36개 200/200 | s6 [169], s29 [168]은 골든 비결정성(아래) |
+| realexe private-sample seed1..45 (x86-32) | 45개 모두 200/200 | |
+| realexe private-sample seed1..44 (x64 UE4) | 44개 중 42개 200/200 | s6 [169], s29 [168]은 골든 비결정성(아래) |
 | 게이트 `tools/gates.py` | 전부 유지 | tree 10/10, breadth 3/3, corpus 8/8, corpus2 10/13, x64_auto 108/109 |
 
 측정: `realexe.py measure --work local/realexe/<name>` (메모리가 빠듯하면 `REALEXE_WORKERS=8`).
@@ -37,7 +37,7 @@ XMM1 < XMM0, R9 < R8인 실행을 확인). Go는 cspec 문서 순서(`paramEntry
 
 ## 다음 후보
 
-- 표본 생성은 seed 번호를 계속 올린다(private-sample 40, private-sample 39).
+- 표본 생성은 seed 번호를 계속 올린다(private-sample 46, private-sample 45).
 
 ## 도구
 

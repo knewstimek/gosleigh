@@ -3222,9 +3222,49 @@ func (s *printCState) renderVarnodeExpr(vn *Varnode) (ExprFragment, error) {
 		}
 		s.activeExpr[op] = true
 		defer delete(s.activeExpr, op)
+		if vn.HasAddlFlags(VarnodeHasImpliedField) {
+			if name := s.impliedFieldName(vn); name != "" {
+				inner, err := s.renderOpExprFrag(op)
+				if err != nil {
+					return ExprFragment{}, err
+				}
+				return s.lang.MemberExpr(inner, ".", name), nil
+			}
+		}
 		return s.renderOpExprFrag(op)
 	}
 	return s.readExpr(vn), nil
+}
+
+// impliedFieldName is the field an implied variable is read through, or "":
+// the resolution recorded for its reading op picks a structure's single
+// field or a union field.
+// C++ parity: PrintC::pushImpliedField.
+func (s *printCState) impliedFieldName(vn *Varnode) string {
+	n := len(s.opStack)
+	if n == 0 || vn.High() == nil {
+		return ""
+	}
+	parent := vn.High().Type()
+	if parent == nil || !parent.NeedsResolution() || parent.Metatype() == TYPE_PTR {
+		return ""
+	}
+	rop := s.opStack[n-1]
+	res := s.fd.getUnionField(parent, rop, rop.GetSlot(vn))
+	if res == nil || res.fieldNum < 0 {
+		return ""
+	}
+	switch t := parent.(type) {
+	case *Struct:
+		if res.fieldNum == 0 && len(t.fields) > 0 {
+			return t.fields[0].Name
+		}
+	case *Union:
+		if res.fieldNum < len(t.fields) {
+			return t.fields[res.fieldNum].Name
+		}
+	}
+	return ""
 }
 
 // castConstantFrag rebuilds a default-printed constant (typecast + hex) as a

@@ -3934,15 +3934,13 @@ func (r *RuleInsertAbsorb) absorbNestedAnd(data *Funcdata, baseOp, insertOp *Pco
 // RuleDoubleIn::attemptMarking and RuleDoubleOut::attemptMarking.
 func isDoublePrecisionArithOp(opc OpCode) bool {
 	switch opc {
+	// TypeOp::isArithmeticOp (arithmetic_op): logical ops, shifts and
+	// integer compares do not produce a logical whole.
 	case CPUI_INT_ADD, CPUI_INT_SUB, CPUI_INT_MULT, CPUI_INT_DIV, CPUI_INT_REM,
-		CPUI_INT_SDIV, CPUI_INT_SREM,
-		CPUI_INT_AND, CPUI_INT_OR, CPUI_INT_XOR,
-		CPUI_INT_NEGATE, CPUI_INT_2COMP,
-		CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT,
-		CPUI_INT_EQUAL, CPUI_INT_NOTEQUAL,
-		CPUI_INT_LESS, CPUI_INT_LESSEQUAL,
-		CPUI_INT_SLESS, CPUI_INT_SLESSEQUAL,
+		CPUI_INT_SDIV, CPUI_INT_SREM, CPUI_INT_2COMP,
 		CPUI_INT_CARRY, CPUI_INT_SCARRY, CPUI_INT_SBORROW,
+		CPUI_PTRADD, CPUI_PTRSUB,
+		// TypeOp::isFloatingPointOp (floatingpoint_op)
 		CPUI_FLOAT_ADD, CPUI_FLOAT_SUB, CPUI_FLOAT_MULT, CPUI_FLOAT_DIV,
 		CPUI_FLOAT_NEG, CPUI_FLOAT_ABS, CPUI_FLOAT_SQRT,
 		CPUI_FLOAT_EQUAL, CPUI_FLOAT_NOTEQUAL,
