@@ -37,9 +37,24 @@ XMM1 < XMM0, R9 < R8인 실행을 확인). Go는 cspec 문서 순서(`paramEntry
 upstream 수정 PR: NationalSecurityAgency/ghidra#9750 (entry 위치 번호로 비교). 병합되면 Go 쪽 비교를
 upstream과 다시 대조한다(repoplane `gosleigh/upstream/ghidra-pr-9750-paramtrial-order`).
 
-## 다음 후보
+## 검증 범위와 한계
 
-- 표본 생성은 seed 번호를 계속 올린다(private-sample 51, private-sample 50).
+- realexe 골든은 Ghidra 헤드리스가 준 호스트 정보(함수 경계, 심볼, 타입, 프로토타입: work의 `captures/`,
+  `symbols.json`)를 받은 상태의 코어 출력 비교다. 실행 파일만 넣어서는 이 수준이 나오지 않는다.
+- 표본은 MSVC PE 두 개(x86-32, x64)이고 4KB 이하 함수만 뽑는다(`realexe.py sample --max-bytes 4096`).
+  GCC/Clang, ELF, ARM, 큰 함수, 속도/메모리는 미측정.
+- CLI(`cmd/gosleigh`)는 개발용이다. 실사용은 downstream MCP 호스트가 라이브러리로 붙인다
+  (모듈 `github.com/knewstimek/gosleigh`).
+
+### 미시작
+
+| 항목 | 현상 | 참조 | 수정 대상 | 성공 기준 |
+|---|---|---|---|---|
+| 호스트 어댑터 | Ghidra capture 없이는 호스트 정보가 비어 이름/타입/프로토타입이 빠진다 | C++ 호스트 쪽: `ghidra_arch.cc`, `database_ghidra.cc`(ScopeGhidra), `typegrp_ghidra.cc`, `loadimage_ghidra.cc` | `pcode.HostScope`(funccallspec.go:63), `bridge.BuildConfig`를 채우는 downstream 어댑터 | 같은 work를 Ghidra 호스트 정보 대신 어댑터로 돌린 출력의 골든 일치율을 재는 측정 모드 추가 후 수치화 |
+| PDB 타입/프로토타입 | downstream은 PE의 RSDS(PDB 경로/GUID)만 읽는다 | Ghidra PDB 파서는 Java(ghidra-ref 미포함)라 parity 대상 아님. MSF/DBI/TPI 포맷 | downstream 호스트 | PDB를 적용한 Ghidra 골든 work에서 일치율 |
+| GCC/ELF 표본 | 미측정 | `tools/realexe/realexe.py sample` | `tools/realexe` (ELF 로딩 경로 확인) | GCC로 빌드한 ELF work 200/200 |
+| 큰 함수 | 4KB 초과 함수 미측정 | `realexe.py sample --max-bytes` | 측정만 | `--max-bytes` 상향 work 200/200 |
+| seed 연장 | private-sample 51, private-sample 50부터 | `realexe.py sample --seed N` 후 `measure` | 측정만 | 새 work 200/200 |
 
 ## 도구
 
