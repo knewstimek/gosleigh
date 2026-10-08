@@ -860,11 +860,55 @@ func (m *JumpBasic) FoldInGuards(fd *Funcdata, jump *JumpTable) bool {
 	return change
 }
 
-// SanityCheck asks the model to prune obviously-bad addresses.
+// SanityCheck cuts the address table off at the first unreasonable entry: a
+// zero address, or one more than 0xffff away from the first entry whose bytes
+// the load image cannot supply. The range and the load points are truncated
+// with it.
 // C++ parity: jumptable.cc JumpBasic::sanityCheck
-func (m *JumpBasic) SanityCheck(_ *Funcdata, _ *PcodeOp, addressTable *[]address.Address,
-	_ *[]LoadTable, _ *[]int32) bool {
-	return len(*addressTable) > 0
+func (m *JumpBasic) SanityCheck(fd *Funcdata, _ *PcodeOp, addressTable *[]address.Address,
+	loadPoints *[]LoadTable, loadCounts *[]int32) bool {
+	tbl := *addressTable
+	if len(tbl) == 0 {
+		return true
+	}
+	first := tbl[0].Offset
+	i := 0
+	if first != 0 {
+		for i = 1; i < len(tbl); i++ {
+			off := tbl[i].Offset
+			if off == 0 {
+				break
+			}
+			diff := off - first
+			if first > off {
+				diff = first - off
+			}
+			if diff > 0xffff {
+				read := fd.ImageReader()
+				if read == nil {
+					break
+				}
+				if _, err := read(tbl[i], 4); err != nil {
+					break // DataUnavailError: the address is not in the image
+				}
+			}
+		}
+	}
+	if i == 0 {
+		return false
+	}
+	if i != len(tbl) {
+		*addressTable = tbl[:i]
+		if m.Range != nil {
+			m.Range.Truncate(int32(i))
+		}
+		if loadCounts != nil && loadPoints != nil && i-1 < len(*loadCounts) {
+			if n := int((*loadCounts)[i-1]); n <= len(*loadPoints) {
+				*loadPoints = (*loadPoints)[:n]
+			}
+		}
+	}
+	return true
 }
 
 // Clone copies this model into jt.
@@ -1185,6 +1229,7 @@ func indexPairLess(a, b IndexPair) bool {
 type JumpTable struct {
 	// recoverFailMsg is the warning text of a failed first-stage recovery.
 	recoverFailMsg   string
+	sanityWarning    string
 	jmodel           JumpModel
 	origModel        JumpModel
 	addressTable     []address.Address
@@ -1364,6 +1409,11 @@ func (jt *JumpTable) EmulateFailMsg() string {
 	}
 	return jt.recoverFailMsg
 }
+
+// SanityWarning is the warning the sanity check left when it truncated the
+// address table, or empty. C++ parity: JumpTable::sanityCheck
+// (fd->warning("Sanity check requires truncation of jumptable", opaddress)).
+func (jt *JumpTable) SanityWarning() string { return jt.sanityWarning }
 
 // AddBlockToSwitch appends a synthetic destination (used when a guard
 // block should also be recorded as a switch target).
@@ -1624,9 +1674,13 @@ func (jt *JumpTable) sanityCheck(fd *Funcdata, loadCounts *[]int32) error {
 			return fmt.Errorf("%w: likely thunk", JumptableThunkError)
 		}
 	}
+	sz := len(jt.addressTable)
 	if !jt.jmodel.SanityCheck(fd, jt.indirect, &jt.addressTable, &jt.loadPoints, loadCounts) {
 		return fmt.Errorf("%w: jumptable at %s failed sanity check",
 			JumptableRecoveryError, jt.opAddress)
+	}
+	if sz != len(jt.addressTable) { // The address table was resized
+		jt.sanityWarning = "Sanity check requires truncation of jumptable"
 	}
 	return nil
 }
@@ -1806,8 +1860,10 @@ func (jt *JumpTable) SetOverride(addrTable []address.Address, normAddr address.A
 // so findUnnormalized / foldInNormalization / foldInGuards operate on live ops.
 // C++ parity: jumptable.cc JumpTable::matchModel (jumptable.cc:2700).
 //
-// Known simplification: the tablesize-mismatch handling (multistage restart /
-// warning) is not ported; the current corpus recovers a matching model.
+// A model whose size does not match the recovered table gets a warning.
+// Unported: when the table has a single entry and the model more, C++ marks a
+// multistage jump in the Override and restarts; Gosleigh's flow has no
+// multistage override yet, so that case also only warns.
 func (jt *JumpTable) MatchModel(fd *Funcdata) {
 	if !jt.IsRecovered() {
 		return // C++ throws LowlevelError
@@ -1817,9 +1873,13 @@ func (jt *JumpTable) MatchModel(fd *Funcdata) {
 			jt.saveModel()
 		} else {
 			jt.clearSavedModel()
+			fd.warning("Switch is manually overridden", jt.opAddress)
 		}
 	}
 	jt.RecoverModel(fd) // Create a current instance of the model
+	if jt.jmodel != nil && int(jt.jmodel.TableSize()) != len(jt.addressTable) {
+		fd.warning("Could not find normalized switch variable to match jumptable", jt.opAddress)
+	}
 }
 
 // RecoverLabels builds case labels from the current model, reverse-emulating

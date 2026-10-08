@@ -498,6 +498,14 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// insertion order the golden expects. Ghidra emits them in this order too:
 	// stageJumpTable's catch warns first (funcdata_block.cc:543), then the
 	// fail_normal path calls truncateIndirectJump (flow.cc:727).
+	// A table the sanity check truncated warns from inside the jump-table
+	// recovery (C++ JumpTable::sanityCheck on the partial Funcdata), hence
+	// the jumptable prefix.
+	for _, jt := range recoveredTables {
+		if w := jt.SanityWarning(); w != "" {
+			fd.WarningJumptable(w, jt.OpAddress())
+		}
+	}
 	if len(emulateFails) > 0 {
 		for _, op := range fd.GetPcodeOpBank().AliveOps() {
 			if op == nil || op.Code() != pcode.CPUI_BRANCHIND {

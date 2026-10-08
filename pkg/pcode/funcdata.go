@@ -372,6 +372,17 @@ func (fd *Funcdata) warning(txt string, ad address.Address) {
 // on the original data (funcdata_block.cc:516,543).
 func (fd *Funcdata) Warning(txt string, ad address.Address) { fd.warning(txt, ad) }
 
+// WarningJumptable attaches a warning that jump-table recovery issued on its
+// partial Funcdata, keeping the "WARNING (jumptable): " prefix that
+// Funcdata::warning gives while isJumptableRecoveryOn.
+// C++ parity: funcdata.cc Funcdata::warning (jumptable branch).
+func (fd *Funcdata) WarningJumptable(txt string, ad address.Address) {
+	if fd.commentDB == nil {
+		fd.commentDB = &CommentDatabase{}
+	}
+	fd.commentDB.addCommentNoDuplicate(CommentWarning, fd.baseAddr, ad, "WARNING (jumptable): "+txt)
+}
+
 // GetGlobalScope returns the parent (global) symbol scope, or nil if none was
 // injected. C++ parity: Funcdata::getScopeLocal()->getParent().
 func (fd *Funcdata) GetGlobalScope() *GlobalScope { return fd.globalScope }
