@@ -1488,7 +1488,6 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 		// re-running Heritage() on later mainloop iterations does not re-place phis
 		// for already-resolved (heritage-known) varnodes.
 		// C++ parity: heritage.cc Heritage::heritage (2702-2732).
-		h.disjoint.Clear()
 		// A read in a range covered by an earlier pass, after dead code was
 		// already removed from the space, means data-flow may have been lost.
 		// C++ parity: Heritage::heritage (needwarning, bumpDeadcodeDelay).
@@ -1550,7 +1549,13 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			}
 			h.fd.warningHeader(msg)
 		}
+	}
 
+	// Every space's ranges are collected before any is placed: Varnodes that
+	// placement creates (refinement and normalization pieces) are not in
+	// globalDisjoint until a later pass collects them.
+	// C++ parity: Heritage::heritage (space loop, then placeMultiequals()).
+	{
 		// Place multiequals for each range (refined first when no write fills
 		// it), then rename. C++ parity: Heritage::placeMultiequals.
 		for i := 0; i < h.disjoint.Len(); i++ {
@@ -1603,7 +1608,7 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			// Collect so the INDIRECT output varnodes appear as written SSA definitions.
 			// C++ parity: heritage.cc Heritage::heritage -> guard -> guardCalls
 			if task.NewAddresses() {
-				h.guardCalls(info.Space, task.Addr.Offset, task.Size)
+				h.guardCalls(task.Addr.Space, task.Addr.Offset, task.Size)
 				// C++ parity: Heritage::guard -> guardReturns.
 				h.guardReturns(0, task.Addr, task.Size)
 				if h.fd.queryPropertyFlags(task.Addr, task.Size)&VarnodePersist != 0 {
