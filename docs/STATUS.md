@@ -34,6 +34,8 @@ XMM1 < XMM0, R9 < R8인 실행을 확인). Go는 cspec 문서 순서(`paramEntry
 | private-sample [169] / private-sample [168] | FStaticStateResource | 두 vtable 호출 인자가 표본마다 다름 |
 
 근거와 재현 방법: repoplane `gosleigh/realexe/private-sample-callind-args-live-only`.
+upstream 수정 PR: NationalSecurityAgency/ghidra#9750 (entry 위치 번호로 비교). 병합되면 Go 쪽 비교를
+upstream과 다시 대조한다(repoplane `gosleigh/upstream/ghidra-pr-9750-paramtrial-order`).
 
 ## 다음 후보
 
