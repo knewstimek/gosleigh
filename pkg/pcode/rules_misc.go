@@ -79,26 +79,11 @@ func NewRulePiecePathology(group string) *RulePiecePathology {
 	return r
 }
 
+// apply is RulePiecePathology alone; folding PIECE(SUBPIECE(V,k),
+// SUBPIECE(V,0)) back to V is RuleHumptyDumpty's job (one root Varnode).
+// C++ parity: RulePiecePathology::applyOp.
 func (r *RulePiecePathology) apply(op *PcodeOp, data *Funcdata) int {
-	if n := piecePathologyApply(op, data); n > 0 {
-		return n
-	}
-	// Go-local: PIECE(SUBPIECE(x,k), SUBPIECE(x,0)) folds back to x. Not part
-	// of the C++ rule; kept because the corpus goldens depend on it.
-	hi := definedBy(op.Input(0), CPUI_SUBPIECE)
-	lo := definedBy(op.Input(1), CPUI_SUBPIECE)
-	if hi == nil || lo == nil || !sameValue(hi.Input(0), lo.Input(0)) {
-		return 0
-	}
-	hiOff, hiOK := constantValue(hi.Input(1))
-	loOff, loOK := constantValue(lo.Input(1))
-	if !hiOK || !loOK || loOff != 0 || hiOff != uint64(op.Input(1).Size()) {
-		return 0
-	}
-	if hi.Input(0).Size() != outputSize(op) {
-		return 0
-	}
-	return rewriteToCopy(data, op, hi.Input(0))
+	return piecePathologyApply(op, data)
 }
 
 type RuleExpandLoad struct{ batchRule }
