@@ -48,12 +48,17 @@ upstream과 다시 대조한다(repoplane `gosleigh/upstream/ghidra-pr-9750-para
 
 ### 미시작
 
+순서: 외부 API -> (downstream) 호스트 어댑터/PDB -> 측정 모드로 어댑터 품질 측정. GCC/ELF 이하는 병행 가능.
+
 | 항목 | 현상 | 참조 | 수정 대상 | 성공 기준 |
 |---|---|---|---|---|
+| 외부 API | `bridge.BuildConfig`/`HostScope`가 테스트용 구성이라 라이브러리 진입점이 없다 | C++ `ghidra_process.cc`(DecompileAt 요청 흐름) | `pkg/bridge` 공개 진입점(바이너리+함수 주소+호스트 정보 -> C) | 외부 모듈에서 import해 realexe work 하나를 같은 결과로 디컴파일하는 예제 테스트 |
 | 호스트 어댑터 | Ghidra capture 없이는 호스트 정보가 비어 이름/타입/프로토타입이 빠진다 | C++ 호스트 쪽: `ghidra_arch.cc`, `database_ghidra.cc`(ScopeGhidra), `typegrp_ghidra.cc`, `loadimage_ghidra.cc` | `pcode.HostScope`(funccallspec.go:63), `bridge.BuildConfig`를 채우는 downstream 어댑터 | 같은 work를 Ghidra 호스트 정보 대신 어댑터로 돌린 출력의 골든 일치율을 재는 측정 모드 추가 후 수치화 |
 | PDB 타입/프로토타입 | downstream은 PE의 RSDS(PDB 경로/GUID)만 읽는다 | Ghidra PDB 파서는 Java(ghidra-ref 미포함)라 parity 대상 아님. MSF/DBI/TPI 포맷 | downstream 호스트 | PDB를 적용한 Ghidra 골든 work에서 일치율 |
-| GCC/ELF 표본 | 미측정 | `tools/realexe/realexe.py sample` | `tools/realexe` (ELF 로딩 경로 확인) | GCC로 빌드한 ELF work 200/200 |
+| GCC/ELF 표본 | 미측정 | `tools/realexe/realexe.py sample` | `tools/realexe`(현재 PE 전용: `pe_machine`/`ARCH_SPECS`) | GCC로 빌드한 ELF work 200/200 |
 | 큰 함수 | 4KB 초과 함수 미측정 | `realexe.py sample --max-bytes` | 측정만 | `--max-bytes` 상향 work 200/200 |
+| 게이트 잔여 | corpus2 10/13, x64_auto 108/109 | `testdata/x64_auto/GAPMAP.md`, corpus2 진단 테스트 출력 | `pkg/pcode` | `X64 CORPUS2 MAP` 13/13, x64_auto 109/109 |
+| ARM 등 | 실바이너리 미검증(sla 골든 테스트만) | `pkg/sla/aarch64_golden_test.go` | `tools/realexe`(아키텍처 매핑) | ARM 바이너리 work 200/200 |
 | seed 연장 | private-sample 51, private-sample 50부터 | `realexe.py sample --seed N` 후 `measure` | 측정만 | 새 work 200/200 |
 
 ## 도구
