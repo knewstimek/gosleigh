@@ -5122,6 +5122,21 @@ func (s *printCState) localPieceName(vn *Varnode, name string, castTo Datatype, 
 		if at == nil {
 			return name, nil
 		}
+	} else if e := sl.QueryContainer(vn.Addr(), 1, address.Address{}); e == nil || e.Symbol() == nil || e.Symbol().Name() != name {
+		// Stack storage of another location merged into the variable (a
+		// copy the merge placed at a scratch slot) prints by where the
+		// variable's Symbol is. C++ parity: high->getSymbol/getSymbolOffset.
+		if hv := vn.High(); hv != nil {
+			for _, w := range hv.Instances() {
+				if w.Space() != sl.SpaceID() || w == vn {
+					continue
+				}
+				if we := sl.QueryContainer(w.Addr(), 1, address.Address{}); we != nil && we.Symbol() != nil && we.Symbol().Name() == name {
+					at = w
+					break
+				}
+			}
+		}
 	}
 	e := sl.QueryContainer(at.Addr(), vn.Size(), address.Address{})
 	if e == nil {
