@@ -61,7 +61,7 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 	// not discard the flow already recovered, so the guard CBRANCH still forms a
 	// block boundary. Ghidra's truncatedFlow clones a flow that already handled
 	// the bad target; the recovery clone reproduces that by tolerating it here.
-	records, _, err := collectInstructionsTolerant(engine, cfg, nil, true)
+	records, _, err := collectInstructionsTolerant(engine, cfg, cfg.partialSeeds, true)
 	if err != nil {
 		return nil, err
 	}
@@ -325,4 +325,30 @@ func recoverLiveJumpTables(engine *sla.Engine, cfg BuildConfig) (map[uint64]*pco
 		}
 	}
 	return recovered, emulateFails
+}
+
+// secondStageJumpTables recovers again every table the override marks as
+// multistage and that the first stage left with a single entry, this time on
+// a partial whose flow already follows that entry. A failed second stage keeps
+// the first-stage table and warns.
+// C++ parity: FlowInfo::checkMultistageJumptables (JumpTable::checkForMultistage)
+// and Funcdata::stageJumpTable -> JumpTable::recoverMultistage.
+func secondStageJumpTables(engine *sla.Engine, cfg BuildConfig, tables map[uint64]*pcode.JumpTable, codeSpace *address.Space) {
+	if len(cfg.MultistageJumps) == 0 {
+		return
+	}
+	for off, jt := range tables {
+		if !cfg.MultistageJumps[off] || jt.NumEntries() != 1 {
+			continue
+		}
+		next := cfg
+		next.partialSeeds = append(append([]address.Address(nil), cfg.partialSeeds...),
+			address.Address{Space: codeSpace, Offset: jt.AddressByIndex(0).Offset})
+		again, _ := recoverLiveJumpTables(engine, next)
+		if jt2 := again[off]; jt2 != nil && jt2.NumEntries() > 0 {
+			tables[off] = jt2
+		} else {
+			jt.AddRecoveryWarning("Second-stage recovery error")
+		}
+	}
 }

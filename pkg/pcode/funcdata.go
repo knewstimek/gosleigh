@@ -133,8 +133,9 @@ type Funcdata struct {
 	deadcodeDelays map[string]int32
 	// protoOverrides are the prototypes forced onto call sites (instruction
 	// offset). C++ parity: Override::protoover.
-	protoOverrides map[uint64]*HostFunction
-	rebuildRequested  bool
+	protoOverrides   map[uint64]*HostFunction
+	rebuildRequested bool
+	multistageJumps  map[uint64]bool
 	// trackedSet are the register values known at entry (ActionConstbase).
 	trackedSet []constbaseTrackedContext
 
@@ -2441,7 +2442,6 @@ func (fd *Funcdata) registerName(vn *Varnode) string {
 	return fd.registerNames[fmt.Sprintf("%d:%d:%d", vn.Space().Index, vn.Offset(), vn.Size())]
 }
 
-
 // addIndirectOverride records a resolved indirect call and requests a rebuild.
 func (fd *Funcdata) addIndirectOverride(at uint64, target address.Address) {
 	if fd.indirectOverrides == nil {
@@ -2453,6 +2453,23 @@ func (fd *Funcdata) addIndirectOverride(at uint64, target address.Address) {
 	fd.indirectOverrides[at] = target
 	fd.rebuildRequested = true
 }
+
+// addMultistageJump marks the BRANCHIND at off as needing a second recovery
+// stage and requests a restart.
+// C++ parity: Override::insertMultistageJump + Funcdata::setRestartPending.
+func (fd *Funcdata) addMultistageJump(off uint64) {
+	if fd.multistageJumps == nil {
+		fd.multistageJumps = make(map[uint64]bool)
+	}
+	fd.multistageJumps[off] = true
+	fd.rebuildRequested = true
+}
+
+// MultistageJumps returns the BRANCHINDs marked for a second recovery stage.
+func (fd *Funcdata) MultistageJumps() map[uint64]bool { return fd.multistageJumps }
+
+// SetMultistageJumps seeds the multistage marks a rebuilt function inherits.
+func (fd *Funcdata) SetMultistageJumps(m map[uint64]bool) { fd.multistageJumps = m }
 
 // SetIndirectOverrides seeds the overrides a rebuilt function inherits.
 func (fd *Funcdata) SetIndirectOverrides(ov map[uint64]address.Address) {

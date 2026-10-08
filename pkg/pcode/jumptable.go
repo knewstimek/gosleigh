@@ -1230,6 +1230,7 @@ type JumpTable struct {
 	// recoverFailMsg is the warning text of a failed first-stage recovery.
 	recoverFailMsg   string
 	sanityWarning    string
+	recoveryWarnings []string
 	jmodel           JumpModel
 	origModel        JumpModel
 	addressTable     []address.Address
@@ -1414,6 +1415,15 @@ func (jt *JumpTable) EmulateFailMsg() string {
 // address table, or empty. C++ parity: JumpTable::sanityCheck
 // (fd->warning("Sanity check requires truncation of jumptable", opaddress)).
 func (jt *JumpTable) SanityWarning() string { return jt.sanityWarning }
+
+// AddRecoveryWarning records a warning recovery issued on its partial
+// Funcdata, to be attached to the live BRANCHIND.
+func (jt *JumpTable) AddRecoveryWarning(txt string) {
+	jt.recoveryWarnings = append(jt.recoveryWarnings, txt)
+}
+
+// RecoveryWarnings lists the warnings of AddRecoveryWarning.
+func (jt *JumpTable) RecoveryWarnings() []string { return jt.recoveryWarnings }
 
 // AddBlockToSwitch appends a synthetic destination (used when a guard
 // block should also be recorded as a switch target).
@@ -1860,10 +1870,10 @@ func (jt *JumpTable) SetOverride(addrTable []address.Address, normAddr address.A
 // so findUnnormalized / foldInNormalization / foldInGuards operate on live ops.
 // C++ parity: jumptable.cc JumpTable::matchModel (jumptable.cc:2700).
 //
-// A model whose size does not match the recovered table gets a warning.
-// Unported: when the table has a single entry and the model more, C++ marks a
-// multistage jump in the Override and restarts; Gosleigh's flow has no
-// multistage override yet, so that case also only warns.
+// A model whose size does not match the recovered table gets a warning,
+// unless the table has a single entry and the model more: the jump-table was
+// not fully recovered during flow, so it is marked multistage and the
+// decompilation restarts.
 func (jt *JumpTable) MatchModel(fd *Funcdata) {
 	if !jt.IsRecovered() {
 		return // C++ throws LowlevelError
@@ -1878,6 +1888,10 @@ func (jt *JumpTable) MatchModel(fd *Funcdata) {
 	}
 	jt.RecoverModel(fd) // Create a current instance of the model
 	if jt.jmodel != nil && int(jt.jmodel.TableSize()) != len(jt.addressTable) {
+		if len(jt.addressTable) == 1 && jt.jmodel.TableSize() > 1 {
+			fd.addMultistageJump(jt.opAddress.Offset)
+			return
+		}
 		fd.warning("Could not find normalized switch variable to match jumptable", jt.opAddress)
 	}
 }

@@ -21,6 +21,13 @@ type BuildConfig struct {
 	// DeadcodeDelays are dead-code delay overrides by space name.
 	// C++ parity: Override::insertDeadcodeDelay.
 	DeadcodeDelays map[string]int32
+	// MultistageJumps are the BRANCHINDs whose table needs a second recovery
+	// stage (keyed by instruction offset).
+	// C++ parity: Override::insertMultistageJump.
+	MultistageJumps map[uint64]bool
+	// partialSeeds are extra flow roots for the jump-table recovery partial:
+	// the first-stage case targets during a second stage.
+	partialSeeds []address.Address
 
 	Name            string
 	Entry           address.Address
@@ -169,7 +176,7 @@ type Result struct {
 	// CspecData is set when BuildConfig.CspecPath is non-empty.
 	CspecData *pcode.CspecData
 	// rebuild re-runs Build with indirect-call overrides (a decompiler restart).
-	rebuild func(map[uint64]address.Address, map[uint64]*pcode.HostFunction, map[string]int32) (*Result, error)
+	rebuild func(map[uint64]address.Address, map[uint64]*pcode.HostFunction, map[string]int32, map[uint64]bool) (*Result, error)
 }
 
 type instructionRecord struct {
@@ -261,6 +268,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	if recordsHaveBranchInd(records) {
 		tables, fails := recoverLiveJumpTables(engine, cfg)
 		emulateFails = fails
+		secondStageJumpTables(engine, cfg, tables, records[0].translation.Address.Space)
 		if len(tables) > 0 {
 			// Normalize case targets into the code space the records use so block
 			// lookups (blockByAddr) and worklist seeds share one AddrSpace pointer.
@@ -308,6 +316,13 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 			ov[k] = v
 		}
 		fd.SetIndirectOverrides(ov) // a restart keeps earlier overrides
+	}
+	if len(cfg.MultistageJumps) != 0 {
+		ms := make(map[uint64]bool, len(cfg.MultistageJumps))
+		for k, v := range cfg.MultistageJumps {
+			ms[k] = v
+		}
+		fd.SetMultistageJumps(ms)
 	}
 	if len(cfg.ProtoOverrides) != 0 {
 		po := make(map[uint64]*pcode.HostFunction, len(cfg.ProtoOverrides))
@@ -505,6 +520,9 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		if w := jt.SanityWarning(); w != "" {
 			fd.WarningJumptable(w, jt.OpAddress())
 		}
+		for _, w := range jt.RecoveryWarnings() {
+			fd.WarningJumptable(w, jt.OpAddress())
+		}
 	}
 	if len(emulateFails) > 0 {
 		for _, op := range fd.GetPcodeOpBank().AliveOps() {
@@ -553,11 +571,12 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		Instructions:   translations,
 		HeritageSpaces: summary.heritageSpaces,
 		Warnings:       warnings,
-		rebuild: func(ov map[uint64]address.Address, po map[uint64]*pcode.HostFunction, dd map[string]int32) (*Result, error) {
+		rebuild: func(ov map[uint64]address.Address, po map[uint64]*pcode.HostFunction, dd map[string]int32, ms map[uint64]bool) (*Result, error) {
 			next := cfg
 			next.IndirectOverrides = ov
 			next.ProtoOverrides = po
 			next.DeadcodeDelays = dd
+			next.MultistageJumps = ms
 			return Build(engine, next)
 		},
 	}
