@@ -85,6 +85,47 @@ func opcodeInheritsSignFirstParamOnly(opc OpCode) bool {
 	return false
 }
 
+// markExplicitLongSize marks a constant shifted as a value wider than int,
+// but small enough to read as an int, to print with a long suffix.
+// C++ parity: cast.cc CastStrategy::markExplicitLongSize.
+func (cs *CastStrategyC) markExplicitLongSize(op *PcodeOp, slot int) bool {
+	switch op.Code() {
+	case CPUI_INT_LEFT, CPUI_INT_RIGHT, CPUI_INT_SRIGHT: // TypeOp::isShiftOp
+	default:
+		return false
+	}
+	if slot != 0 {
+		return false
+	}
+	vn := op.Input(slot)
+	if vn == nil || !vn.IsConstant() || vn.Size() <= cs.promoteSize {
+		return false
+	}
+	dt := vn.Type() // A constant's HighVariable type is its own
+	if hv := vn.High(); hv != nil && hv.Type() != nil {
+		dt = hv.Type()
+	}
+	if dt == nil {
+		return false
+	}
+	meta := dt.Metatype()
+	if meta != TYPE_UINT && meta != TYPE_INT && meta != TYPE_UNKNOWN &&
+		meta != TYPE_PARTIALSTRUCT && meta != TYPE_PARTIALUNION {
+		return false
+	}
+	off := vn.Offset()
+	if meta == TYPE_INT && signbitNegative(off, vn.Size()) {
+		off = (-off) & maskForSize(vn.Size())
+		if mostSigBitSet(off) >= int(cs.promoteSize)*8-1 {
+			return false
+		}
+	} else if mostSigBitSet(off) >= int(cs.promoteSize)*8 {
+		return false // A big enough integer naturally becomes a long
+	}
+	vn.SetAddlFlags(VarnodeLongPrint)
+	return true
+}
+
 // markExplicitUnsigned checks whether the constant input at slot must be coerced
 // (as a source token) into being explicitly unsigned, and if so marks the Varnode
 // so push_integer renders it with a trailing 'U'. Returns true if it marked the

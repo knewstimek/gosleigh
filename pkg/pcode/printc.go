@@ -3296,6 +3296,16 @@ func (s *printCState) renderConstant(vn *Varnode) string {
 	if vn.HasAddlFlags(VarnodeUnsignedPrint) {
 		unsignedSuffix = "U"
 	}
+	// force_sized_token: a constant marked by markExplicitLongSize takes the
+	// long suffix: "LL" when long is no wider than int, else "L". The live
+	// decompiler gets its sizes from the data organization Ghidra sends,
+	// which leaves out a long size equal to the default 4, so TypeFactory
+	// falls back to 8 (setupSizes) and the suffix is "L" (x64 Windows golden
+	// prints 1L although its cspec says long_size 4).
+	// C++ parity: PrintC::push_integer + initializeFromArchitecture (sizeSuffix).
+	if vn.HasAddlFlags(VarnodeLongPrint) {
+		unsignedSuffix += "L"
+	}
 	switch typed := dt.(type) {
 	case *Base:
 		switch typed.Metatype() {

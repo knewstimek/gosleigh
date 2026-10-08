@@ -345,9 +345,11 @@ func (a *ActionSetCasts) castInput(op *PcodeOp, slot int, data *Funcdata, cs *Ca
 	ct := op.GetOpcode().GetInputCast(op, slot, cs)
 	if ct == nil {
 		// No cast type required: the input may still need an explicit unsigned
-		// marker (a trailing 'U' on a constant in a sign-inheriting op).
-		// markExplicitLongSize (the 'LL' size marker) remains an unported gap.
-		if cs.markExplicitUnsigned(op, slot) {
+		// marker (a trailing 'U') or an explicit long size ('L'/'LL') on a
+		// constant.
+		resUnsigned := cs.markExplicitUnsigned(op, slot)
+		resSized := cs.markExplicitLongSize(op, slot)
+		if resUnsigned || resSized {
 			return 1
 		}
 		return 0
