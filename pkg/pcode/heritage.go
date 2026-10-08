@@ -1914,15 +1914,24 @@ func (h *Heritage) guardReturnsPersist(addr address.Address, size int32) {
 
 // guardReturnsOverlapping handles the case where the heritaged range properly
 // contains the return storage: a SUBPIECE truncates the oversized range down to
-// the return register before the result is appended to each RETURN op.
+// the biggest output storage it contains (e.g. XMM0_Qa inside XMM0) before the
+// result is appended to each RETURN op.
 // C++ parity: heritage.cc Heritage::guardReturnsOverlapping (lines 1609-1638).
 func (h *Heritage) guardReturnsOverlapping(addr address.Address, size int32) {
-	retSize := h.proto.ReturnRegSize
-	truncAddr := address.Address{Space: addr.Space, Offset: h.proto.ReturnRegOffset}
-	active := h.fd.GetFuncProto().GetActiveOutput()
+	fp := h.fd.GetFuncProto()
+	truncAddr, retSize, ok := fp.getBiggestContainedOutput(addr, size)
+	if !ok && fp.Model() != nil && fp.Model().OutputParams == nil {
+		// Model without an output ParamList: its single return register is the
+		// only output storage (characterizeReturnOutput uses the same fallback).
+		truncAddr, retSize, ok = address.Address{Space: addr.Space, Offset: h.proto.ReturnRegOffset}, h.proto.ReturnRegSize, true
+	}
+	if !ok {
+		return
+	}
+	active := fp.GetActiveOutput()
 	active.RegisterTrial(truncAddr, retSize)
 	// Number of least significant bytes to truncate.
-	offset := int32(h.proto.ReturnRegOffset - addr.Offset)
+	offset := int32(truncAddr.Offset - addr.Offset)
 	if addr.Space != nil && addr.Space.BigEndian {
 		offset = (size - retSize) - offset
 	}

@@ -55,12 +55,12 @@ func (fc *FuncCallSpecs) IsOutputActive() bool {
 // C++ parity: fspec.cc FuncProto::characterizeAsOutput (register subset).
 // getBiggestContainedOutput returns the biggest possible return storage
 // lying inside [loc, loc+size). C++ parity: FuncProto::getBiggestContainedOutput.
-func (fc *FuncCallSpecs) getBiggestContainedOutput(loc address.Address, size int32) (address.Address, int32, bool) {
-	if fc.IsOutputLocked() {
-		if out := fc.FuncProto.output; out != nil && out.Type() != nil && out.Type().Metatype() == TYPE_VOID {
+func (fp *FuncProto) getBiggestContainedOutput(loc address.Address, size int32) (address.Address, int32, bool) {
+	if fp.IsOutputLocked() {
+		if out := fp.output; out != nil && out.Type() != nil && out.Type().Metatype() == TYPE_VOID {
 			return address.Address{}, 0, false
 		}
-		iaddr, isz, ok := fc.FuncProto.OutputStorage()
+		iaddr, isz, ok := fp.OutputStorage()
 		if !ok || iaddr.Space == nil || loc.Space == nil || iaddr.Space.Index != loc.Space.Index {
 			return address.Address{}, 0, false
 		}
@@ -69,7 +69,7 @@ func (fc *FuncCallSpecs) getBiggestContainedOutput(loc address.Address, size int
 		}
 		return address.Address{}, 0, false
 	}
-	m := fc.Model()
+	m := fp.Model()
 	if m == nil || m.OutputParams == nil {
 		return address.Address{}, 0, false
 	}
