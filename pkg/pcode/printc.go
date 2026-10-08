@@ -4991,7 +4991,8 @@ func (s *printCState) renderSubpieceField(op *PcodeOp) (ExprFragment, bool) {
 		if hv := op.Output().High(); hv != nil {
 			castTo = hv.Type()
 		}
-		name, cast := symbolPieceName(symName, symType, byteOff, sz, castTo, be, op, slot)
+		// opSubpiece pushes the partial symbol directly: no mismatch check.
+		name, cast := partialSymbolName(symName, symType, byteOff, sz, castTo, be, op, slot)
 		if cast != nil {
 			return s.lang.CastExpr(printedTypeString(s.normalizeTypeForDecl(cast)), s.globalNameExpr(vn, name)), true
 		}

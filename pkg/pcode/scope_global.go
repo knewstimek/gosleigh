@@ -190,6 +190,14 @@ func symbolPieceName(name string, ct Datatype, off, sz int32, castTo Datatype, b
 		}
 		return name, nil
 	}
+	return partialSymbolName(name, ct, off, sz, castTo, bigEndian, rop, rslot)
+}
+
+// partialSymbolName is the pushPartialSymbol walk of symbolPieceName without
+// the mismatch check: an access the symbol's type does not cover ends in
+// an artificial ._off_sz_ step (or a truncating cast).
+// C++ parity: PrintC::pushPartialSymbol.
+func partialSymbolName(name string, ct Datatype, off, sz int32, castTo Datatype, bigEndian bool, rop *PcodeOp, rslot int) (string, Datatype) {
 	var finalcast Datatype
 	var sb strings.Builder
 	sb.WriteString(name)

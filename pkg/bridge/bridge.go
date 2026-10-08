@@ -28,6 +28,9 @@ type BuildConfig struct {
 	// partialSeeds are extra flow roots for the jump-table recovery partial:
 	// the first-stage case targets during a second stage.
 	partialSeeds []address.Address
+	// partialTables are the tables an earlier recovery round already found:
+	// the partial wires their case edges and does not recover them again.
+	partialTables map[uint64]*pcode.JumpTable
 
 	Name            string
 	Entry           address.Address
@@ -266,28 +269,60 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// truncateIndirectJump order (funcdata_block.cc:543 then flow.cc:727).
 	var emulateFails map[uint64]string
 	if recordsHaveBranchInd(records) {
+		codeSpace := records[0].translation.Address.Space
 		tables, fails := recoverLiveJumpTables(engine, cfg)
 		emulateFails = fails
-		secondStageJumpTables(engine, cfg, tables, records[0].translation.Address.Space)
-		if len(tables) > 0 {
+		secondStageJumpTables(engine, cfg, tables, codeSpace)
+		tried := branchIndOffsets(records)
+		for len(tables) > 0 {
 			// Normalize case targets into the code space the records use so block
 			// lookups (blockByAddr) and worklist seeds share one AddrSpace pointer.
-			codeSpace := records[0].translation.Address.Space
+			var seeds []address.Address
 			for _, jt := range tables {
 				for i := 0; i < jt.NumEntries(); i++ {
-					caseSeeds = append(caseSeeds, address.Address{Space: codeSpace, Offset: jt.AddressByIndex(i).Offset})
+					seeds = append(seeds, address.Address{Space: codeSpace, Offset: jt.AddressByIndex(i).Offset})
 				}
 			}
-			records2, _, cerr := collectInstructionsSeeded(engine, cfg, caseSeeds)
-			if cerr == nil && len(records2) > 0 {
-				recoveredTables = tables
-				records = records2
-			} else {
+			records2, _, cerr := collectInstructionsSeeded(engine, cfg, seeds)
+			if cerr != nil || len(records2) == 0 {
 				// Re-collection failed (e.g. a case target hit undecodable bytes):
-				// discard the recovery and fall back to the truncate path so output
-				// stays exactly as before rather than a half-decoded switch.
-				caseSeeds = nil
+				// keep the previous round's result (the truncate path when this is
+				// the first round) rather than a half-decoded switch.
+				break
 			}
+			recoveredTables, caseSeeds, records = tables, seeds, records2
+			// A BRANCHIND reached only through the case bodies gets its own
+			// recovery round on a partial that follows the tables found so far.
+			// C++ parity: FlowInfo::generateOps loops recoverJumpTables while
+			// the tablelist is non-empty.
+			fresh := false
+			for off := range branchIndOffsets(records2) {
+				if !tried[off] {
+					tried[off], fresh = true, true
+				}
+			}
+			if !fresh {
+				break
+			}
+			next := cfg
+			next.partialSeeds = append(append([]address.Address(nil), cfg.partialSeeds...), seeds...)
+			next.partialTables = tables
+			more, moreFails := recoverLiveJumpTables(engine, next)
+			for off, msg := range moreFails {
+				emulateFails[off] = msg
+			}
+			if len(more) == 0 {
+				break
+			}
+			secondStageJumpTables(engine, next, more, codeSpace)
+			merged := make(map[uint64]*pcode.JumpTable, len(tables)+len(more))
+			for off, jt := range tables {
+				merged[off] = jt
+			}
+			for off, jt := range more {
+				merged[off] = jt
+			}
+			tables = merged
 		}
 	}
 
@@ -2206,6 +2241,19 @@ func min(left int, right int) int {
 // when false, Build takes the exact pre-3b path (no partial build, no heritage,
 // no re-collection), guaranteeing a byte-identical no-op for every function
 // without an indirect jump.
+// branchIndOffsets returns the instruction offsets holding a BRANCHIND.
+func branchIndOffsets(records []instructionRecord) map[uint64]bool {
+	offs := make(map[uint64]bool)
+	for _, record := range records {
+		for _, op := range record.translation.Ops {
+			if op.OpCode == pcode.CPUI_BRANCHIND {
+				offs[record.translation.Address.Offset] = true
+			}
+		}
+	}
+	return offs
+}
+
 func recordsHaveBranchInd(records []instructionRecord) bool {
 	for _, record := range records {
 		for _, op := range record.translation.Ops {

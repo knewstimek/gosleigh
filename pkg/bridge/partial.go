@@ -182,7 +182,7 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 	// (Ghidra's partial assumption, flow.cc:937), so no recovered tables feed edge
 	// generation here.
 	graph.SetInitialRanges()
-	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock, nil, nil, nil)
+	addCFGEdges(graph, blockByAddr, instToBlock, lastInBlock, cfg.partialTables, nil, nil)
 	graph.StructureLoops()
 	fd.SetBasicBlocks(graph)
 	fd.SetFlag(pcode.FuncBlocksGenerated)
@@ -300,6 +300,9 @@ func recoverLiveJumpTables(engine *sla.Engine, cfg BuildConfig) (map[uint64]*pco
 	}
 
 	for _, bop := range partial.BranchInds {
+		if cfg.partialTables[bop.Addr().Offset] != nil {
+			continue // Recovered in an earlier round
+		}
 		var failMsg string
 		jt := func() *pcode.JumpTable {
 			defer func() { _ = recover() }()
