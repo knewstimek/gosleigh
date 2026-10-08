@@ -1856,7 +1856,7 @@ func (a *ActionConstantPtr) Apply(data *Funcdata) int {
 		vn.SetAddlFlags(VarnodePtrCheck)
 
 		hit := false
-		for _, sp := range candidatePointerSpaces(data) {
+		for _, sp := range candidatePointerSpaces(data, vn) {
 			entry, rampoint := constPtrIsPointer(data, sp, vn, op, slot, scope)
 			if entry == nil {
 				continue
@@ -1885,7 +1885,16 @@ func (a *ActionConstantPtr) Apply(data *Funcdata) int {
 // default data space; here we walk every space the Funcdata bank has seen
 // and keep only the processor-kind ones (RAM / data).
 // C++ parity: Architecture::getDefaultDataSpace + selectInferSpace (subset)
-func candidatePointerSpaces(data *Funcdata) []*address.Space {
+func candidatePointerSpaces(data *Funcdata, vn *Varnode) []*address.Space {
+	// A pointer type bound to a space of the constant's size picks it.
+	// C++ parity: ActionConstantPtr::selectInferSpace (TypePointer::getSpace).
+	if p, ok := vn.Type().(*Pointer); ok && p.SpaceName() != "" {
+		for _, sp := range data.HeritageSpaces() {
+			if sp.Name == p.SpaceName() && int32(sp.AddrSize) == vn.Size() {
+				return []*address.Space{sp}
+			}
+		}
+	}
 	// The spaces a constant may point into: the default data space (the one
 	// the function's code lives in).
 	// C++ parity: Architecture::inferPtrSpaces (default data space only).

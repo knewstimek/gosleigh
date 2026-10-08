@@ -118,3 +118,24 @@ func TestCastPredicates(t *testing.T) {
 		t.Error("IsZextCast int<-bool should be true")
 	}
 }
+
+// TestCastStandardPointerSpace checks that pointers bound to different address
+// spaces need a cast while an unbound pointer converts to either.
+// C++ parity: CastStrategyC::castStandard (TypePointer::getSpace).
+func TestCastStandardPointerSpace(t *testing.T) {
+	tf := NewTypeFactory()
+	cs := NewCastStrategyC(tf)
+	elem := tf.GetBase(4, TYPE_INT, "")
+	ram := tf.GetPointerWithSpace(8, elem, 1, "ram")
+	other := tf.GetPointerWithSpace(8, elem, 1, "io")
+	plain := tf.GetPointer(8, elem, 1)
+	if ram == plain || ram != tf.GetPointerWithSpace(8, elem, 1, "ram") {
+		t.Fatalf("space pointers must intern apart from plain ones")
+	}
+	if got := cs.CastStandard(ram, other, true, true); got != ram {
+		t.Errorf("ram <- io: got %v, want cast", got)
+	}
+	if got := cs.CastStandard(ram, plain, true, true); got != nil {
+		t.Errorf("ram <- plain: got %v, want no cast", got)
+	}
+}

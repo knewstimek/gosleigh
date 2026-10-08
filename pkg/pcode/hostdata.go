@@ -92,6 +92,10 @@ type HostTypeDesc struct {
 	// EnumValues are an enumeration's names by value (the first name of a
 	// value wins). C++ parity: TypeEnum::decode.
 	EnumValues map[uint64]string
+	// WordSize and Space are a pointer's wordsize and space attributes
+	// (0 and "" when absent). C++ parity: TypePointer::decode.
+	WordSize uint32
+	Space    string
 	// Proto is the prototype a function (code) type carries.
 	// C++ parity: TypeCode::proto.
 	Proto *HostCodeProto
@@ -159,7 +163,11 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 		if elem == nil {
 			elem = tf.GetBase(1, TYPE_UNKNOWN, "")
 		}
-		return tf.GetPointer(d.Size, elem, 1)
+		ws := d.WordSize
+		if ws == 0 {
+			ws = 1
+		}
+		return tf.GetPointerWithSpace(d.Size, elem, ws, d.Space)
 	case "array":
 		elem := ResolveHostType(d.Elem)
 		if elem == nil || d.Count <= 0 {

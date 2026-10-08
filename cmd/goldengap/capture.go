@@ -484,6 +484,10 @@ func typeDesc(n *xnode, types map[string]*xnode, depth int) *pcode.HostTypeDesc 
 			}
 		}
 	}
+	if d.Meta == "ptr" {
+		d.WordSize = uint32(parseUint(n.attr("wordsize")))
+		d.Space = n.attr("space")
+	}
 	if len(n.Kids) > 0 && (d.Meta == "ptr" || d.Meta == "array") {
 		d.Elem = typeDesc(&n.Kids[0], types, depth+1)
 	}

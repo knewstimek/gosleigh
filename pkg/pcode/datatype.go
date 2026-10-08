@@ -247,7 +247,15 @@ type Pointer struct {
 	relParent   Datatype
 	relOffset   int32
 	relStripped *Pointer
+
+	// spaceName names the address space the pointer is bound to ("" when
+	// unbound). C++ parity: TypePointer::spaceid.
+	spaceName string
 }
+
+// SpaceName returns the name of the address space the pointer is bound to,
+// or "" for an ordinary pointer. C++ parity: TypePointer::getSpace.
+func (p *Pointer) SpaceName() string { return p.spaceName }
 
 func NewPointer(size int32, to Datatype, wordSize uint32) *Pointer {
 	base := newDatatypeBase(size, -1, TYPE_PTR, "")

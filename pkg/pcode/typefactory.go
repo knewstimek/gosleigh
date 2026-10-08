@@ -487,6 +487,20 @@ func (f *TypeFactory) GetPointer(size int32, to Datatype, wordSize uint32) *Poin
 	return f.internPointer(key, value)
 }
 
+// GetPointerWithSpace is GetPointer for a pointer bound to the named address
+// space; an empty name gives the ordinary pointer.
+// C++ parity: TypePointer::decode (ATTRIB_SPACE) through TypeFactory::findAdd.
+func (f *TypeFactory) GetPointerWithSpace(size int32, to Datatype, wordSize uint32, space string) *Pointer {
+	if space == "" {
+		return f.GetPointer(size, to, wordSize)
+	}
+	canonicalTo := f.Intern(to)
+	value := NewPointer(size, canonicalTo, wordSize)
+	value.spaceName = space
+	key := fmt.Sprintf("ptr:%d:%d:%x:%s", size, wordSize, datatypeIdentity(canonicalTo), space)
+	return f.internPointer(key, value)
+}
+
 // GetPointerStripArray creates a pointer to pt, stripping an outer array so the
 // result points at the array element data-type. Used when a spacebase constant
 // is retyped onto the pointed-to symbol's data-type.

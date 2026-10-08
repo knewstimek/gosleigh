@@ -311,8 +311,9 @@ func (a *ActionSetCasts) Apply(data *Funcdata) int {
 }
 
 // checkPointerIssues warns when the pointer of a LOAD or STORE does not point
-// at a value of the size moved. The pointer's address space is not modelled,
-// so the space mismatch warning is not ported.
+// at a value of the size moved, or is bound to a different address space
+// than the op accesses. Gosleigh has no overlay spaces, so the C++
+// getContain() exemption never applies.
 // C++ parity: ActionSetCasts::checkPointerIssues.
 func checkPointerIssues(op *PcodeOp, vn *Varnode, data *Funcdata) {
 	if op.addlFlags&PcodeOpSpecialPrint != 0 || vn == nil {
@@ -325,6 +326,15 @@ func checkPointerIssues(op *PcodeOp, vn *Varnode, data *Funcdata) {
 			name = "Store"
 		}
 		data.warning(name+" size is inaccurate", op.Addr())
+	}
+	if ok && ptr.SpaceName() != "" {
+		if opSpc := op.Input(0).GetSpaceFromConst(); opSpc != nil && opSpc.Name != ptr.SpaceName() {
+			name := "Load"
+			if op.Code() == CPUI_STORE {
+				name = "Store"
+			}
+			data.warning(name+" refers to '"+opSpc.Name+"' but pointer attribute is '"+ptr.SpaceName()+"'", op.Addr())
+		}
 	}
 }
 

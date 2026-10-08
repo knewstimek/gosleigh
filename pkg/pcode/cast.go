@@ -370,7 +370,6 @@ func typeOrderBool(a, b Datatype) int {
 //
 // Simplifications vs C++ (documented Gosleigh type-system gaps):
 //   - variable-length / hasSameVariableBase short-circuit is skipped.
-//   - pointer address-space comparison is skipped: *Pointer carries no AddrSpace.
 //   - TypeCode prototype comparison is skipped: two CODE types of equal size are
 //     treated as not needing a cast.
 func (cs *CastStrategyC) CastStandard(reqtype, curtype Datatype, careUintInt, carePtrUint bool) Datatype {
@@ -396,7 +395,11 @@ func (cs *CastStrategyC) CastStandard(reqtype, curtype Datatype, careUintInt, ca
 		if reqptr.WordSize() != curptr.WordSize() {
 			return reqtype
 		}
-		// Address-space comparison omitted: Gosleigh *Pointer has no AddrSpace.
+		// Pointers into different address spaces always need a cast; when only
+		// one names a space it is taken as a sub-type conversion.
+		if rs, cs := reqptr.SpaceName(), curptr.SpaceName(); rs != cs && rs != "" && cs != "" {
+			return reqtype
+		}
 		reqbase = reqptr.Pointee()
 		curbase = curptr.Pointee()
 		careUintInt = true
