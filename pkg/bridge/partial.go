@@ -106,7 +106,10 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 	var current *pcode.BlockBasic
 	for idx, record := range records {
 		addr := record.translation.Address
-		if starts[addr] {
+		if len(record.translation.Ops) == 0 {
+			continue // Aliased to the next instruction's block below, as in Build
+		}
+		if starts[addr] || current == nil {
 			current = graph.NewBlockBasicInGraph()
 			blockByAddr[addr] = current
 			if idx == 0 {
@@ -121,6 +124,18 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 
 		if err := addInstructionOps(fd, current, record.translation); err != nil {
 			return nil, err
+		}
+	}
+
+	// A no-op instruction (alignment padding) resolves to the next
+	// instruction's block. C++ parity: FlowInfo::target falls through no-op
+	// instructions.
+	for from, to := range zeroOpRedirect(records) {
+		if b := blockByAddr[to]; b != nil {
+			blockByAddr[from] = b
+		}
+		if b := instToBlock[to]; b != nil {
+			instToBlock[from] = b
 		}
 	}
 
