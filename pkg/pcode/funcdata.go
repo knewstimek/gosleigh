@@ -768,9 +768,10 @@ func (fd *Funcdata) MapGlobals() {
 				continue
 			}
 			group = append(group, w)
-			if e := w.Offset() + uint64(w.Size()); e > end {
-				end = e
-			}
+			// The range ends where the last overlapping Varnode ends, even when
+			// that is short of an earlier, longer one.
+			// C++ parity: mapGlobals (endaddr = vn->getAddr() + vn->getSize()).
+			end = w.Offset() + uint64(w.Size())
 			if w.Size() > maxvn.Size() {
 				maxvn = w
 			}

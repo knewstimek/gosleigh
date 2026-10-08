@@ -360,36 +360,35 @@ func (s *StringSequence) collectCopyOps(size int) bool {
 	if elAlign <= 0 {
 		elAlign = int(s.charType.Size())
 	}
-	endOff := s.startAddr.Offset + uint64(size-1)
+	endOff := s.startAddr.Offset + uint64(size-1) // startAddr..endOff bounds the formal array
+	beginOff := s.startAddr.Offset                 // Start at the array start
+	if s.startAddr.Offset != s.rootAddr.Offset {
+		beginOff = s.rootAddr.Offset - uint64(elAlign) // or the element before the root
+	}
+	// The Varnodes in [beginOff,endOff] in location order (VarnodeLocSet).
+	var vns []*Varnode
+	for _, vn := range s.data.GetVarnodeBank().AllVarnodes() {
+		if vn.Space() == s.startAddr.Space && vn.Offset() >= beginOff && vn.Offset() <= endOff {
+			vns = append(vns, vn)
+		}
+	}
+	sort.SliceStable(vns, func(i, j int) bool { return CompareLocDef(vns[i], vns[j]) < 0 })
 	diff := int(s.rootAddr.Offset - s.startAddr.Offset)
-	// We scan block ops in execution order. The C++ uses beginLoc/endLoc on
-	// VarnodeLocSet which iterates by location; here we iterate ops and
-	// post-filter, since block-local is the only locality that matters for
-	// the downstream checks.
-	for _, op := range s.block.Ops() {
-		if op.Code() != CPUI_COPY {
+	for _, vn := range vns {
+		if !vn.IsWritten() {
 			continue
 		}
-		out := op.Output()
-		if out == nil || op.NumInput() == 0 || op.Input(0) == nil {
+		op := vn.Def()
+		if op.Code() != CPUI_COPY || op.Parent() != s.block || !op.Input(0).IsConstant() {
 			continue
 		}
-		if !op.Input(0).IsConstant() {
-			continue
+		if int(vn.Size()) != int(s.charType.Size()) {
+			return false // COPY is the wrong size (has yet to be split)
 		}
-		if out.Space() != s.startAddr.Space {
-			continue
-		}
-		if out.Offset() < s.startAddr.Offset || out.Offset() > endOff {
-			continue
-		}
-		if int(out.Size()) != int(s.charType.Size()) {
-			return false // not yet split, bail
-		}
-		tmpDiff := int(out.Offset() - s.startAddr.Offset)
+		tmpDiff := int(vn.Offset() - s.startAddr.Offset)
 		if tmpDiff < diff {
 			if tmpDiff+elAlign == diff {
-				return false // root is not the first element
+				return false // COPY to the previous element: root is not the first
 			}
 			continue
 		} else if tmpDiff > diff {
@@ -397,13 +396,95 @@ func (s *StringSequence) collectCopyOps(size int) bool {
 				continue
 			}
 			if tmpDiff-diff > elAlign {
-				break // gap
+				break // Gap in COPYs
 			}
-			diff = tmpDiff
+			diff = tmpDiff // Advanced by one character
 		}
-		s.moveOps = append(s.moveOps, writeNode{offset: out.Offset(), op: op, slot: -1})
+		s.moveOps = append(s.moveOps, writeNode{offset: vn.Offset(), op: op, slot: -1})
 	}
 	return len(s.moveOps) >= arraySeqMinimumLength
+}
+
+// constructTypedPointer builds a typed pointer to the root address: a PTRSUB
+// from the space base to the Symbol, then PTRSUBs/PTRADDs down to the
+// character array, and a final INT_ADD for any remaining offset.
+// C++ parity: constseq.cc StringSequence::constructTypedPointer.
+func (s *StringSequence) constructTypedPointer(insertPoint *PcodeOp) *Varnode {
+	spc := s.rootAddr.Space
+	types := s.data.TypeFactory()
+	if spc == nil || types == nil || s.entry == nil || s.entry.Symbol() == nil {
+		return nil
+	}
+	ws := uint32(spc.WordSize)
+	if ws == 0 {
+		ws = 1
+	}
+	var spacePtr *Varnode
+	if spc.NumSpacebase() > 0 {
+		// Funcdata::constructSpacebaseInput
+		spacePtr = s.data.findSpacebaseInput(spc)
+		if spacePtr == nil {
+			return nil
+		}
+	} else {
+		// Funcdata::constructConstSpacebase
+		ptr := types.GetPointer(int32(spc.AddrSize), types.GetTypeSpacebase(spc), ws)
+		spacePtr = s.data.NewConstant(int32(spc.AddrSize), 0)
+		spacePtr.UpdateTypeLock(ptr, true, true)
+		spacePtr.SetFlags(VarnodeSpaceBase)
+		BindSpaceConstant(spacePtr, spc)
+	}
+	baseType := s.entry.Symbol().Type()
+	ptrsub := s.data.NewOp(2, insertPoint.Addr())
+	s.data.OpSetOpcode(ptrsub, CPUI_PTRSUB)
+	s.data.OpSetInput(ptrsub, spacePtr, 0)
+	baseOff := s.entry.First() / uint64(ws) // AddrSpace::byteToAddress
+	s.data.OpSetInput(ptrsub, s.data.NewConstant(spacePtr.Size(), baseOff), 1)
+	spacePtr = s.data.NewUniqueOut(spacePtr.Size(), ptrsub)
+	s.data.OpInsertBefore(ptrsub, insertPoint)
+	spacePtr.UpdateType(types.GetPointerStripArray(spacePtr.Size(), baseType, ws))
+	curOff := int64(s.rootAddr.Offset - s.entry.First())
+	for baseType != s.charType {
+		elSize := int64(-1)
+		if arr, ok := baseType.(*Array); ok && arr.Element() != nil {
+			elSize = int64(arr.Element().AlignSize())
+		}
+		var newOff int64
+		baseType, newOff = datatypeSubType(baseType, curOff)
+		if baseType == nil {
+			break
+		}
+		curOff -= newOff
+		baseOff = uint64(curOff) / uint64(ws)
+		if elSize >= 0 {
+			if curOff == 0 { // Don't create a PTRADD( #0, ...)
+				continue // As C++: the pointer already has the ARRAY stripped
+			}
+			ptrsub = s.data.NewOp(3, insertPoint.Addr())
+			s.data.OpSetOpcode(ptrsub, CPUI_PTRADD)
+			s.data.OpSetInput(ptrsub, s.data.NewConstant(4, uint64(curOff/elSize)), 1)
+			s.data.OpSetInput(ptrsub, s.data.NewConstant(4, uint64(elSize)), 2)
+		} else {
+			ptrsub = s.data.NewOp(2, insertPoint.Addr())
+			s.data.OpSetOpcode(ptrsub, CPUI_PTRSUB)
+			s.data.OpSetInput(ptrsub, s.data.NewConstant(spacePtr.Size(), baseOff), 1)
+		}
+		s.data.OpSetInput(ptrsub, spacePtr, 0)
+		spacePtr = s.data.NewUniqueOut(spacePtr.Size(), ptrsub)
+		s.data.OpInsertBefore(ptrsub, insertPoint)
+		spacePtr.UpdateType(types.GetPointerStripArray(spacePtr.Size(), baseType, ws))
+		curOff = newOff
+	}
+	if curOff != 0 {
+		addOp := s.data.NewOp(2, insertPoint.Addr())
+		s.data.OpSetOpcode(addOp, CPUI_INT_ADD)
+		s.data.OpSetInput(addOp, spacePtr, 0)
+		s.data.OpSetInput(addOp, s.data.NewConstant(spacePtr.Size(), uint64(curOff)/uint64(ws)), 1)
+		spacePtr = s.data.NewUniqueOut(spacePtr.Size(), addOp)
+		s.data.OpInsertBefore(addOp, insertPoint)
+		spacePtr.UpdateType(types.GetPointer(spacePtr.Size(), s.charType, ws))
+	}
+	return spacePtr
 }
 
 // buildStringCopy constructs the CALLOTHER that replaces the COPY sequence.
@@ -433,18 +514,10 @@ func (s *StringSequence) buildStringCopy() *PcodeOp {
 		return nil
 	}
 	s.data.UserOps().RegisterBuiltin(builtInID, types)
-	// Build the destination pointer as a fresh unique Varnode initialized by a
-	// COPY from a constant encoding the root address. This is a PARTIAL stand-in
-	// for constructTypedPointer -- it keeps downstream consumers pointing at
-	// the right byte address without modelling the containing Symbol PTRSUB
-	// chain.
-	destAddrOff := s.rootAddr.Offset
-	destConst := s.data.NewConstant(charPtrType.Size(), destAddrOff)
-	destCopyOp := s.data.NewOp(1, insertPoint.Addr())
-	s.data.OpSetOpcode(destCopyOp, CPUI_COPY)
-	s.data.OpSetInput(destCopyOp, destConst, 0)
-	destPtr := s.data.NewUniqueOut(charPtrType.Size(), destCopyOp)
-	s.data.OpInsertBefore(destCopyOp, insertPoint)
+	destPtr := s.constructTypedPointer(insertPoint)
+	if destPtr == nil {
+		return nil
+	}
 
 	copyOp := s.data.NewOp(4, insertPoint.Addr())
 	s.data.OpSetOpcode(copyOp, CPUI_CALLOTHER)
@@ -465,13 +538,58 @@ func (s *StringSequence) buildStringCopy() *PcodeOp {
 // scope covered by the rule.
 // TODO mismatch: INDIRECT re-wiring for live descendants (constseq.cc L429).
 func (s *StringSequence) removeCopyOps(replaceOp *PcodeOp) {
-	_ = replaceOp
-	for i := range s.moveOps {
-		op := s.moveOps[i].op
-		if op == nil {
+	var points []*writeNode // Input points whose defining op is removed (C++ list)
+	concatSet := make(map[*PcodeOp]*writeNode)
+	var deadOps []writeNode
+	// removeForward records the readers of a removed op's output; a PIECE
+	// seen from both of its inputs is removed too.
+	// C++ parity: StringSequence::removeForward.
+	removeForward := func(cur writeNode) {
+		vn := cur.op.Output()
+		for _, op := range append([]*PcodeOp(nil), vn.DescendIter()...) {
+			if prev, ok := concatSet[op]; ok {
+				// We have seen the PIECE twice
+				off := prev.offset
+				if cur.offset < off {
+					off = cur.offset
+				}
+				prev.op = nil // points.erase
+				deadOps = append(deadOps, writeNode{offset: off, op: op, slot: -1})
+				continue
+			}
+			pt := &writeNode{offset: cur.offset, op: op, slot: op.GetSlot(vn)}
+			points = append(points, pt)
+			if op.Code() == CPUI_PIECE {
+				concatSet[op] = pt
+			}
+		}
+	}
+	for _, mv := range s.moveOps {
+		removeForward(mv)
+	}
+	for pos := 0; pos < len(deadOps); pos++ {
+		removeForward(deadOps[pos])
+	}
+	for _, pt := range points {
+		if pt.op == nil {
 			continue
 		}
-		s.data.OpDestroy(op)
+		vn := pt.op.Input(pt.slot)
+		if vn.Def().Code() != CPUI_INDIRECT {
+			indOp := s.data.NewOp(2, replaceOp.Addr())
+			s.data.OpSetOpcode(indOp, CPUI_INDIRECT)
+			s.data.OpSetInput(indOp, s.data.NewConstant(vn.Size(), 0), 0)
+			s.data.OpSetInput(indOp, s.data.NewVarnodeIop(replaceOp), 1)
+			s.data.OpSetOutput(indOp, vn)
+			s.data.MarkIndirectCreation(indOp, false)
+			s.data.OpInsertBefore(indOp, replaceOp)
+		}
+	}
+	for _, mv := range s.moveOps {
+		s.data.OpDestroy(mv.op)
+	}
+	for _, d := range deadOps {
+		s.data.OpDestroy(d.op)
 	}
 }
 

@@ -4885,7 +4885,12 @@ func (s *printCState) nameOf(vn *Varnode) string {
 		s.names[vn] = name
 		return name
 	}
+	// A variable without a name prints as its raw location (register0x00000010).
+	// C++ parity: PrintC::pushUnnamedLocation.
 	name := fmt.Sprintf("local_%d", vn.CreateIndex())
+	if sp := vn.Space(); sp != nil {
+		name = sp.Name + PrintRawAddr(vn.Addr())
+	}
 	s.names[vn] = name
 	return name
 }

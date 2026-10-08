@@ -241,6 +241,11 @@ func baseTypeName(dt Datatype) string {
 	if dt == nil {
 		return "void"
 	}
+	if dt.Metatype() == TYPE_SPACEBASE {
+		// TypeSpacebase has no name: it prints by its generic name.
+		// C++ parity: PrintC::genericTypeName (TYPE_SPACEBASE).
+		return "BADSPACEBASE"
+	}
 	if name := dt.DisplayName(); name != "" {
 		return name
 	}
