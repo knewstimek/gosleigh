@@ -4961,6 +4961,9 @@ func (s *printCState) renderSubpieceField(op *PcodeOp) (ExprFragment, bool) {
 		// C++ parity: opSubpiece -> pushPartialSymbol(sym, byteOff + symbol
 		// offset, ..., op, slot).
 		symType := ct
+		if hv := vn.High(); hv != nil && hv.Type() != nil && hv.Type().Size() == vn.Size() {
+			symType = hv.Type() // The variable's own (unresolved) type, as sym->getType()
+		}
 		symName := s.nameOf(vn)
 		if e := s.fd.globalEntryOf(vn); e != nil && e.Symbol() != nil && e.Symbol().Type() != nil && vn.Space() == e.Addr().Space {
 			symType = e.Symbol().Type()
