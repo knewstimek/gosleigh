@@ -1191,7 +1191,7 @@ func (s *printCState) emitLocalDeclarations() bool {
 			name = renamed
 		}
 		decl := localDeclString(dt, name)
-		rec := localDecl{text: decl}
+		rec := localDecl{text: decl, dynamic: vn.High() != nil && vn.High().dynamicSym}
 		if sp := vn.Space(); sp != nil && sl != nil && sp == sl.SpaceID() {
 			rec.hasOffset = true
 			rec.offset = vn.Addr().Offset
@@ -1224,6 +1224,7 @@ type localDecl struct {
 	text      string
 	hasOffset bool
 	offset    uint64
+	dynamic   bool // A dynamic Symbol: declared after every mapped one
 }
 
 // mergeScopeOnlyDecls adds a declaration for every ScopeLocal Symbol that no
@@ -1277,9 +1278,17 @@ func (s *printCState) mergeScopeOnlyDecls(decls []localDecl, declared map[string
 			hasOffset: e.Addr().Space == space,
 			offset:    e.Addr().Offset,
 		}
+		// The rangemap walk ends before the dynamic Symbols.
+		// C++ parity: PrintC::emitScopeVarDecls (MapIterator, then dynamic).
 		pos := len(decls)
+		for i, d := range decls {
+			if d.dynamic {
+				pos = i
+				break
+			}
+		}
 		if rec.hasOffset {
-			for i, d := range decls {
+			for i, d := range decls[:pos] {
 				if d.hasOffset && d.offset > rec.offset {
 					pos = i
 					break
