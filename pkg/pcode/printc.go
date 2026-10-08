@@ -1745,7 +1745,7 @@ func (s *printCState) isBlockEmpty(bl *FlowBlock) bool {
 		if op == nil || op.IsDead() || s.inline[op] {
 			continue
 		}
-		if op.HasFlag(PcodeOpNonPrinting) {
+		if op.NotPrinted() { // A marker (MULTIEQUAL/INDIRECT) is never printed
 			continue
 		}
 		if out := op.Output(); out != nil {
