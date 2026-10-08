@@ -302,6 +302,8 @@ func (c *consumeAnalysis) computeConsumed(data *Funcdata) {
 	returnConsume := gatherConsumedReturn(data)
 
 	for _, op := range data.GetPcodeOpBank().AliveOps() {
+		// Recomputed below from the INDIRECTs that still reference the op.
+		op.ClearFlag(PcodeOpIndirectSource)
 		if op.IsCall() {
 			// Inputs handled by markConsumedParameters; holdOutput seeding omitted.
 			continue

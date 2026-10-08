@@ -126,27 +126,29 @@ func (sf *SubvariableFlow) setReplacement(vn *Varnode, mask uint64) (*subvariabl
 		return rep, false
 	}
 
-	rep := &subvariableFlowReplaceVarnode{vn: vn, mask: mask}
-	sf.varmap[vn] = rep
-	vn.SetMark()
-
-	inworklist := true
 	if vn.IsConstant() {
-		inworklist = false
-		if sf.sextrestrictions && sf.flowsize < 8 {
+		// A constant is not part of the varmap; it only has to be a sign
+		// extension of its logical value (from flowsize up to its own size).
+		if sf.sextrestrictions {
 			cval := vn.Offset()
 			smallval := cval & mask
-			signBit := uint64(1) << (uint(sf.flowsize)*8 - 1)
 			sextval := smallval
-			if smallval&signBit != 0 {
+			if sf.flowsize < 8 && smallval&(uint64(1)<<(uint(sf.flowsize)*8-1)) != 0 {
 				sextval |= ^maskForSize(sf.flowsize)
 			}
+			sextval &= maskForSize(vn.Size())
 			if sextval != cval {
 				return nil, false
 			}
 		}
 		return sf.addConstant(nil, mask, 0, vn), false
 	}
+
+	rep := &subvariableFlowReplaceVarnode{vn: vn, mask: mask}
+	sf.varmap[vn] = rep
+	vn.SetMark()
+
+	inworklist := true
 
 	if vn.IsFree() {
 		return nil, false
