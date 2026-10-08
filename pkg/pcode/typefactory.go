@@ -80,8 +80,8 @@ func (f *TypeFactory) internSlow(dt Datatype) Datatype {
 	case *Union:
 		return f.GetUnion(typed.Name(), typed.Fields())
 	case *Enum:
-		if typed.parent != nil {
-			return typed // A partial enumeration is interned by its parent
+		if typed.parent != nil || typed.Flags()&datatypeTypedef != 0 {
+			return typed // A partial enumeration is interned by its parent, a typedef by its name
 		}
 		enumMeta := TYPE_ENUM_UINT
 		if typed.SubMeta() == SUB_INT_ENUM {
@@ -320,6 +320,25 @@ func (f *TypeFactory) GetTypedefUnion(name string, u *Union) *Union {
 	value.datatypeBase.displayName = "" // A typedef prints (and names variables) by its own name
 	value.datatypeBase.flags |= datatypeTypedef
 	value.datatypeBase.typedefOf = u
+	f.intern[key] = &value
+	return &value
+}
+
+// GetTypedefEnum returns enumeration e under a typedef name
+// (LOGICAL_PROCESSOR_RELATIONSHIP over _LOGICAL_PROCESSOR_RELATIONSHIP).
+// C++ parity: TypeFactory::getTypedef over a TypeEnum.
+func (f *TypeFactory) GetTypedefEnum(name string, e *Enum) *Enum {
+	key := "typedefenum:" + name
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	if v, ok := f.intern[key].(*Enum); ok {
+		return v
+	}
+	value := *e
+	value.datatypeBase.name = name
+	value.datatypeBase.displayName = "" // A typedef prints (and names variables) by its own name
+	value.datatypeBase.flags |= datatypeTypedef
+	value.datatypeBase.typedefOf = e
 	f.intern[key] = &value
 	return &value
 }
