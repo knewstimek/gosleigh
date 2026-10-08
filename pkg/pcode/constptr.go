@@ -140,7 +140,8 @@ func (fd *Funcdata) resolveGlobalSymbol(addr address.Address) *SymbolEntry {
 	}
 	gs := fd.globalScope
 	if hs, ok := fd.hostScope.(HostDataScope); ok {
-		if hd, ok := hs.QueryData(addr); ok && hd.Label && hd.Addr == addr {
+		// A size-less label covers no storage (see resolveGlobal).
+		if hd, ok := hs.QueryData(addr); ok && hd.Label && hd.Size != 0 && hd.Addr == addr {
 			e := gs.AddSymbol(hd.Name, sharedTypeFactory.GetBase(1, TYPE_UNKNOWN, ""), hd.Addr, 1, VarnodeTypeLock|VarnodeNameLock)
 			e.Symbol().namespace = hd.Namespace
 			e.Symbol().nsPath = hd.NamespacePath

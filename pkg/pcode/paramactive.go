@@ -370,8 +370,8 @@ func (p ParamTrial) Less(b ParamTrial) bool {
 	if p.entry.group != b.entry.group {
 		return p.entry.group < b.entry.group
 	}
-	if p.entry != b.entry {
-		return false
+	if p.entry != b.entry { // Compare entry pointers directly
+		return p.entry.pos < b.entry.pos
 	}
 	if p.entry.exclusion {
 		return p.offset < b.offset

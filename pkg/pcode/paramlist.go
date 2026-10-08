@@ -80,6 +80,11 @@ type paramEntry struct {
 	// first), nil otherwise. C++ parity: ParamEntry::joinrec.
 	joinrec *address.JoinRecord
 
+	// pos is the entry's place in its list (document order). C++ orders
+	// trials of one group by ParamEntry pointer; the entries live in a
+	// std::list built in that order, so its nodes ascend in practice.
+	pos int32
+
 	// Denormalized mirrors read directly by ParamTrial ordering (paramactive.go).
 	group        int32
 	exclusion    bool
@@ -619,6 +624,7 @@ func NewParamListStandard(specs []ParamEntrySpec) *ParamListStandard {
 			minsize:     s.MinSize,
 			alignment:   s.Align,
 			groupSet:    []int32{grp},
+			pos:         int32(len(pl.entry)),
 		}
 		if s.Space != nil {
 			pe.spaceIndex = s.Space.Index

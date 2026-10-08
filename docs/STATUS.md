@@ -6,8 +6,8 @@
 
 | 측정 | 결과 | 비고 |
 |---|---|---|
-| realexe private-sample seed1..31 (x86-32) | 31개 모두 200/200 | |
-| realexe private-sample seed1..30 (x64 UE4) | 30개 중 28개 200/200 | s21 [188], s29 [168]은 골든 비결정성(아래) |
+| realexe private-sample seed1..39 (x86-32) | 39개 모두 200/200 | |
+| realexe private-sample seed1..38 (x64 UE4) | 38개 중 36개 200/200 | s6 [169], s29 [168]은 골든 비결정성(아래) |
 | 게이트 `tools/gates.py` | 전부 유지 | tree 10/10, breadth 3/3, corpus 8/8, corpus2 10/13, x64_auto 108/109 |
 
 측정: `realexe.py measure --work local/realexe/<name>` (메모리가 빠듯하면 `REALEXE_WORKERS=8`).
@@ -20,24 +20,24 @@ realexe.py sample`).
 
 ## 미이식
 
-(없음. multistage 점프테이블 재시작은 2c7a6e3에서 이식)
+(없음)
 
 ## 골든 비결정성 (포팅 불일치 아님)
 
 C++ `ParamTrial::operator<`(fspec.cc:1902)는 같은 group의 ParamEntry를 **포인터 주소**로 비교한다
-(x64 XMM0 vs RCX). 그래서 이 순서에 걸리는 CALLIND 인자 복구는 decompile.exe 프로세스마다 결과가 다르다.
-같은 x86 빌드로 단일 함수를 다시 돌려도 결과가 바뀌는 것을 확인했다. Go는 생성 순서(하네스와 동일)를 유지한다.
+(x64 XMM0 vs RCX). std::list 노드는 대개 생성 순서대로 주소가 커지지만 보장되지 않는다(하네스에서
+XMM1 < XMM0, R9 < R8인 실행을 확인). Go는 cspec 문서 순서(`paramEntry.pos`)로 비교한다.
+이 순서에 걸리는 CALLIND 인자 복구는 decompile.exe 프로세스마다 결과가 달라진다(하네스도 실행마다 다름).
 
 | 표본 | 함수 | 골든 쪽 결과 |
 |---|---|---|
-| private-sample [188] | DoEnableStereo | vtable 호출 인자 있음 |
-| private-sample [169] / private-sample [168] | FStaticStateResource | s6은 인자 있음, s29는 `(this)` (같은 함수가 표본마다 다름) |
+| private-sample [169] / private-sample [168] | FStaticStateResource | 두 vtable 호출 인자가 표본마다 다름 |
 
 근거와 재현 방법: repoplane `gosleigh/realexe/private-sample-callind-args-live-only`.
 
 ## 다음 후보
 
-- 표본 생성은 seed 번호를 계속 올린다(private-sample 32, private-sample 31).
+- 표본 생성은 seed 번호를 계속 올린다(private-sample 40, private-sample 39).
 
 ## 도구
 

@@ -334,7 +334,10 @@ func (fd *Funcdata) resolveGlobal(addr address.Address) *SymbolEntry {
 		return nil
 	}
 	hd, ok := hs.QueryData(addr)
-	if !ok {
+	// A code label recorded without a size (one the host made while printing
+	// a goto) covers no storage: only queryCodeLabel finds it.
+	// C++ parity: SymbolEntry::decode (size 0 range) vs Scope::queryContainer.
+	if !ok || (hd.Label && hd.Size == 0) {
 		return fd.externRefSymbol(addr)
 	}
 	if hd.Label {
