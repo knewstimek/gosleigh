@@ -294,7 +294,7 @@ type Cover struct {
 // a matched one can be stepped over.
 // C++ parity: Cover::intersect(const PcodeOpSet &,Varnode *) with
 // StackAffectingOps::affectsTest true for a CALL.
-func (c *Cover) intersectOpSet(opList []*PcodeOp, blockStart []int) bool {
+func (c *Cover) intersectOpSet(opList []*PcodeOp, blockStart []int, affects func(*PcodeOp) bool) bool {
 	if len(opList) == 0 || len(blockStart) == 0 {
 		return false
 	}
@@ -330,8 +330,8 @@ func (c *Cover) intersectOpSet(opList []*PcodeOp, blockStart []int) bool {
 			}
 			for {
 				op := opList[opIndex]
-				if cb != nil && cb.Contain(op) && cb.Boundary(op) == 0 {
-					return true // a CALL always affects
+				if cb != nil && cb.Contain(op) && cb.Boundary(op) == 0 && affects(op) {
+					return true // Secondary test: does the op affect the variable
 				}
 				opIndex++
 				if opIndex >= opMax {

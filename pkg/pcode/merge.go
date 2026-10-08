@@ -63,10 +63,9 @@ func newHighIntersectTest() *HighIntersectTest {
 	return &HighIntersectTest{cache: make(map[highPair]bool)}
 }
 
-// stackAffectingOps lists the CALLs of the function: each may write a local
-// whose address escaped. C++ parity: StackAffectingOps::populate.
-// Known mismatch: store guards (LoadGuard on STORE) are not collected, so
-// guarded STOREs are not part of the set.
+// stackAffectingOps lists the ops that may write a local whose address
+// escaped: every CALL, and every STORE an indexed-store guard still covers.
+// C++ parity: StackAffectingOps::populate.
 func (t *HighIntersectTest) stackAffectingOps() []*PcodeOp {
 	if !t.affectingPop {
 		t.affectingPop = true
@@ -76,9 +75,31 @@ func (t *HighIntersectTest) stackAffectingOps() []*PcodeOp {
 					t.affectingOps = append(t.affectingOps, fc.op)
 				}
 			}
+			if h := t.fd.heritage; h != nil {
+				for i := range h.storeGuards {
+					// LoadGuard::isValid(CPUI_STORE)
+					if op := h.storeGuards[i].Op; op != nil && !op.IsDead() && op.Code() == CPUI_STORE {
+						t.affectingOps = append(t.affectingOps, op)
+					}
+				}
+			}
 		}
 	}
 	return t.affectingOps
+}
+
+// stackAffects reports whether op may write the storage of rep: a STORE only
+// within the range its guard protects, a CALL always.
+// C++ parity: StackAffectingOps::affectsTest.
+func (t *HighIntersectTest) stackAffects(op *PcodeOp, rep *Varnode) bool {
+	if op.Code() == CPUI_STORE {
+		guard := t.fd.getStoreGuard(op)
+		if guard == nil {
+			return true
+		}
+		return guard.IsGuarded(rep.Addr())
+	}
+	return true
 }
 
 // untiedCallIntersection reports whether the untied variable is live across an
@@ -99,7 +120,7 @@ func (t *HighIntersectTest) untiedCallIntersection(tied, untied *HighVariable) b
 		return false
 	}
 	ops, starts := t.stackAffectingOpSet()
-	return cov.intersectOpSet(ops, starts)
+	return cov.intersectOpSet(ops, starts, func(op *PcodeOp) bool { return t.stackAffects(op, vn) })
 }
 
 // stackAffectingOpSet orders the affecting ops by block, then by position
