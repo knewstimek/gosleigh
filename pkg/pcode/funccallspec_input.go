@@ -459,6 +459,12 @@ func (fd *Funcdata) onlyOpUse(invn *Varnode, opmatch *PcodeOp, trial *ParamTrial
 					if slot >= 0 && slot < op.NumInput() && op.Input(slot) == vn {
 						continue // but at the same slot
 					}
+				} else if fp := fd.GetFuncProto(); fp != nil && fp.GetActiveOutput() != nil {
+					// In the middle of analyzing returns: a return trial is
+					// no use unless it holds the actual return value.
+					if op.Input(0) != vn && !isAlternatePathValid(vn, curFlags) {
+						continue
+					}
 				}
 				res = false
 			case CPUI_MULTIEQUAL, CPUI_INT_SEXT, CPUI_INT_ZEXT, CPUI_CAST:

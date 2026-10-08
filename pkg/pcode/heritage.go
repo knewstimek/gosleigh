@@ -1619,8 +1619,14 @@ func (h *Heritage) Heritage(graph *BlockGraph) {
 			}
 			reads, writes, inputs = h.Collect(task.Addr, task.Size)
 			guardWrites := append([]*Varnode(nil), normWrites...)
+			// A load guard's COPY is renamed but places no MULTIEQUAL: C++
+			// guardLoads does not add it to the write list.
+			loadCopy := make(map[*PcodeOp]bool, len(h.loadCopyOps))
+			for _, op := range h.loadCopyOps {
+				loadCopy[op] = true
+			}
 			for _, vn := range writes {
-				if !preGuard[vn] && !h.guardPieces[vn] {
+				if !preGuard[vn] && !h.guardPieces[vn] && !loadCopy[vn.Def()] {
 					guardWrites = append(guardWrites, vn)
 				}
 			}
