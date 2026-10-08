@@ -361,7 +361,9 @@ func (a *ActionSetCasts) castInput(op *PcodeOp, slot int, data *Funcdata, cs *Ca
 	if vn.IsWritten() && vn.Def() != nil && vn.Def().Code() == CPUI_CAST {
 		if vn.IsImplied() {
 			if vn.LoneDescend() == op {
-				vn.UpdateType(ct)
+				if !vn.IsTypeLock() { // C++ Varnode::updateType(ct) leaves a locked type
+					vn.UpdateType(ct)
+				}
 				if vn.Type() == ct {
 					return 1
 				}
@@ -373,7 +375,9 @@ func (a *ActionSetCasts) castInput(op *PcodeOp, slot int, data *Funcdata, cs *Ca
 			}
 		}
 	} else if vn.IsConstant() {
-		vn.UpdateType(ct)
+		if !vn.IsTypeLock() { // A locked constant (read-only fill) keeps its type and gets a cast
+			vn.UpdateType(ct)
+		}
 		if vn.Type() == ct {
 			return 1
 		}
