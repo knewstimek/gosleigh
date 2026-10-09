@@ -46,7 +46,7 @@ func TestEmbeddedMatchesTestdata(t *testing.T) {
 
 func TestX86(t *testing.T) {
 	for _, bits := range []int{32, 64} {
-		for _, cc := range []string{CompilerWindows, CompilerGCC} {
+		for _, cc := range []string{CompilerWindows, CompilerGCC, CompilerGolang} {
 			s, err := X86(bits, cc)
 			if err != nil || len(s.SLA) == 0 || len(s.Pspec) == 0 || len(s.Cspec) == 0 {
 				t.Errorf("X86(%d, %q) = %q, %v", bits, cc, s.ID, err)

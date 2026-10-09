@@ -130,6 +130,28 @@ func TestDecompileTypedPrototypeWithoutStorage(t *testing.T) {
 	}
 }
 
+// Go-compiled code passes arguments in RAX, RBX, ... (ABIInternal); the
+// golang compiler spec recovers them where the gcc one would not.
+func TestDecompileGolangABI(t *testing.T) {
+	spec, err := specs.X86(64, specs.CompilerGolang)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// lea rax,[rax+rbx]; ret
+	code := []byte{0x48, 0x8d, 0x04, 0x18, 0xc3, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc}
+	prog, err := decomp.Load(spec, []decomp.Section{{Name: ".text", VMA: 0x401000, Data: code}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := prog.Decompile(decomp.Function{Entry: 0x401000})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.C, "(long param_1, long param_2)") || !strings.Contains(res.C, "return param_1 + param_2;") {
+		t.Errorf("golang ABI parameters not recovered:\n%s", res.C)
+	}
+}
+
 func TestLoadRejectsIncompleteSpec(t *testing.T) {
 	if _, err := decomp.Load(decomp.Spec{ID: "empty"}, []decomp.Section{{Data: []byte{0xc3}}}); err == nil {
 		t.Error("Load accepted a spec without sla/pspec/cspec")

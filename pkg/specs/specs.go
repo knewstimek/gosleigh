@@ -14,7 +14,8 @@
 
 // Package specs embeds the Ghidra language specs a host needs to decompile
 // without shipping spec files next to its binary. Only x86 (32/64-bit) is
-// embedded; importing this package adds about 1 MB.
+// embedded, with the Windows, gcc and Go compiler specs; importing this
+// package adds about 1 MB.
 //
 // The files under data/ are copies of testdata/sla (Ghidra 12 packed .sla and
 // the matching x86.ldefs pspec/cspec pairs); TestEmbeddedMatchesTestdata keeps
@@ -45,12 +46,19 @@ var (
 	x64Win []byte
 	//go:embed data/x86-64-gcc.cspec
 	x64Gcc []byte
+	//go:embed data/x86-32-golang.cspec
+	x86Go []byte
+	//go:embed data/x86-64-golang.cspec
+	x64Go []byte
 )
 
 // Compiler ids follow x86.ldefs <compiler id=...>.
 const (
 	CompilerWindows = "windows" // Visual Studio (and clang targeting Windows)
 	CompilerGCC     = "gcc"
+	// CompilerGolang is the Go toolchain's register ABI (ABIInternal),
+	// which Go-compiled functions use instead of the platform convention.
+	CompilerGolang = "golang"
 )
 
 // X86 returns the embedded spec for x86 with the given address size (32 or
@@ -66,6 +74,8 @@ func X86(bits int, compiler string) (decomp.Spec, error) {
 			s.Cspec = x86Win
 		case CompilerGCC:
 			s.Cspec = x86Gcc
+		case CompilerGolang:
+			s.Cspec = x86Go
 		}
 	case 64:
 		s = decomp.Spec{SLA: x64SLA, Pspec: x64Pspec}
@@ -74,12 +84,14 @@ func X86(bits int, compiler string) (decomp.Spec, error) {
 			s.Cspec = x64Win
 		case CompilerGCC:
 			s.Cspec = x64Gcc
+		case CompilerGolang:
+			s.Cspec = x64Go
 		}
 	default:
 		return decomp.Spec{}, fmt.Errorf("specs: x86 address size %d not embedded (32 or 64)", bits)
 	}
 	if s.Cspec == nil {
-		return decomp.Spec{}, fmt.Errorf("specs: x86 compiler %q not embedded (%q or %q)", compiler, CompilerWindows, CompilerGCC)
+		return decomp.Spec{}, fmt.Errorf("specs: x86 compiler %q not embedded (%q, %q or %q)", compiler, CompilerWindows, CompilerGCC, CompilerGolang)
 	}
 	s.ID = fmt.Sprintf("x86:LE:%d:default:%s", bits, compiler)
 	return s, nil
