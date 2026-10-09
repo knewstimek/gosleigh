@@ -314,6 +314,12 @@ type PcodeOp struct {
 	output    *Varnode
 	inputs    []*Varnode
 	parent    *BlockBasic
+	// blockPos is the op's position in its block's op list when last set;
+	// BlockBasic checks it before use. It stands in for the C++ list
+	// iterator (PcodeOp::basiciter).
+	blockPos int
+	// listPos is the op's slot in the PcodeOpBank alive or dead list.
+	listPos int
 	// callSpec is the call site's prototype (C++ encodes it in the CALL's
 	// fspec-space input 0, FuncCallSpecs::getFspecFromConst).
 	callSpec *FuncCallSpecs

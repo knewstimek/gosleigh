@@ -1672,8 +1672,9 @@ func (fd *Funcdata) OpUnsetOutput(op *PcodeOp) {
 	}
 	op.SetOutput(nil)
 	if vn.IsWritten() {
-		// Varnode is in VarnodeBank's defTree. Must remove/transition while
-		// vn.def is still valid so CompareDefLoc can sort during removal.
+		// The loc tree orders written Varnodes by their def. Must
+		// remove/transition while vn.def is still valid so CompareLocDef can
+		// find it during removal.
 		// The output becomes free but stays in the bank (clearDeadVarnodes
 		// reclaims it). MakeFree clears def and VarnodeWritten.
 		fd.vbank.MakeFree(vn)

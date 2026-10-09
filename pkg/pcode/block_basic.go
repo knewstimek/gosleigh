@@ -28,34 +28,62 @@ type BlockBasic struct {
 	// data is the function owning the block. C++ parity: BlockBasic::data.
 	data *Funcdata
 
-	// posIndex caches each op's position in ops (rebuilt lazily). It stands
-	// in for the C++ SeqNum order, which the block keeps current.
-	posIndex map[*PcodeOp]int
+	// posValid: ops before this index have their blockPos current.
+	posValid int
 }
 
 // opPosition is op's 0-based position in the block, or -1 when absent.
-// A cached position is checked against the slice, so any reordering of ops
-// only costs a rebuild. C++ parity: PcodeOp::getSeqNum().getOrder().
+// Each op records its position; an insertion or removal only marks the
+// positions after it stale, and a lookup renumbers them when it needs one,
+// so a run of edits costs one renumbering, not one per edit.
+// C++ parity: PcodeOp::getSeqNum().getOrder() / PcodeOp::getBasicIter().
 func (bb *BlockBasic) opPosition(op *PcodeOp) int {
 	if bb.srcDelegate != nil {
 		return bb.srcDelegate.opPosition(op)
 	}
-	if i, ok := bb.posIndex[op]; ok && i < len(bb.ops) && bb.ops[i] == op {
+	// A recorded position is right whenever the op is still there.
+	i := op.blockPos
+	if i < 0 || i >= len(bb.ops) || bb.ops[i] != op {
+		for k := bb.posValid; k < len(bb.ops); k++ {
+			bb.ops[k].blockPos = k
+		}
+		bb.posValid = len(bb.ops)
+		i = op.blockPos
+	}
+	if i >= 0 && i < len(bb.ops) && bb.ops[i] == op {
 		return i
 	}
-	if bb.posIndex == nil {
-		bb.posIndex = make(map[*PcodeOp]int, len(bb.ops))
-	} else {
-		clear(bb.posIndex)
+	return -1
+}
+
+// find is op's index for an edit: its recorded position when still right,
+// else a scan from the front (edits cluster near block starts, where a
+// scan ends quickly and renumbering the rest would not pay).
+func (bb *BlockBasic) find(op *PcodeOp) int {
+	if i := op.blockPos; i >= 0 && i < len(bb.ops) && bb.ops[i] == op {
+		return i
 	}
-	pos := -1
 	for i, o := range bb.ops {
-		bb.posIndex[o] = i
 		if o == op {
-			pos = i
+			return i
 		}
 	}
-	return pos
+	return -1
+}
+
+// staleFrom marks the recorded positions from index i on as out of date.
+func (bb *BlockBasic) staleFrom(i int) {
+	if i < bb.posValid {
+		bb.posValid = i
+	}
+}
+
+// insertAt puts op at index i of the op list.
+func (bb *BlockBasic) insertAt(i int, op *PcodeOp) {
+	bb.ops = append(bb.ops, nil)
+	copy(bb.ops[i+1:], bb.ops[i:])
+	bb.ops[i] = op
+	bb.staleFrom(i)
 }
 
 // GetFuncdata returns the function containing this block.
@@ -190,7 +218,7 @@ func (bb *BlockBasic) AddOp(op *PcodeOp) {
 		bb.srcDelegate.AddOp(op)
 		return
 	}
-	bb.ops = append(bb.ops, op)
+	bb.insertAt(len(bb.ops), op)
 }
 
 // RemoveOp finds and removes op from this basic block.
@@ -199,11 +227,9 @@ func (bb *BlockBasic) RemoveOp(op *PcodeOp) {
 		bb.srcDelegate.RemoveOp(op)
 		return
 	}
-	for i, o := range bb.ops {
-		if o == op {
-			bb.ops = append(bb.ops[:i], bb.ops[i+1:]...)
-			return
-		}
+	if i := bb.find(op); i >= 0 {
+		bb.ops = append(bb.ops[:i], bb.ops[i+1:]...)
+		bb.staleFrom(i)
 	}
 }
 
@@ -213,16 +239,12 @@ func (bb *BlockBasic) InsertOpBefore(op, follow *PcodeOp) {
 		bb.srcDelegate.InsertOpBefore(op, follow)
 		return
 	}
-	for i, o := range bb.ops {
-		if o == follow {
-			bb.ops = append(bb.ops, nil)
-			copy(bb.ops[i+1:], bb.ops[i:])
-			bb.ops[i] = op
-			return
-		}
+	if i := bb.find(follow); i >= 0 {
+		bb.insertAt(i, op)
+		return
 	}
 	// If follow not found, append.
-	bb.ops = append(bb.ops, op)
+	bb.insertAt(len(bb.ops), op)
 }
 
 // InsertOpAfter inserts op after prev in the ops slice.
@@ -231,16 +253,11 @@ func (bb *BlockBasic) InsertOpAfter(op, prev *PcodeOp) {
 		bb.srcDelegate.InsertOpAfter(op, prev)
 		return
 	}
-	for i, o := range bb.ops {
-		if o == prev {
-			pos := i + 1
-			bb.ops = append(bb.ops, nil)
-			copy(bb.ops[pos+1:], bb.ops[pos:])
-			bb.ops[pos] = op
-			return
-		}
+	if i := bb.find(prev); i >= 0 {
+		bb.insertAt(i+1, op)
+		return
 	}
-	bb.ops = append(bb.ops, op)
+	bb.insertAt(len(bb.ops), op)
 }
 
 // InsertOpBegin prepends op to the ops slice.
@@ -249,7 +266,7 @@ func (bb *BlockBasic) InsertOpBegin(op *PcodeOp) {
 		bb.srcDelegate.InsertOpBegin(op)
 		return
 	}
-	bb.ops = append([]*PcodeOp{op}, bb.ops...)
+	bb.insertAt(0, op)
 }
 
 // InsertOpEnd appends op to the ops slice.
@@ -258,7 +275,7 @@ func (bb *BlockBasic) InsertOpEnd(op *PcodeOp) {
 		bb.srcDelegate.InsertOpEnd(op)
 		return
 	}
-	bb.ops = append(bb.ops, op)
+	bb.insertAt(len(bb.ops), op)
 }
 
 // FirstOp returns the first op, or nil if empty.

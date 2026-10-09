@@ -1,7 +1,6 @@
 package pcode
 
 import (
-	"sort"
 
 	"github.com/knewstimek/gosleigh/pkg/address"
 )
@@ -11,12 +10,12 @@ import (
 // C++ parity: varnode.hh VarnodeBank
 // ---------------------------------------------------------------------------
 
-// VarnodeBank manages all Varnodes within a function with two sorted indices.
-// locTree is sorted by (space, offset, size, status, seqnum/createIndex).
-// defTree is sorted by (status, seqnum, space, offset, size, createIndex).
+// VarnodeBank manages all Varnodes within a function, sorted by location:
+// (space, offset, size, status, seqnum/createIndex). The C++ def tree is not
+// kept: nothing here iterates Varnodes in definition order.
 type VarnodeBank struct {
-	locTree     []*Varnode     // sorted by location-then-definition
-	defTree     []*Varnode     // sorted by definition-then-location
+	locTree     vnList         // sorted by location-then-definition
+	maxSize     int32          // largest Varnode size ever inserted (bounds LocRange)
 	uniqSpace   *address.Space // unique/temp space
 	uniqBase    uint64         // starting offset for unique allocations
 	uniqID      uint64         // current unique offset counter
@@ -200,54 +199,26 @@ func cmpInt32(a, b int32) int {
 
 // insertLoc inserts vn into locTree maintaining sorted order.
 func (vb *VarnodeBank) insertLoc(vn *Varnode) {
-	pos := sort.Search(len(vb.locTree), func(i int) bool {
-		return CompareLocDef(vb.locTree[i], vn) >= 0
-	})
-	vb.locTree = append(vb.locTree, nil)
-	copy(vb.locTree[pos+1:], vb.locTree[pos:])
-	vb.locTree[pos] = vn
-}
-
-// insertDef inserts vn into defTree maintaining sorted order.
-func (vb *VarnodeBank) insertDef(vn *Varnode) {
-	pos := sort.Search(len(vb.defTree), func(i int) bool {
-		return CompareDefLoc(vb.defTree[i], vn) >= 0
-	})
-	vb.defTree = append(vb.defTree, nil)
-	copy(vb.defTree[pos+1:], vb.defTree[pos:])
-	vb.defTree[pos] = vn
+	p := vb.locTree.search(func(x *Varnode) bool { return CompareLocDef(x, vn) >= 0 })
+	vb.locTree.insertAt(p, vn)
+	if vn.size > vb.maxSize {
+		vb.maxSize = vn.size
+	}
 }
 
 // removeLoc removes vn from locTree.
 func (vb *VarnodeBank) removeLoc(vn *Varnode) {
-	pos := sort.Search(len(vb.locTree), func(i int) bool {
-		return CompareLocDef(vb.locTree[i], vn) >= 0
-	})
-	// Find exact pointer match at or near pos
-	for i := pos; i < len(vb.locTree); i++ {
-		if vb.locTree[i] == vn {
-			vb.locTree = append(vb.locTree[:i], vb.locTree[i+1:]...)
+	p := vb.locTree.search(func(x *Varnode) bool { return CompareLocDef(x, vn) >= 0 })
+	// Find the exact pointer among the equal keys.
+	for x := vb.locTree.at(p); x != nil; x = vb.locTree.at(p) {
+		if x == vn {
+			vb.locTree.removeAt(p)
 			return
 		}
-		if CompareLocDef(vb.locTree[i], vn) > 0 {
-			break
-		}
-	}
-}
-
-// removeDef removes vn from defTree.
-func (vb *VarnodeBank) removeDef(vn *Varnode) {
-	pos := sort.Search(len(vb.defTree), func(i int) bool {
-		return CompareDefLoc(vb.defTree[i], vn) >= 0
-	})
-	for i := pos; i < len(vb.defTree); i++ {
-		if vb.defTree[i] == vn {
-			vb.defTree = append(vb.defTree[:i], vb.defTree[i+1:]...)
+		if CompareLocDef(x, vn) > 0 {
 			return
 		}
-		if CompareDefLoc(vb.defTree[i], vn) > 0 {
-			break
-		}
+		p = vb.locTree.next(p)
 	}
 }
 
@@ -255,17 +226,16 @@ func (vb *VarnodeBank) removeDef(vn *Varnode) {
 // Public API
 // ---------------------------------------------------------------------------
 
-// Create creates a free varnode and inserts it in both trees.
+// Create creates a free varnode and inserts it in the loc tree.
 func (vb *VarnodeBank) Create(size int32, loc address.Address) *Varnode {
 	vn := NewVarnode(size, loc)
 	vn.createIndex = vb.createIndex
 	vb.createIndex++
 	vb.insertLoc(vn)
-	vb.insertDef(vn)
 	return vn
 }
 
-// CreateDef creates a varnode with a defining op and inserts it in both trees.
+// CreateDef creates a varnode with a defining op and inserts it in the loc tree.
 // Sets VarnodeInsert to match C++ VarnodeBank::xref which sets Varnode::insert
 // for every non-free varnode entering the loc/def trees.
 func (vb *VarnodeBank) CreateDef(size int32, loc address.Address, op *PcodeOp) *Varnode {
@@ -275,7 +245,6 @@ func (vb *VarnodeBank) CreateDef(size int32, loc address.Address, op *PcodeOp) *
 	vn.def = op
 	vn.flags |= VarnodeWritten | VarnodeInsert
 	vb.insertLoc(vn)
-	vb.insertDef(vn)
 	return vn
 }
 
@@ -298,10 +267,8 @@ func (vb *VarnodeBank) CreateDefUnique(size int32, op *PcodeOp) *Varnode {
 // Sets VarnodeInsert -- C++ xref sets Varnode::insert for all non-free varnodes.
 func (vb *VarnodeBank) SetInput(vn *Varnode) {
 	vb.removeLoc(vn)
-	vb.removeDef(vn)
 	vn.flags |= VarnodeInput | VarnodeInsert
 	vb.insertLoc(vn)
-	vb.insertDef(vn)
 }
 
 // SetDef transitions a free varnode to written status with the given defining op.
@@ -309,29 +276,24 @@ func (vb *VarnodeBank) SetInput(vn *Varnode) {
 // Sets VarnodeInsert -- C++ xref sets Varnode::insert for all non-free varnodes.
 func (vb *VarnodeBank) SetDef(vn *Varnode, op *PcodeOp) {
 	vb.removeLoc(vn)
-	vb.removeDef(vn)
 	vn.def = op
 	vn.flags |= VarnodeWritten | VarnodeInsert
 	vb.insertLoc(vn)
-	vb.insertDef(vn)
 }
 
 // MakeFree transitions an input or written varnode back to free status.
 // Clears VarnodeInsert -- C++ makeFree clears insert|input|indirect_creation.
 func (vb *VarnodeBank) MakeFree(vn *Varnode) {
 	vb.removeLoc(vn)
-	vb.removeDef(vn)
 	vn.flags &^= (VarnodeInput | VarnodeWritten | VarnodeInsert | VarnodeIndirectCreation)
 	vn.def = nil
 	vb.insertLoc(vn)
-	vb.insertDef(vn)
 }
 
-// Destroy removes a varnode from both trees. The varnode must be free
+// Destroy removes a varnode from the loc tree. The varnode must be free
 // with no descendants.
 func (vb *VarnodeBank) Destroy(vn *Varnode) {
 	vb.removeLoc(vn)
-	vb.removeDef(vn)
 	// A destroyed Varnode leaves its HighVariable, or the high keeps a stale
 	// instance whose type still votes in getTypeRepresentative.
 	// C++ parity: Varnode::~Varnode (high->remove(this)).
@@ -351,12 +313,11 @@ func (vb *VarnodeBank) Replace(oldVn, newVn *Varnode) {
 	oldVn.DestroyDescend()
 }
 
-// lowerLoc returns the first locTree index whose (space, offset, size) is not
+// lowerLoc is the first locTree position whose (space, offset, size) is not
 // below the given key. C++ parity: VarnodeBank::beginLoc (loc_tree lower_bound).
-func (vb *VarnodeBank) lowerLoc(spc *address.Space, off uint64, size int32) int {
+func (vb *VarnodeBank) lowerLoc(spc *address.Space, off uint64, size int32) vnPos {
 	so := spaceOrder(spc)
-	return sort.Search(len(vb.locTree), func(i int) bool {
-		vn := vb.locTree[i]
+	return vb.locTree.search(func(vn *Varnode) bool {
 		if o := spaceOrder(vn.loc.Space); o != so {
 			return o > so
 		}
@@ -371,10 +332,10 @@ func (vb *VarnodeBank) lowerLoc(spc *address.Space, off uint64, size int32) int 
 // Returns nil if not found.
 // C++ parity: VarnodeBank::findInput.
 func (vb *VarnodeBank) FindInput(size int32, loc address.Address) *Varnode {
-	for i := vb.lowerLoc(loc.Space, loc.Offset, size); i < len(vb.locTree); i++ {
-		vn := vb.locTree[i]
-		if vn.loc.Space != loc.Space || vn.loc.Offset != loc.Offset || vn.size != size {
-			break
+	for p := vb.lowerLoc(loc.Space, loc.Offset, size); ; p = vb.locTree.next(p) {
+		vn := vb.locTree.at(p)
+		if vn == nil || vn.loc.Space != loc.Space || vn.loc.Offset != loc.Offset || vn.size != size {
+			return nil
 		}
 		if vn.IsInput() {
 			return vn
@@ -382,34 +343,32 @@ func (vb *VarnodeBank) FindInput(size int32, loc address.Address) *Varnode {
 		// In locTree order, input comes before written/free at same loc+size,
 		// so if we passed it, stop.
 		if vn.IsWritten() || vn.IsFree() {
-			break
+			return nil
 		}
 	}
-	return nil
 }
 
 // NumVarnodes returns the total number of managed varnodes.
 func (vb *VarnodeBank) NumVarnodes() int {
-	return len(vb.locTree)
+	return vb.locTree.Len()
 }
 
 // Clear removes all varnodes.
 func (vb *VarnodeBank) Clear() {
-	vb.locTree = vb.locTree[:0]
-	vb.defTree = vb.defTree[:0]
+	vb.locTree.clear()
+	vb.maxSize = 0
 	vb.uniqID = vb.uniqBase
 	vb.createIndex = 0
 }
 
 // AllVarnodes returns a snapshot of all varnodes in locTree order.
 func (vb *VarnodeBank) AllVarnodes() []*Varnode {
-	out := make([]*Varnode, len(vb.locTree))
-	copy(out, vb.locTree)
-	return out
+	return vb.locTree.all()
 }
 
 // LocRange returns all varnodes whose address overlaps [addr, addr+size)
-// within the given space. Scans locTree (sorted by space/offset).
+// within the given space, in loc order. The scan starts maxSize bytes before
+// the range: no Varnode starting earlier can reach into it.
 // C++ parity: VarnodeBank loc-tree range queries
 func (vb *VarnodeBank) LocRange(addr address.Address, size int32) []*Varnode {
 	var result []*Varnode
@@ -419,11 +378,17 @@ func (vb *VarnodeBank) LocRange(addr address.Address, size int32) []*Varnode {
 	// Compare last bytes so a range ending at the top of the space does not
 	// wrap. C++ parity: Heritage::collect (endaddr wraparound check).
 	last := addr.Offset + uint64(size) - 1
-	for _, vn := range vb.BySpace(addr.Space) {
-		if vn.loc.Offset > last {
+	start := uint64(0)
+	if back := uint64(vb.maxSize); addr.Offset > back {
+		start = addr.Offset - back
+	}
+	so := spaceOrder(addr.Space)
+	for p := vb.lowerLoc(addr.Space, start, 0); ; p = vb.locTree.next(p) {
+		vn := vb.locTree.at(p)
+		if vn == nil || spaceOrder(vn.loc.Space) != so || vn.loc.Offset > last {
 			break // sorted by offset: nothing later can overlap
 		}
-		if vn.size > 0 && vn.loc.Offset+uint64(vn.size)-1 >= addr.Offset {
+		if vn.loc.Space == addr.Space && vn.size > 0 && vn.loc.Offset+uint64(vn.size)-1 >= addr.Offset {
 			result = append(result, vn)
 		}
 	}
@@ -435,9 +400,9 @@ func (vb *VarnodeBank) LocRange(addr address.Address, size int32) []*Varnode {
 // C++ parity: VarnodeBank::beginLoc(size,addr) / endLoc(size,addr).
 func (vb *VarnodeBank) LocExact(addr address.Address, size int32) []*Varnode {
 	var result []*Varnode
-	for i := vb.lowerLoc(addr.Space, addr.Offset, size); i < len(vb.locTree); i++ {
-		vn := vb.locTree[i]
-		if vn.loc != addr || vn.size != size {
+	for p := vb.lowerLoc(addr.Space, addr.Offset, size); ; p = vb.locTree.next(p) {
+		vn := vb.locTree.at(p)
+		if vn == nil || vn.loc != addr || vn.size != size {
 			break
 		}
 		result = append(result, vn)
@@ -449,9 +414,10 @@ func (vb *VarnodeBank) LocExact(addr address.Address, size int32) []*Varnode {
 // C++ parity: VarnodeBank space iteration
 func (vb *VarnodeBank) BySpace(spc *address.Space) []*Varnode {
 	var result []*Varnode
-	for i := vb.lowerLoc(spc, 0, 0); i < len(vb.locTree); i++ {
-		vn := vb.locTree[i]
-		if spaceOrder(vn.loc.Space) != spaceOrder(spc) {
+	so := spaceOrder(spc)
+	for p := vb.lowerLoc(spc, 0, 0); ; p = vb.locTree.next(p) {
+		vn := vb.locTree.at(p)
+		if vn == nil || spaceOrder(vn.loc.Space) != so {
 			break
 		}
 		if vn.loc.Space == spc {

@@ -729,13 +729,13 @@ func (p *ActionPool) syncCurrentOp(data *Funcdata, includeCurrent bool) {
 }
 
 func (p *ActionPool) beginTraversal(data *Funcdata) {
-	ops := data.GetPcodeOpBank().sorted
-	if len(ops) == 0 {
+	ops := &data.GetPcodeOpBank().sorted
+	if ops.Len() == 0 {
 		p.currentOp = nil
 		p.currentSeq = SeqNum{}
 		return
 	}
-	p.currentOp = ops[0]
+	p.currentOp = ops.at(vnPos{})
 	p.currentSeq = p.currentOp.Seq()
 }
 

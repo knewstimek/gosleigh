@@ -10,13 +10,13 @@ import (
 // C++ parity: op.hh PcodeOpBank
 type PcodeOpBank struct {
 	opTree    map[SeqNum]*PcodeOp // primary index by SeqNum
-	deadList  []*PcodeOp          // dead ops (not in CFG)
-	aliveList []*PcodeOp          // alive ops (in CFG)
+	deadList  opList              // dead ops (not in CFG)
+	aliveList opList              // alive ops (in CFG)
 	uniqID    uint64              // monotonic sequence counter
 	// sorted holds every op in SeqNum order (C++ optree is a std::map keyed
 	// by SeqNum), maintained on create/destroy. Iterating the Go map would
 	// make the order, and so the output, vary from run to run.
-	sorted []*PcodeOp
+	sorted chunkList[*PcodeOp]
 	// codeCounter stamps each opcode change, so CodeList can rebuild the
 	// C++ per-opcode lists, which append an op whenever its opcode is set.
 	codeCounter uint64
@@ -54,44 +54,45 @@ func (b *PcodeOpBank) createInternal(numInputs int, seq SeqNum) *PcodeOp {
 	op := NewPcodeOp(numInputs, seq)
 	op.SetFlag(PcodeOpDead)
 	b.opTree[seq] = op
-	i := b.searchSeq(seq)
-	b.sorted = append(b.sorted, nil)
-	copy(b.sorted[i+1:], b.sorted[i:])
-	b.sorted[i] = op
-	b.deadList = append(b.deadList, op)
+	b.sorted.insertAt(b.searchSeq(seq), op)
+	b.deadList.push(op)
 	return op
 }
 
 // MarkAlive moves an op from the dead list to the alive list.
 // C++ parity: PcodeOpBank::markAlive
 func (b *PcodeOpBank) MarkAlive(op *PcodeOp) {
-	b.deadList = removeFromSlice(b.deadList, op)
+	b.deadList.remove(op)
 	op.ClearFlag(PcodeOpDead)
-	b.aliveList = append(b.aliveList, op)
+	b.aliveList.push(op)
 }
 
 // MarkDead moves an op from the alive list to the dead list.
 // C++ parity: PcodeOpBank::markDead
 func (b *PcodeOpBank) MarkDead(op *PcodeOp) {
-	b.aliveList = removeFromSlice(b.aliveList, op)
+	b.aliveList.remove(op)
 	op.SetFlag(PcodeOpDead)
-	b.deadList = append(b.deadList, op)
+	b.deadList.push(op)
 }
 
 // Destroy removes an op from all indices.
 // C++ parity: PcodeOpBank::destroy
 func (b *PcodeOpBank) Destroy(op *PcodeOp) {
 	delete(b.opTree, op.seq)
-	for i := b.searchSeq(op.seq); i < len(b.sorted) && SeqNumEqual(b.sorted[i].seq, op.seq); i++ {
-		if b.sorted[i] == op {
-			b.sorted = append(b.sorted[:i], b.sorted[i+1:]...)
+	for p := b.searchSeq(op.seq); ; p = b.sorted.next(p) {
+		o := b.sorted.at(p)
+		if o == nil || !SeqNumEqual(o.seq, op.seq) {
+			break
+		}
+		if o == op {
+			b.sorted.removeAt(p)
 			break
 		}
 	}
 	if op.IsDead() {
-		b.deadList = removeFromSlice(b.deadList, op)
+		b.deadList.remove(op)
 	} else {
-		b.aliveList = removeFromSlice(b.aliveList, op)
+		b.aliveList.remove(op)
 	}
 }
 
@@ -103,7 +104,7 @@ func (b *PcodeOpBank) FindOp(seq SeqNum) *PcodeOp {
 // Target returns the first op (in SeqNum order) at addr, or nil.
 // C++ parity: PcodeOpBank::target.
 func (b *PcodeOpBank) Target(addr address.Address) *PcodeOp {
-	for _, op := range b.sorted {
+	for _, op := range b.sorted.all() {
 		if op.seq.Address == addr {
 			return op
 		}
@@ -117,34 +118,35 @@ func (b *PcodeOpBank) NumOps() int { return len(b.opTree) }
 // Clear removes all ops from the bank.
 func (b *PcodeOpBank) Clear() {
 	b.opTree = make(map[SeqNum]*PcodeOp)
-	b.sorted = nil
-	b.deadList = nil
-	b.aliveList = nil
+	b.sorted.clear()
+	b.deadList = opList{}
+	b.aliveList = opList{}
 	// uniqID is not reset -- matches C++ behavior
 }
 
 // AllOps returns a snapshot of all ops in the bank in SeqNum order.
 // C++ parity: PcodeOpBank::beginAll/endAll (optree iteration).
 func (b *PcodeOpBank) AllOps() []*PcodeOp {
-	return append([]*PcodeOp(nil), b.sorted...)
+	return b.sorted.all()
 }
 
-// searchSeq is the index of the first op whose SeqNum is not before seq.
-func (b *PcodeOpBank) searchSeq(seq SeqNum) int {
-	return sort.Search(len(b.sorted), func(i int) bool { return !SeqNumLess(b.sorted[i].seq, seq) })
+// searchSeq is the position of the first op whose SeqNum is not before seq.
+func (b *PcodeOpBank) searchSeq(seq SeqNum) vnPos {
+	return b.sorted.search(func(op *PcodeOp) bool { return !SeqNumLess(op.seq, seq) })
 }
 
 // NextAfter returns the first op at or after seq (strictly after when
 // strict), or nil. C++ parity: optree.lower_bound / upper_bound.
 func (b *PcodeOpBank) NextAfter(seq SeqNum, strict bool) *PcodeOp {
-	i := b.searchSeq(seq)
-	for strict && i < len(b.sorted) && SeqNumEqual(b.sorted[i].seq, seq) {
-		i++ // ops can share a SeqNum (CreateWithSeq); skip them all
+	p := b.searchSeq(seq)
+	for strict {
+		op := b.sorted.at(p)
+		if op == nil || !SeqNumEqual(op.seq, seq) {
+			break
+		}
+		p = b.sorted.next(p) // ops can share a SeqNum (CreateWithSeq); skip them all
 	}
-	if i < len(b.sorted) {
-		return b.sorted[i]
-	}
-	return nil
+	return b.sorted.at(p)
 }
 
 // ChangeOpcode sets op's opcode and moves it to the end of its opcode
@@ -161,7 +163,7 @@ func (b *PcodeOpBank) ChangeOpcode(op *PcodeOp, t TypeOp) {
 // returnlist / storelist / loadlist / useroplist.
 func (b *PcodeOpBank) CodeList(opc OpCode) []*PcodeOp {
 	var out []*PcodeOp
-	for _, op := range b.sorted {
+	for _, op := range b.sorted.all() {
 		if op.Code() == opc {
 			out = append(out, op)
 		}
@@ -171,35 +173,85 @@ func (b *PcodeOpBank) CodeList(opc OpCode) []*PcodeOp {
 }
 
 // AliveOps returns a copy of the alive list.
-func (b *PcodeOpBank) AliveOps() []*PcodeOp {
-	out := make([]*PcodeOp, len(b.aliveList))
-	copy(out, b.aliveList)
-	return out
-}
+func (b *PcodeOpBank) AliveOps() []*PcodeOp { return b.aliveList.snapshot() }
 
 // SortAliveByTime orders the alive list by op creation time.
 // C++ parity: FlowInfo::splitBasic inserts the ops into their blocks walking
 // the dead list, which flow fills in generation (time) order, so the alive
 // list starts out in that order.
 func (b *PcodeOpBank) SortAliveByTime() {
-	sort.SliceStable(b.aliveList, func(i, j int) bool {
-		return b.aliveList[i].seq.Time < b.aliveList[j].seq.Time
-	})
+	b.aliveList.compact()
+	ops := b.aliveList.ops
+	sort.SliceStable(ops, func(i, j int) bool { return ops[i].seq.Time < ops[j].seq.Time })
+	b.aliveList.renumber()
 }
 
 // DeadOps returns a copy of the dead list.
-func (b *PcodeOpBank) DeadOps() []*PcodeOp {
-	out := make([]*PcodeOp, len(b.deadList))
-	copy(out, b.deadList)
-	return out
+func (b *PcodeOpBank) DeadOps() []*PcodeOp { return b.deadList.snapshot() }
+
+// opList is the alive or dead op list in its insertion order. A removal
+// leaves a hole (each op knows its slot) that a later compaction closes, so
+// it is O(1) like the C++ std::list erase through the op's stored iterator.
+type opList struct {
+	ops   []*PcodeOp
+	holes int
 }
 
-// removeFromSlice removes the first occurrence of target from s.
-func removeFromSlice(s []*PcodeOp, target *PcodeOp) []*PcodeOp {
-	for i, op := range s {
-		if op == target {
-			return append(s[:i], s[i+1:]...)
+func (l *opList) push(op *PcodeOp) {
+	op.listPos = len(l.ops)
+	l.ops = append(l.ops, op)
+}
+
+func (l *opList) remove(op *PcodeOp) {
+	i := op.listPos
+	if i < 0 || i >= len(l.ops) || l.ops[i] != op {
+		i = -1
+		for k, o := range l.ops {
+			if o == op {
+				i = k
+				break
+			}
+		}
+		if i < 0 {
+			return
 		}
 	}
-	return s
+	l.ops[i] = nil
+	l.holes++
+	if l.holes > 64 && 2*l.holes > len(l.ops) {
+		l.compact()
+	}
+}
+
+// compact closes the holes, keeping the order.
+func (l *opList) compact() {
+	if l.holes == 0 {
+		return
+	}
+	kept := l.ops[:0]
+	for _, op := range l.ops {
+		if op != nil {
+			kept = append(kept, op)
+		}
+	}
+	clear(l.ops[len(kept):])
+	l.ops = kept
+	l.holes = 0
+	l.renumber()
+}
+
+func (l *opList) renumber() {
+	for i, op := range l.ops {
+		op.listPos = i
+	}
+}
+
+func (l *opList) snapshot() []*PcodeOp {
+	out := make([]*PcodeOp, 0, len(l.ops)-l.holes)
+	for _, op := range l.ops {
+		if op != nil {
+			out = append(out, op)
+		}
+	}
+	return out
 }
