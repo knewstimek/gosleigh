@@ -2091,7 +2091,7 @@ func (a *ActionDeindirect) Apply(data *Funcdata) int {
 					// The host's description of the external function stands in
 					// for the Funcdata shell queryExternalRefFunction returns; an
 					// undescribed one has an unlocked prototype.
-					hf, known := h.QueryFunction(vn.Addr())
+					hf, known := data.queryHostFunction(vn.Addr())
 					if !known {
 						hf = HostFunction{Name: name}
 					}
@@ -2122,7 +2122,7 @@ func (a *ActionDeindirect) Apply(data *Funcdata) int {
 			sp := data.BaseAddr().Space
 			if h := data.HostScope(); h != nil && sp != nil {
 				codeaddr := address.Address{Space: sp, Offset: vn.Offset()}
-				if hf, ok := h.QueryFunction(codeaddr); ok {
+				if hf, ok := data.queryHostFunction(codeaddr); ok {
 					fc.deindirectHost(data, hf, codeaddr, hf.Name)
 					a.count++
 					continue

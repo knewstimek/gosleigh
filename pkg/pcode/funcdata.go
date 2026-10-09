@@ -1477,7 +1477,7 @@ func (fd *Funcdata) unjustifiedInputParam(addr address.Address, size int32) (add
 		return address.Address{}, 0, false
 	}
 	if !fp.dotdotdot && fd.hostScope != nil {
-		if hf, ok := fd.hostScope.QueryFunction(fd.baseAddr); ok && hf.InputLocked {
+		if hf, ok := fd.queryHostFunction(fd.baseAddr); ok && hf.InputLocked {
 			if len(hf.Params) == 0 {
 				return address.Address{}, 0, false // a locked void input list
 			}

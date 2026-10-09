@@ -97,6 +97,39 @@ func TestDecompileHostNames(t *testing.T) {
 	}
 }
 
+// hostProto knows one function's prototype by data-types only, the way a
+// host reading debug info (PDB, DWARF) describes it.
+type hostProto struct {
+	entry uint64
+	hf    pcode.HostFunction
+}
+
+func (h hostProto) QueryFunction(a address.Address) (pcode.HostFunction, bool) {
+	return h.hf, a.Offset == h.entry
+}
+
+func (h hostProto) QueryExternalRef(address.Address) (string, bool) { return "", false }
+
+// A locked prototype without storage gets its storage from the cspec model,
+// so the parameter types reach the output.
+func TestDecompileTypedPrototypeWithoutStorage(t *testing.T) {
+	// lea eax,[rcx+rdx]; ret
+	code := []byte{0x8d, 0x04, 0x11, 0xc3, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc}
+	uintT := pcode.ResolveHostType(&pcode.HostTypeDesc{Name: "uint", Meta: "uint", Size: 4})
+	host := hostProto{entry: 0x140001000, hf: pcode.HostFunction{
+		Name: "add", ExtraPop: pcode.ExtrapopUnknown, InputLocked: true, OutputLocked: true,
+		Params: []pcode.HostParam{{Name: "a", Type: uintT, Size: 4}, {Name: "b", Type: uintT, Size: 4}},
+		Output: &pcode.HostParam{Type: uintT, Size: 4},
+	}}
+	res, err := load(t, 64, code, 0x140001000).Decompile(decomp.Function{Entry: 0x140001000, Host: host})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(res.C, "uint add(uint a, uint b)") || !strings.Contains(res.C, "return a + b;") {
+		t.Errorf("typed prototype not applied:\n%s", res.C)
+	}
+}
+
 func TestLoadRejectsIncompleteSpec(t *testing.T) {
 	if _, err := decomp.Load(decomp.Spec{ID: "empty"}, []decomp.Section{{Data: []byte{0xc3}}}); err == nil {
 		t.Error("Load accepted a spec without sla/pspec/cspec")

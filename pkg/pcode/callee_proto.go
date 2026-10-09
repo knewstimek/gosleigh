@@ -67,6 +67,38 @@ func (fd *Funcdata) spaceByName(name string) *address.Space {
 // SetArchSpaces records every address space of the architecture.
 func (fd *Funcdata) SetArchSpaces(spaces []*address.Space) { fd.archSpaces = spaces }
 
+// queryHostFunction asks the host about the function at addr. A locked
+// prototype the host describes by data-types alone (no storage) gets its
+// parameter and return storage from its model, the way a <prototype>
+// without addresses does; a host that sends storage is used as sent.
+// C++ parity: FuncProto::decode -> ProtoModel::assignParameterStorage.
+func (fd *Funcdata) queryHostFunction(addr address.Address) (HostFunction, bool) {
+	if fd.hostScope == nil {
+		return HostFunction{}, false
+	}
+	hf, ok := fd.hostScope.QueryFunction(addr)
+	if ok && hostNeedsStorage(&hf) {
+		if assigned, good := fd.assignCodeProtoStorage(&hf); good {
+			hf = *assigned
+		}
+	}
+	return hf, ok
+}
+
+func hostNeedsStorage(hf *HostFunction) bool {
+	if hf.InputLocked {
+		for _, p := range hf.Params {
+			if p.Space == "" && len(p.JoinPieces) == 0 {
+				return true
+			}
+		}
+	}
+	if o := hf.Output; hf.OutputLocked && o != nil && o.Type != nil && o.Type.Metatype() != TYPE_VOID {
+		return o.Space == "" && len(o.JoinPieces) == 0
+	}
+	return false
+}
+
 func (fd *Funcdata) resolveHostParam(p HostParam) (ProtoSlot, bool) {
 	sp := fd.spaceByName(p.Space)
 	if sp == nil || p.Size <= 0 {
@@ -253,7 +285,7 @@ func (fd *Funcdata) ApplyHostSelfPrototype(model *ProtoModel) {
 	if fd.hostScope == nil {
 		return
 	}
-	hf, ok := fd.hostScope.QueryFunction(fd.baseAddr)
+	hf, ok := fd.queryHostFunction(fd.baseAddr)
 	// Processing an inlined function starts with a header warning.
 	// C++ parity: Funcdata::startProcessing (funcp.isInline()).
 	if ok && hf.Inline {

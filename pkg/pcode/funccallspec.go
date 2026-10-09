@@ -150,7 +150,7 @@ func newFuncCallSpecs(fd *Funcdata, op *PcodeOp) *FuncCallSpecs {
 		if in0 := op.Input(0); !in0.IsConstant() {
 			fc.entryAddress = in0.Addr()
 			if fd != nil && fd.hostScope != nil {
-				if hf, ok := fd.hostScope.QueryFunction(fc.entryAddress); ok {
+				if hf, ok := fd.queryHostFunction(fc.entryAddress); ok {
 					fc.name = hf.Name
 					fc.hostProto = &hf
 				}

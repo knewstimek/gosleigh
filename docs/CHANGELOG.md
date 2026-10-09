@@ -5,6 +5,14 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-10-09: 저장 위치 없는 호스트 프로토타입
+
+- 호스트가 잠긴 프로토타입을 타입만으로 보내면(PDB/DWARF를 읽는 호스트) `queryHostFunction`이
+  프로토타입 모델로 인자·반환 저장 위치를 배정한다. C++ `FuncProto::decode`가 주소 없는
+  `<prototype>`에 `ProtoModel::assignParameterStorage`를 쓰는 것과 같은 경로(`assignCodeProtoStorage`).
+  저장 위치를 보내는 호스트(Ghidra 캡처, 골든 전부)는 그대로라 게이트·realexe 수치 불변.
+- 테스트: `decomp.TestDecompileTypedPrototypeWithoutStorage`(변경 없으면 `int add(void)`로 실패).
+
 ### 2026-10-09: 외부 API (`pkg/decomp`, `pkg/specs`)
 
 - `decomp.Load(spec, sections) -> Program.Decompile(Function)`: loader/bridge 배선과 콜러 계약(cspec 필수,
