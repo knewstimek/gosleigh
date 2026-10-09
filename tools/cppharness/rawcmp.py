@@ -12,7 +12,7 @@ printers break long lines at different widths, so lines are joined.
 
 usage: py -3 tools/cppharness/rawcmp.py testdata/<corpus>/x64_goldens.json [name ...]
 Needs local/cppharness/decomp_dbg.exe and an x64 capture to graft the bytes
-into (RAWCMP_TEMPLATE, default: the first local/realexe/private-sample capture).
+into (set RAWCMP_TEMPLATE to a local x64 capture file).
 """
 import difflib, glob, json, os, re, subprocess, sys, tempfile
 
@@ -23,10 +23,7 @@ ROOT = os.path.dirname(os.path.dirname(HERE))
 def template():
 	t = os.environ.get('RAWCMP_TEMPLATE')
 	if not t:
-		caps = sorted(glob.glob(os.path.join(ROOT, 'local', 'realexe', 'private-sample', 'captures', '*.xml')))
-		if not caps:
-			sys.exit('no x64 capture template; set RAWCMP_TEMPLATE')
-		t = caps[0]
+		sys.exit('no x64 capture template; set RAWCMP_TEMPLATE')
 	return open(t, encoding='utf-8').read()
 
 

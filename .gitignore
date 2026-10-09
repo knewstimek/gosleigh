@@ -51,8 +51,36 @@ local/
 *.old
 *.pid
 
-# gorchera runtime artifacts
-.gorchera/serve.pid
+# Private agent configuration and session artifacts
+.gorchera/
+.gochera/
+.codex/
+.mcp.json
+.mcp.*.json
+AGENTS.md
+CLAUDE.md
+NEXT_SESSION*.md
+**/NEXT_SESSION*.md
+**/*SESSION_PROMPT*.md
+/docs/ORCHESTRATOR_WORKFLOW.md
+/docs/INDEX.md
+
+# Local profiles and credentials
+.env.*
+!.env.example
+!.env.sample
+*.local.*
+/local-profiles/
+
+# Generated diagnostics (keep source corpora and reference goldens tracked)
+/tools/captures/*.txt
+/testdata/x64_auto/*gosleigh_out.json
+/testdata/x64_auto/*gapmap.json
+*.py[cod]
+**/.codegraph.db-*
+
+# Required generated PE fixture
+!/testdata/elfs/simple_add.exe
 
 # Local launcher scripts (personal, keep on disk only)
 /Gosleigh.bat

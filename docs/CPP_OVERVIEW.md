@@ -16,7 +16,6 @@
 
 함께 봐야 하는 문서:
 
-- `docs/INDEX.md`
 - `docs/CPP_FLOW.md`
 - `docs/CPP_TYPES.md`
 - `docs/CPP_PORT_SCOPE.md`

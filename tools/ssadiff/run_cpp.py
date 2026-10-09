@@ -13,7 +13,7 @@ Usage (library, called from ssadiff.py):
     text = run_print_raw(decomp_dbg_path, savefile_path, func_name, sleighhome)
 
 Usage (standalone):
-    py -3 tools/ssadiff/run_cpp.py --decomp-dbg local/private
+    py -3 tools/ssadiff/run_cpp.py --decomp-dbg tools/decomp_dbg.exe \
         --savefile /tmp/sum_to_n.xml --func sum_to_n
 """
 

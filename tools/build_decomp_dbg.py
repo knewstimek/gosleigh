@@ -1,7 +1,9 @@
 import os, sys, subprocess
 
-SRC = r"local/private"
-BUILD = r"local/private"
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+SRC = os.environ.get("DECOMP_SRC", os.path.join(ROOT, "ghidra-ref", "Ghidra",
+    "Features", "Decompiler", "src", "decompile", "cpp"))
+BUILD = os.environ.get("DECOMP_BUILD", os.path.join(ROOT, "local", "decomp_build"))
 OBJ = os.path.join(BUILD, "obj")
 VCVARSALL = r"C:\Program Files\Microsoft Visual Studio\2022\Community\VC\Auxiliary\Build\vcvarsall.bat"
 ZLIB_INC = r"C:\vcpkg\installed\x86-windows-static\include"

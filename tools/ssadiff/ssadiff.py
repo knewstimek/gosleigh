@@ -18,10 +18,10 @@ friends):
 
 Usage:
     py -3 tools/ssadiff/ssadiff.py --golden testdata/x64_corpus/x64_goldens.json \
-        --func sum_to_n --decomp-dbg local/private
+        --func sum_to_n --decomp-dbg tools/decomp_dbg.exe
 
     py -3 tools/ssadiff/ssadiff.py --golden testdata/x64_corpus2/x64_goldens.json \
-        --func umulhi --decomp-dbg local/private
+        --func umulhi --decomp-dbg tools/decomp_dbg.exe
 
     # No decomp_dbg available: compare against a pre-captured raw dump file
     # (see run_cpp.py output, or tools/captures/*.txt) instead of running it live.

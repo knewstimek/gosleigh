@@ -1,13 +1,13 @@
 # 프로젝트 상태
 
-목표: Ghidra C++ 디컴파일러를 Go로 동일 동작 포팅(CLAUDE.md). 이력은 `git log`/`docs/CHANGELOG.md`.
+목표: Ghidra C++ 디컴파일러를 Go로 동일 동작 포팅. 이력은 `git log`/`docs/CHANGELOG.md`.
 
 ## 현재 수치 (2026-10-08)
 
 | 측정 | 결과 | 비고 |
 |---|---|---|
-| realexe private-sample seed1..50 (x86-32) | 50개 모두 200/200 | |
-| realexe private-sample seed1..49 (x64 UE4) | 49개 중 47개 200/200 | s6 [169], s29 [168]은 골든 비결정성(아래) |
+| realexe 비공개 x86 표본 seed1..50 (x86-32) | 50개 모두 200/200 | |
+| realexe 비공개 x64 표본 seed1..49 (x64 UE4) | 49개 중 47개 200/200 | s6 [169], s29 [168]은 골든 비결정성(아래) |
 | 게이트 `tools/gates.py` | 전부 유지 | tree 10/10, breadth 3/3, corpus 8/8, corpus2 10/13, x64_auto 108/109 |
 
 측정: `realexe.py measure --work local/realexe/<name>` (메모리가 빠듯하면 `REALEXE_WORKERS=8`).
@@ -31,9 +31,8 @@ XMM1 < XMM0, R9 < R8인 실행을 확인). Go는 cspec 문서 순서(`paramEntry
 
 | 표본 | 함수 | 골든 쪽 결과 |
 |---|---|---|
-| private-sample [169] / private-sample [168] | FStaticStateResource | 두 vtable 호출 인자가 표본마다 다름 |
+| x64 s6 [169] / s29 [168] | 표본 함수 | 두 vtable 호출 인자가 표본마다 다름 |
 
-근거와 재현 방법: repoplane `gosleigh/realexe/private-sample-callind-args-live-only`.
 upstream 수정 PR: NationalSecurityAgency/ghidra#9750 (entry 위치 번호로 비교). 병합되면 Go 쪽 비교를
 upstream과 다시 대조한다(repoplane `gosleigh/upstream/ghidra-pr-9750-paramtrial-order`).
 
@@ -61,7 +60,7 @@ upstream과 다시 대조한다(repoplane `gosleigh/upstream/ghidra-pr-9750-para
 | 큰 함수 | 4KB 초과 함수 미측정 | `realexe.py sample --max-bytes` | 측정만 | `--max-bytes` 상향 work 200/200 |
 | 게이트 잔여 | corpus2 10/13, x64_auto 108/109 | `testdata/x64_auto/GAPMAP.md`, corpus2 진단 테스트 출력 | `pkg/pcode` | `X64 CORPUS2 MAP` 13/13, x64_auto 109/109 |
 | ARM 등 | 실바이너리 미검증(sla 골든 테스트만) | `pkg/sla/aarch64_golden_test.go` | `tools/realexe`(아키텍처 매핑) | ARM 바이너리 work 200/200 |
-| seed 연장 | private-sample 51, private-sample 50부터 | `realexe.py sample --seed N` 후 `measure` | 측정만 | 새 work 200/200 |
+| seed 연장 | x86 표본 51, x64 표본 50부터 | `realexe.py sample --seed N` 후 `measure` | 측정만 | 새 work 200/200 |
 
 ## 도구
 

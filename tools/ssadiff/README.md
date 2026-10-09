@@ -3,7 +3,7 @@
 Gosleigh의 최종 SSA p-code(디컴파일 파이프라인 완료 직후, print 직전 상태)와
 Ghidra C++ 코어(`tools/decomp_dbg.exe`)의 `print raw` 출력을 op 단위로 정렬해
 나란히 비교하는 도구. merge/type/heritage 갭을 손으로 로깅해 대조하던 작업을
-상설화한 것 (`local-notes.md` "우선 제작 툴셋" #2).
+자동화한 것이다.
 
 ## 구성
 
@@ -33,11 +33,11 @@ Ghidra C++ 코어(`tools/decomp_dbg.exe`)의 `print raw` 출력을 op 단위로 
 
 ```
 py -3 tools/ssadiff/ssadiff.py --golden testdata/x64_corpus/x64_goldens.json \
-    --func sum_to_n --decomp-dbg local/private
+    --func sum_to_n --decomp-dbg tools/decomp_dbg.exe --fuzzy
 ```
 
 `SLEIGHHOME` 환경변수 필요(`tools/BUILD_NOTES.md` 참조). `decomp_dbg.exe`는
-gitignore 대상이라 워크트리에는 없다 -- 메인 repo 절대경로(`local/private`)를 넘긴다.
+gitignore 대상이라 워크트리에는 없다 -- 로컬에서 빌드한 실행 파일의 경로를 넘긴다.
 
 Gosleigh 쪽만 단독으로 보고 싶으면:
 
@@ -49,7 +49,7 @@ C++ 코어 쪽 캡처만 재현하고 싶으면 (savefile을 직접 만들거나
 
 ```
 py -3 tools/ssadiff/capture.py --golden testdata/x64_corpus/x64_goldens.json --func sum_to_n --out /tmp/sum_to_n.xml
-py -3 tools/ssadiff/run_cpp.py --decomp-dbg local/private
+py -3 tools/ssadiff/run_cpp.py --decomp-dbg tools/decomp_dbg.exe --savefile /tmp/sum_to_n.xml --func sum_to_n
 ```
 
 decomp_dbg를 아예 실행할 수 없는 환경에서는 미리 떠둔 raw 텍스트 파일로 비교:

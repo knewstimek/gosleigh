@@ -14,7 +14,7 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
   `BuildConfig.CspecBytes`, `sla.ParsePspecBytes`. pspec `tracked_set`을 `PspecData.TrackedSet`으로 파싱.
 - `pkg/specs`: x86/x64 sla+pspec + win/gcc cspec embed(testdata/sla 사본, 동일성 테스트).
 - `cmd/goldengap`이 `decomp` 경유로 바뀜 -> 게이트 전부 유지(tree 10/10, corpus 8/8, breadth 3/3,
-  corpus2 10/13, x64_auto 108/109), realexe private-sample/private-sample 200/200.
+  corpus2 10/13, x64_auto 108/109), realexe 비공개 x86/x64 표본 200/200.
 
 ### 2026-07-25 (세션12): #9 conditional-move + #7 루프 렌더 2건 + #6 find_max TypeOrder (master 세션12 tip)
 
@@ -52,7 +52,7 @@ else local=0; return local;}`로 방출되던 것(최다빈도 C 패턴). 3-부�
 
 **착지2(`1f6a4cb`) -- #7 누산기 루프 렌더 fix + 오진 정정(핵심 교훈)**: `int s=0; do{s+=i; i++;} while(i<n);
 return s;`가 루프-body `s+=i` 소실 + `return local_14+local_18`(should `return local_14`)로 방출.
-- **오진 정정**: local-notes 옛 #7 가설("Merge가 register ECX(=s+i)를 stack local_14 phi 출력과 coalesce 못함,
+- **오진 정정**: 로컬 진단 노트 옛 #7 가설("Merge가 register ECX(=s+i)를 stack local_14 phi 출력과 coalesce 못함,
   Merge 코어 deep")은 **실측 반증**. MERGE_SKIP_DEBUG(임시 계측)로 확인: MergeMarker/MergeOp가 register 입력을
   stack local High로 **정상 coalesce**하고(DOMERGE 발화), ActionMarkExplicit도 multi-instance High를 explicit
   마킹함. 즉 SSA·Merge·explicit 전부 정상. 세션10/11의 "과잉 root-cause 단정" 교훈 재현.
@@ -77,7 +77,7 @@ dowhile + loop-head snapshot binsearch) 완료. insort류 조건부 루프변수
 **방법론 교훈(영구)**: "빈 함수/void 붕괴/드롭된 문장" 증상은 엔진(Merge/SSA) 갭으로 보이지만 **렌더 억제 휴리스틱
 (markPrologueOps/markReturnOnlyCopies/renderReturnValueFrag -- 전부 C++ 비충실 Gosleigh 근사)이 HOT 근본**일 수
 있다. 착수: MERGE_SKIP_DEBUG류로 병합/explicit 상태부터 실측 -> 정상이면 렌더 억제 경로 추적(EMIT 루프의 inline/
-prologue/identity 플래그 계측). 선행 가설(local-notes 기록)도 실측 반증 대상.
+prologue/identity 플래그 계측). 선행 가설(로컬 진단 노트 기록)도 실측 반증 대상.
 
 ---
 
@@ -115,7 +115,7 @@ int로 오승격. LOAD는 값-provenance 체인을 끊으므로(로드값 타입
   coreaction.cc:3024-3065의 ZEXT/PIECE fall-through 상실). ZEXT 슬라이스만 포팅 가능(PIECE는 PieceNode 미포팅),
   현 코퍼스 dormant, broad blast 대비 benefit 없어 미착수.
 
-**신규 divergence 5건 특성화(전부 C++ 실측 확정, 미착지 -- 상세=local-notes 세션11 블록)**:
+**신규 divergence 5건 특성화(전부 C++ 실측 확정, 미착지 -- 상세=로컬 진단 노트 세션11 블록)**:
 - **#6 struct 혼합폭 필드 로드 cast 누락**: `p->c`(8B, int* 기반)를 `param_1[2]`(4B)로 렌더. 근본 = PTRADD pointee가
   scale=4인데 int/8로 widening(역전파) + 8B int가 "longlong" 아닌 "int" 오명명 -> GetInputCast가 cast 억제. 깊은 타입전파.
 - **#7 do-while + accumulator 누산기+반환 통째 드롭 (심각)**: `do{s+=i;i++;}while(i<n);return s`가 `void(void)`로
@@ -157,7 +157,7 @@ HOT divergence ~8건** 발견.
 - #5 `TypeOpPtradd::propagateType`(typeop.cc:2270) 미배선 -> PTRADD가 default로 빠져 배열인덱스마다 포인터 타입전파
   중단. PTRSUB 로직 + slot2 가드 미러(이미 있는 propagateAddIn2Out 재사용). action_infertypes.go에 케이스 추가.
 
-**큰 미착지 3건** (실제 gap, 각각 신중한 C++ 포팅 필요 -- local-notes 감사맵):
+**큰 미착지 3건** (실제 gap, 각각 신중한 C++ 포팅 필요 -- 로컬 진단 노트 감사맵):
 - **AddTreeState distribute 반쪽포팅**(addtreestate.go): C++ 2-pass fixup(preventDistribution/isDistributeUsed +
   distributeIntMultAdd 물리 재작성 + 재수렴, ruleaction.cc:6463-6493)을 단일 pass로. `ptr[(x+y)*c]` 인덱싱 재구성 divergence.
 - **merge.go MergeMarker**: `mergeIndirect`(merge.cc:846-882, addrForce 분기 + snipOutputInterference) 부재, 모든 marker를 mergeOp로 균일 처리. addrForce 로컬이 call 넘어 살 때 영향.
@@ -235,7 +235,7 @@ INT_AND->INT_OR 분배하던 과공격적 부분포팅(benefit-guard 전무) -- 
 완전덮음 trivial), `othermask==0`(RuleAndMask 담당)/`==fullmask` skip, other 비상수 허용, NewOpBefore 블록삽입.
 이로써 distribute/factor 쌍의 RuleAndDistribute-측 발진원 제거. 제거된 과공격적 분배는 코퍼스 무영향(전 골든 유지).
 (#7 RuleHumptyOr 실제 포팅은 별도 발진 -- 공통 a가 상수로 b/c 완전덮음 + `const&b` 선-환원 순서 gap으로
-`pkg/bridge` 행 -> revert. 정밀 근본/착지조건은 local-notes #7 노트.)
+`pkg/bridge` 행 -> revert. 정밀 근본/착지조건은 로컬 진단 노트 #7 노트.)
 
 **게이트**: TREE_MAP 10/10, X64_CORPUS 8/8, X64_SWITCH byte-MATCH, X64_BREADTH 3/3, X64_CORPUS2 10/13,
 x64_auto 31/32, `go test ./...` green, `go vet` clean. **잔여 순수 미착수 4건 = RuleHumptyOr / RuleOrCompare /
@@ -626,7 +626,7 @@ go test ./...). 스냅샷 재생성 `32fb2b6`.
 이미 포팅된 `ActionMarkExplicit/ActionMarkImplied`의 IsImplied flag를 미소비. 핸드오프 신호("umulhi spurious
 CAST", "sum_via_pp copy-coalesce")는 둘 다 오진. 이건 (B) print-inline 시스템 갭(대형, 단독 세션)이며 고레버리지
 (하나 고치면 sum_via_pp/umulhi/gate/faverage 등 다수 동시 해결 가능성). 지금 착수할 저위험 조각 없음 -> STATUS
-잔여 부채 + local-notes에 기록.
+잔여 부채 + 로컬 진단 노트에 기록.
 
 ---
 
@@ -853,7 +853,7 @@ stale 워커 worktree/브랜치 40개 전수 검증(git cherry 패치 대조) �
 **게이트 (최종)**: tree 10/10, x64 corpus 8/8, op_switch byte-MATCH, breadth 3/3, corpus2 4/13, x64_auto
 15/32, production 전부 PASS, `go test ./...` green, goldengap 2회 산출 byte-diff 없음(디코드 결정성).
 
-**known gap 신규 기록**(상세 GAPMAP.md 수동 섹션 + local-notes.md): reverse_bytes_inplace
+**known gap 신규 기록**(상세 GAPMAP.md 수동 섹션 + 로컬 진단 노트): reverse_bytes_inplace
 param-recovery 발산(spurious RDX sz8 + phantom R8 -> 캐리어 EDX가 iVar2로 새어 선언 소실; 선언 경로 수정은
 증상 봉합이라 기각), dowhile_count 초기화 누락+증가 temp 미병합(디코드 버그와 무관 확인), BlockBasic
 isComplex leaf(pre-structure SSA 정합 선행), 다중 레벨 개행, char 리터럴('\0') 미구현, SSA parity 부채 3건.
@@ -924,7 +924,7 @@ struct/포인터/signed div/함수호출/goto/float/64bit곱). 재현 파이프�
 **미착지 (보존 브랜치 `worktree-agent-a31599a51b280b836` @ `42522d9`)**: faithful ActionReturnSplit
 (NodeSplit/CloneBlockOps SSA 수술, funcdata_block.cc:845-1093 + gatherReturnGotos/getCopyMap
 blockaction.cc:2205). split 엔진 byte-correct(dowhile_scan 개선 입증)이나 ReturnSplit 활성시 parse_steps 의미
-손상(하류 collapse multi-exit-loop 구조화 갭) -> parity-first로 보류. 상세 local-notes.md.
+손상(하류 collapse multi-exit-loop 구조화 갭) -> parity-first로 보류. 상세 로컬 진단 노트.
 
 **자산**: `tools/decomp_dbg.exe`(재빌드, CPUI_DEBUG core 콘솔) + `tools/BUILD_NOTES.md`(재빌드 절차) +
 `tools/build_decomp_dbg.py` + `tools/captures/`(debug_op_switch.xml, debug_dispatch.xml, 측정 결과). C++ 코어
@@ -978,7 +978,7 @@ HEADLESS 분석(param recovery)에서만. merge.cc/cover.cc 12.0.4<->12.2 byte-i
 파리티 위반 -- 하지 말 것.** (2) **breadth "reloc 갭" 프레이밍 폐기** -- 하네스가 .obj 안 읽고 골든
 JSON(post-reloc) 바이트 먹임, reloc 로더는 dead code. dispatch 진짜 갭 = CALLIND target 붕괴+param
 recovery(headless-env). **converged frontier = headless-environment param/type/symbol recovery**(대형/고위험,
-다음 세션). 상세는 `local-notes.md` + 메모리 `local-memory`.
+다음 세션). 상세는 `로컬 진단 노트` + 메모리 로컬 메모리.
 
 ### 2026-07-03: track B 완성 -- switch 복구 엔진을 실 CFG/파이프라인에 통합 + switch{case} 구조 렌더 (phase3a/3b/3c/phase4)
 바로 아래 항목(B2 phase1/phase2, master `80a28d1`)에서 완성된 JumpBasic 모델 복구 엔진을 실 함수
@@ -1298,7 +1298,7 @@ golden ground-truth 대조)으로 남은 3갭(gap2/gap3/gap4)의 진짜 근본�
   (universal-action 트리)로 교체 -> bespoke `ActionStackPtrFlow` 은퇴. 트리는 이미 10/10 + 7/8로 우수.
   H8-debt-2가 merge/structuring/snapshot parity를 정면으로 다루므로 process 3갭이 그 과정에서 해소될
   경로다. `ActionDoNothing`(완료 2, `c4d85ea`)은 이 작업의 선행 인프라. 상세는 `docs/STATUS.md` 미시작 +
-  `local-notes.md` 참고.
+  `로컬 진단 노트` 참고.
 - C++ 참조: `printc.cc:2836`(emitBlockBasic), `coreaction.cc:3244`(ActionMarkExplicit)/`:3252`(ActionDeadCode
   beginDef)/`:3473-3497`(ActionDoNothing), `funcdata_block.cc:84/177/233/254/327`(pushMultiequals/
   opZeroMulti/descendantsOutside/blockRemoveInternal/RemoveDoNothingBlock), `block.cc:2534/2578/2596`
@@ -2059,7 +2059,7 @@ ActionSetCasts driver의 documented core blocker(컴포넌트 2) 해소. `432b30
 - [x] .gitignore
 - [x] Launcher scripts (Gosleigh.bat, Gosleigh-codex.bat)
 - [x] C++ reference codegraph index created for `ghidra-ref/.../decompile/cpp`
-- [x] Indexing workflow documented in `docs/INDEX.md`
+- [x] Reference indexing workflow established
 - [x] Detailed implementation plan documented (archived)
 - [x] Parity audit document added for current runtime mismatches: `docs/PARITY_AUDIT.md`
 - [x] Go module initialized

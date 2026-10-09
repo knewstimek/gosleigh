@@ -45,7 +45,7 @@ import (
 // orchestrator (instead of a subagent) because every dependency read for
 // scope analysis was already hot in context, and re-dispatching would have
 // duplicated the C++ read budget on a file whose realistic landing surface
-// is primarily data structures + stubs. See project CLAUDE.md note on
+// is primarily data structures + stubs. See project parity requirements on
 // subagent overhead vs. direct work.
 
 // -----------------------------------------------------------------------
