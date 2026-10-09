@@ -314,10 +314,12 @@ type PcodeOp struct {
 	output    *Varnode
 	inputs    []*Varnode
 	parent    *BlockBasic
-	// blockPos is the op's position in its block's op list when last set;
-	// BlockBasic checks it before use. It stands in for the C++ list
-	// iterator (PcodeOp::basiciter).
-	blockPos int
+	// inBlock is the block whose op list holds the op, blockPrev/blockNext
+	// its neighbours there and blockPos its index when the block last
+	// numbered its ops. C++ parity: PcodeOp::basiciter.
+	inBlock              *BlockBasic
+	blockPrev, blockNext *PcodeOp
+	blockPos             int
 	// listPos is the op's slot in the PcodeOpBank alive or dead list.
 	listPos int
 	// callSpec is the call site's prototype (C++ encodes it in the CALL's
@@ -517,6 +519,14 @@ func (op *PcodeOp) PreviousOp() *PcodeOp { return op.blockNeighbor(-1) }
 func (op *PcodeOp) blockNeighbor(d int) *PcodeOp {
 	if op.parent == nil {
 		return nil
+	}
+	if op.inBlock != nil && (op.parent == op.inBlock || op.parent.srcDelegate == op.inBlock) {
+		switch d {
+		case 1:
+			return op.blockNext
+		case -1:
+			return op.blockPrev
+		}
 	}
 	ops := op.parent.opSlice()
 	i := op.parent.opPosition(op)
