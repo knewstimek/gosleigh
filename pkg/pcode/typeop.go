@@ -565,11 +565,11 @@ func RegisterTypeOps() []TypeOp {
 	inst[CPUI_NEW] = &typeOpBase{CPUI_NEW, PcodeOpSpecial | PcodeOpCall | PcodeOpNoCollapse, "NEW"}
 
 	// Bit manipulation
-	inst[CPUI_INSERT] = &typeOpBase{CPUI_INSERT, PcodeOpTernary, "INSERT"}
-	inst[CPUI_ZPULL] = &typeOpBase{CPUI_ZPULL, PcodeOpTernary, "ZPULL"}
+	inst[CPUI_INSERT] = &typeOpBitField{typeOpBase{CPUI_INSERT, PcodeOpTernary, "INSERT"}, 1}
+	inst[CPUI_ZPULL] = &typeOpBitField{typeOpBase{CPUI_ZPULL, PcodeOpTernary, "ZPULL"}, 0}
 	inst[CPUI_POPCOUNT] = &typeOpBase{CPUI_POPCOUNT, PcodeOpUnary, "POPCOUNT"}
 	inst[CPUI_LZCOUNT] = &typeOpBase{CPUI_LZCOUNT, PcodeOpUnary, "LZCOUNT"}
-	inst[CPUI_SPULL] = &typeOpBase{CPUI_SPULL, PcodeOpTernary, "SPULL"}
+	inst[CPUI_SPULL] = &typeOpBitField{typeOpBase{CPUI_SPULL, PcodeOpTernary, "SPULL"}, 0}
 
 	return inst
 }
@@ -583,4 +583,28 @@ func preferredZextSizeFloatInt2Float(inSize int) int {
 		return 8
 	}
 	return inSize + 1
+}
+
+// typeOpBitField is INSERT, ZPULL or SPULL: the container inputs (slots up
+// to lastRaw) are undefined bytes, inputs never get casts and the output
+// token is the output's own type.
+// C++ parity: TypeOpInsert / TypeOpZpull / TypeOpSpull.
+type typeOpBitField struct {
+	typeOpBase
+	lastRaw int
+}
+
+func (t *typeOpBitField) InputTypeLocal(op *PcodeOp, slot int, tf *TypeFactory) Datatype {
+	if slot <= t.lastRaw {
+		return tf.GetBase(op.Input(slot).Size(), TYPE_UNKNOWN, "")
+	}
+	return t.typeOpBase.InputTypeLocal(op, slot, tf)
+}
+
+func (t *typeOpBitField) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Datatype {
+	return nil // never needs casts
+}
+
+func (t *typeOpBitField) GetOutputToken(op *PcodeOp, cs *CastStrategyC) Datatype {
+	return op.Output().HighTypeDefFacing()
 }

@@ -123,21 +123,27 @@ type Datatype interface {
 // carry bitfield members (currently *Struct) override this.
 func (d datatypeBase) HasBitfields() bool { return false }
 
-// HasBitfields scans the struct's fields and reports whether any are modelled
-// as bitfields, or whether any field type itself contains bitfields.
-// C++ parity: Datatype::hasBitfields combined with the has_bitfields flag bit
-// that TypeStruct::assignFieldOffsets lights up when it finds a bitfield
-// member (type.cc ~L2383, L2745, L2107). We evaluate lazily instead of caching
-// a flag so struct construction does not need to be threaded through the
-// TypeFactory path used by the C++ code.
+// HasBitfields reports a structure with bitfield members, its own or a
+// nested structure's. C++ parity: Datatype::hasBitfields (has_bitfields,
+// set by TypeStruct::decodeFields / decodeField for nested structures).
 func (s *Struct) HasBitfields() bool {
+	if len(s.bitfields) > 0 {
+		return true
+	}
 	for _, f := range s.fields {
-		if f.IsBitfield {
-			return true
-		}
 		if f.Type != nil && f.Type.HasBitfields() {
 			return true
 		}
+	}
+	return false
+}
+
+// HasBitfields reports a piece of a structure that overlaps bitfields.
+// C++ parity: TypePartialStruct::TypePartialStruct (has_bitfields when
+// the container hasBitFieldsInRange).
+func (p *PartialStruct) HasBitfields() bool {
+	if st, ok := p.container.(*Struct); ok && st.HasBitfields() {
+		return st.hasBitFieldsInRange(int32(p.offset), p.Size())
 	}
 	return false
 }
@@ -339,18 +345,26 @@ func (f TypeField) End() int32 {
 	return f.Offset + f.Type.Size()
 }
 
-// Struct is a composite type with non-overlapping fields.
+// Struct is a composite type with non-overlapping fields. Bitfield members
+// are kept apart from the byte-aligned fields, sorted by their bit range.
+// C++ parity: TypeStruct (field / bitfield lists).
 type Struct struct {
 	datatypeBase
-	fields []TypeField
+	fields    []TypeField
+	bitfields []TypeBitField
 }
 
 func NewStruct(name string, fields []TypeField) *Struct {
-	fieldsCopy := cloneFields(fields)
+	fieldsCopy, bitfields := splitBitfields(fields)
 	align := maxFieldAlignment(fieldsCopy)
 	size := int32(0)
 	for _, field := range fieldsCopy {
 		if end := field.End(); end > size {
+			size = end
+		}
+	}
+	for _, bf := range bitfields {
+		if end := bf.Bits.ByteOffset + bf.Bits.ByteSize; end > size {
 			size = end
 		}
 	}
@@ -364,6 +378,7 @@ func NewStruct(name string, fields []TypeField) *Struct {
 	return &Struct{
 		datatypeBase: base,
 		fields:       fieldsCopy,
+		bitfields:    bitfields,
 	}
 }
 

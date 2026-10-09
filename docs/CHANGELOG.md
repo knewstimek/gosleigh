@@ -5,6 +5,24 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-10-09: 비트필드 (Ghidra 12 bitfield.cc 재이식)
+
+- 이전 이식은 뼈대뿐이었다: 비트필드를 일반 필드 목록에 섞어 두고, 변환에 TODO 9곳(foldLoad/foldPtrsub,
+  checkRedundancy, applyCompareRecord, LOAD 복제, pointerEquality 등)이 남았고, 출력기는 INSERT/ZPULL을 의사
+  함수로만 찍었다. 호스트가 비트필드를 보내면 `RuleExpandLoad`가 출력 없는 LOAD에서 nil 패닉.
+- 타입 모델: `Struct`가 C++ `TypeStruct`처럼 비트필드 목록을 따로 든다(`splitBitfields` = decodeBitField:
+  컨테이너 최소화, 바이트 범위 비트필드는 일반 필드로). `findMatchingBitField` / `collectBitFields` /
+  `hasBitFieldsInRange`, `PartialStruct.HasBitfields`. `BitRange`는 address.cc 전체(compare, translateLSB,
+  overlapTest, intersection, minimizeContainer).
+- 변환: `BitFieldInsertTransform` / `BitFieldPullTransform`과 규칙 6개(`RuleBitFieldStore/Out/Load/In`,
+  `RulePullAbsorb`, `RuleInsertAbsorb`)를 bitfield.cc 순서 그대로 다시 씀. expression.cc의 `BitFieldExpression`
+  계열, `rootPointer` / `pointerEquality`.
+- 출력: `emitBitFieldStore` / `emitBitFieldExpression` / `opZpullOp`(`p->mode = v;`, `return p->level;`),
+  `checkBitFieldMember`, `pushPartialSymbol`의 ZPULL 정지, `TypeOpInsert/Zpull/Spull`(입력 캐스트 없음),
+  특수 출력 STORE에 캐스트 없음(`TypeOpStore::getInputCast`).
+- 미이식: 빅엔디언 호스트 비트필드(구조체 생성 시점에 데이터 공간을 몰라 리틀엔디언으로 둠).
+- 테스트: `decomp.TestDecompileBitfields`(부모 커밋에서는 패닉). 골든에 비트필드 타입이 없어 게이트·realexe 불변.
+
 ### 2026-10-09: 호스트 지역변수 타입, 스택에 놓인 반환값
 
 - `decomp.Function.HostLocalTypes`(스택 오프셋 -> `HostTypeDesc`): 호스트(PDB/DWARF)가 준 지역변수 타입을

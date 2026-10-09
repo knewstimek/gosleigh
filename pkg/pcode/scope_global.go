@@ -253,6 +253,9 @@ func partialSymbolName(name string, ct Datatype, off, sz int32, castTo Datatype,
 		if !ok && off == 0 && sz == ct.Size() {
 			break // A whole value that does not resolve to its component
 		}
+		if _, isStruct := ct.(*Struct); !ok && isStruct && rop != nil && (rop.Code() == CPUI_ZPULL || rop.Code() == CPUI_SPULL) {
+			break // the final byte field cannot resolve: it is a bitfield
+		}
 		if !ok && castTo != nil {
 			if _, isStruct := ct.(*Struct); !isStruct {
 				if _, isArray := ct.(*Array); !isArray {

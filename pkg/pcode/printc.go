@@ -2842,6 +2842,21 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 	// per use reads through it). C++ parity: PrintC::emitStatement -> op->push.
 	s.opStack = append(s.opStack, op)
 	defer func() { s.opStack = s.opStack[:len(s.opStack)-1] }()
+	// Bitfield writes print as assignments to the field.
+	// C++ parity: PrintC::emitExpression (doesSpecialPrinting).
+	if op.addlFlags&PcodeOpSpecialPrint != 0 {
+		var done bool
+		var err error
+		switch op.Code() {
+		case CPUI_STORE:
+			done, err = s.emitBitFieldStore(op)
+		case CPUI_INSERT:
+			done, err = s.emitBitFieldExpression(op)
+		}
+		if done || err != nil {
+			return err
+		}
+	}
 	switch op.Code() {
 	case CPUI_STORE:
 		lhsFrag, err := s.renderStoreLHSFrag(storePointer(op))
@@ -3908,14 +3923,12 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 		return s.renderPseudoCall("NEW", op, 0)
 	case CPUI_INSERT:
 		return s.renderPseudoCall("INSERT", op, 0)
-	case CPUI_ZPULL:
-		return s.renderPseudoCall("ZPULL", op, 0)
+	case CPUI_ZPULL, CPUI_SPULL:
+		return s.renderPull(op)
 	case CPUI_POPCOUNT:
 		return s.renderPseudoCall("POPCOUNT", op, 0)
 	case CPUI_LZCOUNT:
 		return s.renderPseudoCall("LZCOUNT", op, 0)
-	case CPUI_SPULL:
-		return s.renderPseudoCall("SPULL", op, 0)
 	default:
 		return ExprFragment{}, fmt.Errorf("unsupported opcode %s", op.Code())
 	}

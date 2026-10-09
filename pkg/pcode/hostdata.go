@@ -116,11 +116,24 @@ type HostCodeProto struct {
 	Params      []*HostTypeDesc
 }
 
-// HostFieldDesc is one member of a host structure.
+// HostFieldDesc is one member of a host structure. A bitfield member has
+// BitSize > 0: Offset and Type describe the storage unit holding it and
+// BitOffset is its least significant bit within that unit.
+// C++ parity: TypeStruct::decodeBitField (bitfield members of a structure).
 type HostFieldDesc struct {
-	Name   string
-	Offset int32
-	Type   *HostTypeDesc
+	Name      string
+	Offset    int32
+	Type      *HostTypeDesc
+	BitOffset int32
+	BitSize   int32
+}
+
+// hostField builds the core field of a host member.
+func hostField(i int, fd HostFieldDesc, ft Datatype) TypeField {
+	if fd.BitSize > 0 {
+		return NewBitfieldTypeField(int32(i), fd.Offset, fd.Name, ft, fd.BitOffset, fd.BitSize)
+	}
+	return TypeField{Ident: int32(i), Offset: fd.Offset, Name: fd.Name, Type: ft}
 }
 
 var hostMetatypes = map[string]metatype{
@@ -190,7 +203,7 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 				var fields []TypeField
 				for i, fd := range d.Fields {
 					if ft := ResolveHostType(fd.Type); ft != nil {
-						fields = append(fields, TypeField{Ident: int32(i), Offset: fd.Offset, Name: fd.Name, Type: ft})
+						fields = append(fields, hostField(i, fd, ft))
 					}
 				}
 				tf.SetHostStructFields(st, fields)
@@ -200,7 +213,7 @@ func ResolveHostType(d *HostTypeDesc) Datatype {
 		var fields []TypeField
 		for i, fd := range d.Fields {
 			if ft := ResolveHostType(fd.Type); ft != nil {
-				fields = append(fields, TypeField{Ident: int32(i), Offset: fd.Offset, Name: fd.Name, Type: ft})
+				fields = append(fields, hostField(i, fd, ft))
 			}
 		}
 		return tf.GetStructSized(d.Name, d.Size, fields)

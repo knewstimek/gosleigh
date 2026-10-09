@@ -571,21 +571,11 @@ func NewBitfieldTypeField(ident int32, byteOffset int32, name string, logicalTyp
 	}
 }
 
-// GetBitfieldStruct is the typefactory entry point for composite types that
-// contain one or more bitfield members. It is the Go-level counterpart of the
-// C++ TypeFactory::decodeStructure branch that folds a TypeBitField side
-// table into the containing TypeStruct (see type.cc L2383 where the
-// has_bitfields flag is promoted). Because the Go type model stores bitfield
-// metadata inline on TypeField rather than in a parallel TypeBitField list,
-// the bitfield path shares GetStruct internment exactly, and the bitfield
-// descriptor (IsBitfield/BitOffset/BitSize) is part of the intern key via
-// fieldsKey. Callers must tag bitfield members with IsBitfield=true (use
-// NewBitfieldTypeField) before handing them to this function -- otherwise
-// Struct.HasBitfields will report false and the BitField rules will skip
-// the struct.
-// C++ parity: TypeFactory::decodeStructure + TypeStruct::decodeBitField
-// (type.cc ~L2127) plus the has_bitfields promotion in
-// TypeStruct::assignFieldOffsets.
+// GetBitfieldStruct builds a structure with bitfield members: fields
+// tagged IsBitfield (NewBitfieldTypeField) are moved by NewStruct into the
+// structure's separate bitfield list. The tags are part of the intern key
+// (fieldsKey).
+// C++ parity: TypeFactory::decodeStruct + TypeStruct::decodeBitField.
 func (f *TypeFactory) GetBitfieldStruct(name string, fields []TypeField) *Struct {
 	return f.GetStruct(name, fields)
 }

@@ -475,6 +475,9 @@ func (t *typeOpStore) GetInputCast(op *PcodeOp, slot int, cs *CastStrategyC) Dat
 	if slot == 0 || op == nil || op.NumInput() < 3 {
 		return nil
 	}
+	if op.addlFlags&PcodeOpSpecialPrint != 0 { // a bitfield write prints as the field
+		return nil
+	}
 	pointerVn := op.Input(1)
 	valueVn := op.Input(2)
 	if pointerVn == nil || valueVn == nil {
