@@ -5,6 +5,20 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-10-09: 호스트 지역변수 타입, 스택에 놓인 반환값
+
+- `decomp.Function.HostLocalTypes`(스택 오프셋 -> `HostTypeDesc`): 호스트(PDB/DWARF)가 준 지역변수 타입을
+  잠근다. 각 타입 지역변수는 스택 맵 재구성 전에 잠긴 심볼로 들어가고 고정·typelock 힌트가 된다(C++
+  `ScopeLocal::restructureVarnode`가 잠긴 심볼을 남기고 `MapState::gatherSymbols`가 힌트로 넣는 경로,
+  `gatherHostSymbols`). 없으면 추론 범위가 구조체를 배열로 키웠다(`Parms [3]`). C++와 다른 점: 함수가 스택에서
+  건드리지 않는 호스트 변수(최적화 코드에서 레지스터에만 사는 것)는 넣지 않는다 -- 안 쓰는 선언만 찍힌다.
+- 스택에 놓인 잠긴 반환값(Go 386 ABI0의 결과 슬롯 등): `funcLinkOutput`의 `setStackOutputLock` 지연과
+  `Heritage::tryOutputStackGuard`를 이식해 호출 지점에서 CALL 출력이 된다. `FuncProto::characterizeAsOutput`의
+  잠긴 출력 분기, 호스트가 출력 저장 위치를 직접 준 프로토타입은 입력만 모델로 배정(`assignCodeProtoStorage`).
+  미이식: 반환 슬롯을 진부분집합으로 품는 범위(`guardOutputOverlapStack`).
+- 테스트: `decomp.TestDecompileHostLocalTypes`, `TestDecompileStackLocatedReturn`(부모 커밋에서 실패 확인).
+  게이트·realexe 수치 불변(호스트 지역 타입·스택 반환을 주는 골든 없음).
+
 ### 2026-10-09: 저장 위치 없는 호스트 프로토타입
 
 - 호스트가 잠긴 프로토타입을 타입만으로 보내면(PDB/DWARF를 읽는 호스트) `queryHostFunction`이

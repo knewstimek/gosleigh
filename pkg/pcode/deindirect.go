@@ -117,7 +117,10 @@ func (fd *Funcdata) assignCodeProtoStorage(proto *HostFunction) (*HostFunction, 
 		hp.Params = append(hp.Params, p)
 	}
 	if out := proto.Output; out != nil && out.Type != nil && out.Type.Metatype() != TYPE_VOID {
-		if pieces[0].addr.Space == nil {
+		if out.Space != "" || len(out.JoinPieces) > 0 {
+			// The host placed the output itself (custom storage, e.g. Go
+			// ABI0 results in stack slots); only the inputs needed the model.
+		} else if pieces[0].addr.Space == nil {
 			// No valid storage for the output: an unlocked void.
 			hp.Output, hp.OutputLocked = nil, false
 		} else {

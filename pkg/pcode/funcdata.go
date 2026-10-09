@@ -349,6 +349,26 @@ func (fd *Funcdata) SetHostLocals(m map[uint64]string) {
 	}
 }
 
+// SetHostLocalTypes adds the host's stack symbol types (wrapped stack offset
+// -> type). A type the locked prototype already gave a parameter slot wins.
+// C++ parity: a typed symbol of the decoded local scope (type-locked).
+func (fd *Funcdata) SetHostLocalTypes(m map[uint64]Datatype) {
+	if len(m) == 0 {
+		return
+	}
+	if fd.hostLocalTypes == nil {
+		fd.hostLocalTypes = map[uint64]Datatype{}
+	}
+	for off, t := range m {
+		if _, ok := fd.hostLocalTypes[off]; !ok {
+			fd.hostLocalTypes[off] = t
+		}
+	}
+	if fd.scopeLocal != nil {
+		fd.scopeLocal.ext().hostLocalTypes = fd.hostLocalTypes
+	}
+}
+
 // warning records an auto-generated warning comment in the comment database,
 // indexed by its placement address (the emitter attempts to place it before the
 // source expression mapping most closely to that address). The "WARNING: "

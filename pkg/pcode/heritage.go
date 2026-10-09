@@ -78,8 +78,7 @@ func (h *Heritage) WithProtoModel(pm *ProtoModel) *Heritage {
 // guarded twice for the same range.
 //
 // C++ parity: heritage.cc Heritage::guardCalls (1443-1527). Not ported:
-// guardCallOverlappingInput / tryOutputOverlapGuard / tryOutputStackGuard
-// (ranges that properly contain a parameter or return slot), isAutoKilledByCall.
+// guardCallOverlappingInput (ranges that properly contain a parameter).
 func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 	if h.proto == nil || sp == nil {
 		return
@@ -122,6 +121,13 @@ func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 					possibleoutput = true
 				}
 			}
+		} else if fc.stackOutputLock && tryregister {
+			if outputCharacter := fc.CharacterizeAsOutput(transAddr, size); outputCharacter != retOutNoContainment {
+				effecttype = EffectUnknown
+				if h.tryOutputStackGuard(fc, addr, transAddr, size, outputCharacter) {
+					effecttype = EffectUnaffected // The range is handled
+				}
+			}
 		}
 		if fc.IsInputActive() && tryregister {
 			if fc.CharacterizeAsInputParam(transAddr, size) == peContainsJustified {
@@ -151,6 +157,43 @@ func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 			h.fd.NewIndirectCreation(op, addr, size, possibleoutput).Output().SetActiveHeritage()
 		}
 	}
+}
+
+// tryOutputStackGuard gives a CALL with a locked stack return its output
+// Varnode once the stack is heritaged: the return slot, translated to the
+// caller's stack, or a truncation of it when the range is smaller.
+// TODO known mismatch: a range properly containing the return slot
+// (contained_by, guardOutputOverlapStack) is not handled; the CALL is then
+// guarded as an unknown effect.
+// C++ parity: Heritage::tryOutputStackGuard.
+func (h *Heritage) tryOutputStackGuard(fc *FuncCallSpecs, addr, transAddr address.Address, size int32, outputCharacter int) bool {
+	if outputCharacter == retOutContainedBy || fc.lockedOut == nil {
+		return false
+	}
+	callOp := fc.op
+	// Translate the output address to the caller's perspective.
+	retAddr := fc.lockedOut.Addr
+	retAddr.Offset = wrapSpaceOffset(addr.Space, retAddr.Offset+addr.Offset-transAddr.Offset)
+	retSize := fc.lockedOut.Size
+	outvn := callOp.Output()
+	var vnFinal *Varnode
+	if outvn == nil {
+		outvn = h.fd.NewVarnodeOut(retSize, retAddr, callOp)
+		vnFinal = outvn
+	}
+	if size < retSize {
+		subPiece := h.fd.NewOp(2, callOp.Addr())
+		h.fd.OpSetOpcode(subPiece, CPUI_SUBPIECE)
+		truncateAmount := addressJustifiedContain(retAddr, retSize, addr, size, false)
+		h.fd.OpSetInput(subPiece, h.fd.NewConstant(4, uint64(truncateAmount)), 1)
+		h.fd.OpSetInput(subPiece, outvn, 0)
+		vnFinal = h.fd.NewVarnodeOut(size, addr, subPiece)
+		h.fd.OpInsertAfter(subPiece, callOp)
+	}
+	if vnFinal != nil {
+		vnFinal.SetActiveHeritage()
+	}
+	return true
 }
 
 // guardOutputOverlap guards a range that properly contains a call's possible

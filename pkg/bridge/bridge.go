@@ -104,6 +104,9 @@ type BuildConfig struct {
 	// HostLocals are the host's name-locked stack symbols of this function
 	// (stack offset -> name), as Java sends them in the function's localdb.
 	HostLocals map[int64]string
+	// HostLocalTypes are the types of the host's stack symbols (stack
+	// offset -> type), type-locked like a typed localdb symbol.
+	HostLocalTypes map[int64]*pcode.HostTypeDesc
 }
 
 func (cfg *BuildConfig) hasCspec() bool { return len(cfg.CspecBytes) > 0 || cfg.CspecPath != "" }
@@ -734,6 +737,16 @@ func attachEnvironment(engine *sla.Engine, fd *pcode.Funcdata, cfg BuildConfig, 
 			m[uint64(off)&mask] = name
 		}
 		fd.SetHostLocals(m)
+	}
+	if cfg.HostLocalTypes != nil {
+		mask := spaceHighest(cfg.Entry.Space)
+		m := make(map[uint64]pcode.Datatype, len(cfg.HostLocalTypes))
+		for off, d := range cfg.HostLocalTypes {
+			if t := pcode.ResolveHostType(d); t != nil {
+				m[uint64(off)&mask] = t
+			}
+		}
+		fd.SetHostLocalTypes(m)
 	}
 	if !cfg.hasCspec() {
 		return nil

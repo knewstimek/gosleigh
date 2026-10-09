@@ -579,6 +579,7 @@ func (sl *ScopeLocal) RestructureVarnode(fd *Funcdata, aliasyes bool) bool {
 		for _, h := range sl.gatherOpen(fd) {
 			ms.addRange(h.start, h.elem, 0, rhOpen, h.minItems)
 		}
+		sl.gatherHostSymbols(ms)
 		sl.restructureMap(ms)
 		sl.fakeInputSymbols(fd)
 	}
@@ -779,3 +780,53 @@ func containsRange(e *SymbolEntry, addr uint64, size int32) bool {
 	return end <= last
 }
 
+// gatherHostSymbols enters the host's typed local variables as locked
+// Symbols before the sweep and adds each as a fixed, type-locked hint, so
+// inferred ranges stop at them instead of growing them into arrays. The
+// stack parameters of a locked prototype keep their own handling
+// (addLockedParamSymbol).
+// C++ parity: ScopeLocal::restructureVarnode keeps locked Symbols
+// (clearUnlockedCategory) and MapState::gatherSymbols adds them as hints;
+// adjustFit then skips them as already entered.
+// Unlike C++, a host variable the function never touches on the stack is
+// left out: debug info of optimized code describes slots a variable uses in
+// only part of the function or not at all (it lives in a register), and
+// Ghidra's locked symbols would print as unused declarations.
+func (sl *ScopeLocal) gatherHostSymbols(ms *mapState) {
+	types := sl.ext().hostLocalTypes
+	if len(types) == 0 {
+		return
+	}
+	offs := make([]uint64, 0, len(types))
+	for off := range types {
+		offs = append(offs, off)
+	}
+	sort.Slice(offs, func(i, j int) bool { return offs[i] < offs[j] })
+	for _, off := range offs {
+		ct := types[off]
+		if ct == nil || ct.Size() <= 0 || signExtendSpaceOffset(off, ms.space) >= 0 {
+			continue // parameters and unsized types
+		}
+		if !rangeListInRange(sl.mapRanges(), off, ct.Size()) || sl.overlapEntry(off, ct.Size()) != nil {
+			continue
+		}
+		lo := signExtendSpaceOffset(off, ms.space)
+		used := false
+		for _, h := range ms.hints {
+			if h.sstart < lo+int64(ct.Size()) && lo < h.sstart+int64(h.size) {
+				used = true
+				break
+			}
+		}
+		if !used {
+			continue
+		}
+		addr := address.Address{Space: sl.SpaceID(), Offset: off}
+		sym := NewSymbol(sl.buildVariableName(addr, address.Address{}, ct), ct)
+		sym.SetFlags(VarnodeAddrTied | VarnodeTypeLock | VarnodeNameLock)
+		entry := NewSymbolEntry(sym, 0, addr, ct.Size(), 0)
+		sym.attachEntry(entry)
+		sl.ext().entries = append(sl.ext().entries, entry)
+		ms.addRange(off, ct, rhTypeLock, rhFixed, -1)
+	}
+}

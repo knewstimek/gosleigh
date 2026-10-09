@@ -54,6 +54,10 @@ type FuncCallSpecs struct {
 	// C++ parity: the ProtoParameters of a locked FuncProto (ProtoStoreSymbol).
 	lockedIn  []ProtoSlot
 	lockedOut *ProtoSlot
+	// stackOutputLock: the locked return is a stack slot; its Varnode is
+	// created when the stack is heritaged (the call's stack offset is known).
+	// C++ parity: FuncCallSpecs::isstackoutputlock.
+	stackOutputLock bool
 }
 
 // HostScope is the analysis environment's symbol database, queried by the

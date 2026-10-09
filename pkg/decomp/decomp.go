@@ -129,6 +129,9 @@ type Function struct {
 	TrackedRegs map[string]uint64
 	// HostLocals are name-locked stack symbols (stack offset -> name).
 	HostLocals map[int64]string
+	// HostLocalTypes are the types of stack symbols (stack offset -> type),
+	// type-locked as a typed symbol of Ghidra's local scope is.
+	HostLocalTypes map[int64]*pcode.HostTypeDesc
 	// HostComments are the function's comments (Ghidra <commentdb>).
 	HostComments []bridge.HostComment
 	// Injections are host-compiled call-fixup payloads by call-site address.
@@ -194,6 +197,7 @@ func (p *Program) Decompile(fn Function) (res *Result, err error) {
 		FlowOverrides:   fn.FlowOverrides,
 		TrackedRegs:     p.trackedRegs(fn.TrackedRegs),
 		HostLocals:      fn.HostLocals,
+		HostLocalTypes:  fn.HostLocalTypes,
 		HostComments:    fn.HostComments,
 		Injections:      fn.Injections,
 	})

@@ -77,6 +77,21 @@ func (fp *FuncProto) getBiggestContainedOutput(loc address.Address, size int32) 
 }
 
 func (fc *FuncCallSpecs) CharacterizeAsOutput(addr address.Address, size int32) int {
+	// A locked return must hold the range justified, irrespective of the
+	// space's endianness. C++ parity: FuncProto::characterizeAsOutput
+	// (isOutputLocked branch).
+	if out := fc.lockedOut; fc.IsOutputLocked() && out != nil && out.Addr.Space != nil {
+		if out.Type == nil || out.Type.Metatype() == TYPE_VOID {
+			return retOutNoContainment
+		}
+		if addressJustifiedContain(out.Addr, out.Size, addr, size, false) >= 0 {
+			return retOutOther
+		}
+		if addressJustifiedContain(addr, size, out.Addr, out.Size, true) >= 0 {
+			return retOutContainedBy
+		}
+		return retOutNoContainment
+	}
 	m := fc.Model()
 	if m != nil && m.OutputParams != nil {
 		// C++ parity: FuncProto::characterizeAsOutput -> output->characterizeAsParam

@@ -193,9 +193,10 @@ func (fc *FuncCallSpecs) linkLockedInputs(data *Funcdata, varargs bool) bool {
 	return needPlaceholder
 }
 
-// linkLockedOutput gives the CALL its locked return value.
-// TODO known mismatch: stack-located outputs and assumedOutputExtension are
-// not ported (x86 returns are registers without extension).
+// linkLockedOutput gives the CALL its locked return value. A stack-located
+// return waits for the stack's heritage (Heritage.tryOutputStackGuard).
+// TODO known mismatch: assumedOutputExtension is not ported (x86 returns
+// are registers without extension).
 // C++ parity: ActionFuncLink::funcLinkOutput (isOutputLocked branch).
 func (fc *FuncCallSpecs) linkLockedOutput(data *Funcdata) {
 	out := fc.lockedOut
@@ -208,6 +209,9 @@ func (fc *FuncCallSpecs) linkLockedOutput(data *Funcdata) {
 		fc.op.SetFlag(PcodeOpCalculatedBool)
 	}
 	if out.Addr.Space.Kind == address.SpaceKindStack {
+		// Delay creating the output Varnode until heritage of the stack,
+		// when the relative value of the stack pointer is known.
+		fc.stackOutputLock = true
 		return
 	}
 	data.NewVarnodeOut(out.Size, out.Addr, fc.op)
