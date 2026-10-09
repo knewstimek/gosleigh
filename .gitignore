@@ -59,9 +59,12 @@ local/
 .mcp.*.json
 AGENTS.md
 CLAUDE.md
-NEXT_SESSION*.md
-**/NEXT_SESSION*.md
-**/*SESSION_PROMPT*.md
+# Session resume prompts and handoffs: any case, extension, or directory
+[Nn][Ee][Xx][Tt][_-][Ss][Ee][Ss][Ss][Ii][Oo][Nn]*
+[Nn][Ee][Xx][Tt][_-][Pp][Rr][Oo][Mm][Pp][Tt]*
+*[Ss][Ee][Ss][Ss][Ii][Oo][Nn][_-][Pp][Rr][Oo][Mm][Pp][Tt]*
+*[Ss][Ee][Ss][Ss][Ii][Oo][Nn][_-][Hh][Aa][Nn][Dd][Oo][Ff][Ff]*
+[Hh][Aa][Nn][Dd][Oo][Ff][Ff].*
 /docs/ORCHESTRATOR_WORKFLOW.md
 /docs/INDEX.md
 
