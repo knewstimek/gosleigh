@@ -5,6 +5,17 @@ Gosleigh 프로젝트 이력. 완료된 마일스톤과 파동별 포팅 기록�
 
 ---
 
+### 2026-10-09: 외부 API (`pkg/decomp`, `pkg/specs`)
+
+- `decomp.Load(spec, sections) -> Program.Decompile(Function)`: loader/bridge 배선과 콜러 계약(cspec 필수,
+  pspec tracked_set -> TrackedRegs, 기본 이름 `FUN_%08x`, 엔진 panic -> `ErrPanic`)을 한곳에 모음.
+  `Program.CodeSpace()`는 캐시된 .sla 디코드의 기본 공간 포인터라 호스트가 빌드 전에 주소를 만들 수 있다.
+- spec을 파일 경로 없이 받는다: `EngineBuilder.SLABytes/PspecBytes`(디코드 캐시 키 = 내용 sha256),
+  `BuildConfig.CspecBytes`, `sla.ParsePspecBytes`. pspec `tracked_set`을 `PspecData.TrackedSet`으로 파싱.
+- `pkg/specs`: x86/x64 sla+pspec + win/gcc cspec embed(testdata/sla 사본, 동일성 테스트).
+- `cmd/goldengap`이 `decomp` 경유로 바뀜 -> 게이트 전부 유지(tree 10/10, corpus 8/8, breadth 3/3,
+  corpus2 10/13, x64_auto 108/109), realexe private-sample/private-sample 200/200.
+
 ### 2026-07-25 (세션12): #9 conditional-move + #7 루프 렌더 2건 + #6 find_max TypeOrder (master 세션12 tip)
 
 자율주행, Opus 직접. **엔진 fix 4건 착지(전 골든 무회귀), x64_auto 102/103 -> 108/109**(switch_dense만 non-match).

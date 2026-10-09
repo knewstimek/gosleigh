@@ -200,10 +200,10 @@ func BuildJumpTablePartial(engine *sla.Engine, cfg BuildConfig) (*PartialResult,
 	}
 
 	var cspecData *pcode.CspecData
-	if cfg.CspecPath != "" {
-		cs, csErr := pcode.ParseCspec(cfg.CspecPath)
+	if cfg.hasCspec() {
+		cs, csErr := cfg.parseCspec()
 		if csErr != nil {
-			return nil, fmt.Errorf("build partial: cspec parse %q: %w", cfg.CspecPath, csErr)
+			return nil, fmt.Errorf("build partial: %w", csErr)
 		}
 		cspecData = cs
 	}

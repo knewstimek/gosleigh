@@ -43,17 +43,19 @@ upstream과 다시 대조한다(repoplane `gosleigh/upstream/ghidra-pr-9750-para
   `symbols.json`)를 받은 상태의 코어 출력 비교다. 실행 파일만 넣어서는 이 수준이 나오지 않는다.
 - 표본은 MSVC PE 두 개(x86-32, x64)이고 4KB 이하 함수만 뽑는다(`realexe.py sample --max-bytes 4096`).
   GCC/Clang, ELF, ARM, 큰 함수, 속도/메모리는 미측정.
-- CLI(`cmd/gosleigh`)는 개발용이다. 실사용은 downstream MCP 호스트가 라이브러리로 붙인다
-  (모듈 `github.com/knewstimek/gosleigh`).
+- CLI(`cmd/gosleigh`)는 개발용이다. 실사용은 downstream 호스트가 `pkg/decomp`(진입점: `Load` ->
+  `Program.Decompile`)와 `pkg/specs`(x86/x64 sla+pspec+cspec embed)로 붙인다. `cmd/goldengap`이 이
+  경로로 돌기 때문에 위 realexe/게이트 수치가 곧 공개 API의 수치다.
+- 엔진은 취소가 안 되고 일부 실함수에서 메모리가 무한히 늘 수 있다(goldengap `-mem-limit-mb`가 있는
+  이유). 상주 호스트는 별도 프로세스에 시간/메모리 상한을 걸고 돌려야 한다.
 
 ### 미시작
 
-순서: 외부 API -> (downstream) 호스트 어댑터/PDB -> 측정 모드로 어댑터 품질 측정. GCC/ELF 이하는 병행 가능.
+순서: (downstream) 호스트 어댑터/PDB -> 측정 모드로 어댑터 품질 측정. GCC/ELF 이하는 병행 가능.
 
 | 항목 | 현상 | 참조 | 수정 대상 | 성공 기준 |
 |---|---|---|---|---|
-| 외부 API | `bridge.BuildConfig`/`HostScope`가 테스트용 구성이라 라이브러리 진입점이 없다 | C++ `ghidra_process.cc`(DecompileAt 요청 흐름) | `pkg/bridge` 공개 진입점(바이너리+함수 주소+호스트 정보 -> C) | 외부 모듈에서 import해 realexe work 하나를 같은 결과로 디컴파일하는 예제 테스트 |
-| 호스트 어댑터 | Ghidra capture 없이는 호스트 정보가 비어 이름/타입/프로토타입이 빠진다 | C++ 호스트 쪽: `ghidra_arch.cc`, `database_ghidra.cc`(ScopeGhidra), `typegrp_ghidra.cc`, `loadimage_ghidra.cc` | `pcode.HostScope`(funccallspec.go:63), `bridge.BuildConfig`를 채우는 downstream 어댑터 | 같은 work를 Ghidra 호스트 정보 대신 어댑터로 돌린 출력의 골든 일치율을 재는 측정 모드 추가 후 수치화 |
+| 호스트 어댑터 | Ghidra capture 없이는 호스트 정보가 비어 이름/타입/프로토타입이 빠진다 | C++ 호스트 쪽: `ghidra_arch.cc`, `database_ghidra.cc`(ScopeGhidra), `typegrp_ghidra.cc`, `loadimage_ghidra.cc` | `pcode.HostScope`(funccallspec.go:63), `decomp.Function`을 채우는 downstream 어댑터 | 같은 work를 Ghidra 호스트 정보 대신 어댑터로 돌린 출력의 골든 일치율을 재는 측정 모드 추가 후 수치화 |
 | PDB 타입/프로토타입 | downstream은 PE의 RSDS(PDB 경로/GUID)만 읽는다 | Ghidra PDB 파서는 Java(ghidra-ref 미포함)라 parity 대상 아님. MSF/DBI/TPI 포맷 | downstream 호스트 | PDB를 적용한 Ghidra 골든 work에서 일치율 |
 | GCC/ELF 표본 | 미측정 | `tools/realexe/realexe.py sample` | `tools/realexe`(현재 PE 전용: `pe_machine`/`ARCH_SPECS`) | GCC로 빌드한 ELF work 200/200 |
 | 큰 함수 | 4KB 초과 함수 미측정 | `realexe.py sample --max-bytes` | 측정만 | `--max-bytes` 상향 work 200/200 |

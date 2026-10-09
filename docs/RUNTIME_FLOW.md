@@ -273,8 +273,9 @@ tree 10/10, x64 corpus 7/8 무회귀. bespoke `ActionStackPtrFlow`(action_stack_
 production 경로에서 은퇴했고 레거시 테스트 하네스(loader_test.go의 직접 heritage 테스트, 비-Ghidra
 `runPipeline`)에만 남아 있다. 완전 제거(Step 3)는 그 하네스들을 트리로 이전한 뒤 진행하는 후속 작업이다.
 
-콜러 계약: `bridge.Decompile`은 `bridge.Build`가 cspec을 받았다고 가정한다(레포 내 콜러는 현재
-골든 테스트 하네스뿐). 실 다운스트림 통합 시 cspec 공급 계약을 지켜야 스택 로컬이 복구된다.
+콜러 계약: `bridge.Decompile`은 `bridge.Build`가 cspec을 받았다고 가정한다. 이 계약은 공개 진입점
+`pkg/decomp`가 지킨다(`Load`가 cspec 없는 spec을 거부하고 pspec tracked_set을 TrackedRegs로 넘긴다).
+다운스트림과 `cmd/goldengap`은 `decomp`를 거치고, `bridge`를 직접 부르는 것은 레포 내 진단 테스트뿐이다.
 
 ## 현재 설계 원칙
 

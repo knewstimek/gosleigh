@@ -30,8 +30,8 @@ type PspecContextEntry struct {
 }
 
 // PspecData holds the parsed result of a .pspec file.
-// Only context_set entries are included -- tracked_set entries are NOT context register
-// defaults in Ghidra and must not be passed to SetVariableDefault.
+// Only ContextSet entries are context register defaults; TrackedSet entries
+// must not be passed to SetVariableDefault.
 type PspecData struct {
 	ContextSet []PspecContextEntry
 	// LanedRegisters lists the registers carrying vector_lane_sizes.
@@ -40,6 +40,12 @@ type PspecData struct {
 	// IncidentalCopy names the registers copied to incidentally (the x87
 	// stack). C++ parity: Architecture::decodeIncidentalCopy.
 	IncidentalCopy []string
+	// TrackedSet holds the tracked_set register values known at every function
+	// entry (x86: DF=0). They are not context defaults; a host passes them to
+	// the core as the function's tracked registers. C++ parity:
+	// ContextDatabase::decodeFromSpec (ELEM_TRACKED_SET), read back through
+	// ContextDatabase::getTrackedSet by ActionConstbase.
+	TrackedSet []PspecContextEntry
 }
 
 // PspecLanedRegister is a register_data entry with preferred lane sizes.
@@ -69,9 +75,11 @@ type pspecXMLContextSet struct {
 }
 
 // pspecXMLContextData is the XML shape of the <context_data> element.
-// tracked_set is deliberately not mapped -- we ignore it.
+// tracked_set is kept apart from context_set: only context_set becomes context
+// register defaults.
 type pspecXMLContextData struct {
 	ContextSet []pspecXMLContextSet `xml:"context_set"`
+	TrackedSet []pspecXMLContextSet `xml:"tracked_set"`
 }
 
 // pspecXMLRoot is the XML shape of the top-level <processor_spec> element.
@@ -89,10 +97,18 @@ func ParsePspec(path string) (PspecData, error) {
 	if err != nil {
 		return PspecData{}, fmt.Errorf("ParsePspec read %q: %w", path, err)
 	}
+	result, err := ParsePspecBytes(data)
+	if err != nil {
+		return PspecData{}, fmt.Errorf("%w (file %q)", err, path)
+	}
+	return result, nil
+}
 
+// ParsePspecBytes parses .pspec XML from in-memory bytes (an embedded spec).
+func ParsePspecBytes(data []byte) (PspecData, error) {
 	var root pspecXMLRoot
 	if err := xml.Unmarshal(data, &root); err != nil {
-		return PspecData{}, fmt.Errorf("ParsePspec unmarshal %q: %w", path, err)
+		return PspecData{}, fmt.Errorf("ParsePspec unmarshal: %w", err)
 	}
 
 	var result PspecData
@@ -103,6 +119,16 @@ func ParsePspec(path string) (PspecData, error) {
 				return PspecData{}, fmt.Errorf("ParsePspec: invalid val %q for %q: %w", s.Val, s.Name, err)
 			}
 			result.ContextSet = append(result.ContextSet, PspecContextEntry{Name: s.Name, Value: v})
+		}
+	}
+	for _, ts := range root.ContextData.TrackedSet {
+		for _, s := range ts.Sets {
+			// Base 0: the C++ decoder (decodeUnsignedInteger) accepts 0x-prefixed values.
+			v, err := strconv.ParseUint(s.Val, 0, 64)
+			if err != nil {
+				return PspecData{}, fmt.Errorf("ParsePspec: invalid tracked val %q for %q: %w", s.Val, s.Name, err)
+			}
+			result.TrackedSet = append(result.TrackedSet, PspecContextEntry{Name: s.Name, Value: v})
 		}
 	}
 	for _, r := range root.RegisterData.Registers {

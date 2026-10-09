@@ -42,6 +42,9 @@ type BuildConfig struct {
 	// CspecPath is the optional path to a .cspec calling convention file.
 	// When non-empty, the cspec is parsed and stored in Result.CspecData.
 	CspecPath string
+	// CspecBytes is the .cspec content (an embedded spec); it takes precedence
+	// over CspecPath.
+	CspecBytes []byte
 	// SymbolName overrides the display name on the resulting Funcdata when
 	// non-empty. This allows callers to wire in a recovered symbol name
 	// (e.g. from DWARF or a PE import table) without changing the internal
@@ -101,6 +104,25 @@ type BuildConfig struct {
 	// HostLocals are the host's name-locked stack symbols of this function
 	// (stack offset -> name), as Java sends them in the function's localdb.
 	HostLocals map[int64]string
+}
+
+func (cfg *BuildConfig) hasCspec() bool { return len(cfg.CspecBytes) > 0 || cfg.CspecPath != "" }
+
+// parseCspec parses a fresh CspecData on every call: Build consumers may
+// mutate it, and a restart rebuild must start from the same unmodified spec.
+func (cfg *BuildConfig) parseCspec() (*pcode.CspecData, error) {
+	if len(cfg.CspecBytes) > 0 {
+		cs, err := pcode.ParseCspecBytes(cfg.CspecBytes)
+		if err != nil {
+			return nil, fmt.Errorf("cspec parse: %w", err)
+		}
+		return cs, nil
+	}
+	cs, err := pcode.ParseCspec(cfg.CspecPath)
+	if err != nil {
+		return nil, fmt.Errorf("cspec parse %q: %w", cfg.CspecPath, err)
+	}
+	return cs, nil
 }
 
 // HostComment is one host-supplied comment. C++ parity: comment.hh Comment.
@@ -659,10 +681,10 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// cspec silently drops the stack space and every prototype model, which
 	// produced plausible-looking but wholly wrong output (x86win.cspec's
 	// extrapop="unknown" went unnoticed this way).
-	if cfg.CspecPath != "" {
-		cs, csErr := pcode.ParseCspec(cfg.CspecPath)
+	if cfg.hasCspec() {
+		cs, csErr := cfg.parseCspec()
 		if csErr != nil {
-			return nil, fmt.Errorf("cspec parse %q: %w", cfg.CspecPath, csErr)
+			return nil, csErr
 		}
 		result.CspecData = cs
 	}
@@ -713,12 +735,12 @@ func attachEnvironment(engine *sla.Engine, fd *pcode.Funcdata, cfg BuildConfig, 
 		}
 		fd.SetHostLocals(m)
 	}
-	if cfg.CspecPath == "" {
+	if !cfg.hasCspec() {
 		return nil
 	}
-	cs, err := pcode.ParseCspec(cfg.CspecPath)
+	cs, err := cfg.parseCspec()
 	if err != nil {
-		return fmt.Errorf("cspec parse %q: %w", cfg.CspecPath, err)
+		return err
 	}
 	ram := cfg.Entry.Space
 	if ram == nil {

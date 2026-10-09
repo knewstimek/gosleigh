@@ -27,6 +27,8 @@ package loader
 
 import (
 	"bytes"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
@@ -39,14 +41,22 @@ import (
 // EngineBuilder holds all parameters needed to build a translation Engine.
 // Zero-value fields use sensible defaults where possible.
 type EngineBuilder struct {
-	// SLAPath is the path to the packed or XML .sla file. Required.
+	// SLAPath is the path to the packed or XML .sla file. Required unless
+	// SLABytes is set.
 	SLAPath string
+
+	// SLABytes is the .sla file content (an embedded spec). It takes precedence
+	// over SLAPath; the decode is cached by content hash.
+	SLABytes []byte
 
 	// PspecPath is the optional path to a .pspec XML file.
 	// When non-empty, context_set defaults from the file are applied to the
 	// backend before the Engine is built, matching the Java
 	// SleighLanguage.setContextForProcessor behavior.
 	PspecPath string
+
+	// PspecBytes is the .pspec content; it takes precedence over PspecPath.
+	PspecBytes []byte
 
 	// BinaryPath is the optional path to a raw binary image.
 	// When non-empty, the file is opened via Backend.OpenRawInstructionFile.
@@ -94,26 +104,10 @@ type EngineBuilder struct {
 //  7. NewLoweringContext + SpacesByIndex[0] = ConstantSpace fix
 //  8. NewEngineFromBoundaries
 func (b *EngineBuilder) Build() (*sla.Engine, address.Address, error) {
-	if b.SLAPath == "" {
-		return nil, address.Address{}, fmt.Errorf("loader: SLAPath is required")
-	}
-
-	// --- Steps 1-2: decode the .sla and build cross-references (cached) ---
-	boundaries, xrefs, err := decodeSLA(b.SLAPath)
+	// --- Steps 1-3: decode the .sla (cached) and locate the default space ---
+	boundaries, xrefs, ram, err := b.decode()
 	if err != nil {
 		return nil, address.Address{}, err
-	}
-
-	// --- Step 3: locate default address space ---
-	var ram *address.Space
-	for i := range boundaries.Metadata.Spaces {
-		if boundaries.Metadata.Spaces[i].Name == boundaries.Metadata.DefaultSpace {
-			ram = &boundaries.Metadata.Spaces[i]
-			break
-		}
-	}
-	if ram == nil {
-		return nil, address.Address{}, fmt.Errorf("loader: default address space %q not found in sla metadata", boundaries.Metadata.DefaultSpace)
 	}
 
 	// --- Step 4: create backend and register context variables ---
@@ -128,11 +122,15 @@ func (b *EngineBuilder) Build() (*sla.Engine, address.Address, error) {
 	// Mirrors SleighLanguage.setContextForProcessor: only context_set entries
 	// are applied as SetVariableDefault; tracked_set is not.
 	var pspecData sla.PspecData
-	if b.PspecPath != "" {
+	if len(b.PspecBytes) > 0 || b.PspecPath != "" {
 		var pspecErr error
-		pspecData, pspecErr = sla.ParsePspec(b.PspecPath)
+		if len(b.PspecBytes) > 0 {
+			pspecData, pspecErr = sla.ParsePspecBytes(b.PspecBytes)
+		} else {
+			pspecData, pspecErr = sla.ParsePspec(b.PspecPath)
+		}
 		if pspecErr != nil {
-			return nil, address.Address{}, fmt.Errorf("loader: ParsePspec(%q): %w", b.PspecPath, pspecErr)
+			return nil, address.Address{}, fmt.Errorf("loader: pspec: %w", pspecErr)
 		}
 		for _, entry := range pspecData.ContextSet {
 			if setErr := backend.SetVariableDefault(entry.Name, entry.Value); setErr != nil {
@@ -237,10 +235,50 @@ func (b *EngineBuilder) Build() (*sla.Engine, address.Address, error) {
 	return engine, entryAddr, nil
 }
 
-// slaCache holds decoded .sla files by path. The decoded boundaries and
+// CodeSpace returns the default (code) address space engines from this
+// builder will use. The decode is cached, so it is the same *address.Space
+// every later Build returns in its entry address; a host can build addresses
+// for its symbol scope before the first Build.
+func (b *EngineBuilder) CodeSpace() (*address.Space, error) {
+	_, _, ram, err := b.decode()
+	return ram, err
+}
+
+func (b *EngineBuilder) decode() (*sla.Boundaries, *sla.XRefs, *address.Space, error) {
+	var boundaries *sla.Boundaries
+	var xrefs *sla.XRefs
+	var err error
+	switch {
+	case len(b.SLABytes) > 0:
+		sum := sha256.Sum256(b.SLABytes)
+		boundaries, xrefs, err = decodeSLA("sha256:"+hex.EncodeToString(sum[:]), func() ([]byte, error) { return b.SLABytes, nil })
+	case b.SLAPath != "":
+		path := b.SLAPath
+		boundaries, xrefs, err = decodeSLA("path:"+path, func() ([]byte, error) {
+			data, rerr := os.ReadFile(path)
+			if rerr != nil {
+				return nil, fmt.Errorf("loader: read sla %q: %w", path, rerr)
+			}
+			return data, nil
+		})
+	default:
+		return nil, nil, nil, fmt.Errorf("loader: SLAPath or SLABytes is required")
+	}
+	if err != nil {
+		return nil, nil, nil, err
+	}
+	for i := range boundaries.Metadata.Spaces {
+		if boundaries.Metadata.Spaces[i].Name == boundaries.Metadata.DefaultSpace {
+			return boundaries, xrefs, &boundaries.Metadata.Spaces[i], nil
+		}
+	}
+	return nil, nil, nil, fmt.Errorf("loader: default address space %q not found in sla metadata", boundaries.Metadata.DefaultSpace)
+}
+
+// slaCache holds decoded .sla files by path or content hash. The decoded boundaries and
 // cross-references are read-only after BuildXrefs, so one process decoding
 // many functions decodes each .sla once.
-var slaCache sync.Map // path -> *slaEntry
+var slaCache sync.Map // "path:<p>" or "sha256:<hex>" -> *slaEntry
 
 type slaEntry struct {
 	once       sync.Once
@@ -249,13 +287,13 @@ type slaEntry struct {
 	err        error
 }
 
-func decodeSLA(path string) (*sla.Boundaries, *sla.XRefs, error) {
-	v, _ := slaCache.LoadOrStore(path, &slaEntry{})
+func decodeSLA(key string, read func() ([]byte, error)) (*sla.Boundaries, *sla.XRefs, error) {
+	v, _ := slaCache.LoadOrStore(key, &slaEntry{})
 	e := v.(*slaEntry)
 	e.once.Do(func() {
-		rawData, err := os.ReadFile(path)
+		rawData, err := read()
 		if err != nil {
-			e.err = fmt.Errorf("loader: read sla %q: %w", path, err)
+			e.err = err
 			return
 		}
 		container, err := sla.Read(bytes.NewReader(rawData))

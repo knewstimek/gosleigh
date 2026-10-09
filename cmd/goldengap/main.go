@@ -35,20 +35,20 @@ package main
 
 import (
 	"bufio"
+	"errors"
 	"encoding/hex"
 	"encoding/json"
 	"flag"
 	"fmt"
 	"os"
 	"runtime"
-	"runtime/debug"
 	"runtime/pprof"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/knewstimek/gosleigh/pkg/address"
-	"github.com/knewstimek/gosleigh/pkg/bridge"
+	"github.com/knewstimek/gosleigh/pkg/decomp"
 	"github.com/knewstimek/gosleigh/pkg/loader"
 	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
@@ -155,9 +155,20 @@ func main() {
 		os.Exit(1)
 	}
 
-	var sections []loader.PESection
+	spec, err := readSpec(*slaPath, *pspecPath, *cspecPath)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "goldengap: %v\n", err)
+		os.Exit(1)
+	}
+	// With -pe the whole image is one Program; without it each golden's body
+	// bytes are their own image at base 0 (isolated harness).
+	var prog *decomp.Program
 	if *pePath != "" {
-		if sections, err = loader.LoadPESections(*pePath); err != nil {
+		sections, err := loader.LoadPESections(*pePath)
+		if err == nil {
+			prog, err = decomp.Load(spec, peSections(sections))
+		}
+		if err != nil {
 			fmt.Fprintf(os.Stderr, "goldengap: %v\n", err)
 			os.Exit(1)
 		}
@@ -190,12 +201,8 @@ func main() {
 				continue
 			}
 			fn := gf.Functions[i]
-			b := &loader.EngineBuilder{SLAPath: *slaPath, PspecPath: *pspecPath}
-			if sections != nil {
-				b.BaseAddr, b.Sections = uint64(fn.Entry), sections
-			}
 			start := time.Now()
-			res := decompileOne(fn, b, *cspecPath, *maxInstr, host)
+			res := decompileOne(fn, prog, spec, *maxInstr, host)
 			line, _ := json.Marshal(struct {
 				Index int     `json:"index"`
 				Secs  float64 `json:"secs"`
@@ -209,11 +216,7 @@ func main() {
 
 	out := resultFile{Functions: make([]funcResult, 0, len(fns))}
 	for _, fn := range fns {
-		b := &loader.EngineBuilder{SLAPath: *slaPath, PspecPath: *pspecPath}
-		if sections != nil {
-			b.BaseAddr, b.Sections = uint64(fn.Entry), sections
-		}
-		out.Functions = append(out.Functions, decompileOne(fn, b, *cspecPath, *maxInstr, host))
+		out.Functions = append(out.Functions, decompileOne(fn, prog, spec, *maxInstr, host))
 	}
 
 	enc, err := json.MarshalIndent(out, "", "  ")
@@ -321,56 +324,76 @@ func memWatchdog(limit uint64) {
 	}
 }
 
-// decompileOne mirrors the pkg/loader x64_corpus2 diagnostic test's pipeline
-// (EngineBuilder.Build -> bridge.Build -> bridge.Decompile) for a single
-// golden function. The deferred recover matches that test's per-function
-// panic guard so one bad function does not abort the whole batch. When b has
-// no Sections, the golden body bytes are mapped at base 0 (isolated harness).
-func decompileOne(fn goldenEntry, b *loader.EngineBuilder, cspecPath string, maxInstr int, host pcode.HostScope) (res funcResult) {
+// decompileOne decompiles a single golden function through the library entry
+// point (pkg/decomp), so this harness measures exactly what a downstream host
+// runs. A nil prog maps the golden body bytes at base 0 (isolated harness).
+// Error prefixes: BYTES-ERR (bad golden bytes), BUILD-ERR (image/spec
+// load), DECOMP-ERR (pipeline), PANIC (engine panic).
+func decompileOne(fn goldenEntry, prog *decomp.Program, spec decomp.Spec, maxInstr int, host pcode.HostScope) (res funcResult) {
 	res.Name = fn.Name
-	defer func() {
-		if r := recover(); r != nil {
-			res.Error = fmt.Sprintf("PANIC: %v", r)
-			if os.Getenv("GOLDENGAP_TRACE") != "" {
-				res.Error += "\n" + string(debug.Stack())
-			}
-		}
-	}()
-
-	if b.Sections == nil {
-		prog, err := hex.DecodeString(fn.Bytes)
+	entry := uint64(fn.Entry)
+	if prog == nil {
+		body, err := hex.DecodeString(fn.Bytes)
 		if err != nil {
 			res.Error = fmt.Sprintf("BYTES-ERR: %v", err)
 			return
 		}
-		b.Bytes = prog
+		// The Sleigh matcher needs 16 bytes of lookahead even past a tiny body.
+		if len(body) < 16 {
+			body = append(body, make([]byte, 16-len(body))...)
+		}
+		if prog, err = decomp.Load(spec, []decomp.Section{{Name: "body", Data: body}}); err != nil {
+			res.Error = fmt.Sprintf("BUILD-ERR: %v", err)
+			return
+		}
+		entry = 0
 	}
 
-	engine, base, err := b.Build()
-	if err != nil {
-		res.Error = fmt.Sprintf("BUILD-ERR: %v", err)
-		return
-	}
-
-	result, err := bridge.Build(engine, bridge.BuildConfig{
-		Name: fn.Name, Entry: base, MaxInstructions: maxInstr,
-		CspecPath: cspecPath, SymbolName: displayName(fn), HostScope: withCapture(host, fn, base.Space),
+	ram := prog.CodeSpace()
+	out, err := prog.Decompile(decomp.Function{
+		Entry: entry, Name: fn.Name, DisplayName: displayName(fn), MaxInstructions: maxInstr,
+		Host:       withCapture(host, fn, ram),
 		HostLocals: hostLocals(fn), FlowOverrides: flowOverrides(fn), TrackedRegs: trackedRegs(fn),
 		HostComments: captureComments(fn),
-		Injections:   captureInjections(fn, host, base.Space),
+		Injections:   captureInjections(fn, host, ram),
+		GhidraFormat: true,
 	})
 	if err != nil {
-		res.Error = fmt.Sprintf("BRIDGE-ERR: %v", err)
+		res.Error = "DECOMP-ERR: " + err.Error()
+		if errors.Is(err, decomp.ErrPanic) {
+			res.Error = "PANIC: " + err.Error()
+			if os.Getenv("GOLDENGAP_TRACE") == "" {
+				// The stack trace follows the first line.
+				res.Error, _, _ = strings.Cut(res.Error, "\n")
+			}
+		}
 		return
 	}
-
-	out, err := bridge.Decompile(engine, result, bridge.DecompileConfig{GhidraFormat: true})
-	if err != nil {
-		res.Error = fmt.Sprintf("EMIT-ERR: %v", err)
-		return
-	}
-	res.Output = out
+	res.Output = out.C
 	return
+}
+
+func readSpec(slaPath, pspecPath, cspecPath string) (decomp.Spec, error) {
+	spec := decomp.Spec{ID: slaPath}
+	for _, f := range []struct {
+		path string
+		dst  *[]byte
+	}{{slaPath, &spec.SLA}, {pspecPath, &spec.Pspec}, {cspecPath, &spec.Cspec}} {
+		data, err := os.ReadFile(f.path)
+		if err != nil {
+			return decomp.Spec{}, fmt.Errorf("read spec: %w", err)
+		}
+		*f.dst = data
+	}
+	return spec, nil
+}
+
+func peSections(secs []loader.PESection) []decomp.Section {
+	out := make([]decomp.Section, len(secs))
+	for i, s := range secs {
+		out[i] = decomp.Section{Name: s.Name, VMA: s.VMA, Data: s.Bytes}
+	}
+	return out
 }
 
 func displayName(fn goldenEntry) string {
