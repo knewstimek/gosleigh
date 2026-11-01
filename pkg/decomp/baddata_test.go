@@ -15,11 +15,29 @@
 package decomp_test
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/knewstimek/gosleigh/pkg/bridge"
 	"github.com/knewstimek/gosleigh/pkg/decomp"
 )
+
+// A flow longer than MaxInstructions fails instead of being cut short
+// (a cut leaves branches to undecoded targets); one that fits decompiles.
+// C++ parity: FlowInfo::processInstruction with error_toomanyinstructions.
+func TestDecompileTooManyInstructions(t *testing.T) {
+	// test ecx,ecx; jz +4; lea eax,[rcx+1]; ret; xor eax,eax; ret (6 instructions)
+	code := []byte{0x85, 0xc9, 0x74, 0x04, 0x8d, 0x41, 0x01, 0xc3, 0x31, 0xc0, 0xc3, 0xcc, 0xcc, 0xcc, 0xcc, 0xcc}
+	prog := load(t, 64, code, 0x140001000)
+	if _, err := prog.Decompile(decomp.Function{Entry: 0x140001000, MaxInstructions: 6}); err != nil {
+		t.Fatalf("flow that fits the limit: %v", err)
+	}
+	_, err := prog.Decompile(decomp.Function{Entry: 0x140001000, MaxInstructions: 5})
+	if !errors.Is(err, bridge.ErrTooManyInstructions) {
+		t.Fatalf("err = %v, want ErrTooManyInstructions", err)
+	}
+}
 
 // A path into undecodable bytes ends in halt_baddata(); the rest of the
 // function still decompiles. Expected text measured with the Ghidra 12 core

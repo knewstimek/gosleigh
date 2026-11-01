@@ -200,6 +200,9 @@ func (p *Program) Decompile(fn Function) (res *Result, err error) {
 		HostLocalTypes:  fn.HostLocalTypes,
 		HostComments:    fn.HostComments,
 		Injections:      fn.Injections,
+
+		// Ghidra's default: a flow over the limit fails the function.
+		ErrorTooManyInstructions: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("decomp: %w", err)

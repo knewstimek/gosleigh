@@ -2,6 +2,7 @@ package bridge
 
 import (
 	"errors"
+	"fmt"
 
 	"github.com/knewstimek/gosleigh/pkg/address"
 	"github.com/knewstimek/gosleigh/pkg/pcode"
@@ -63,6 +64,24 @@ func markNoReturnHalts(fd *pcode.Funcdata) {
 		fd.OpMarkHalt(op, pcode.PcodeOpNoReturn)
 		fd.Warning("Subroutine does not return", prev.Addr())
 	}
+}
+
+// ErrTooManyInstructions is the flow exceeding BuildConfig.MaxInstructions
+// while BuildConfig.ErrorTooManyInstructions is set.
+var ErrTooManyInstructions = errors.New("Flow exceeded maximum allowable instructions")
+
+// tooManyInstructionsError wraps ErrTooManyInstructions with the limit and
+// how many of the collected paths ended at untranslatable bytes: many such
+// halts usually mean the flow ran into junk bytes (obfuscation) rather than
+// a genuinely large function.
+func tooManyInstructionsError(limit int, records []instructionRecord) error {
+	halts := 0
+	for _, r := range records {
+		if r.halt != 0 {
+			halts++
+		}
+	}
+	return fmt.Errorf("%w (limit %d; %d paths ended at undecodable bytes)", ErrTooManyInstructions, limit, halts)
 }
 
 // translateFailureHalt classes an instruction the engine could not translate.

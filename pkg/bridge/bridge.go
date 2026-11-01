@@ -38,6 +38,12 @@ type BuildConfig struct {
 	Entry           address.Address
 	End             address.Address
 	MaxInstructions int
+	// ErrorTooManyInstructions makes reaching MaxInstructions with flow left to
+	// follow an error (ErrTooManyInstructions) instead of a silent cut, which
+	// leaves branches to undecoded targets the actions cannot handle.
+	// C++ parity: FlowInfo::error_toomanyinstructions, set by default in
+	// Architecture::resetDefaultsInternal (architecture.cc:1423).
+	ErrorTooManyInstructions bool
 	// CspecPath is the optional path to a .cspec calling convention file.
 	// When non-empty, the cspec is parsed and stored in Result.CspecData.
 	CspecPath string
@@ -1526,12 +1532,15 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 		}
 	}
 
-	for len(pending) > 0 && len(records) < limit {
+	// The partial clone of jump-table recovery stays a plain cut: the main
+	// collection has already raised the error for the same flow.
+	tooManyErr := cfg.ErrorTooManyInstructions && !tolerateBadFlow
+	for len(pending) > 0 && (tooManyErr || len(records) < limit) {
 		cur := pending[0]
 		pending = pending[1:]
 
 		// Linear scan from cur until a hard terminator, range boundary, or limit.
-		for len(records) < limit {
+		for tooManyErr || len(records) < limit {
 			if !cfg.End.IsInvalid() {
 				if !sameSpace(cur, cfg.End) {
 					return nil, nil, fmt.Errorf("build bridge: end address %v is not in entry space %v", cfg.End, cfg.Entry.Space)
@@ -1543,6 +1552,10 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 			if _, exists := known[cur]; exists {
 				// Already collected via another path; stop this linear scan.
 				break
+			}
+			if len(records) >= limit {
+				// C++ parity: FlowInfo::processInstruction (flow.cc:393-395).
+				return nil, nil, tooManyInstructionsError(limit, records)
 			}
 
 			translation, err := engine.TranslateInstructionAt(cur)
