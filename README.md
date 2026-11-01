@@ -93,6 +93,21 @@ architectures, larger functions, speed and memory use are not part of this measu
 - A constant stored into a bitfield as `(v & clear) | set`, where neither mask covers the whole
   field, prints as `p->mode = 5`; Ghidra 12.1 keeps the masks. Upstream fix proposed in
   [NationalSecurityAgency/ghidra#9836](https://github.com/NationalSecurityAgency/ghidra/pull/9836).
+- `decomp.DefaultMaxInstructions` is 20000 (Ghidra's default is 100000). As in Ghidra, a flow
+  over the limit fails the function (`bridge.ErrTooManyInstructions`, with the number of paths
+  that ended at undecodable bytes) rather than being cut short.
+
+## Extensions
+
+Behavior Ghidra does not have lives in `pkg/ext` and runs only when a caller passes it through
+`decomp.Function.InstructionHooks` (`bridge.InstructionHook`); without hooks the decompiler is the
+plain port.
+
+- `pkg/ext/branchassume` fixes chosen conditional branches to one side before flow is followed,
+  the way a Ghidra user would patch `jz` to `jmp` or to no-ops. For junk-byte obfuscation the
+  directions come from the caller (a runtime trace): the dropped side is not decompiled, each
+  fixed branch is marked in the output, and `Hook.Unapplied` lists addresses no flow reached.
+  Ghidra's `Funcdata::overrideFlow` rejects conditional-branch overrides.
 
 ## Layout
 
@@ -103,6 +118,7 @@ architectures, larger functions, speed and memory use are not part of this measu
 | `pkg/pcode` | Decompiler core: actions and rules, types, structuring, C printer |
 | `pkg/sla` | Sleigh runtime: `.sla` decoding and instruction translation to p-code |
 | `pkg/bridge`, `pkg/loader` | Wiring between the Sleigh runtime and the core |
+| `pkg/ext` | Extensions beyond Ghidra, opt-in through instruction hooks |
 | `pkg/address` | Address spaces |
 | `cmd/` | Development tools (golden comparison, SSA dump); not a supported CLI |
 

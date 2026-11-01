@@ -92,6 +92,10 @@ type BuildConfig struct {
 	// analysis marked CALL_RETURN.
 	FlowOverrides map[uint64]string
 
+	// InstructionHooks are Gosleigh extensions (pkg/ext) applied to every
+	// instruction before flow is followed; none for the plain Ghidra port.
+	InstructionHooks []InstructionHook
+
 	// Injections are the host-compiled call-fixup payloads, by call-site
 	// address (Java compiles the cspec <callfixup> snippets).
 	Injections map[uint64]HostInjection
@@ -221,6 +225,8 @@ type instructionRecord struct {
 	// halt is the PcodeOp halt class of an artificial halt that stands in
 	// for an instruction that could not be translated, 0 otherwise.
 	halt uint32
+	// note is an InstructionHook warning for this instruction.
+	note string
 }
 
 type instructionFlow struct {
@@ -528,6 +534,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	fd.GetPcodeOpBank().SortAliveByTime()
 	markTranslateHalts(fd, records)
 	markNoReturnHalts(fd)
+	markHookNotes(fd, records)
 	for _, w := range injectWarnings {
 		fd.WarningHeader(w)
 	}
@@ -1580,6 +1587,10 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 			if t, ok := cfg.FlowOverrides[cur.Offset]; ok {
 				translation = applyFlowOverride(translation, t)
 			}
+			note := ""
+			if len(cfg.InstructionHooks) != 0 {
+				translation, note = applyInstructionHooks(translation, cfg.InstructionHooks)
+			}
 			// An overridden CALLIND is a direct CALL before the no-return
 			// check, so a call through an import to ExitProcess halts.
 			// C++ parity: FlowInfo::setupCallindSpecs (applyIndirect, then
@@ -1594,7 +1605,7 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 				return nil, nil, fmt.Errorf("build bridge: instruction %v did not advance", cur)
 			}
 
-			records = append(records, instructionRecord{translation: translation})
+			records = append(records, instructionRecord{translation: translation, note: note})
 			known[cur] = len(records) - 1
 
 			if translation.Next == cur {

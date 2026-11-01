@@ -124,6 +124,9 @@ type Function struct {
 	// FlowOverrides are instruction flow overrides by address ("BRANCH",
 	// "CALL", "CALL_RETURN", "RETURN").
 	FlowOverrides map[uint64]string
+	// InstructionHooks are Gosleigh extensions beyond Ghidra (pkg/ext, e.g.
+	// branchassume) applied before flow is followed; none for plain Ghidra.
+	InstructionHooks []bridge.InstructionHook
 	// TrackedRegs are register values known at the entry (register name ->
 	// value), added to the pspec tracked_set; an entry here wins.
 	TrackedRegs map[string]uint64
@@ -203,6 +206,7 @@ func (p *Program) Decompile(fn Function) (res *Result, err error) {
 
 		// Ghidra's default: a flow over the limit fails the function.
 		ErrorTooManyInstructions: true,
+		InstructionHooks:         fn.InstructionHooks,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("decomp: %w", err)
