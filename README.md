@@ -96,6 +96,10 @@ architectures, larger functions, speed and memory use are not part of this measu
 - `decomp.DefaultMaxInstructions` is 20000 (Ghidra's default is 100000). As in Ghidra, a flow
   over the limit fails the function (`bridge.ErrTooManyInstructions`, with the number of paths
   that ended at undecodable bytes) rather than being cut short.
+- `decomp.Function.FlowBounds` limits flow to a function's extent (several ranges for a split
+  function). Ghidra's flow has the same out-of-bounds handling ("Function flow out of bounds" +
+  `halt_missing()`) but a decompile always passes the whole address space; with no bounds Gosleigh
+  does the same.
 
 ## Extensions
 
