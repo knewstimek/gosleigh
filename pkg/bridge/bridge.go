@@ -1,7 +1,6 @@
 package bridge
 
 import (
-	"errors"
 	"fmt"
 	"sort"
 
@@ -213,6 +212,9 @@ type Result struct {
 type instructionRecord struct {
 	translation sla.InstructionTranslation
 	flow        instructionFlow
+	// halt is the PcodeOp halt class of an artificial halt that stands in
+	// for an instruction that could not be translated, 0 otherwise.
+	halt uint32
 }
 
 type instructionFlow struct {
@@ -518,6 +520,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	// Instructions were translated in worklist order; the alive list follows
 	// p-code generation order as in C++ (assignFlowTimes set the times).
 	fd.GetPcodeOpBank().SortAliveByTime()
+	markTranslateHalts(fd, records)
 	markNoReturnHalts(fd)
 	for _, w := range injectWarnings {
 		fd.WarningHeader(w)
@@ -1502,6 +1505,7 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 
 	known := make(map[address.Address]int)
 	records := make([]instructionRecord, 0, min(limit, 16))
+	var warnings []string
 
 	// pending holds addresses yet to be scanned. We use a worklist so that
 	// branch targets reachable only via a forward/unconditional branch are also
@@ -1550,12 +1554,15 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 					// the outer worklist / final flow analysis proceed.
 					break
 				}
-				var unimplErr *sla.UnimplError
-				if errors.As(err, &unimplErr) {
-					warn := fmt.Sprintf("unimplemented at %v: %v", cur, err)
-					return records, []string{warn}, nil
-				}
-				return nil, nil, fmt.Errorf("build bridge: translate instruction at %v: %w", cur, err)
+				// Only this path ends: an artificial halt stands in for the
+				// instruction and the worklist goes on with the other flows.
+				// C++ parity: FlowInfo::processInstruction catches UnimplError
+				// and BadDataError (flow.cc:423-457), default flow options.
+				halt, kind := translateFailureHalt(err)
+				warnings = append(warnings, fmt.Sprintf("%s at %v: %v", kind, cur, err))
+				records = append(records, instructionRecord{translation: haltTranslation(cur), halt: halt})
+				known[cur] = len(records) - 1
+				break
 			}
 			if t, ok := cfg.FlowOverrides[cur.Offset]; ok {
 				translation = applyFlowOverride(translation, t)
@@ -1624,7 +1631,7 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 		records[idx].flow = analyzeInstructionFlow(records[idx].translation, cfg.Entry.Space, knownAddrs)
 	}
 
-	return records, nil, nil
+	return records, warnings, nil
 }
 
 // extractBranchTarget returns the branch target address embedded in a BRANCH or

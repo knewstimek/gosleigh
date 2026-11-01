@@ -987,6 +987,25 @@ func (s *printCState) inferReturnType() Datatype {
 	return sharedTypeFactory.GetVoid()
 }
 
+// haltName is the pseudo-function a special halt RETURN prints as, "" for a
+// plain return. A noreturn halt reaches here only if printed at all
+// (NotPrinted hides it).
+// C++ parity: PrintC::opReturn (printc.cc:773).
+func haltName(op *PcodeOp) string {
+	switch op.HaltType() {
+	case 0:
+		return ""
+	case PcodeOpBadInstruction:
+		return "halt_baddata"
+	case PcodeOpUnimplemented:
+		return "halt_unimplemented"
+	case PcodeOpMissing:
+		return "halt_missing"
+	default: // halt, noreturn
+		return "halt"
+	}
+}
+
 func returnValue(op *PcodeOp) *Varnode {
 	// Input 0 is the return-address placeholder (a constant; 1 on an
 	// artificial halt); only input 1 is a return value.
@@ -2877,6 +2896,14 @@ func (s *printCState) emitStatement(op *PcodeOp) error {
 		})
 		return nil
 	case CPUI_RETURN:
+		if nm := haltName(op); nm != "" {
+			s.lang.Statement(func() {
+				s.lang.Token(nm)
+				s.lang.Token("(")
+				s.lang.Token(")")
+			})
+			return nil
+		}
 		// C++ parity: PrintC::emitStatement CPUI_RETURN (printc.cc ~line 780):
 		//   if (op->numInput()>1) { pushVn(op->getIn(1), op, mods); }
 		// returnValue selects input[1] (the return-value wiring form) or input[0] (raw form).
