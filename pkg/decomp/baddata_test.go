@@ -59,6 +59,38 @@ func TestDecompileFlowBounds(t *testing.T) {
 	}
 }
 
+// A fall-through past the bounds gets its own halt_missing block: the stub is
+// collected after every other path, so it must not join whichever block was
+// built last. C++ parity: fillinBranchStubs marks each stub opMarkStartBasic.
+func TestDecompileFlowBoundsFallthrough(t *testing.T) {
+	// 0: test ecx,ecx; 2: jz 0x10; 4: lea eax,[rcx+1]; 7: ret (out of bounds)
+	// 0x10: xor eax,eax; 0x12: ret
+	code := make([]byte, 0x20)
+	for i := range code {
+		code[i] = 0xcc
+	}
+	copy(code, []byte{0x85, 0xc9, 0x74, 0x0c, 0x8d, 0x41, 0x01, 0xc3})
+	copy(code[0x10:], []byte{0x31, 0xc0, 0xc3})
+	prog := load(t, 64, code, 0x140001000)
+	res, err := prog.Decompile(decomp.Function{Entry: 0x140001000, GhidraFormat: true,
+		FlowBounds: []bridge.AddrRange{{Lo: 0x140001000, Hi: 0x140001007}, {Lo: 0x140001010, Hi: 0x140001020}}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{
+		"/* WARNING: Function flow out of bounds: r0x000140001006 flows to r0x000140001007 */",
+		"halt_missing();",
+		"return 0;",
+	} {
+		if !strings.Contains(res.C, want) {
+			t.Errorf("missing %q in:\n%s", want, res.C)
+		}
+	}
+	if !strings.Contains(res.C, "if (") || strings.Index(res.C, "halt_missing") < strings.Index(res.C, "if (") {
+		t.Errorf("the stub is not on the fall-through path of the branch:\n%s", res.C)
+	}
+}
+
 // A flow longer than MaxInstructions fails instead of being cut short
 // (a cut leaves branches to undecoded targets); one that fits decompiles.
 // C++ parity: FlowInfo::processInstruction with error_toomanyinstructions.

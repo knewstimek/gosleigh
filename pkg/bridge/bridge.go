@@ -1775,6 +1775,12 @@ func discoverBlockStarts(records []instructionRecord) map[address.Address]bool {
 	}
 
 	for _, record := range records {
+		// An out-of-bounds stub is collected after every path, so it must
+		// open its own block rather than extend the last one built.
+		// C++ parity: FlowInfo::fillinBranchStubs (opMarkStartBasic).
+		if record.halt == pcode.PcodeOpMissing {
+			mark(record.translation.Address)
+		}
 		if record.flow.hasDirect {
 			if _, exists := known[record.flow.directTarget]; exists {
 				mark(record.flow.directTarget)
