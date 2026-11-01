@@ -127,6 +127,10 @@ type Function struct {
 	// InstructionHooks are Gosleigh extensions beyond Ghidra (pkg/ext, e.g.
 	// branchassume) applied before flow is followed; none for plain Ghidra.
 	InstructionHooks []bridge.InstructionHook
+	// FlowBounds limits flow to the function's extent (offsets in the entry's
+	// space): flow leaving it ends in halt_missing() with Ghidra's
+	// out-of-bounds warning. None = the whole space, as Ghidra decompiles.
+	FlowBounds []bridge.AddrRange
 	// TrackedRegs are register values known at the entry (register name ->
 	// value), added to the pspec tracked_set; an entry here wins.
 	TrackedRegs map[string]uint64
@@ -207,6 +211,7 @@ func (p *Program) Decompile(fn Function) (res *Result, err error) {
 		// Ghidra's default: a flow over the limit fails the function.
 		ErrorTooManyInstructions: true,
 		InstructionHooks:         fn.InstructionHooks,
+		FlowBounds:               fn.FlowBounds,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("decomp: %w", err)

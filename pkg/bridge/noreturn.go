@@ -94,6 +94,10 @@ func tooManyInstructionsError(limit int, records []instructionRecord) error {
 // C++ parity: GhidraTranslate::oneInstruction (ghidra_translate.cc:120) and
 // DecompileCallback.getPcode.
 func translateFailureHalt(err error) (uint32, string) {
+	var badErr *sla.BadDataError
+	if errors.As(err, &badErr) {
+		return pcode.PcodeOpBadInstruction, "bad instruction"
+	}
 	var unimplErr *sla.UnimplError
 	if errors.As(err, &unimplErr) && !errors.Is(err, sla.ErrObtainContextUnimplemented) {
 		return pcode.PcodeOpUnimplemented, "unimplemented"
@@ -118,22 +122,31 @@ func haltTranslation(at address.Address) sla.InstructionTranslation {
 // records Ghidra's warnings: one at each halt, one header per kind.
 // C++ parity: FlowInfo::processInstruction (flow.cc:433-456).
 func markTranslateHalts(fd *pcode.Funcdata, records []instructionRecord) {
-	halts := map[address.Address]uint32{}
+	halts := map[address.Address]instructionRecord{}
 	for _, r := range records {
 		if r.halt != 0 {
-			halts[r.translation.Address] = r.halt
+			halts[r.translation.Address] = r
 		}
 	}
 	if len(halts) == 0 {
 		return
 	}
-	var bad, unimpl bool
+	var bad, unimpl, oob bool
 	for _, op := range fd.GetPcodeOpBank().AliveOps() {
-		flag, ok := halts[op.Addr()]
+		r, ok := halts[op.Addr()]
 		if !ok || op.Code() != pcode.CPUI_RETURN {
 			continue
 		}
+		flag := r.halt
 		fd.OpMarkHalt(op, flag)
+		if flag == pcode.PcodeOpMissing { // flow out of bounds (bounds.go)
+			fd.Warning(r.note, op.Addr())
+			if !oob {
+				oob = true
+				fd.WarningHeader("Function flows out of bounds")
+			}
+			continue
+		}
 		if flag == pcode.PcodeOpUnimplemented {
 			fd.Warning("Unimplemented instruction - Truncating control flow here", op.Addr())
 			if !unimpl {

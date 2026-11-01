@@ -563,7 +563,7 @@ func TestResolveHandlesBoundaryVarnodeSymbolUnknownSpaceReturnsUnimplemented(t *
 	}
 }
 
-func TestResolveHandlesBoundaryVarnodeListNullEntryReturnsUnimplemented(t *testing.T) {
+func TestResolveHandlesBoundaryVarnodeListNullEntryReturnsBadData(t *testing.T) {
 	ctx, curSpace, _ := newResolveHandlesTestContext()
 	ctx.SetSymbolTable(&SymbolTableBoundary{Symbols: []SymbolBoundary{
 		{
@@ -595,21 +595,18 @@ func TestResolveHandlesBoundaryVarnodeListNullEntryReturnsUnimplemented(t *testi
 
 	err := ResolveHandles(ctx, ResolveHandlesHooks{})
 	if err == nil {
-		t.Fatalf("ResolveHandles succeeded, want unimplemented error for null varnode list entry")
+		t.Fatalf("ResolveHandles succeeded, want bad data for null varnode list entry")
 	}
-	if !errors.Is(err, ErrResolveHandlesUnimplemented) {
-		t.Fatalf("error = %v, want ErrResolveHandlesUnimplemented", err)
+	var berr *BadDataError
+	if !errors.As(err, &berr) {
+		t.Fatalf("error type = %T, want *BadDataError (C++ BadDataError)", err)
 	}
-	var uerr *UnimplError
-	if !errors.As(err, &uerr) {
-		t.Fatalf("error type = %T, want *UnimplError", err)
-	}
-	if uerr.Explain != "varnode list entry 0 is null" {
-		t.Fatalf("ResolveHandles unimplemented explain mismatch: got %q", uerr.Explain)
+	if berr.Explain != "varnode list entry 0 is null: No corresponding entry in varnode list" {
+		t.Fatalf("explain = %q", berr.Explain)
 	}
 }
 
-func TestResolveHandlesBoundaryVarnodeListSelectorOutOfRangeReturnsUnimplemented(t *testing.T) {
+func TestResolveHandlesBoundaryVarnodeListSelectorOutOfRangeReturnsBadData(t *testing.T) {
 	ctx, curSpace, _ := newResolveHandlesTestContext()
 	ctx.SetSymbolTable(&SymbolTableBoundary{Symbols: []SymbolBoundary{
 		{
@@ -640,17 +637,14 @@ func TestResolveHandlesBoundaryVarnodeListSelectorOutOfRangeReturnsUnimplemented
 
 	err := ResolveHandles(ctx, ResolveHandlesHooks{})
 	if err == nil {
-		t.Fatalf("ResolveHandles succeeded, want unimplemented error for out-of-range varnode list selector")
+		t.Fatalf("ResolveHandles succeeded, want bad data for out-of-range varnode list selector")
 	}
-	if !errors.Is(err, ErrResolveHandlesUnimplemented) {
-		t.Fatalf("error = %v, want ErrResolveHandlesUnimplemented", err)
+	var berr *BadDataError
+	if !errors.As(err, &berr) {
+		t.Fatalf("error type = %T, want *BadDataError (C++ BadDataError)", err)
 	}
-	var uerr *UnimplError
-	if !errors.As(err, &uerr) {
-		t.Fatalf("error type = %T, want *UnimplError", err)
-	}
-	if uerr.Explain != "varnode list selector index 2 is out of range" {
-		t.Fatalf("ResolveHandles unimplemented explain mismatch: got %q", uerr.Explain)
+	if berr.Explain != "varnode list selector index 2 is out of range: No corresponding entry in varnode list" {
+		t.Fatalf("explain = %q", berr.Explain)
 	}
 }
 
@@ -993,10 +987,11 @@ func TestResolveHandlesUsesValueMapSymbolPatternAndValueTable(t *testing.T) {
 	}
 }
 
-// TestResolveHandlesValueMapOutOfRangeReturnsUnimplemented verifies that when
+// TestResolveHandlesValueMapOutOfRangeReturnsBadData verifies that when
 // the selector evaluates to an out-of-range ValueTable index the result is a
-// typed UnimplError rather than a panic or a silent wrong value.
-func TestResolveHandlesValueMapOutOfRangeReturnsUnimplemented(t *testing.T) {
+// BadDataError (C++ ValueMapSymbol::resolve) rather than a panic or a silent
+// wrong value.
+func TestResolveHandlesValueMapOutOfRangeReturnsBadData(t *testing.T) {
 	ctx, _, _ := newResolveHandlesTestContext()
 	// selector = 5; ValueTable has only 3 entries
 	ctx.SetSymbolTable(&SymbolTableBoundary{Symbols: []SymbolBoundary{
@@ -1024,16 +1019,13 @@ func TestResolveHandlesValueMapOutOfRangeReturnsUnimplemented(t *testing.T) {
 
 	err := ResolveHandles(ctx, ResolveHandlesHooks{})
 	if err == nil {
-		t.Fatalf("ResolveHandles succeeded, want unimplemented error for out-of-range valuemap index")
+		t.Fatalf("ResolveHandles succeeded, want bad data for out-of-range valuemap index")
 	}
-	if !errors.Is(err, ErrResolveHandlesUnimplemented) {
-		t.Fatalf("error = %v, want ErrResolveHandlesUnimplemented", err)
+	var berr *BadDataError
+	if !errors.As(err, &berr) {
+		t.Fatalf("error type = %T, want *BadDataError (C++ BadDataError)", err)
 	}
-	var uerr *UnimplError
-	if !errors.As(err, &uerr) {
-		t.Fatalf("error type = %T, want *UnimplError", err)
-	}
-	if uerr.Explain != "valuemap index 5 is out of range" {
-		t.Fatalf("unimplemented explain = %q, want \"valuemap index 5 is out of range\"", uerr.Explain)
+	if berr.Explain != "valuemap index 5 is out of range: No corresponding entry in valuetable" {
+		t.Fatalf("explain = %q", berr.Explain)
 	}
 }

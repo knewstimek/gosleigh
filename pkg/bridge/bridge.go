@@ -96,6 +96,12 @@ type BuildConfig struct {
 	// instruction before flow is followed; none for the plain Ghidra port.
 	InstructionHooks []InstructionHook
 
+	// FlowBounds limits flow to these ranges of the entry's space; a branch
+	// or fall-through leaving them is not followed and ends in halt_missing()
+	// with Ghidra's out-of-bounds warning. None means the whole space, as in
+	// Ghidra's decompile.
+	FlowBounds []AddrRange
+
 	// Injections are the host-compiled call-fixup payloads, by call-site
 	// address (Java compiles the cspec <callfixup> snippets).
 	Injections map[uint64]HostInjection
@@ -1519,6 +1525,8 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 	known := make(map[address.Address]int)
 	records := make([]instructionRecord, 0, min(limit, 16))
 	var warnings []string
+	bounds := flowBounds(cfg.FlowBounds)
+	var oob outOfBounds
 
 	// pending holds addresses yet to be scanned. We use a worklist so that
 	// branch targets reachable only via a forward/unconditional branch are also
@@ -1616,7 +1624,10 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 			// We enqueue now (before building knownAddrs) so that the target is
 			// added even when this linear scan terminates early.
 			if cfg.End.IsInvalid() {
-				if target, ok := extractBranchTarget(translation, cfg.Entry.Space); ok {
+				if target, ok := extractBranchTarget(translation, cfg.Entry.Space); ok && !bounds.contains(target.Offset) {
+					// C++ parity: FlowInfo::newAddress range check.
+					oob.add(cur, target)
+				} else if ok {
 					if _, seen := pendingSeen[target]; !seen {
 						pendingSeen[target] = struct{}{}
 						pending = append(pending, target)
@@ -1639,8 +1650,17 @@ func collectInstructionsTolerant(engine *sla.Engine, cfg BuildConfig, seeds []ad
 			if cfg.End.IsInvalid() && hasHardTerminator(translation) {
 				break
 			}
+			if !bounds.contains(translation.Next.Offset) {
+				// C++ parity: FlowInfo::fallthru reports flow from eaddr.
+				oob.add(address.Address{Space: cur.Space, Offset: bounds.last(cur.Offset)}, translation.Next)
+				break
+			}
 			cur = translation.Next
 		}
+	}
+	for _, stub := range oob.stubs(known) {
+		records = append(records, stub)
+		known[stub.translation.Address] = len(records) - 1
 	}
 
 	if len(records) == 0 {

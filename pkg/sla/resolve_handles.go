@@ -251,7 +251,7 @@ func resolveBoundarySymbolFixedHandle(sym *SymbolBoundary, walker *ParserWalker,
 			}
 		if sym.HeaderElement == elemValueMapSymHead {
 			if value < 0 || int(value) >= len(sym.Body.Pattern.ValueTable) {
-					return FixedHandle{}, true, newUnimplError(ErrResolveHandlesUnimplemented, fmt.Sprintf("valuemap index %d is out of range", value))
+					return FixedHandle{}, true, &BadDataError{fmt.Sprintf("valuemap index %d is out of range: No corresponding entry in valuetable", value)}
 			}
 			value = sym.Body.Pattern.ValueTable[int(value)]
 		}
@@ -452,12 +452,12 @@ func resolveVarnodeListSymbolFixedHandle(sym *SymbolBoundary, walker *ParserWalk
 		return FixedHandle{}, true, normalizeResolveHandlesUnimpl(err)
 	}
 	if index < 0 || int(index) >= len(body.Table) {
-		return FixedHandle{}, true, newUnimplError(ErrResolveHandlesUnimplemented, fmt.Sprintf("varnode list selector index %d is out of range", index))
+		return FixedHandle{}, true, &BadDataError{fmt.Sprintf("varnode list selector index %d is out of range: No corresponding entry in varnode list", index)}
 	}
 
 	entry := body.Table[int(index)]
 	if !entry.HasVarnodeSymbolID {
-		return FixedHandle{}, true, newUnimplError(ErrResolveHandlesUnimplemented, fmt.Sprintf("varnode list entry %d is null", index))
+		return FixedHandle{}, true, &BadDataError{fmt.Sprintf("varnode list entry %d is null: No corresponding entry in varnode list", index)}
 	}
 	if walker == nil || walker.ParserContext() == nil || walker.ParserContext().GetSymbolTable() == nil {
 		return FixedHandle{}, true, newUnimplError(ErrResolveHandlesUnimplemented, "symbol table is unavailable for varnode list resolution")

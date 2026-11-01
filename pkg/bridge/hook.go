@@ -50,7 +50,7 @@ func applyInstructionHooks(tr sla.InstructionTranslation, hooks []InstructionHoo
 // markHookNotes prints the hooks' warnings at their instructions.
 func markHookNotes(fd *pcode.Funcdata, records []instructionRecord) {
 	for _, r := range records {
-		if r.note != "" {
+		if r.note != "" && r.halt == 0 { // a halt's note is its own warning
 			fd.Warning(r.note, r.translation.Address)
 		}
 	}
