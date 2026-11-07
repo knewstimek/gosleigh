@@ -25,6 +25,8 @@ not read PDB, so a PDB-named golden would never match.
 """
 
 import argparse
+import contextlib
+import io
 import difflib
 import hashlib
 import re
@@ -291,16 +293,21 @@ def run_shard(binary, base_args, idxs, fns, timeout_s, emit):
 		p.wait()
 
 
-def do_run(work, timeout_s, mem_mb, fresh):
+def build_goldengap(binary):
+	rc, _, _ = goldengap.run_cmd(["go", "build", "-o", binary, "./cmd/goldengap"], cwd=REPO_ROOT, timeout=600)
+	return rc == 0
+
+
+def do_run(work, timeout_s, mem_mb, fresh, jobs, binary=None):
 	meta = load_meta(work)
 	want = meta.get("sha256", {}).get(os.path.basename(meta["exe"]))
 	if want != sha256(meta["exe"]):
 		raise SystemExit("snapshot %s does not match the analyzed sha256 -- re-run analyze" % meta["exe"])
 	sla, pspec, cspec = (os.path.join(REPO_ROOT, p) for p in ARCH_SPECS[meta["machine"]])
-	binary = os.path.join(work, "goldengap.exe")
-	rc, _, _ = goldengap.run_cmd(["go", "build", "-o", binary, "./cmd/goldengap"], cwd=REPO_ROOT, timeout=600)
-	if rc != 0:
-		return False
+	if binary is None: # measure-all builds once and passes it in
+		binary = os.path.join(work, "goldengap.exe")
+		if not build_goldengap(binary):
+			return False
 
 	goldens = os.path.join(work, "goldens.json")
 	fns = goldengap.load_json(goldens)["functions"]
@@ -323,10 +330,10 @@ def do_run(work, timeout_s, mem_mb, fresh):
 	captures = os.path.join(work, "captures")
 	if os.path.isdir(captures):
 		args += ["-host-captures", captures] # per-function host data symbols
-	# Shard the functions over one process per core: each process decodes the
+	# Shard the functions over `jobs` processes: each process decodes the
 	# .sla and loads the image once, then streams a result line per function.
 	todo = [i for i in range(len(fns)) if i not in done]
-	workers = max(1, min(len(todo), int(os.environ.get("REALEXE_WORKERS", 0)) or (os.cpu_count() or 4) - 2))
+	workers = max(1, min(len(todo), jobs))
 	shards = [todo[k::workers] for k in range(workers)]
 	lock = threading.Lock()
 	with open(jsonl, "a", encoding="utf-8") as f, \
@@ -385,8 +392,35 @@ def do_report(work):
 			c = by_bucket[k]
 			print("%-8s %6d %6d %6d %6.3f" % (k, c["total"], c["match"], c["err"], sum(sims[k]) / len(sims[k])))
 	allsim = [s for v in sims.values() for s in v]
-	print("%-8s %6d %6d %6s %6.3f" % ("all", len(allsim), sum(c["match"] for c in by_bucket.values()), "", sum(allsim) / len(allsim)))
-	return True
+	matched = sum(c["match"] for c in by_bucket.values())
+	print("%-8s %6d %6d %6s %6.3f" % ("all", len(allsim), matched, "", sum(allsim) / len(allsim)))
+	return matched, len(allsim)
+
+
+def do_measure_all(works, timeout_s, mem_mb, jobs):
+	"""Measure several works with one goldengap build; print only the works
+	that are not all-MATCH, then the tally."""
+	root = os.path.join(REPO_ROOT, "local", "realexe")
+	if not works:
+		works = sorted(d for d in os.listdir(root) if os.path.isfile(meta_path(os.path.join(root, d))))
+	binary = os.path.join(root, "goldengap.exe")
+	if not build_goldengap(binary):
+		return False
+	clean = 0
+	start = time.time()
+	for name in works:
+		work = name if os.path.isabs(name) else os.path.join(root, name)
+		log = io.StringIO()
+		with contextlib.redirect_stdout(log):
+			ok = do_run(work, timeout_s, mem_mb, True, jobs, binary)
+			counts = do_report(work) if ok else None
+		if counts and counts[0] == counts[1]:
+			clean += 1
+		else:
+			got = "%d/%d" % counts if counts else "run failed"
+			print("%s %s (see %s)" % (os.path.basename(work), got, os.path.join(work, "GAPMAP.md")), flush=True)
+	print("%d/%d works all-MATCH, %.0fs" % (clean, len(works), time.time() - start))
+	return clean == len(works)
 
 
 TOKEN = re.compile(r"[A-Za-z_][A-Za-z0-9_]*|0x[0-9a-fA-F]+|\d+|\S")
@@ -397,6 +431,11 @@ def similarity(want, got):
 	if not a and not b:
 		return 1.0
 	return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
+
+
+def add_jobs(parser):
+	parser.add_argument("--jobs", type=int, choices=range(1, 5), default=2, metavar="1-4",
+		help="decompiler processes run at once (default 2)")
 
 
 def main():
@@ -417,6 +456,7 @@ def main():
 	pr.add_argument("--timeout", type=int, default=10, help="per-function seconds")
 	pr.add_argument("--mem-mb", type=int, default=2048, help="per-function Go heap limit")
 	pr.add_argument("--fresh", action="store_true", help="discard results.jsonl instead of resuming")
+	add_jobs(pr)
 	pp = sub.add_parser("report")
 	pp.add_argument("--work")
 	pc = sub.add_parser("capture", help="C++ decompiler debug savefiles for decomp_dbg")
@@ -429,6 +469,12 @@ def main():
 	pm.add_argument("--work")
 	pm.add_argument("--timeout", type=int, default=10)
 	pm.add_argument("--mem-mb", type=int, default=2048)
+	add_jobs(pm)
+	pma = sub.add_parser("measure-all", help="measure several works (default: all) with one build; prints only the works with gaps")
+	pma.add_argument("works", nargs="*", help="work dir names under local/realexe or paths (default: every work)")
+	pma.add_argument("--timeout", type=int, default=10)
+	pma.add_argument("--mem-mb", type=int, default=2048)
+	add_jobs(pma)
 	args = p.parse_args()
 
 	if args.cmd == "analyze":
@@ -437,16 +483,18 @@ def main():
 	elif args.cmd == "sample":
 		ok = do_sample(resolve_work(args), args.n, args.seed, args.max_bytes, args.allow_seen)
 	elif args.cmd == "run":
-		ok = do_run(resolve_work(args), args.timeout, args.mem_mb, args.fresh)
+		ok = do_run(resolve_work(args), args.timeout, args.mem_mb, args.fresh, args.jobs)
 	elif args.cmd == "capture":
 		ok = do_capture(resolve_work(args), args.entries)
 	elif args.cmd == "names":
 		ok = do_names(resolve_work(args), args.entries)
 	elif args.cmd == "measure":
 		work = resolve_work(args)
-		ok = do_run(work, args.timeout, args.mem_mb, True) and do_report(work)
+		ok = do_run(work, args.timeout, args.mem_mb, True, args.jobs) and bool(do_report(work))
+	elif args.cmd == "measure-all":
+		ok = do_measure_all(args.works, args.timeout, args.mem_mb, args.jobs)
 	else:
-		ok = do_report(resolve_work(args))
+		ok = bool(do_report(resolve_work(args)))
 	sys.exit(0 if ok else 1)
 
 
