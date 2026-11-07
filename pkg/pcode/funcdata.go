@@ -39,9 +39,14 @@ type Funcdata struct {
 
 	// ext is the opt-in behavior beyond Ghidra (zero = plain port).
 	ext Extensions
+	// nanIgnore is Ghidra's nanignore option (zero = "compare", the default).
+	nanIgnore NaNIgnore
 	// opUseNestedPieces is set by the caller of ancestorOpUse for the length
 	// of one call that applies Extensions.NestedPieceTrials.
 	opUseNestedPieces bool
+	// calleeReads is the optional read-before-write hint source for callees
+	// (beyond Ghidra, see HostCalleeReads).
+	calleeReads HostCalleeReads
 
 	flags       uint32
 	name        string

@@ -98,6 +98,7 @@ Every intentional difference, always-on or opt-in, is listed in [DIFFERENCES.md]
 | `pkg/sla` | Sleigh runtime: `.sla` decoding and instruction translation to p-code |
 | `pkg/bridge`, `pkg/loader` | Wiring between the Sleigh runtime and the core |
 | `pkg/ext` | Extensions beyond Ghidra, opt-in (see [DIFFERENCES.md](DIFFERENCES.md)) |
+| `pkg/analysis` | Whole-program analyses Ghidra runs on its Java side (callee register reads) and the `Enhanced` preset, opt-in |
 | `pkg/address` | Address spaces |
 | `cmd/` | Development tools (golden comparison, SSA dump); not a supported CLI |
 

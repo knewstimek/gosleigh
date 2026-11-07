@@ -153,6 +153,11 @@ func (r *RuleExpandLoad) apply(op *PcodeOp, data *Funcdata) int {
 		if meta != TYPE_INT && meta != TYPE_UINT {
 			return 0
 		}
+		// Beyond Ghidra (Extensions.FloatLoads): a load whose value is used as
+		// a float is not a truncated integer element.
+		if data.ext.FloatLoads && usedAsFloat(data, outVn) {
+			return 0
+		}
 		switch outVn.TypeDefFacing().Metatype() {
 		case TYPE_INT, TYPE_UINT, TYPE_UNKNOWN, TYPE_BOOL:
 		default:

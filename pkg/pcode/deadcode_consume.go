@@ -404,6 +404,11 @@ func gatherConsumedReturn(data *Funcdata) uint64 {
 		}
 	}
 	if fp := data.GetFuncProto(); fp != nil {
+		// Beyond Ghidra (Extensions.NarrowFloatReturns): a float returned in
+		// an 8-byte XMM slot uses its low 4 bytes only.
+		if data.ext.NarrowFloatReturns && isFloatReturn(data) {
+			fp.SetReturnBytesConsumed(4)
+		}
 		if val := fp.ReturnBytesConsumed(); val != 0 {
 			consumeVal &= maskForSize(val)
 		}

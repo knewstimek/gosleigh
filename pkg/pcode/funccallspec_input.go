@@ -199,12 +199,21 @@ func (fc *FuncCallSpecs) checkInputTrialUse(data *Funcdata, aliascheck *aliasChe
 			if !trial.IsActive() && data.ext.NestedPieceTrials {
 				fc.rescueNestedPieceTrial(data, trial, slot, vn)
 			}
+			// Beyond Ghidra (HostCalleeReads): a trial Ghidra left inactive
+			// -- the caller's own input passed on unchanged
+			// (AncestorRealistic::execute), or a value also read after the
+			// call (ancestorOpUse) -- is kept when the callee is known to read
+			// that register before writing it. A trial Ghidra rules out
+			// (definitely not used) stays out.
+			if !trial.IsActive() && !trial.IsDefinitelyNotUsed() && fc.calleeReadsTrial(trial) {
+				trial.markRescued()
+			}
 		}
 		if trial.IsDefinitelyNotUsed() { // free up the dataflow
 			data.OpSetInput(fc.op, data.NewConstant(vn.Size(), 0), slot)
 		}
 	}
-	if data.ext.NestedPieceTrials {
+	if data.ext.NestedPieceTrials || data.calleeReads != nil {
 		fc.yieldRescuedTrials(data)
 	}
 }
@@ -262,6 +271,22 @@ func (fc *FuncCallSpecs) yieldRescuedTrials(data *Funcdata) {
 			}
 		}
 	}
+}
+
+// calleeReadsTrial reports whether the host's read-before-write hint for the
+// callee covers any byte of the trial's storage.
+func (fc *FuncCallSpecs) calleeReadsTrial(trial *ParamTrial) bool {
+	ta := trial.GetAddress()
+	if ta.Space == nil {
+		return false
+	}
+	lo, hi := ta.Offset, ta.Offset+uint64(trial.GetSize())
+	for _, r := range fc.calleeReads {
+		if r.Space == ta.Space.Name && r.Offset < hi && lo < r.Offset+uint64(r.Size) {
+			return true
+		}
+	}
+	return false
 }
 
 // groupsOverlap reports whether two entries compete for a parameter slot.

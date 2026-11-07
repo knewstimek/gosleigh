@@ -55,6 +55,26 @@ func (r *RuleFloatCast) apply(op *PcodeOp, data *Funcdata) int {
 	return 0
 }
 
+// NaNIgnore is Ghidra's "nanignore" decompiler option: which NaN tests the
+// decompiler drops, assuming float inputs are not NaN. Dropping them reads
+// better but changes what a comparison means for NaN (comiss/jnbe and minss
+// print with the NaN case taken the other way).
+// C++ parity: OptionNanIgnore (Architecture::nan_ignore_all/compare).
+type NaNIgnore uint8
+
+const (
+	// NaNIgnoreCompare drops NaN tests protecting a float comparison
+	// ("compare", Ghidra's default).
+	NaNIgnoreCompare NaNIgnore = iota
+	// NaNIgnoreNone keeps every NaN test ("none"): exact for NaN inputs.
+	NaNIgnoreNone
+	// NaNIgnoreAll drops every NaN test ("all").
+	NaNIgnoreAll
+)
+
+// SetNaNIgnore sets the nanignore option for this function.
+func (fd *Funcdata) SetNaNIgnore(v NaNIgnore) { fd.nanIgnore = v }
+
 type RuleIgnoreNan struct{ batchRule }
 
 func NewRuleIgnoreNan(group string) *RuleIgnoreNan {
@@ -64,10 +84,20 @@ func NewRuleIgnoreNan(group string) *RuleIgnoreNan {
 }
 
 // apply removes NaN tests guarding a floating-point comparison of the same
-// value, following the NaN result through up to three boolean combinations.
-// C++ parity: RuleIgnoreNan::applyOp (nan_ignore_all off: the default
-// "compare" setting).
+// value, following the NaN result through up to three boolean combinations
+// (NaNIgnoreCompare, Ghidra's default); NaNIgnoreAll removes every NaN test
+// and NaNIgnoreNone none (C++ disables the rule).
+// C++ parity: RuleIgnoreNan::applyOp, OptionNanIgnore::apply.
 func (r *RuleIgnoreNan) apply(op *PcodeOp, data *Funcdata) int {
+	switch data.nanIgnore {
+	case NaNIgnoreNone:
+		return 0
+	case NaNIgnoreAll:
+		// Treat the NaN operation as always returning false.
+		data.OpSetOpcode(op, CPUI_COPY)
+		data.OpSetInput(op, data.NewConstant(1, 0), 0)
+		return 1
+	}
 	if op.NumInput() != 1 || op.Output() == nil || op.Input(0).IsFree() {
 		return 0
 	}

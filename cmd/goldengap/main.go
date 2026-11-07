@@ -48,6 +48,7 @@ import (
 	"time"
 
 	"github.com/knewstimek/gosleigh/pkg/address"
+	"github.com/knewstimek/gosleigh/pkg/analysis"
 	"github.com/knewstimek/gosleigh/pkg/decomp"
 	"github.com/knewstimek/gosleigh/pkg/loader"
 	"github.com/knewstimek/gosleigh/pkg/pcode"
@@ -350,17 +351,20 @@ func decompileOne(fn goldenEntry, prog *decomp.Program, spec decomp.Spec, maxIns
 	}
 
 	ram := prog.CodeSpace()
-	out, err := prog.Decompile(decomp.Function{
+	df := decomp.Function{
 		Entry: entry, Name: fn.Name, DisplayName: displayName(fn), MaxInstructions: maxInstr,
 		Host:       withCapture(host, fn, ram),
 		HostLocals: hostLocals(fn), FlowOverrides: flowOverrides(fn), TrackedRegs: trackedRegs(fn),
 		HostComments: captureComments(fn),
 		Injections:   captureInjections(fn, host, ram),
 		GhidraFormat: true,
-		// GOLDENGAP_NESTED_PIECE=1 measures the opt-in extension against
-		// Ghidra's goldens (every change it makes shows up as a gap).
-		Extensions: pcode.Extensions{NestedPieceTrials: os.Getenv("GOLDENGAP_NESTED_PIECE") != ""},
-	})
+	}
+	// GOLDENGAP_ENHANCED=1 measures the analysis.Enhanced preset against
+	// Ghidra's goldens: every change it makes shows up as a gap.
+	if os.Getenv("GOLDENGAP_ENHANCED") != "" {
+		analysis.NewEnhanced(prog).Apply(&df)
+	}
+	out, err := prog.Decompile(df)
 	if err != nil {
 		res.Error = "DECOMP-ERR: " + err.Error()
 		if errors.Is(err, decomp.ErrPanic) {

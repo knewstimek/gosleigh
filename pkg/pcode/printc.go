@@ -3171,7 +3171,10 @@ func (s *printCState) renderBranchConditionFrag(op *PcodeOp) (ExprFragment, erro
 			}
 			return inner, nil
 		}
-		if negTok, prec, reorder, ok := booleanFlipToken(defOp.Code()); ok {
+		// Beyond Ghidra (Extensions.NaNExactCompares): a negated float order
+		// comparison keeps its "!" (the swapped token is wrong for NaN).
+		if negTok, prec, reorder, ok := booleanFlipToken(defOp.Code()); ok &&
+			!(s.fd.ext.NaNExactCompares && isFloatOrder(defOp.Code())) {
 			var left, right ExprFragment
 			var err error
 			if reorder {
@@ -3843,7 +3846,8 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 		// An implied comparison input is printed with its negated token instead
 		// of a leading "!". C++ parity: PrintC::opBoolNegate + checkPrintNegation
 		// (negatetoken, OpToken::negate).
-		if in := op.Input(0); in.IsImplied() && in.IsWritten() {
+		if in := op.Input(0); in.IsImplied() && in.IsWritten() &&
+			!(s.fd.ext.NaNExactCompares && isFloatOrder(in.Def().Code())) {
 			def := in.Def()
 			switch def.Code() {
 			case CPUI_BOOL_NEGATE: // The negations cancel
@@ -4115,7 +4119,30 @@ func (s *printCState) renderCast(op *PcodeOp) (ExprFragment, error) {
 		// C++ parity: PrintC::opCast pushes getOut()->getHighTypeDefFacing().
 		dt = s.normalizeTypeForDecl(out.HighTypeDefFacing())
 	}
+	// Beyond Ghidra (Extensions.BitCastSyntax): a CAST between a float and an
+	// integer reinterprets the bits (a numeric conversion is INT2FLOAT or
+	// TRUNC), but C's (float)x reads as a conversion.
+	if s.fd.ext.BitCastSyntax && isBitCast(op) {
+		// A call form, so a long operand still breaks across lines.
+		return s.lang.CallExpr(s.lang.Atom("bit_cast<"+printedTypeString(dt)+">"), inner), nil
+	}
 	return s.lang.CastExpr(printedTypeString(dt), inner), nil
+}
+
+// isBitCast reports a CAST whose one side is a float and the other is not.
+func isBitCast(op *PcodeOp) bool {
+	if op.Code() != CPUI_CAST { // INT2FLOAT etc. print through renderCast too
+		return false
+	}
+	out, in := op.Output(), op.Input(0)
+	if out == nil || in == nil || out.Size() != in.Size() {
+		return false
+	}
+	ot, it := out.HighTypeDefFacing(), in.HighTypeDefFacing()
+	if ot == nil || it == nil {
+		return false
+	}
+	return (ot.Metatype() == TYPE_FLOAT) != (it.Metatype() == TYPE_FLOAT)
 }
 
 func (s *printCState) renderLoad(op *PcodeOp) (ExprFragment, error) {

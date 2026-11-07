@@ -118,6 +118,11 @@ func (r *RuleBoolNegate) apply(op *PcodeOp, data *Funcdata) int {
 	if opc == CPUI_MAX {
 		return 0
 	}
+	// Beyond Ghidra (Extensions.NaNExactCompares): !(a < b) is not b <= a
+	// when an operand is NaN, so a float order comparison keeps its negate.
+	if data.ext.NaNExactCompares && isFloatOrder(flipOp.Code()) {
+		return 0
+	}
 	data.OpSetOpcode(flipOp, opc)
 	if reorder {
 		data.OpSwapInput(flipOp, 0, 1)

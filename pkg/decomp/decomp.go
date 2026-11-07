@@ -101,6 +101,14 @@ func Load(spec Spec, sections []Section) (*Program, error) {
 // into; a HostScope compares and builds addresses in it.
 func (p *Program) CodeSpace() *address.Space { return p.code }
 
+// NewEngine builds a Sleigh engine over p's image, for analyses that read
+// instructions outside a decompile (pkg/analysis). Each engine keeps its own
+// instruction cache; the .sla decode is shared.
+// The returned address is entry in the engine's code space.
+func (p *Program) NewEngine(entry uint64) (*sla.Engine, address.Address, error) {
+	return p.builder(entry).Build()
+}
+
 func (p *Program) builder(entry uint64) *loader.EngineBuilder {
 	return &loader.EngineBuilder{SLABytes: p.spec.SLA, PspecBytes: p.spec.Pspec, BaseAddr: entry, Sections: p.sections}
 }
@@ -134,6 +142,14 @@ type Function struct {
 	// Extensions switches on core behavior beyond Ghidra; the zero value
 	// decompiles as Ghidra does. See DIFFERENCES.md.
 	Extensions pcode.Extensions
+	// NaNIgnore is Ghidra's nanignore option: which NaN tests are dropped.
+	// The zero value is Ghidra's default ("compare"); pcode.NaNIgnoreNone
+	// keeps them, so float comparisons stay exact for NaN.
+	NaNIgnore pcode.NaNIgnore
+	// CalleeReads tells which registers a callee reads before writing them
+	// (analysis.CalleeReads); with it, the caller's input passed unchanged to
+	// such a callee is kept as an argument. nil = Ghidra. See DIFFERENCES.md.
+	CalleeReads pcode.HostCalleeReads
 	// TrackedRegs are register values known at the entry (register name ->
 	// value), added to the pspec tracked_set; an entry here wins.
 	TrackedRegs map[string]uint64
@@ -216,6 +232,8 @@ func (p *Program) Decompile(fn Function) (res *Result, err error) {
 		InstructionHooks:         fn.InstructionHooks,
 		FlowBounds:               fn.FlowBounds,
 		Extensions:               fn.Extensions,
+		CalleeReads:              fn.CalleeReads,
+		NaNIgnore:                fn.NaNIgnore,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("decomp: %w", err)

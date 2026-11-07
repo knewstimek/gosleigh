@@ -100,6 +100,13 @@ type BuildConfig struct {
 	// plain Ghidra port).
 	Extensions pcode.Extensions
 
+	// NaNIgnore is Ghidra's nanignore option (zero value = "compare").
+	NaNIgnore pcode.NaNIgnore
+
+	// CalleeReads is an optional read-before-write hint source for callees
+	// (pkg/analysis; beyond Ghidra, see pcode.HostCalleeReads).
+	CalleeReads pcode.HostCalleeReads
+
 	// FlowBounds limits flow to these ranges of the entry's space; a branch
 	// or fall-through leaving them is not followed and ends in halt_missing()
 	// with Ghidra's out-of-bounds warning. None means the whole space, as in
@@ -396,6 +403,8 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, analysisUniqueBase, summary.constSpace)
 	fd.SetSizeLockTypes(cfg.sizeLockTypes) // before any global Symbol is resolved
 	fd.SetExtensions(cfg.Extensions)
+	fd.SetCalleeReads(cfg.CalleeReads)
+	fd.SetNaNIgnore(cfg.NaNIgnore)
 	fd.SetArchSpaces(engine.Spaces())
 	fd.UserOps().RegisterNames(engine.UserOpNames())
 	fd.SetRegisterNames(engine.RegisterNamesByLocation())

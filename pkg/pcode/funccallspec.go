@@ -49,6 +49,9 @@ type FuncCallSpecs struct {
 	// hostProto is the callee's prototype as reported by the host, standing
 	// in for the callee Funcdata C++ links via queryFunction.
 	hostProto *HostFunction
+	// calleeReads is the read-before-write hint for the callee (beyond
+	// Ghidra, see HostCalleeReads); nil without one.
+	calleeReads []HostStorage
 	// lockedIn / lockedOut are the callee's locked prototype slots (host
 	// prototype with typelocked parameters / return), resolved to storage.
 	// C++ parity: the ProtoParameters of a locked FuncProto (ProtoStoreSymbol).
@@ -71,6 +74,28 @@ type HostScope interface {
 	// reference (e.g. an import address table slot) lives at addr.
 	// C++ parity: Scope::queryExternalRefFunction / ExternRefSymbol.
 	QueryExternalRef(addr address.Address) (name string, ok bool)
+}
+
+// HostCalleeReads answers, for a function entry, the register storage the
+// function reads before writing it, as an analysis outside the core found it
+// (pkg/analysis; beyond Ghidra, set with Funcdata.SetCalleeReads). It is a
+// hint, not a prototype: the core uses it only to keep an argument Ghidra's
+// core left inactive -- the caller's input passed on unchanged
+// (AncestorRealistic::execute) or a value also read after the call -- which
+// Ghidra's Java side covers by committing the callee's prototype first
+// (Decompiler Parameter ID). Like Extensions.NestedPieceTrials it only fills
+// a slot Ghidra left empty.
+type HostCalleeReads interface {
+	CalleeReadsBeforeWrite(entry address.Address) []HostStorage
+}
+
+// HostCalleeReturn is an optional extension of a HostCalleeReads source
+// (pkg/analysis; beyond Ghidra): the size of the float the function at entry
+// returns in its float output slot (4 float, 8 double), or 0 when unknown.
+// The core applies it only to a callee whose return the host does not lock,
+// as Ghidra's Java side would after committing the callee's prototype.
+type HostCalleeReturn interface {
+	CalleeFloatReturn(entry address.Address) int32
 }
 
 // HostFunction is what the host reports about a function: its display name
@@ -153,11 +178,18 @@ func newFuncCallSpecs(fd *Funcdata, op *PcodeOp) *FuncCallSpecs {
 	if op.Code() == CPUI_CALL && op.NumInput() > 0 && op.Input(0) != nil {
 		if in0 := op.Input(0); !in0.IsConstant() {
 			fc.entryAddress = in0.Addr()
+			if fd != nil && fd.calleeReads != nil {
+				fc.calleeReads = fd.calleeReads.CalleeReadsBeforeWrite(fc.entryAddress)
+			}
 			if fd != nil && fd.hostScope != nil {
 				if hf, ok := fd.queryHostFunction(fc.entryAddress); ok {
 					fc.name = hf.Name
 					fc.hostProto = &hf
 				}
+
+			}
+			if fd != nil {
+				fc.applyCalleeReturnHint(fd)
 			}
 		}
 	}

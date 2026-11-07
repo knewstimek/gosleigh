@@ -83,3 +83,34 @@ func TestNestedPieceTrialsReturn(t *testing.T) {
 		t.Errorf("with NestedPieceTrials the XMM0 return should be recovered:\n%s", ext)
 	}
 }
+
+// One path returns a float sum, the other returns the float parameter in
+// XMM1 unchanged:
+//
+//	test edx, edx
+//	jz   L
+//	movss xmm0, [rcx]
+//	addss xmm0, xmm1
+//	ret
+//	L: movaps xmm0, xmm1
+//	ret
+var floatOrPassThrough = []byte{
+	0x85, 0xd2, 0x74, 0x09, 0xf3, 0x0f, 0x10, 0x01, 0xf3, 0x0f, 0x58, 0xc1, 0xc3,
+	0x0f, 0x28, 0xc1, 0xc3, 0xcc, 0xcc, 0xcc, 0xcc,
+}
+
+// Ghidra keeps all 8 bytes of XMM0_Qa: the C++ decompiler prints
+// "ulonglong func(float *param_1, ulonglong param_2)" for these bytes.
+// NarrowFloatReturns returns float.
+func TestNarrowFloatReturns(t *testing.T) {
+	plain := decompileX64(t, floatOrPassThrough, pcode.Extensions{})
+	t.Logf("plain:\n%s", plain)
+	if !strings.HasPrefix(plain, "ulonglong ") {
+		t.Errorf("without the extension the output should match Ghidra (ulonglong):\n%s", plain)
+	}
+	ext := decompileX64(t, floatOrPassThrough, pcode.Extensions{NarrowFloatReturns: true})
+	t.Logf("extension:\n%s", ext)
+	if !strings.HasPrefix(ext, "float ") || strings.Contains(ext, "ulonglong") {
+		t.Errorf("with NarrowFloatReturns the return should be float:\n%s", ext)
+	}
+}
