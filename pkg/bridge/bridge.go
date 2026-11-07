@@ -96,6 +96,10 @@ type BuildConfig struct {
 	// instruction before flow is followed; none for the plain Ghidra port.
 	InstructionHooks []InstructionHook
 
+	// Extensions switches on core behavior beyond Ghidra (zero value = the
+	// plain Ghidra port).
+	Extensions pcode.Extensions
+
 	// FlowBounds limits flow to these ranges of the entry's space; a branch
 	// or fall-through leaving them is not followed and ends in halt_missing()
 	// with Ghidra's out-of-bounds warning. None means the whole space, as in
@@ -391,6 +395,7 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 	injectWarnings := applyInjections(records, cfg.Injections, summary.constSpace)
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, analysisUniqueBase, summary.constSpace)
 	fd.SetSizeLockTypes(cfg.sizeLockTypes) // before any global Symbol is resolved
+	fd.SetExtensions(cfg.Extensions)
 	fd.SetArchSpaces(engine.Spaces())
 	fd.UserOps().RegisterNames(engine.UserOpNames())
 	fd.SetRegisterNames(engine.RegisterNamesByLocation())

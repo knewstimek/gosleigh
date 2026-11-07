@@ -37,6 +37,12 @@ type Funcdata struct {
 	// Merge::groupPartials. C++ parity: Merge::protoPartial.
 	protoPartial []*PcodeOp
 
+	// ext is the opt-in behavior beyond Ghidra (zero = plain port).
+	ext Extensions
+	// opUseNestedPieces is set by the caller of ancestorOpUse for the length
+	// of one call that applies Extensions.NestedPieceTrials.
+	opUseNestedPieces bool
+
 	flags       uint32
 	name        string
 	displayName string

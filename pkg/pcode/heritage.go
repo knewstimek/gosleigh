@@ -77,8 +77,7 @@ func (h *Heritage) WithProtoModel(pm *ProtoModel) *Heritage {
 // Like C++, only ranges with new addresses are guarded, so a call is never
 // guarded twice for the same range.
 //
-// C++ parity: heritage.cc Heritage::guardCalls (1443-1527). Not ported:
-// guardCallOverlappingInput (ranges that properly contain a parameter).
+// C++ parity: heritage.cc Heritage::guardCalls (1443-1527).
 func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 	if h.proto == nil || sp == nil {
 		return
@@ -130,7 +129,7 @@ func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 			}
 		}
 		if fc.IsInputActive() && tryregister {
-			if fc.CharacterizeAsInputParam(transAddr, size) == peContainsJustified {
+			if inputCharacter := fc.CharacterizeAsInputParam(transAddr, size); inputCharacter == peContainsJustified {
 				active := fc.GetActiveInput()
 				if active != nil && active.WhichTrial(transAddr, size) < 0 {
 					active.RegisterTrial(transAddr, size)
@@ -138,8 +137,10 @@ func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 					vn.SetActiveHeritage()
 					h.fd.OpInsertInput(op, vn, op.NumInput())
 				}
+			} else if inputCharacter == peContainedBy {
+				// The call may use part of this range as an input parameter.
+				h.guardCallOverlappingInput(fc, addr, transAddr, size)
 			}
-			// TODO known mismatch: contained_by -> guardCallOverlappingInput.
 		}
 		// The call is not guarded when the effect is "unaffected".
 		switch effecttype {
@@ -244,6 +245,40 @@ func (h *Heritage) guardOutputOverlap(callOp *PcodeOp, addr address.Address, siz
 	}
 	delete(h.guardPieces, vnCollect)
 	vnCollect.SetActiveHeritage()
+}
+
+// guardCallOverlappingInput guards a heritaged range that is larger than any
+// single parameter of the call (a full 16-byte XMM register where the
+// parameter slot is XMM1_Qa): a SUBPIECE pulls the biggest contained
+// parameter out of the range and becomes a new input trial of the call.
+// C++ parity: heritage.cc Heritage::guardCallOverlappingInput.
+func (h *Heritage) guardCallOverlappingInput(fc *FuncCallSpecs, addr, transAddr address.Address, size int32) {
+	pAddr, pSize, ok := fc.GetBiggestContainedInputParam(transAddr, size)
+	if !ok {
+		return
+	}
+	active := fc.GetActiveInput()
+	if active == nil {
+		return
+	}
+	// Convert the parameter's address to the caller's perspective.
+	truncAddr := addr.Add(pAddr.Offset - transAddr.Offset)
+	// C++ looks the trial up with the whole range's size, not the parameter's.
+	if active.WhichTrial(truncAddr, size) >= 0 {
+		return
+	}
+	truncateAmount := addressJustifiedContain(addr, size, truncAddr, pSize, false)
+	op := fc.op
+	subpieceOp := h.fd.NewOp(2, op.Addr())
+	h.fd.OpSetOpcode(subpieceOp, CPUI_SUBPIECE)
+	wholeVn := h.fd.NewVarnode(size, addr)
+	wholeVn.SetActiveHeritage()
+	h.fd.OpSetInput(subpieceOp, wholeVn, 0)
+	h.fd.OpSetInput(subpieceOp, h.fd.NewConstant(4, uint64(truncateAmount)), 1)
+	vn := h.fd.NewVarnodeOut(pSize, truncAddr, subpieceOp)
+	h.fd.OpInsertBefore(subpieceOp, op)
+	active.RegisterTrial(truncAddr, pSize)
+	h.fd.OpInsertInput(op, vn, op.NumInput())
 }
 
 // tryOutputOverlapGuard guards a range bigger than any one possible return

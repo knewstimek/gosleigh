@@ -131,6 +131,9 @@ type Function struct {
 	// space): flow leaving it ends in halt_missing() with Ghidra's
 	// out-of-bounds warning. None = the whole space, as Ghidra decompiles.
 	FlowBounds []bridge.AddrRange
+	// Extensions switches on core behavior beyond Ghidra; the zero value
+	// decompiles as Ghidra does. See DIFFERENCES.md.
+	Extensions pcode.Extensions
 	// TrackedRegs are register values known at the entry (register name ->
 	// value), added to the pspec tracked_set; an entry here wins.
 	TrackedRegs map[string]uint64
@@ -212,6 +215,7 @@ func (p *Program) Decompile(fn Function) (res *Result, err error) {
 		ErrorTooManyInstructions: true,
 		InstructionHooks:         fn.InstructionHooks,
 		FlowBounds:               fn.FlowBounds,
+		Extensions:               fn.Extensions,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("decomp: %w", err)

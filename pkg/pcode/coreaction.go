@@ -1557,11 +1557,13 @@ func (a *ActionReturnRecovery) Apply(data *Funcdata) int {
 				continue
 			}
 			vn := op.Input(slot)
-			ar := &ancestorRealistic{}
+			ar := &ancestorRealistic{nestedPieces: data.ext.NestedPieceTrials}
+			data.opUseNestedPieces = data.ext.NestedPieceTrials
 			if ar.execute(op, slot, trial, false) &&
 				data.ancestorOpUse(trimRecurseMax, vn, op, trial, 0, 0) {
 				trial.MarkActive() // this varnode sees active use as a return value
 			}
+			data.opUseNestedPieces = false
 			a.count++
 		}
 	}

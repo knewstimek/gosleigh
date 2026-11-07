@@ -357,6 +357,9 @@ func decompileOne(fn goldenEntry, prog *decomp.Program, spec decomp.Spec, maxIns
 		HostComments: captureComments(fn),
 		Injections:   captureInjections(fn, host, ram),
 		GhidraFormat: true,
+		// GOLDENGAP_NESTED_PIECE=1 measures the opt-in extension against
+		// Ghidra's goldens (every change it makes shows up as a gap).
+		Extensions: pcode.Extensions{NestedPieceTrials: os.Getenv("GOLDENGAP_NESTED_PIECE") != ""},
 	})
 	if err != nil {
 		res.Error = "DECOMP-ERR: " + err.Error()

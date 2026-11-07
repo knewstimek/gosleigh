@@ -78,6 +78,18 @@ func (fp *FuncProto) CharacterizeAsInputParam(addr address.Address, size int32) 
 	return fp.model.InputParams.characterizeAsParam(addr, size)
 }
 
+// GetBiggestContainedInputParam returns the storage of the biggest input
+// parameter wholly inside [loc,loc+size). As in CharacterizeAsInputParam the
+// locked-parameter branch of C++ is unreachable for call-site prototypes
+// here, so the model answers.
+// C++ parity: fspec.cc FuncProto::getBiggestContainedInputParam.
+func (fp *FuncProto) GetBiggestContainedInputParam(loc address.Address, size int32) (address.Address, int32, bool) {
+	if fp == nil || fp.model == nil || fp.model.InputParams == nil {
+		return address.Address{}, 0, false
+	}
+	return fp.model.InputParams.getBiggestContainedParam(loc, size)
+}
+
 // DeriveInputMap hands the trials to the model's input ParamList so it can pick
 // the formal parameter map (which trials survive, in what order, at what size).
 // C++ parity: FuncProto::deriveInputMap -> ParamList::fillinMap (fspec.hh:1420).
@@ -184,11 +196,84 @@ func (fc *FuncCallSpecs) checkInputTrialUse(data *Funcdata, aliascheck *aliasChe
 				// An ancestor is unaffected, an unusual input, or killed by a call.
 				trial.MarkNoUse()
 			}
+			if !trial.IsActive() && data.ext.NestedPieceTrials {
+				fc.rescueNestedPieceTrial(data, trial, slot, vn)
+			}
 		}
 		if trial.IsDefinitelyNotUsed() { // free up the dataflow
 			data.OpSetInput(fc.op, data.NewConstant(vn.Size(), 0), slot)
 		}
 	}
+	if data.ext.NestedPieceTrials {
+		fc.yieldRescuedTrials(data)
+	}
+}
+
+// rescueNestedPieceTrial retests a register trial Ghidra rejected, with the
+// nested-PIECE rules of Extensions.NestedPieceTrials (beyond Ghidra). A trial
+// it passes becomes active and is marked rescued.
+func (fc *FuncCallSpecs) rescueNestedPieceTrial(data *Funcdata, trial *ParamTrial, slot int, vn *Varnode) {
+	ar := ancestorRealistic{nestedPieces: true}
+	if !ar.execute(fc.op, slot, trial, false) {
+		return
+	}
+	data.opUseNestedPieces = true
+	use := data.ancestorOpUse(trimRecurseMax, vn, fc.op, trial, 0, 0)
+	data.opUseNestedPieces = false
+	if use {
+		trial.markRescued()
+	}
+}
+
+// yieldRescuedTrials gives a parameter slot back to Ghidra's choice: a
+// rescued trial is dropped when a trial Ghidra itself accepted shares its
+// slot (x64: RDX and XMM1 are one parameter slot). So the extension only fills
+// a slot Ghidra left empty and never changes an argument Ghidra recovered,
+// e.g. a pointer in RDX next to a vector left in XMM1.
+func (fc *FuncCallSpecs) yieldRescuedTrials(data *Funcdata) {
+	active := fc.GetActiveInput()
+	model := fc.Model()
+	if model == nil || model.InputParams == nil {
+		return
+	}
+	for i := 0; i < active.NumTrials(); i++ {
+		rescued := active.Trial(i)
+		if !rescued.isRescued() {
+			continue
+		}
+		re := model.InputParams.findEntry(rescued.GetAddress(), rescued.GetSize(), true)
+		if re == nil {
+			continue
+		}
+		for j := 0; j < active.NumTrials(); j++ {
+			other := active.Trial(j)
+			if j == i || !other.IsActive() || other.isRescued() {
+				continue
+			}
+			oe := model.InputParams.findEntry(other.GetAddress(), other.GetSize(), true)
+			if oe != nil && groupsOverlap(re, oe) {
+				rescued.unrescue()
+				slot := int(rescued.GetSlot())
+				if rescued.IsDefinitelyNotUsed() && slot < fc.op.NumInput() {
+					in := fc.op.Input(slot)
+					data.OpSetInput(fc.op, data.NewConstant(in.Size(), 0), slot)
+				}
+				break
+			}
+		}
+	}
+}
+
+// groupsOverlap reports whether two entries compete for a parameter slot.
+func groupsOverlap(a, b *paramEntry) bool {
+	for _, g := range a.groupSet {
+		for _, h := range b.groupSet {
+			if g == h {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // finalInputCheck re-tests the trials whose activity could have been changed by
@@ -570,11 +655,20 @@ func (fd *Funcdata) ancestorOpUse(maxlevel int, invn *Varnode, op *PcodeOp, tria
 		if in1 == nil {
 			return false
 		}
+		// Beyond Ghidra (Extensions.NestedPieceTrials): a PIECE is heritage's
+		// join of a register's parts, not a data movement, so passing through
+		// one does not use up the recursion budget. Otherwise a value joined as
+		// PIECE(XMM0_Dd, PIECE(XMM0_Dc, XMM0_Qa)) runs out of levels before
+		// reaching the op that computed it.
+		next := maxlevel - 1
+		if fd.opUseNestedPieces {
+			next = maxlevel
+		}
 		if offset == 0 {
-			return fd.ancestorOpUse(maxlevel-1, in1, op, trial, 0, mainFlags) // least significant piece
+			return fd.ancestorOpUse(next, in1, op, trial, 0, mainFlags) // least significant piece
 		}
 		if offset == in1.Size() {
-			return fd.ancestorOpUse(maxlevel-1, def.Input(0), op, trial, 0, mainFlags) // most significant piece
+			return fd.ancestorOpUse(next, def.Input(0), op, trial, 0, mainFlags) // most significant piece
 		}
 		return false
 	case CPUI_SUBPIECE:
@@ -592,9 +686,17 @@ func (fd *Funcdata) ancestorOpUse(maxlevel int, invn *Varnode, op *PcodeOp, tria
 				trial.SetRemFormed()
 			}
 		}
+		sameStorage := int32(invn.Overlap(in0)) == newOff
 		if invn.Space() != nil && invn.Space().IsUnique() || def.IsIncidentalCopy() ||
-			in0.IsIncidentalCopy() || int32(invn.Overlap(in0)) == newOff {
-			return fd.ancestorOpUse(maxlevel-1, in0, op, trial, offset+newOff, mainFlags)
+			in0.IsIncidentalCopy() || sameStorage {
+			// Beyond Ghidra (Extensions.NestedPieceTrials): taking a part of
+			// the same register back out is the other half of heritage's
+			// PIECE joins and passes through for free as well.
+			next := maxlevel - 1
+			if fd.opUseNestedPieces && sameStorage {
+				next = maxlevel
+			}
+			return fd.ancestorOpUse(next, in0, op, trial, offset+newOff, mainFlags)
 		}
 	case CPUI_CALL, CPUI_CALLIND:
 		return false // a call is never a good indication of a single-op use

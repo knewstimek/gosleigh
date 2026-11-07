@@ -10,11 +10,13 @@ import "github.com/knewstimek/gosleigh/pkg/address"
 //
 // C++ parity: funcdata.hh / funcdata_varnode.cc class AncestorRealistic.
 type ancestorRealistic struct {
-	trial            *ParamTrial   // current trial being analyzed
-	stateStack       []arState     // depth-first traversal stack
-	markedVn         []*Varnode    // visited varnodes, for cycle trimming
-	multiDepth       int           // number of MULTIEQUAL ops on the current path
-	allowFailingPath bool          // allow/test failing paths from conditional execution
+	trial            *ParamTrial // current trial being analyzed
+	stateStack       []arState   // depth-first traversal stack
+	markedVn         []*Varnode  // visited varnodes, for cycle trimming
+	multiDepth       int         // number of MULTIEQUAL ops on the current path
+	allowFailingPath bool        // allow/test failing paths from conditional execution
+	// nestedPieces is Extensions.NestedPieceTrials (beyond Ghidra).
+	nestedPieces bool
 }
 
 // State flag bits. C++ parity: AncestorRealistic::State enum.
@@ -57,9 +59,9 @@ func (s *arState) markSolid(slot int) {
 	}
 }
 
-func (s *arState) markKill()        { s.flags |= arSeenKill }
-func (s *arState) seenSolid() bool  { return s.flags&(arSeenSolid0|arSeenSolid1) != 0 }
-func (s *arState) seenKill() bool   { return s.flags&arSeenKill != 0 }
+func (s *arState) markKill()       { s.flags |= arSeenKill }
+func (s *arState) seenSolid() bool { return s.flags&(arSeenSolid0|arSeenSolid1) != 0 }
+func (s *arState) seenKill() bool  { return s.flags&arSeenKill != 0 }
 
 // newARStateSubpiece builds a state pulled back through a CPUI_SUBPIECE: the data in
 // the SUBPIECE output originates at a non-zero offset within the input varnode.
@@ -205,6 +207,13 @@ func (ar *ancestorRealistic) enterNode() int {
 				// Truncation corresponds to most significant piece, follow slot=0.
 				ar.stateStack = append(ar.stateStack, arState{op: op, slot: 0})
 				return arEnterNode
+			} else if ar.nestedPieces && state.offset+int(ar.trial.GetSize()) <= int(op.Input(1).Size()) {
+				// Beyond Ghidra (Extensions.NestedPieceTrials): the trial lies
+				// wholly inside a least significant piece that is itself larger
+				// than the trial, as in PIECE(XMM0_Dd, PIECE(XMM0_Dc, XMM0_Qa)).
+				// Keep the offset and test that piece the same way.
+				ar.stateStack = append(ar.stateStack, arState{op: op, slot: 1, offset: state.offset})
+				return arEnterNode
 			}
 			if stateVn.Space() == nil || stateVn.Space().Kind != address.SpaceKindStack {
 				return arPopFail
@@ -233,7 +242,7 @@ func (ar *ancestorRealistic) uponPop(popCommand int) int {
 		} else if popCommand == arPopFailkill {
 			prevstate.markKill() // failkill along at least one path of MULTIEQUAL
 		}
-		state.slot++ // move to the next sibling
+		state.slot++                           // move to the next sibling
 		if state.slot == state.op.NumInput() { // traversed all siblings
 			if prevstate.seenSolid() { // an overriding "solid" along at least one path
 				popCommand = arPopSuccess // always a success...
@@ -304,6 +313,7 @@ func (ar *ancestorRealistic) execute(op *PcodeOp, slot int, t *ParamTrial, allow
 		switch command {
 		case arEnterNode:
 			command = ar.enterNode()
+
 		case arPopSuccess, arPopSolid, arPopFail, arPopFailkill:
 			command = ar.uponPop(command)
 		}

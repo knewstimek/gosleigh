@@ -79,39 +79,14 @@ two MSVC executables:
 | Sample | Result |
 |---|---|
 | x86-32, 50 seeds of 200 functions | all 200/200 identical |
-| x64 (Unreal Engine 4 game), 49 seeds of 200 functions | 47 seeds 200/200; the other two differ only where Ghidra itself is nondeterministic (below) |
+| x64 (Unreal Engine 4 game), 49 seeds of 200 functions | 47 seeds 200/200; the other two differ only where Ghidra itself is nondeterministic (parameter trial order in [DIFFERENCES.md](DIFFERENCES.md)) |
 
 The samples are functions up to 4 KB from MSVC PE images. GCC/Clang output, ELF, other
 architectures, larger functions, speed and memory use are not part of this measurement.
 
-## Intentional differences from Ghidra
+## Differences from Ghidra
 
-- Call argument recovery orders parameter trials by their position in the compiler spec. Ghidra
-  compares them by pointer address (`ParamTrial::operator<`), so its result can change between
-  runs; upstream fix proposed in
-  [NationalSecurityAgency/ghidra#9750](https://github.com/NationalSecurityAgency/ghidra/pull/9750).
-- A constant stored into a bitfield as `(v & clear) | set`, where neither mask covers the whole
-  field, prints as `p->mode = 5`; Ghidra 12.1 keeps the masks. Upstream fix proposed in
-  [NationalSecurityAgency/ghidra#9836](https://github.com/NationalSecurityAgency/ghidra/pull/9836).
-- `decomp.DefaultMaxInstructions` is 20000 (Ghidra's default is 100000). As in Ghidra, a flow
-  over the limit fails the function (`bridge.ErrTooManyInstructions`, with the number of paths
-  that ended at undecodable bytes) rather than being cut short.
-- `decomp.Function.FlowBounds` limits flow to a function's extent (several ranges for a split
-  function). Ghidra's flow has the same out-of-bounds handling ("Function flow out of bounds" +
-  `halt_missing()`) but a decompile always passes the whole address space; with no bounds Gosleigh
-  does the same.
-
-## Extensions
-
-Behavior Ghidra does not have lives in `pkg/ext` and runs only when a caller passes it through
-`decomp.Function.InstructionHooks` (`bridge.InstructionHook`); without hooks the decompiler is the
-plain port.
-
-- `pkg/ext/branchassume` fixes chosen conditional branches to one side before flow is followed,
-  the way a Ghidra user would patch `jz` to `jmp` or to no-ops. For junk-byte obfuscation the
-  directions come from the caller (a runtime trace): the dropped side is not decompiled, each
-  fixed branch is marked in the output, and `Hook.Unapplied` lists addresses no flow reached.
-  Ghidra's `Funcdata::overrideFlow` rejects conditional-branch overrides.
+Every intentional difference, always-on or opt-in, is listed in [DIFFERENCES.md](DIFFERENCES.md).
 
 ## Layout
 
@@ -122,7 +97,7 @@ plain port.
 | `pkg/pcode` | Decompiler core: actions and rules, types, structuring, C printer |
 | `pkg/sla` | Sleigh runtime: `.sla` decoding and instruction translation to p-code |
 | `pkg/bridge`, `pkg/loader` | Wiring between the Sleigh runtime and the core |
-| `pkg/ext` | Extensions beyond Ghidra, opt-in through instruction hooks |
+| `pkg/ext` | Extensions beyond Ghidra, opt-in (see [DIFFERENCES.md](DIFFERENCES.md)) |
 | `pkg/address` | Address spaces |
 | `cmd/` | Development tools (golden comparison, SSA dump); not a supported CLI |
 

@@ -48,6 +48,11 @@ const (
 	paramTrialCondExeEffect     uint32 = 0x100
 	paramTrialAncestorRealistic uint32 = 0x200
 	paramTrialAncestorSolid     uint32 = 0x400
+	// Gosleigh only (Extensions.NestedPieceTrials): the trial is active only
+	// because the extension rescued it; rescuedNoUse records that Ghidra had
+	// marked it definitely-not-used rather than inactive.
+	paramTrialRescued      uint32 = 0x800
+	paramTrialRescuedNoUse uint32 = 0x1000
 )
 
 // NewParamTrial constructs a trial from its address, size, and slot.
@@ -175,6 +180,27 @@ func (p *ParamTrial) MarkNotActive() {
 // MarkInactive is an alias for MarkNotActive.
 // C++ parity: ParamTrial::markInactive
 func (p *ParamTrial) MarkInactive() { p.MarkNotActive() }
+
+// markRescued makes a trial Ghidra rejected active (beyond Ghidra, see
+// FuncCallSpecs.rescueNestedPieceTrial), remembering Ghidra's verdict.
+func (p *ParamTrial) markRescued() {
+	if p.flags&paramTrialDefNoUse != 0 {
+		p.flags |= paramTrialRescuedNoUse
+	}
+	p.flags &^= paramTrialDefNoUse
+	p.flags |= paramTrialActive | paramTrialChecked | paramTrialRescued
+}
+
+func (p *ParamTrial) isRescued() bool { return p.flags&paramTrialRescued != 0 }
+
+// unrescue restores Ghidra's verdict on a rescued trial.
+func (p *ParamTrial) unrescue() {
+	noUse := p.flags&paramTrialRescuedNoUse != 0
+	p.flags &^= paramTrialRescued | paramTrialRescuedNoUse | paramTrialActive
+	if noUse {
+		p.MarkNoUse()
+	}
+}
 
 // MarkNoUse marks the trial as definitely not a parameter.
 // C++ parity: ParamTrial::markNoUse
