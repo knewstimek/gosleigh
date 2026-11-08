@@ -92,3 +92,4 @@ __pycache__/
 
 # Internal working notes (status, journal, parity audit, C++ reading notes): local only
 /docs/
+.repoplane/
