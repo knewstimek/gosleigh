@@ -6,6 +6,9 @@ cgo, no Java, no Ghidra installation.
 
 The goal is the same output as Ghidra's decompiler for the same input. Ghidra's x86/x64 language
 specs are embedded, so a host only supplies image bytes and whatever it knows about the program.
+Fixes beyond Ghidra (lost float returns and arguments, NaN-exact comparisons, bit casts, forwarded
+parameters) are opt-in; one preset turns on those measured not to change any function Ghidra
+already gets right.
 
 ```
 go get github.com/knewstimek/gosleigh@latest
@@ -65,6 +68,10 @@ int FUN_140001000(int param_1, int param_2) {
   function types). Without a host the output is what Ghidra prints for a program with no symbols.
 - `GhidraFormat: true` prints Ghidra's exact layout (no indentation, brace on its own line); the
   default is indented.
+- For better output than Ghidra's, make `analysis.NewEnhanced(prog)` once per program and call
+  `Apply(&fn)` on each `decomp.Function` before `Decompile`. New fixes join this preset only after
+  the real-binary measurement below shows no regression, so a host needs no change when they do.
+  Every difference is listed in [DIFFERENCES.md](DIFFERENCES.md).
 
 `Decompile` runs in the calling goroutine and cannot be cancelled, and the engine can grow without
 bound on some real functions. A long-lived host should run it in a separate process with a time
@@ -72,7 +79,8 @@ and memory limit.
 
 ## Accuracy
 
-Measured against the output of Ghidra 12's own decompiler, given the same host information
+Measured with the default options (no extensions) against the output of Ghidra 12's own
+decompiler, given the same host information
 (function bounds, symbols, types and prototypes exported from Ghidra), on functions sampled from
 two MSVC executables:
 
@@ -98,7 +106,7 @@ Every intentional difference, always-on or opt-in, is listed in [DIFFERENCES.md]
 | `pkg/sla` | Sleigh runtime: `.sla` decoding and instruction translation to p-code |
 | `pkg/bridge`, `pkg/loader` | Wiring between the Sleigh runtime and the core |
 | `pkg/ext` | Extensions beyond Ghidra, opt-in (see [DIFFERENCES.md](DIFFERENCES.md)) |
-| `pkg/analysis` | Whole-program analyses Ghidra runs on its Java side (callee register reads) and the `Enhanced` preset, opt-in |
+| `pkg/analysis` | Whole-program analyses Ghidra runs on its Java side (callee argument reads, callee float returns) and the `Enhanced` preset, opt-in |
 | `pkg/address` | Address spaces |
 | `cmd/` | Development tools (golden comparison, SSA dump); not a supported CLI |
 
