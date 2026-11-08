@@ -1327,6 +1327,39 @@ func (r *RuleRangeMeld) apply(op *PcodeOp, data *Funcdata) int {
 
 type RuleFloatRange struct{ batchRule }
 
+// floatRangeNegated folds !(a < b) || a == b and !(a <= b) || a == b into
+// !(a < b) (beyond Ghidra, Extensions.NaNExactCompares). The NaN-exact rewrite
+// of a dropped NaN test (nanExactOrderTest) leaves jbe after comiss in this
+// form, where Ghidra's own form a <= b folds through the code below. Both
+// sides agree for NaN (true), so the fold is exact.
+func floatRangeNegated(op *PcodeOp, data *Funcdata) bool {
+	if op.Code() != CPUI_BOOL_OR {
+		return false
+	}
+	for slot := 0; slot < 2; slot++ {
+		neg, eq := op.Input(slot), op.Input(1-slot)
+		if !neg.IsWritten() || !eq.IsWritten() || neg.Def().Code() != CPUI_BOOL_NEGATE || eq.Def().Code() != CPUI_FLOAT_EQUAL {
+			continue
+		}
+		cmpVn := neg.Def().Input(0)
+		if !cmpVn.IsWritten() || !isFloatOrder(cmpVn.Def().Code()) {
+			continue
+		}
+		cmp, e := cmpVn.Def(), eq.Def()
+		a, b := cmp.Input(0), cmp.Input(1)
+		if !(sameValue(a, e.Input(0)) && sameValue(b, e.Input(1))) && !(sameValue(a, e.Input(1)) && sameValue(b, e.Input(0))) {
+			continue
+		}
+		less := newAuxBinaryOp(data, op.Addr(), CPUI_FLOAT_LESS, 1, a, b)
+		data.OpInsertBefore(less, op)
+		data.OpSetOpcode(op, CPUI_BOOL_NEGATE)
+		data.OpRemoveInput(op, 1)
+		data.OpSetInput(op, less.Output(), 0)
+		return true
+	}
+	return false
+}
+
 func NewRuleFloatRange(group string) *RuleFloatRange {
 	r := &RuleFloatRange{}
 	r.batchRule = newBatchRule(group, "floatrange", []OpCode{CPUI_BOOL_OR, CPUI_BOOL_AND}, r.apply, func(g string) Rule { return NewRuleFloatRange(g) })
@@ -1335,6 +1368,9 @@ func NewRuleFloatRange(group string) *RuleFloatRange {
 
 // RuleFloatRange::applyOp -- ruleaction.cc.
 func (r *RuleFloatRange) apply(op *PcodeOp, data *Funcdata) int {
+	if data.ext.NaNExactCompares && floatRangeNegated(op, data) {
+		return 1
+	}
 	vn1 := op.Input(0)
 	if !vn1.IsWritten() {
 		return 0

@@ -107,3 +107,35 @@ func TestBitCastSyntax(t *testing.T) {
 		t.Errorf("a numeric conversion must stay a (float) cast:\n%s", conv)
 	}
 }
+
+// comiss xmm0, xmm1 ; ja L ; mov eax, 1 ; ret ; L: xor eax, eax ; ret --
+// ja is not taken for NaN, so NaN returns 1. Ghidra drops the NaN test from
+// !NaN && !(a < b) && a != b and prints if (param_1 <= param_2), which
+// returns 0 for NaN; NaNExactCompares prints !(param_2 < param_1), true for
+// NaN.
+var comissAbove = []byte{
+	0x0f, 0x2f, 0xc1, 0x77, 0x06, 0xb8, 0x01, 0x00, 0x00, 0x00, 0xc3, 0x31, 0xc0, 0xc3, 0xcc, 0xcc,
+}
+
+func TestNaNExactDroppedTest(t *testing.T) {
+	ext := decomp.Function{Extensions: pcode.Extensions{NaNExactCompares: true}}
+	// jbe is taken for NaN and param_2 < param_1 is false for NaN: already
+	// exact, so the extension leaves it alone.
+	for _, c := range []struct {
+		name, plain, exact string
+		code               []byte
+	}{
+		{"ja", "if (param_1 <= param_2)", "if (!(param_2 < param_1))", comissAbove},
+		{"jbe", "if (param_2 < param_1)", "if (param_2 < param_1)", comissBranch},
+	} {
+		plain := decompileWith(t, c.code, decomp.Function{})
+		exact := decompileWith(t, c.code, ext)
+		t.Logf("%s plain:\n%s\nexact:\n%s", c.name, plain, exact)
+		if !strings.Contains(plain, c.plain) {
+			t.Errorf("%s: without the extension want %q as in Ghidra", c.name, c.plain)
+		}
+		if !strings.Contains(exact, c.exact) || strings.Contains(exact, "NAN(") {
+			t.Errorf("%s: with NaNExactCompares want %q and no NaN test", c.name, c.exact)
+		}
+	}
+}

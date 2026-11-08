@@ -350,9 +350,11 @@ func nanTestForComparison(floatVar *Varnode, op *PcodeOp, slot int, matchCode Op
 	case opc == matchCode:
 		vn := op.Input(1 - slot)
 		if nanCheckBackForCompare(floatVar, vn) {
-			data.OpSetOpcode(op, CPUI_COPY)
-			data.OpRemoveInput(op, 1)
-			data.OpSetInput(op, vn, 0)
+			if !nanExactOrderTest(floatVar, op, vn, matchCode, data) {
+				data.OpSetOpcode(op, CPUI_COPY)
+				data.OpRemoveInput(op, 1)
+				data.OpSetInput(op, vn, 0)
+			}
 			*count++
 		} else if nanIsAnotherNan(vn) {
 			return op.Output()
@@ -400,6 +402,190 @@ func nanTestForComparison(floatVar *Varnode, op *PcodeOp, slot int, matchCode Op
 		}
 	}
 	return nil
+}
+
+// nanExactOrderTest replaces op, a NaN test combined with vn (NaN || vn, or
+// !NaN && vn), by vn rewritten to take the value the NaN test gave for a NaN
+// operand, when Extensions.NaNExactCompares is on (beyond Ghidra). Ghidra
+// assumes no NaN and keeps vn as it is; when vn has the other value for NaN
+// the NaN case moves to the other branch (comiss; ja becomes
+// !NaN && !(a < b) && a != b, and dropping !NaN leaves an expression true for
+// NaN). Order comparisons are rewritten through their NaN-false and NaN-true
+// forms (a < b and !(b <= a) agree except on NaN); equality has no such pair,
+// so a vn that needs one changed keeps Ghidra's rewrite. A test of a value
+// that cannot be NaN is dropped as Ghidra does: nothing changes.
+func nanExactOrderTest(floatVar *Varnode, op *PcodeOp, vn *Varnode, matchCode OpCode, data *Funcdata) bool {
+	if !data.ext.NaNExactCompares || neverNaN(floatVar) {
+		return false
+	}
+	want := matchCode == CPUI_BOOL_OR // NaN || vn is true for NaN, !NaN && vn false
+	if v, ok := nanValue(vn, 0); !ok || v == want {
+		return false
+	}
+	if !nanFixable(vn, want, 0) {
+		return false
+	}
+	// A lone order comparison that must become true for NaN is negated by
+	// op itself, which Ghidra turns into a COPY, so the block keeps Ghidra's
+	// op count (conditional-execution and structuring look at it).
+	if want && isFloatOrder(vn.Def().Code()) {
+		swapped := nanSwappedOrder(vn.Def(), vn.LoneDescend() != nil, data)
+		data.OpSetOpcode(op, CPUI_BOOL_NEGATE)
+		data.OpRemoveInput(op, 1)
+		data.OpSetInput(op, swapped, 0)
+		return true
+	}
+	fixed := nanRewrite(vn, want, true, op, data, 0)
+	data.OpSetOpcode(op, CPUI_COPY)
+	data.OpRemoveInput(op, 1)
+	data.OpSetInput(op, fixed, 0)
+	return true
+}
+
+// neverNaN reports a float value that is not NaN: an integer converted to
+// float, or a constant whose bits are not a NaN.
+func neverNaN(vn *Varnode) bool {
+	if vn.IsConstant() {
+		v := vn.Offset()
+		switch vn.Size() {
+		case 4:
+			return v&0x7f800000 != 0x7f800000 || v&0x7fffff == 0
+		case 8:
+			return v&0x7ff0000000000000 != 0x7ff0000000000000 || v&0xfffffffffffff == 0
+		}
+		return false
+	}
+	return vn.IsWritten() && vn.Def().Code() == CPUI_FLOAT_INT2FLOAT
+}
+
+// nanMaxDepth bounds the boolean tree nanValue and nanRewrite walk.
+const nanMaxDepth = 4
+
+// nanValue reports the value of the boolean vn when a float operand of its
+// comparisons is NaN; ok is false when vn is not built only from float
+// comparisons, NOT, AND and OR.
+func nanValue(vn *Varnode, depth int) (val, ok bool) {
+	if depth > nanMaxDepth || !vn.IsWritten() {
+		return false, false
+	}
+	def := vn.Def()
+	switch def.Code() {
+	case CPUI_FLOAT_LESS, CPUI_FLOAT_LESSEQUAL, CPUI_FLOAT_EQUAL:
+		return false, true
+	case CPUI_FLOAT_NOTEQUAL:
+		return true, true
+	case CPUI_BOOL_NEGATE:
+		v, ok := nanValue(def.Input(0), depth+1)
+		return !v, ok
+	case CPUI_BOOL_AND, CPUI_BOOL_OR:
+		a, okA := nanValue(def.Input(0), depth+1)
+		b, okB := nanValue(def.Input(1), depth+1)
+		if def.Code() == CPUI_BOOL_AND {
+			return a && b, okA && okB
+		}
+		return a || b, okA && okB
+	}
+	return false, false
+}
+
+// nanFixable reports whether nanRewrite can give vn the value want for NaN.
+// nanRewrite changes ops in place, so it runs only after this check passes.
+func nanFixable(vn *Varnode, want bool, depth int) bool {
+	v, ok := nanValue(vn, depth)
+	if !ok || v == want {
+		return ok
+	}
+	def := vn.Def()
+	switch def.Code() {
+	case CPUI_FLOAT_LESS, CPUI_FLOAT_LESSEQUAL:
+		return true
+	case CPUI_BOOL_NEGATE:
+		in := def.Input(0)
+		return (in.IsWritten() && isFloatOrder(in.Def().Code())) || nanFixable(in, !want, depth+1)
+	case CPUI_BOOL_AND, CPUI_BOOL_OR:
+		a := nanFixable(def.Input(0), want, depth+1)
+		b := nanFixable(def.Input(1), want, depth+1)
+		if (def.Code() == CPUI_BOOL_AND) != want { // one operand is enough
+			return a || b
+		}
+		return a && b
+	}
+	return false
+}
+
+// nanRewrite returns a value equal to vn for non-NaN operands and equal to
+// want for NaN ones; the caller checked nanFixable. A NaN-false order
+// comparison a < b becomes !(b <= a), a NaN-true !(a < b) becomes b <= a, and
+// an AND or OR rewrites the fewest operands needed. An op read only by the
+// tree (and every op between it and the dropped test) is changed in place and a new op goes next to the comparison it
+// replaces, so no value lives longer or moves to another block (a copy at
+// the dropped test would keep the operands alive across it).
+func nanRewrite(vn *Varnode, want, owned bool, at *PcodeOp, data *Funcdata, depth int) *Varnode {
+	owned = owned && vn.LoneDescend() != nil
+	if v, _ := nanValue(vn, depth); v == want {
+		return vn
+	}
+	def := vn.Def()
+	switch def.Code() {
+	case CPUI_FLOAT_LESS, CPUI_FLOAT_LESSEQUAL: // NaN-false, want true
+		swapped := nanSwappedOrder(def, owned, data)
+		neg := newAuxUnaryOp(data, swapped.Def().Addr(), CPUI_BOOL_NEGATE, 1, swapped)
+		data.OpInsertAfter(neg, swapped.Def())
+		return neg.Output()
+	case CPUI_BOOL_NEGATE: // NaN-true, want false
+		in := def.Input(0)
+		if in.IsWritten() && isFloatOrder(in.Def().Code()) {
+			return nanSwappedOrder(in.Def(), owned && in.LoneDescend() != nil, data)
+		}
+		r := nanRewrite(in, !want, owned, at, data, depth+1)
+		if owned {
+			data.OpSetInput(def, r, 0)
+			return vn
+		}
+		neg := newAuxUnaryOp(data, at.Addr(), CPUI_BOOL_NEGATE, 1, r)
+		data.OpInsertBefore(neg, at)
+		return neg.Output()
+	case CPUI_BOOL_AND, CPUI_BOOL_OR:
+		a, b := def.Input(0), def.Input(1)
+		ra, rb := a, b
+		if (def.Code() == CPUI_BOOL_AND) != want {
+			if nanFixable(a, want, depth+1) {
+				ra = nanRewrite(a, want, owned, at, data, depth+1)
+			} else {
+				rb = nanRewrite(b, want, owned, at, data, depth+1)
+			}
+		} else {
+			ra = nanRewrite(a, want, owned, at, data, depth+1)
+			rb = nanRewrite(b, want, owned, at, data, depth+1)
+		}
+		if owned {
+			data.OpSetInput(def, ra, 0)
+			data.OpSetInput(def, rb, 1)
+			return vn
+		}
+		comb := newAuxBinaryOp(data, at.Addr(), def.Code(), 1, ra, rb)
+		data.OpInsertBefore(comb, at)
+		return comb.Output()
+	}
+	return nil
+}
+
+// nanSwappedOrder returns b <= a for def = a < b and b < a for a <= b: the
+// negation of def except on NaN, where both are false. def itself is changed
+// when owned (read only on the rewritten path), otherwise the new op follows it.
+func nanSwappedOrder(def *PcodeOp, owned bool, data *Funcdata) *Varnode {
+	opc := CPUI_FLOAT_LESSEQUAL
+	if def.Code() == CPUI_FLOAT_LESSEQUAL {
+		opc = CPUI_FLOAT_LESS
+	}
+	if owned {
+		data.OpSetOpcode(def, opc)
+		data.OpSwapInput(def, 0, 1)
+		return def.Output()
+	}
+	op := newAuxBinaryOp(data, def.Addr(), opc, 1, def.Input(1), def.Input(0))
+	data.OpInsertAfter(op, def)
+	return op.Output()
 }
 
 // nanCheckBackForCompare reports a boolean root produced by (or combining

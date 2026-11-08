@@ -41,8 +41,13 @@ type Extensions struct {
 	// written, !(a < b), where Ghidra swaps it to b <= a (RuleBoolNegate
 	// through get_booleanflip, and the printer's negated tokens). The two
 	// differ when an operand is NaN, so minss and comiss/jnbe code printed
-	// the NaN case taken the wrong way. For NaN tests the decompiler adds
-	// itself see decomp.Function.NaNIgnore (Ghidra's nanignore option).
+	// the NaN case taken the wrong way. It also keeps the NaN meaning of a
+	// NaN test the decompiler drops (nanignore "compare"): Ghidra replaces
+	// NaN || a < b by a < b and !NaN && !(a < b) by !(a < b), each with the
+	// other value for NaN (comiss; ja prints its NaN case on the wrong
+	// branch); the option rewrites the comparison to the NaN-free form with
+	// the dropped test's value instead (!(b <= a), b <= a). To keep every NaN
+	// test see decomp.Function.NaNIgnore (Ghidra's nanignore option).
 	NaNExactCompares bool
 
 	// BitCastSyntax prints a CAST between a float and an integer of the same
