@@ -399,6 +399,9 @@ func Build(engine *sla.Engine, cfg BuildConfig) (*Result, error) {
 		}
 	}
 	fixFlowOverrideReturns(records, summary.constSpace)
+	if cfg.Extensions.AllocaReturnStores {
+		dropAllocaReturnStores(records)
+	}
 	injectWarnings := applyInjections(records, cfg.Injections, summary.constSpace)
 	fd := pcode.NewFuncdata(resolveName(cfg.Name), cfg.Entry, summary.uniqueSpace, analysisUniqueBase, summary.constSpace)
 	fd.SetSizeLockTypes(cfg.sizeLockTypes) // before any global Symbol is resolved

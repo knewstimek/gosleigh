@@ -24,11 +24,13 @@ func NewEnhanced(prog *decomp.Program) *Enhanced {
 // Apply switches fn to the preset.
 func (e *Enhanced) Apply(fn *decomp.Function) {
 	fn.Extensions = pcode.Extensions{
-		NestedPieceTrials:  true,
-		NarrowFloatReturns: true,
-		NaNExactCompares:   true,
-		BitCastSyntax:      true,
-		FloatLoads:         true,
+		NestedPieceTrials:   true,
+		NarrowFloatReturns:  true,
+		NaNExactCompares:    true,
+		BitCastSyntax:       true,
+		FloatLoads:          true,
+		CurrentSwitchLabels: true,
+		AllocaReturnStores:  true,
 	}
 	fn.CalleeReads = e.reads
 }

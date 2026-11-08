@@ -805,15 +805,25 @@ func (m *JumpBasic) BuildLabels(fd *Funcdata, addressTable []address.Address, la
 	for notdone {
 		val := origrange.Value()
 		var switchval uint64
+		needswarning := 0 // 1: may not be properly labeled, 2: calculation failed
 		if origrange.IsReversible() { // If the current value is reversible
+			if m.Range != nil && !m.Range.Contains(val) {
+				needswarning = 1
+			}
 			sv, err := m.backup2Switch(fd, val, m.NormalVn, m.SwitchVn)
 			if err != nil {
 				switchval = JumpValueNoLabel
+				needswarning = 2
 			} else {
 				switchval = sv
 			}
 		} else {
 			switchval = JumpValueNoLabel // If can't reverse, hopefully this is the default or exit
+		}
+		if needswarning == 1 {
+			fd.warning("This code block may not be properly labeled as switch case", addressTable[len(*labels)])
+		} else if needswarning == 2 {
+			fd.warning("Calculation of case label failed", addressTable[len(*labels)])
 		}
 		*labels = append(*labels, switchval)
 		// The address table may have been truncated by the sanity check.
@@ -823,6 +833,7 @@ func (m *JumpBasic) BuildLabels(fd *Funcdata, addressTable []address.Address, la
 		notdone = origrange.Next()
 	}
 	for len(*labels) < len(addressTable) {
+		fd.warning("Bad switch case", addressTable[len(*labels)])
 		*labels = append(*labels, JumpValueNoLabel)
 	}
 }
@@ -1908,8 +1919,66 @@ func (jt *JumpTable) RecoverLabels(fd *Funcdata) {
 	if jt.origModel != nil && jt.origModel.TableSize() != 0 {
 		orig = jt.origModel
 	}
+	if fd.ext.CurrentSwitchLabels && orig != jt.jmodel && jt.currentModelRelabels(fd, orig) {
+		orig = jt.jmodel
+	}
 	jt.jmodel.BuildLabels(fd, jt.addressTable, &jt.label, orig)
 	jt.clearSavedModel()
+}
+
+// currentModelRelabels reports that the case labels should come from the
+// current model's own range instead of the flow-time one (beyond Ghidra,
+// Extensions.CurrentSwitchLabels).
+//
+// buildLabels reverse-emulates the flow-time model's values through the
+// current model's normalization path, assuming both models chose the same
+// normalized Varnode. They need not: at flow time two copies of zext(DL) can
+// keep a guard from matching the normalized "DL - 0x80" (so zext(DL), range
+// 0x80..0x8d, is the smallest), while after CSE the guard matches and the
+// normalized Varnode is the subtraction (range 0..0xd). The flow-time 0x80 is
+// then backed up as a normalized value to 0x100. Ghidra detects this (the value
+// is outside the current range and it prints "may not be properly labeled")
+// but keeps the wrong label.
+//
+// The current range is used only when it is that case and the current model,
+// emulated over its own range, rebuilds exactly the recovered address table,
+// so each current value is proven to select the same table entry.
+func (jt *JumpTable) currentModelRelabels(fd *Funcdata, orig JumpModel) bool {
+	cur, ok := jt.jmodel.(*JumpBasic)
+	if !ok || cur.Range == nil {
+		return false
+	}
+	ob, ok := orig.(*JumpBasic)
+	if !ok {
+		return false
+	}
+	origrange := ob.GetValueRange()
+	if origrange == nil || !origrange.IsReversible() {
+		return false
+	}
+	outside := false
+	for notdone := origrange.InitializeForReading(); notdone; notdone = origrange.Next() {
+		if !cur.Range.Contains(origrange.Value()) {
+			outside = true
+			break
+		}
+	}
+	if !outside {
+		return false
+	}
+	failMsg := cur.emulateFailMsg
+	var rebuilt []address.Address
+	cur.BuildAddresses(fd, jt.indirect, &rebuilt, nil, nil)
+	cur.emulateFailMsg = failMsg
+	if len(rebuilt) != len(jt.addressTable) {
+		return false
+	}
+	for i := range rebuilt {
+		if rebuilt[i].Offset != jt.addressTable[i].Offset {
+			return false
+		}
+	}
+	return true
 }
 
 // CheckForMultistage reports whether this table still needs another

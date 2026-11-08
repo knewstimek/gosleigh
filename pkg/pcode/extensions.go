@@ -65,8 +65,21 @@ type Extensions struct {
 	// a float parameter slot) stays as it is.
 	FloatLoads bool
 
+	// CurrentSwitchLabels takes the case labels of a jump table from the
+	// current model's normalized range when the flow-time model normalized a
+	// different Varnode. Ghidra reverse-emulates the flow-time values through
+	// the current path regardless, so a byte switch "lea eax,[rsi-0x80]"
+	// printed case 0x100 for 0x80 (with "may not be properly labeled"). The
+	// current range is used only when emulating it rebuilds the same address
+	// table; see JumpTable.currentModelRelabels.
+	CurrentSwitchLabels bool
 
-
+	// AllocaReturnStores drops each call's return address store in a function
+	// that moves its stack pointer by a register (alloca, "sub rsp, rax").
+	// There Ghidra cannot place the store in the frame and prints one
+	// "*(undefined8 *)((longlong)&local_10 + -param_1) = <return address>;" per call.
+	// Other functions are not changed; see bridge.dropAllocaReturnStores.
+	AllocaReturnStores bool
 }
 
 // isFloatOrder reports a float order comparison, whose negation is not the
