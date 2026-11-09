@@ -17,10 +17,14 @@ const (
 )
 
 // slotRead is what a function reads of one parameter location before writing
-// it: the widest read, and whether it was used as a float.
+// it: the widest read, whether it was used as a float, and for an XMM
+// register the widest scalar (4- or 8-byte) read. A whole-register read
+// (roundsd as a user op, a 16-byte store) shows the parameter exists but not
+// its size.
 type slotRead struct {
-	size  int32
-	float bool
+	size   int32
+	float  bool
+	scalar int32
 }
 
 // inferredInputs is the CalleeInputs answer for one entry.
@@ -167,7 +171,16 @@ func (c *CalleeReads) scanInputs(entry uint64) *inferredInputs {
 						work = append(work, q)
 					}
 				case pcode.CPUI_BRANCHIND:
-					return fail // a switch or a computed jump: paths not followed
+					// With RSP back at its entry value this is a tail jump
+					// (virtual dispatch: jmp [vtable+n]) and ends the path,
+					// provided no parameter register is left undecided for the
+					// unknown target. Otherwise a switch or computed jump whose
+					// paths are not followed.
+					if p.spOK&1 == 0 || p.sp != 0 || !c.passOn(&p, op, &reg) {
+						return fail
+					}
+					end = true
+					break ops
 				case pcode.CPUI_RETURN:
 					end = true
 					break ops
@@ -381,6 +394,9 @@ func widen(r *slotRead, size int32, float bool) {
 	if size > r.size {
 		r.size = size
 	}
+	if float && (size == 4 || size == 8) && size > r.scalar {
+		r.scalar = size
+	}
 	r.float = r.float || float
 }
 
@@ -393,12 +409,22 @@ func (c *CalleeReads) buildInputs(reg [8]slotRead, stack [stackSlots]slotRead, m
 			lastStack = s
 		}
 	}
-	// Only a function with stack parameters is locked: a register-only one
-	// is already served by the read and not-input hints, which leave each
-	// argument's size to the caller (a lock sized by a 64-bit register copy
-	// prints casts). A function homing R9 may be varargs: its parameter count
-	// is not knowable.
-	if lastStack < 0 || mayBeVarargs {
+	// Locked: a function with stack parameters, or one whose parameters are
+	// all floats. Other register-only functions are already served by the
+	// read and not-input hints, which leave each argument's size to the caller
+	// (an integer lock sized by a 64-bit register copy prints casts); a float
+	// size comes from a scalar operation and is exact, and the lock fixes a
+	// double argument the caller's heritage split to 4 bytes (SUB84(d, 0)).
+	// A function homing R9 may be varargs: its parameter count is not knowable.
+	floatsOnly := false
+	for s := 0; s < 4; s++ {
+		if reg[s].size != 0 {
+			floatsOnly = false
+			break
+		}
+		floatsOnly = floatsOnly || reg[s+4].size != 0
+	}
+	if (lastStack < 0 && !floatsOnly) || mayBeVarargs {
 		return res
 	}
 	lastReg := -1
@@ -409,7 +435,7 @@ func (c *CalleeReads) buildInputs(reg [8]slotRead, stack [stackSlots]slotRead, m
 		if reg[s].size != 0 || reg[s+4].size != 0 {
 			lastReg = s
 		}
-		if reg[s+4].size != 0 && reg[s+4].size != 4 && reg[s+4].size != 8 {
+		if reg[s+4].size != 0 && reg[s+4].scalar == 0 {
 			return res // an XMM parameter never used as a scalar
 		}
 	}
@@ -421,6 +447,7 @@ func (c *CalleeReads) buildInputs(reg [8]slotRead, stack [stackSlots]slotRead, m
 		k, r := s, reg[s]
 		if reg[s+4].size != 0 {
 			k, r = s+4, reg[s+4]
+			r.size = r.scalar
 		} else if r.size == 0 {
 			r.size = 8 // unused slot before a used one
 		}

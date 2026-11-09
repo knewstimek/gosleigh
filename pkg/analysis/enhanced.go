@@ -31,6 +31,7 @@ func (e *Enhanced) Apply(fn *decomp.Function) {
 		FloatLoads:          true,
 		CurrentSwitchLabels: true,
 		AllocaReturnStores:  true,
+		NoFloatAddresses:    true,
 	}
 	fn.CalleeReads = e.reads
 }

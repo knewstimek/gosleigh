@@ -379,6 +379,13 @@ func inferPropagateTypeEdge(data *Funcdata, tf *TypeFactory, op *PcodeOp, inslot
 	if newtype == nil {
 		return false
 	}
+	// Beyond Ghidra (Extensions.NoFloatAddresses): a value that forms an
+	// address is not a float, however specific the float type is. A stack slot
+	// first holding `this` and later reused as a double temporary otherwise
+	// types `this` as double across the COPY into the slot.
+	if data != nil && data.ext.NoFloatAddresses && newtype.Metatype() == TYPE_FLOAT && formsAddress(outvn, 3) {
+		return false
+	}
 	// C++ compares against outvn->getTempType(), which buildLocaltypes always
 	// seeds. A Varnode reached across an edge but not seeded (e.g. one outside
 	// the loc-set the seeding pass iterated) has a nil tempType; treat nil as the

@@ -82,6 +82,32 @@ type Extensions struct {
 	// "*(undefined8 *)((longlong)&local_10 + -param_1) = <return address>;" per call.
 	// Other functions are not changed; see bridge.dropAllocaReturnStores.
 	AllocaReturnStores bool
+
+	// NoFloatAddresses keeps a float type from propagating into a value that
+	// forms an address (a LOAD/STORE address, or the base of the addition
+	// computing one). Ghidra ranks float above integer, so a stack slot first
+	// holding `this` (homed RCX) and later reused as a double temporary types
+	// `this` as double across the COPY into the slot, printing every field
+	// access as bit_cast<longlong>(param_1) + off.
+	NoFloatAddresses bool
+}
+
+// formsAddress reports a Varnode used as a LOAD or STORE address, directly or
+// through up to depth additions, pointer arithmetic or copies.
+func formsAddress(vn *Varnode, depth int) bool {
+	for _, op := range vn.descend {
+		switch op.Code() {
+		case CPUI_LOAD, CPUI_STORE:
+			if op.NumInput() > 1 && op.Input(1) == vn {
+				return true
+			}
+		case CPUI_INT_ADD, CPUI_PTRADD, CPUI_PTRSUB, CPUI_COPY:
+			if depth > 0 && op.Output() != nil && formsAddress(op.Output(), depth-1) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // isFloatOrder reports a float order comparison, whose negation is not the

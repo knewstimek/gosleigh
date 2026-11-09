@@ -35,8 +35,11 @@ const (
 //
 // A return path gives a size when XMM0's lane is sized, was not read again
 // after that write (a void function's float scratch in XMM0 feeds a later
-// operation; a result is written last) and RAX was not written after it; a path where RAX was written after XMM0 (cvttss2si eax,
-// xmm0; an integer result) makes the whole answer 0. The result is the one
+// operation; a result is written last) and RAX was not written after it; a
+// path where RAX was written after XMM0 (cvttss2si eax, xmm0; an integer
+// result) makes the whole answer 0. A path that never writes XMM0 returns
+// the caller's value unchanged (floor of a NaN) and says nothing, whatever
+// scratch it leaves in RAX. The result is the one
 // size the sized paths agree on; 0.0-only paths agree with any size, and no
 // sized path, two sizes, an indirect jump on every path or no return within
 // the limit give 0.
@@ -152,8 +155,8 @@ func (c *CalleeReads) scanReturn(at address.Address, depth int) int32 {
 				case pcode.CPUI_BRANCHIND:
 					break path
 				case pcode.CPUI_RETURN:
-					if p.raxSeq > p.xmmSeq {
-						return 0 // an integer result on this path
+					if p.xmmSeq != unset && p.raxSeq > p.xmmSeq {
+						return 0 // XMM0 then RAX written: an integer result (cvttss2si eax, xmm0)
 					}
 					if l := p.lane[0]; l > 0 && !p.xmmRead {
 						if size != 0 && size != l {

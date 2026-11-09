@@ -90,6 +90,34 @@ func TestCurrentSwitchLabels(t *testing.T) {
 	}
 }
 
+// this (RCX) is homed and used as a base; the home slot's address is passed
+// on (so it is one variable) and the slot is then read as a double:
+//
+//	   mov [rsp+8], rcx ; sub rsp, 0x28 ; mov eax, [rcx+0xd8] ; mov [rdx], eax
+//	   lea rcx, [rsp+0x30] ; call g ; movsd xmm0, [rsp+0x30] ; addsd xmm0, xmm0
+//	   add rsp, 0x28 ; ret
+//	g: ret
+//
+// Ghidra 12's core types param_1 double (checked on the same pattern in a real
+// binary with the C++ decompiler).
+func TestNoFloatAddresses(t *testing.T) {
+	code := []byte{
+		0x48, 0x89, 0x4c, 0x24, 0x08, 0x48, 0x83, 0xec, 0x28, 0x8b, 0x81, 0xd8, 0x00, 0x00, 0x00,
+		0x89, 0x02, 0x48, 0x8d, 0x4c, 0x24, 0x30, 0xe8, 0x10, 0x00, 0x00, 0x00,
+		0xf2, 0x0f, 0x10, 0x44, 0x24, 0x30, 0xf2, 0x0f, 0x58, 0xc0, 0x48, 0x83, 0xc4, 0x28, 0xc3, 0xcc, 0xc3,
+	}
+	plain := decompileX64Fn(t, code, decomp.Function{})
+	t.Logf("plain:\n%s", plain)
+	ext := decompileX64Fn(t, code, decomp.Function{Extensions: pcode.Extensions{NoFloatAddresses: true}})
+	t.Logf("extension:\n%s", ext)
+	if !strings.Contains(plain, "double param_1") {
+		t.Errorf("without the extension param_1 should be double as in Ghidra")
+	}
+	if strings.Contains(ext, "double param_1") || strings.Contains(ext, "bit_cast<longlong>(param_1)") {
+		t.Errorf("with NoFloatAddresses param_1 should stay an integer")
+	}
+}
+
 // Calls after a dynamic stack allocation:
 //
 //	   push rbp
