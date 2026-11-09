@@ -398,7 +398,7 @@ func readSpec(slaPath, pspecPath, cspecPath string) (decomp.Spec, error) {
 func peSections(secs []loader.PESection) []decomp.Section {
 	out := make([]decomp.Section, len(secs))
 	for i, s := range secs {
-		out[i] = decomp.Section{Name: s.Name, VMA: s.VMA, Data: s.Bytes}
+		out[i] = decomp.Section{Name: s.Name, VMA: s.VMA, Data: s.Bytes, Exec: s.Exec}
 	}
 	return out
 }

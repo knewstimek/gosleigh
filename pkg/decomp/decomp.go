@@ -60,6 +60,9 @@ type Section struct {
 	Name string
 	VMA  uint64
 	Data []byte
+	// Exec marks a section holding code. Optional: when no section is
+	// marked, every section counts as code (see Program.IsExec).
+	Exec bool
 }
 
 // Program is a spec plus a loaded image, ready to decompile functions. Each
@@ -69,6 +72,8 @@ type Program struct {
 	sections []loader.PESection
 	code     *address.Space
 	tracked  []sla.PspecContextEntry
+	// execKnown: some section is marked Exec (IsExec).
+	execKnown bool
 }
 
 // Load validates spec and maps sections. The sections are retained, not
@@ -89,12 +94,27 @@ func Load(spec Spec, sections []Section) (*Program, error) {
 	}
 	p := &Program{spec: spec, tracked: pspec.TrackedSet}
 	for _, s := range sections {
-		p.sections = append(p.sections, loader.PESection{Name: s.Name, VMA: s.VMA, Bytes: s.Data})
+		p.sections = append(p.sections, loader.PESection{Name: s.Name, VMA: s.VMA, Bytes: s.Data, Exec: s.Exec})
+		p.execKnown = p.execKnown || s.Exec
 	}
 	if p.code, err = p.builder(0).CodeSpace(); err != nil {
 		return nil, fmt.Errorf("decomp: %w", err)
 	}
 	return p, nil
+}
+
+// IsExec reports whether addr lies in a section holding code. Without any
+// section marked Exec it is true for every loaded address, so a host that
+// does not mark sections loses nothing. Analyses that read a callee's
+// instructions use it to skip a call through an import slot, whose bytes are
+// a pointer, not code.
+func (p *Program) IsExec(addr uint64) bool {
+	for _, s := range p.sections {
+		if addr >= s.VMA && addr-s.VMA < uint64(len(s.Bytes)) {
+			return s.Exec || !p.execKnown
+		}
+	}
+	return false
 }
 
 // CodeSpace is the default code space every decompilation of p addresses

@@ -208,6 +208,12 @@ func (fc *FuncCallSpecs) checkInputTrialUse(data *Funcdata, aliascheck *aliasChe
 			if !trial.IsActive() && !trial.IsDefinitelyNotUsed() && fc.calleeReadsTrial(trial) {
 				trial.markRescued()
 			}
+			// Beyond Ghidra (HostCalleeNotInputs): a register the callee
+			// never takes from its caller is not an argument, even though it
+			// is live at the call.
+			if trial.IsActive() && fc.calleeNotInputTrial(trial) {
+				trial.MarkInactive()
+			}
 		}
 		if trial.IsDefinitelyNotUsed() { // free up the dataflow
 			data.OpSetInput(fc.op, data.NewConstant(vn.Size(), 0), slot)
@@ -236,9 +242,11 @@ func (fc *FuncCallSpecs) rescueNestedPieceTrial(data *Funcdata, trial *ParamTria
 
 // yieldRescuedTrials gives a parameter slot back to Ghidra's choice: a
 // rescued trial is dropped when a trial Ghidra itself accepted shares its
-// slot (x64: RDX and XMM1 are one parameter slot). So the extension only fills
-// a slot Ghidra left empty and never changes an argument Ghidra recovered,
-// e.g. a pointer in RDX next to a vector left in XMM1.
+// slot (x64: RDX and XMM1 are one parameter slot). So the extension fills a
+// slot Ghidra left empty and keeps an argument Ghidra recovered, e.g. a
+// pointer in RDX next to a vector left in XMM1 -- unless the callee reads the
+// rescued register before writing it and not Ghidra's, in which case
+// Ghidra's trial is the one dropped.
 func (fc *FuncCallSpecs) yieldRescuedTrials(data *Funcdata) {
 	active := fc.GetActiveInput()
 	model := fc.Model()
@@ -261,6 +269,13 @@ func (fc *FuncCallSpecs) yieldRescuedTrials(data *Funcdata) {
 			}
 			oe := model.InputParams.findEntry(other.GetAddress(), other.GetSize(), true)
 			if oe != nil && groupsOverlap(re, oe) {
+				// The callee reads the rescued register before writing it and
+				// not Ghidra's: Ghidra's is only live at the call (a thunk
+				// using xmm0 as scratch while passing rcx on), so it gives way.
+				if fc.calleeReadsTrial(rescued) && !fc.calleeReadsTrial(other) {
+					other.MarkInactive()
+					continue
+				}
 				rescued.unrescue()
 				slot := int(rescued.GetSlot())
 				if rescued.IsDefinitelyNotUsed() && slot < fc.op.NumInput() {
@@ -283,6 +298,22 @@ func (fc *FuncCallSpecs) calleeReadsTrial(trial *ParamTrial) bool {
 	lo, hi := ta.Offset, ta.Offset+uint64(trial.GetSize())
 	for _, r := range fc.calleeReads {
 		if r.Space == ta.Space.Name && r.Offset < hi && lo < r.Offset+uint64(r.Size) {
+			return true
+		}
+	}
+	return false
+}
+
+// calleeNotInputTrial reports whether the trial's storage lies inside a
+// register the callee provably does not take from its caller.
+func (fc *FuncCallSpecs) calleeNotInputTrial(trial *ParamTrial) bool {
+	ta := trial.GetAddress()
+	if ta.Space == nil {
+		return false
+	}
+	lo, hi := ta.Offset, ta.Offset+uint64(trial.GetSize())
+	for _, r := range fc.calleeNotInputs {
+		if r.Space == ta.Space.Name && r.Offset <= lo && hi <= r.Offset+uint64(r.Size) {
 			return true
 		}
 	}

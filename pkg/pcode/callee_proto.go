@@ -295,6 +295,17 @@ func (fd *Funcdata) ApplyHostSelfPrototype(model *ProtoModel) {
 	if ok && hf.Inline {
 		fd.warningHeader("This is an inlined function")
 	}
+	// Beyond Ghidra (HostCalleeReturn): the function's own float return when
+	// the host does not lock it, as for a callee (applyCalleeReturnHint).
+	if !ok || !hf.OutputLocked {
+		base := &hf
+		if !ok {
+			base = &HostFunction{ExtraPop: ExtrapopUnknown}
+		}
+		if h, good := fd.floatReturnProto(fd.baseAddr, base); good {
+			hf, ok = *h, true
+		}
+	}
 	if !ok {
 		return
 	}

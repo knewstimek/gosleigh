@@ -53,6 +53,8 @@ type PESection struct {
 	Name  string
 	VMA   uint64
 	Bytes []byte
+	// Exec is IMAGE_SCN_MEM_EXECUTE: the section holds code.
+	Exec bool
 }
 
 // peImageBase returns the ImageBase from a PE file's optional header,
@@ -81,6 +83,9 @@ func peImageBase(f *pe.File) (uint64, error) {
 // raw on-disk size, matching the actual in-memory footprint (raw data may be
 // zero-padded up to FileAlignment). No Ghidra Java loader exists in ghidra-ref;
 // this follows the MS PE/COFF specification directly.
+// peScnMemExecute is IMAGE_SCN_MEM_EXECUTE (PE/COFF section characteristics).
+const peScnMemExecute = 0x20000000
+
 func LoadPESections(path string, names ...string) ([]PESection, error) {
 	f, err := pe.Open(path)
 	if err != nil {
@@ -114,6 +119,7 @@ func LoadPESections(path string, names ...string) ([]PESection, error) {
 			Name:  sec.Name,
 			VMA:   imageBase + uint64(sec.VirtualAddress),
 			Bytes: data,
+			Exec:  sec.Characteristics&peScnMemExecute != 0,
 		})
 	}
 

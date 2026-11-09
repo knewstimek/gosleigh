@@ -60,7 +60,9 @@ int FUN_140001000(int param_1, int param_2) {
   are embedded. Another architecture can be loaded by filling `decomp.Spec` with its compiled
   files, but only x86/x64 are measured.
 - `decomp.Load(spec, sections)` maps the image once; each `Program.Decompile` call builds a fresh
-  engine over the shared `.sla` decode.
+  engine over the shared `.sla` decode. Mark code sections with `Section.Exec` (PE
+  `IMAGE_SCN_MEM_EXECUTE`, as `loader.LoadPESections` does): the `analysis` preset then never
+  reads an import slot's bytes as a callee's code.
 - `decomp.Function` carries what the host knows, as Ghidra's host does for a decompile request:
   a `pcode.HostScope` for callee names, prototypes, global data and external references, flow
   overrides (tail calls), tracked register values, and named and typed stack locals. Types are

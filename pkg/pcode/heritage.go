@@ -90,8 +90,10 @@ func (h *Heritage) guardCalls(sp *address.Space, offset uint64, size int32) {
 			continue
 		}
 		op := fc.op
-		// Skip a range the call already assigns as its output.
-		if out := op.Output(); out != nil && out.Addr() == addr && out.Size() == size {
+		// Skip a range the call already assigns as its output (beyond Ghidra:
+		// unless the lock came from the callee return hint and the callee
+		// reads the register, see keepsInputAtOutput).
+		if out := op.Output(); out != nil && out.Addr() == addr && out.Size() == size && !fc.keepsInputAtOutput(addr, size) {
 			continue
 		}
 		off := offset

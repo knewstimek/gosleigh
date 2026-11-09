@@ -55,14 +55,21 @@ type CalleeReads struct {
 	// rax, xmm0 are the return registers' offsets (retRegsOK when found);
 	// returns caches CalleeFloatReturn.
 	rax, xmm0 uint64
+	xmmBase   [16]uint64 // XMM0..XMM15 offsets, for CalleeFloatReturn
 	retRegsOK bool
 	returns   map[uint64]int32
 	cache     map[uint64][]pcode.HostStorage
+	// params are the register parameter slots and notInputs caches
+	// CalleeNotInputs.
+	params    []paramReg
+	notInputs map[uint64][]pcode.HostStorage
+	homes     map[uint64][]homeStore // home-area stores of the entry path, per entry
 }
 
 // NewCalleeReads returns a CalleeReads over prog's image.
 func NewCalleeReads(prog *decomp.Program) *CalleeReads {
-	return &CalleeReads{prog: prog, cache: map[uint64][]pcode.HostStorage{}, returns: map[uint64]int32{}}
+	return &CalleeReads{prog: prog, cache: map[uint64][]pcode.HostStorage{}, returns: map[uint64]int32{},
+		notInputs: map[uint64][]pcode.HostStorage{}, homes: map[uint64][]homeStore{}}
 }
 
 // CalleeReadsBeforeWrite implements pcode.HostCalleeReads.
@@ -72,11 +79,52 @@ func (c *CalleeReads) CalleeReadsBeforeWrite(entry address.Address) []pcode.Host
 	if r, ok := c.cache[entry.Offset]; ok {
 		return r
 	}
-	if !c.ensureEngine(entry.Offset) {
+	if !c.prog.IsExec(entry.Offset) || !c.ensureEngine(entry.Offset) {
 		return nil
 	}
-	r := c.scanReads(address.Address{Space: c.code, Offset: entry.Offset})
-	c.cache[entry.Offset] = r
+	return c.reads(entry.Offset)
+}
+
+// reads is CalleeReadsBeforeWrite under c.mu, caching the home-area stores
+// of the same scan for CalleeNotInputs.
+func (c *CalleeReads) reads(entry uint64) []pcode.HostStorage {
+	if r, ok := c.cache[entry]; ok {
+		return r
+	}
+	r, homes := c.scanReads(address.Address{Space: c.code, Offset: entry})
+	r = c.addHomedRegs(r, homes)
+	c.cache[entry], c.homes[entry] = r, homes
+	return r
+}
+
+// addHomedRegs counts homed parameter registers as read. A homed XMM register
+// always counts (movsd [rsp+8], xmm0: a double parameter). A homed integer
+// register counts only when R9 is not homed: a varargs function homes the
+// variadic slots up to the last one (R9) whatever it was passed, so there
+// homing is no evidence (counting it gave junk arguments to varargs calls),
+// and a fixed-parameter function homing all four is left without it.
+func (c *CalleeReads) addHomedRegs(r []pcode.HostStorage, homes []homeStore) []pcode.HostStorage {
+	const slots = 4
+	if len(c.params) < 2*slots {
+		return r
+	}
+	var homed [2 * slots]bool // c.params order: four integer, four XMM
+	for _, h := range homes {
+		s := int(h.disp/8) - 1
+		if h.disp%8 != 0 || s < 0 || s >= slots {
+			continue
+		}
+		for _, k := range []int{s, s + slots} {
+			if c.params[k].off == h.reg {
+				homed[k] = true
+			}
+		}
+	}
+	for k, ok := range homed {
+		if ok && (k >= slots || !homed[slots-1]) {
+			r = appendStorage(r, pcode.HostStorage{Space: "register", Offset: c.params[k].off, Size: int32(c.params[k].size)})
+		}
+	}
 	return r
 }
 
@@ -93,13 +141,25 @@ func (c *CalleeReads) ensureEngine(entry uint64) bool {
 	c.sp, c.spOK = registerOffset(engine, "RSP")
 	rax, okA := registerOffset(engine, "RAX")
 	xmm0, okX := registerOffset(engine, "XMM0")
-	c.rax, c.xmm0, c.retRegsOK = rax, xmm0, okA && okX
+	c.rax, c.xmm0 = rax, xmm0
+	c.retRegsOK = okA && okX && c.findXMM()
+	c.findParams()
 	return true
 }
 
+// homeStore is a register stored to the caller's home area at disp (8..0x20)
+// on the entry path before the function wrote it: MSVC homes a parameter
+// register into its own slot, the integer or the XMM register the slot is
+// passed in.
+type homeStore struct {
+	disp uint64
+	reg  uint64
+}
+
 // scanReads walks the entry path and returns the register bytes read before
-// written, merged into ranges.
-func (c *CalleeReads) scanReads(at address.Address) []pcode.HostStorage {
+// written, merged into ranges, and the parameter registers it homes.
+func (c *CalleeReads) scanReads(at address.Address) ([]pcode.HostStorage, []homeStore) {
+	var homes []homeStore
 	written := map[uint64]bool{}
 	read := map[uint64]bool{}
 	seen := map[uint64]bool{}
@@ -113,7 +173,8 @@ func (c *CalleeReads) scanReads(at address.Address) []pcode.HostStorage {
 			break
 		}
 		next, stop := tr.Next, false
-		homed := c.homingCopies(tr.Ops, written, spCopies)
+		homed, h := c.homingCopies(tr.Ops, written, spCopies)
+		homes = append(homes, h...)
 	ops:
 		for i, op := range tr.Ops {
 			if homed[i] {
@@ -159,7 +220,7 @@ func (c *CalleeReads) scanReads(at address.Address) []pcode.HostStorage {
 			delete(read, b)
 		}
 	}
-	return mergeBytes(read)
+	return mergeBytes(read), homes
 }
 
 // homingCopies marks the ops of one instruction that store a register to
@@ -167,10 +228,11 @@ func (c *CalleeReads) scanReads(at address.Address) []pcode.HostStorage {
 // before it moves or through a register holding the entry RSP: the STORE and
 // the COPY of the register into the temporary it stores (Sleigh: tmp = 8 +
 // RSP; val = RCX; *tmp = val).
-func (c *CalleeReads) homingCopies(ops []pcode.RawOp, written, spCopies map[uint64]bool) map[int]bool {
+func (c *CalleeReads) homingCopies(ops []pcode.RawOp, written, spCopies map[uint64]bool) (map[int]bool, []homeStore) {
 	if !c.spOK || (written[c.sp] && len(spCopies) == 0) {
-		return nil
+		return nil, nil
 	}
+	var homes []homeStore
 	// RSP itself counts while it has its entry value; a copy keeps that value
 	// after RSP moves (mov r11, rsp ... sub rsp, n ... mov [r11+0x18], r8).
 	isSP := func(v pcode.VarnodeData) bool {
@@ -205,12 +267,17 @@ func (c *CalleeReads) homingCopies(ops []pcode.RawOp, written, spCopies map[uint
 				out = map[int]bool{}
 			}
 			out[i] = true
+			src := val
 			if isCopy {
 				out[cp] = true
+				src = ops[cp].Inputs[0]
+			}
+			if !written[src.Offset] {
+				homes = append(homes, homeStore{k, src.Offset})
 			}
 		}
 	}
-	return out
+	return out, homes
 }
 
 // noteSPCopy keeps spCopies current for an op writing a register: a copy of

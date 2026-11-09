@@ -52,6 +52,12 @@ type FuncCallSpecs struct {
 	// calleeReads is the read-before-write hint for the callee (beyond
 	// Ghidra, see HostCalleeReads); nil without one.
 	calleeReads []HostStorage
+	// calleeNotInputs are registers the callee provably does not take from
+	// the caller (beyond Ghidra, see HostCalleeNotInputs).
+	calleeNotInputs []HostStorage
+	// returnHinted: the output lock came from the callee return hint
+	// (applyCalleeReturnHint), not the host.
+	returnHinted bool
 	// lockedIn / lockedOut are the callee's locked prototype slots (host
 	// prototype with typelocked parameters / return), resolved to storage.
 	// C++ parity: the ProtoParameters of a locked FuncProto (ProtoStoreSymbol).
@@ -96,6 +102,17 @@ type HostCalleeReads interface {
 // as Ghidra's Java side would after committing the callee's prototype.
 type HostCalleeReturn interface {
 	CalleeFloatReturn(entry address.Address) int32
+}
+
+// HostCalleeNotInputs is an optional extension of a HostCalleeReads source
+// (pkg/analysis; beyond Ghidra): register storage the function at entry
+// provably does not take from its caller (every path writes it before
+// reading it or returns without reading it). The core drops an argument
+// trial Ghidra accepted in such storage -- a register merely live at the call,
+// such as RCX left holding a class pointer before "call f(xmm0)" -- as Ghidra's
+// Java side would after committing the callee's prototype.
+type HostCalleeNotInputs interface {
+	CalleeNotInputs(entry address.Address) []HostStorage
 }
 
 // HostFunction is what the host reports about a function: its display name
@@ -180,6 +197,9 @@ func newFuncCallSpecs(fd *Funcdata, op *PcodeOp) *FuncCallSpecs {
 			fc.entryAddress = in0.Addr()
 			if fd != nil && fd.calleeReads != nil {
 				fc.calleeReads = fd.calleeReads.CalleeReadsBeforeWrite(fc.entryAddress)
+				if ni, ok := fd.calleeReads.(HostCalleeNotInputs); ok {
+					fc.calleeNotInputs = ni.CalleeNotInputs(fc.entryAddress)
+				}
 			}
 			if fd != nil && fd.hostScope != nil {
 				if hf, ok := fd.queryHostFunction(fc.entryAddress); ok {
@@ -187,9 +207,6 @@ func newFuncCallSpecs(fd *Funcdata, op *PcodeOp) *FuncCallSpecs {
 					fc.hostProto = &hf
 				}
 
-			}
-			if fd != nil {
-				fc.applyCalleeReturnHint(fd)
 			}
 		}
 	}

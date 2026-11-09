@@ -1,5 +1,7 @@
 package pcode
 
+import "github.com/knewstimek/gosleigh/pkg/address"
+
 // Extensions switches on core behavior beyond Ghidra. The zero value is the
 // plain Ghidra port; every field is opt-in and listed in DIFFERENCES.md.
 type Extensions struct {
@@ -101,27 +103,60 @@ func (fd *Funcdata) Extensions() Extensions { return fd.ext }
 // applyCalleeReturnHint locks the callee's return to the float the hint
 // source reports, when the host does not lock it (beyond Ghidra, see
 // HostCalleeReturn). The extrapop comes from the model, as for any host
-// prototype without one.
+// prototype without one. It runs in ActionDefaultParams, where the default
+// model the storage is assigned from is set; at call-spec construction it may
+// not be yet (assignCodeProtoStorage then fails and the hint was lost).
 func (fc *FuncCallSpecs) applyCalleeReturnHint(fd *Funcdata) {
-	r, ok := fd.calleeReads.(HostCalleeReturn)
-	if !ok || (fc.hostProto != nil && fc.hostProto.OutputLocked) {
+	if fc.entryAddress.Space == nil || (fc.hostProto != nil && fc.hostProto.OutputLocked) {
 		return
 	}
-	size := r.CalleeFloatReturn(fc.entryAddress)
-	if size != 4 && size != 8 {
-		return
-	}
-	hf := HostFunction{ExtraPop: ExtrapopUnknown}
+	base := &HostFunction{ExtraPop: ExtrapopUnknown}
 	if fc.hostProto != nil {
-		hf = *fc.hostProto
+		base = fc.hostProto
+	}
+	if assigned, good := fd.floatReturnProto(fc.entryAddress, base); good {
+		fc.hostProto = assigned
+		fc.returnHinted = true
+	}
+}
+
+// floatReturnProto is base with its return locked to the float the hint
+// source reports for the function at entry (beyond Ghidra, HostCalleeReturn),
+// storage assigned from the model; false without a hint or a float return.
+func (fd *Funcdata) floatReturnProto(entry address.Address, base *HostFunction) (*HostFunction, bool) {
+	r, ok := fd.calleeReads.(HostCalleeReturn)
+	if !ok {
+		return nil, false
+	}
+	size := r.CalleeFloatReturn(entry)
+	if size != 4 && size != 8 {
+		return nil, false
 	}
 	name := "float"
 	if size == 8 {
 		name = "double"
 	}
+	hf := *base
 	hf.OutputLocked = true
 	hf.Output = &HostParam{Size: size, Type: ResolveHostType(&HostTypeDesc{Name: name, Meta: "float", Size: size})}
-	if assigned, good := fd.assignCodeProtoStorage(&hf); good {
-		fc.hostProto = assigned
+	return fd.assignCodeProtoStorage(&hf)
+}
+
+// keepsInputAtOutput reports that heritage should still try the call's
+// output range as an input (beyond Ghidra): the output was locked by
+// applyCalleeReturnHint and the callee reads that register before writing
+// it ("float f(float)" both in XMM0). Heritage::guardCalls skips the exact
+// output range; with Ghidra's Java side the whole prototype is committed and
+// the input comes from it, but the hint locks only the return.
+func (fc *FuncCallSpecs) keepsInputAtOutput(addr address.Address, size int32) bool {
+	if !fc.returnHinted || addr.Space == nil {
+		return false
 	}
+	lo, hi := addr.Offset, addr.Offset+uint64(size)
+	for _, r := range fc.calleeReads {
+		if r.Space == addr.Space.Name && r.Offset < hi && lo < r.Offset+uint64(r.Size) {
+			return true
+		}
+	}
+	return false
 }
