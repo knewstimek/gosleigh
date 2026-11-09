@@ -49,6 +49,12 @@ func (c *CalleeReads) CalleeNotInputs(entry address.Address) []pcode.HostStorage
 	r := c.scanNotInputs(address.Address{Space: c.code, Offset: entry.Offset})
 	c.reads(entry.Offset)
 	r = c.addOtherSlotRegs(r, c.homes[entry.Offset])
+	// Stack slots past the last one any path reads are not inputs (needs the
+	// full-path scan of CalleeInputs; not for a possible varargs function).
+	if in := c.inputsOf(entry.Offset); in.complete && !in.mayBeVarargs {
+		from := uint64(stackParamBase + 8*(in.lastStack+1))
+		r = append(r, pcode.HostStorage{Space: "stack", Offset: from, Size: int32(stackParamBase + 8*stackSlots - int(from))})
+	}
 	c.notInputs[entry.Offset] = r
 	return r
 }

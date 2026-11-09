@@ -85,6 +85,9 @@ type ExprFragment struct {
 	// the same associative operator. C++ parity: PrintLanguage::parentheses,
 	// OpToken::hiddenfunction case.
 	hidden bool
+	// keepGroup parenthesizes the operand even as the same associative
+	// operator as its parent (a non-associative float operation).
+	keepGroup bool
 }
 
 // fragKind is OpToken::tokentype for the structured fragment forms.
@@ -634,7 +637,7 @@ func (pl *PrintLanguage) binaryChild(child ExprFragment, parentOp string, parent
 	case child.Precedence > parentPrec:
 		paren = false
 	default:
-		paren = child.hidden || !(child.op == parentOp && associativeBinaryOps[parentOp])
+		paren = child.hidden || child.keepGroup || !(child.op == parentOp && associativeBinaryOps[parentOp])
 	}
 	if paren {
 		return "(" + child.Text + ")", true

@@ -118,6 +118,124 @@ func TestNoFloatAddresses(t *testing.T) {
 	}
 }
 
+// Two indirect calls share an outgoing stack slot: the first gets 8 bytes
+// there, the second only a byte.
+//
+//	sub rsp, 0x38 ; mov rbx, rcx ; mov [rsp+0x20], rdx ; (ecx..r9d = 1..4) ; call [rbx]
+//	mov byte [rsp+0x20], 3 ; (ecx..r9d = 1..4) ; call [rbx+8] ; add rsp, 0x38 ; ret
+func TestStaleStackArgBytes(t *testing.T) {
+	code := []byte{
+		0x48, 0x83, 0xec, 0x38, 0x48, 0x89, 0xcb, 0x48, 0x89, 0x54, 0x24, 0x20,
+		0xb9, 0x01, 0x00, 0x00, 0x00, 0xba, 0x02, 0x00, 0x00, 0x00, 0x41, 0xb8, 0x03, 0x00, 0x00, 0x00, 0x41, 0xb9, 0x04, 0x00, 0x00, 0x00, 0xff, 0x13,
+		0xc6, 0x44, 0x24, 0x20, 0x03,
+		0xb9, 0x01, 0x00, 0x00, 0x00, 0xba, 0x02, 0x00, 0x00, 0x00, 0x41, 0xb8, 0x03, 0x00, 0x00, 0x00, 0x41, 0xb9, 0x04, 0x00, 0x00, 0x00, 0xff, 0x53, 0x08, 0x48, 0x83, 0xc4, 0x38, 0xc3,
+	}
+	plain := decompileX64Fn(t, code, decomp.Function{})
+	t.Logf("plain:\n%s", plain)
+	ext := decompileX64Fn(t, code, decomp.Function{Extensions: pcode.Extensions{StaleStackArgBytes: true}})
+	t.Logf("extension:\n%s", ext)
+	// Here Ghidra already passes the byte (the slot's heritage splits at the
+	// byte write); the stale case needs the slot written wider elsewhere in a
+	// way a short sample does not reproduce (seen on real IL2CPP code). The
+	// extension must leave this case as it is.
+	if ext != plain {
+		t.Errorf("StaleStackArgBytes changed a call Ghidra already gets right")
+	}
+}
+
+// A struct a callee fills in, copied to a zeroed local whose address a loop
+// passes on, in a function whose every exit is a noreturn call:
+//
+//	 0: sub rsp, 0x58 ; xor eax, eax ; mov [rsp+0x38], rax ; mov [rsp+0x40], rax
+//	16: lea rcx, [rsp+0x20] ; call getEnumerator   (fills a)
+//	26: movups xmm0, [rsp+0x20] ; movups [rsp+0x38], xmm0   (b = a)
+//	36: lea rcx, [rsp+0x38] ; call moveNext ; test al, al ; jne 36
+//	50: call fail                                  (CALL_RETURN: noreturn)
+//
+// Ghidra drops "b = a": the copy folds into the loop MULTIEQUAL, the callee's
+// write of a is not a direct write, and nothing reads b at a RETURN (checked
+// with the C++ decompiler, the callee declared noreturn, on the real IL2CPP
+// function).
+var enumeratorCopy = []byte{
+	0x48, 0x83, 0xec, 0x58, 0x31, 0xc0, 0x48, 0x89, 0x44, 0x24, 0x38, 0x48, 0x89, 0x44, 0x24, 0x40,
+	0x48, 0x8d, 0x4c, 0x24, 0x20, 0xe8, 0x1e, 0x00, 0x00, 0x00,
+	0x0f, 0x10, 0x44, 0x24, 0x20, 0x0f, 0x11, 0x44, 0x24, 0x38,
+	0x48, 0x8d, 0x4c, 0x24, 0x38, 0xe8, 0x0b, 0x00, 0x00, 0x00, 0x84, 0xc0, 0x75, 0xf2,
+	0xe8, 0x03, 0x00, 0x00, 0x00, 0xcc,
+	0xc3, 0xc3, 0xc3,
+}
+
+func TestFoldedStackCopies(t *testing.T) {
+	overrides := map[uint64]string{0x140001032: "CALL_RETURN"}
+	plain := decompileX64Fn(t, enumeratorCopy, decomp.Function{FlowOverrides: overrides})
+	t.Logf("plain:\n%s", plain)
+	ext := decompileX64Fn(t, enumeratorCopy, decomp.Function{FlowOverrides: overrides, Extensions: pcode.Extensions{FoldedStackCopies: true}})
+	t.Logf("extension:\n%s", ext)
+	if strings.Count(plain, "local_20 = ") != 1 {
+		t.Errorf("without the extension the copy is dropped as in Ghidra")
+	}
+	if strings.Count(ext, "local_20 = ") != 2 || strings.Count(ext, "local_18 = ") != 2 {
+		t.Errorf("the copy of the filled-in struct should be kept")
+	}
+}
+
+// MSVC's EH state written in the prologue, then a call, then a virtual call
+// with two register arguments:
+//
+//	 0: sub rsp, 0x38 ; mov qword [rsp+0x20], -2
+//	13: call f
+//	18: mov ecx, 1 ; mov edx, 2 ; call [rbx]
+//	30: add rsp, 0x38 ; ret
+//	f: ret
+//
+// Ghidra takes the -2 as the virtual call's 5th argument and fills R8 and R9
+// in front of it.
+var ehStateSlot = []byte{
+	0x48, 0x83, 0xec, 0x38, 0x48, 0xc7, 0x44, 0x24, 0x20, 0xfe, 0xff, 0xff, 0xff,
+	0xe8, 0x0d, 0x00, 0x00, 0x00,
+	0xb9, 0x01, 0x00, 0x00, 0x00, 0xba, 0x02, 0x00, 0x00, 0x00, 0xff, 0x13,
+	0x48, 0x83, 0xc4, 0x38, 0xc3,
+	0xc3,
+}
+
+func TestStaleStackArgs(t *testing.T) {
+	plain := decompileX64Fn(t, ehStateSlot, decomp.Function{})
+	t.Logf("plain:\n%s", plain)
+	ext := decompileX64Fn(t, ehStateSlot, decomp.Function{Extensions: pcode.Extensions{StaleStackArgs: true}})
+	t.Logf("extension:\n%s", ext)
+	if !strings.Contains(ext, "(1, 2);") {
+		t.Errorf("the virtual call should take only its two register arguments")
+	}
+	if !strings.Contains(plain, "0xfffffffffffffffe") {
+		t.Errorf("the test no longer reproduces the EH state argument without the extension")
+	}
+}
+
+// a * (b * c) in float:
+//
+//	movss xmm0, [rcx] ; movss xmm1, [rcx+4] ; mulss xmm1, [rcx+8]
+//	mulss xmm0, xmm1 ; movss [rdx], xmm0 ; ret
+//
+// Ghidra prints a * b * c, which C evaluates as (a * b) * c: a different
+// float32 rounding.
+var floatRightProduct = []byte{
+	0xf3, 0x0f, 0x10, 0x01, 0xf3, 0x0f, 0x10, 0x49, 0x04, 0xf3, 0x0f, 0x59, 0x49, 0x08,
+	0xf3, 0x0f, 0x59, 0xc1, 0xf3, 0x0f, 0x11, 0x02, 0xc3,
+}
+
+func TestFloatGrouping(t *testing.T) {
+	plain := decompileX64Fn(t, floatRightProduct, decomp.Function{})
+	t.Logf("plain: %s", plain)
+	ext := decompileX64Fn(t, floatRightProduct, decomp.Function{Extensions: pcode.Extensions{FloatGrouping: true}})
+	t.Logf("extension: %s", ext)
+	if strings.Contains(plain, "* (") {
+		t.Errorf("without the extension Ghidra drops the parentheses")
+	}
+	if !strings.Contains(ext, "* (") {
+		t.Errorf("the right product should keep its parentheses")
+	}
+}
+
 // Calls after a dynamic stack allocation:
 //
 //	   push rbp

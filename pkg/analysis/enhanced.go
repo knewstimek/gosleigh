@@ -32,6 +32,11 @@ func (e *Enhanced) Apply(fn *decomp.Function) {
 		CurrentSwitchLabels: true,
 		AllocaReturnStores:  true,
 		NoFloatAddresses:    true,
+		SelfCancelNoUse:     true,
+		StaleStackArgBytes:  true,
+		StaleStackArgs:      true,
+		FoldedStackCopies:   true,
+		FloatGrouping:       true,
 	}
 	fn.CalleeReads = e.reads
 }

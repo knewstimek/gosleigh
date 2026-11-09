@@ -3880,10 +3880,16 @@ func (s *printCState) renderOpExprFrag(op *PcodeOp) (ExprFragment, error) {
 	case CPUI_FLOAT_NAN:
 		return s.renderPseudoCall("NAN", op, 0) // C++ parity: opFunc prints the TypeOp name
 	case CPUI_FLOAT_ADD:
+		if s.fd.ext.FloatGrouping {
+			return s.renderFloatBinary(op, "+", cPrecAdd)
+		}
 		return s.renderBinary(op, "+", cPrecAdd, ExprAssocLeft)
 	case CPUI_FLOAT_DIV:
 		return s.renderBinary(op, "/", cPrecMultiply, ExprAssocLeft)
 	case CPUI_FLOAT_MULT:
+		if s.fd.ext.FloatGrouping {
+			return s.renderFloatBinary(op, "*", cPrecMultiply)
+		}
 		return s.renderBinary(op, "*", cPrecMultiply, ExprAssocLeft)
 	case CPUI_FLOAT_SUB:
 		return s.renderBinary(op, "-", cPrecAdd, ExprAssocLeft)
@@ -4027,6 +4033,26 @@ func (s *printCState) renderBinary(op *PcodeOp, token string, prec ExprPrecedenc
 		}
 	}
 	return s.lang.BinaryExpr(left, token, right, prec, assoc), nil
+}
+
+// renderFloatBinary prints a float + or * keeping the evaluation order:
+// float arithmetic is not associative, so a right operand that is the same
+// operation is parenthesized (C groups a * b * c as (a * b) * c).
+// Beyond Ghidra (Extensions.FloatGrouping): PrintC uses the associative
+// integer tokens (binary_plus, multiply) for FLOAT_ADD and FLOAT_MULT.
+func (s *printCState) renderFloatBinary(op *PcodeOp, token string, prec ExprPrecedence) (ExprFragment, error) {
+	left, err := s.renderVarnodeExpr(op.Input(0))
+	if err != nil {
+		return ExprFragment{}, err
+	}
+	right, err := s.renderVarnodeExpr(op.Input(1))
+	if err != nil {
+		return ExprFragment{}, err
+	}
+	if right.op == token && right.Precedence == prec {
+		right.keepGroup = true
+	}
+	return s.lang.BinaryExpr(left, token, right, prec, ExprAssocLeft), nil
 }
 
 func (s *printCState) renderUnary(op *PcodeOp, token string, prec ExprPrecedence) (ExprFragment, error) {

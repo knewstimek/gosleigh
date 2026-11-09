@@ -90,6 +90,71 @@ type Extensions struct {
 	// `this` as double across the COPY into the slot, printing every field
 	// access as bit_cast<longlong>(param_1) + off.
 	NoFloatAddresses bool
+
+	// SelfCancelNoUse stops a parameter trial's use check at x ^ x and
+	// x - x: the result is a constant, not a use of x. `xor r9d, r9d` after
+	// a call reads the R9 passed to it; when the zero then reaches a callee
+	// with a locked prototype (Funcdata::checkCallDoubleUse), Ghidra drops
+	// the R9 argument of the earlier call.
+	SelfCancelNoUse bool
+
+	// StaleStackArgBytes takes only the low bytes of a stack argument whose
+	// slot is written partly right before the call (mov byte [rsp+0x30], 3)
+	// while its high bytes come from an earlier, wider use of the slot.
+	// Ghidra's ActionParamDouble splits such a PIECE only when both halves can
+	// be parameters, which an x64 8-byte stack slot never allows, so the
+	// argument prints as CONCAT71(in_stack_.., 3) or in_stack_.. & 0xff..00.
+	StaleStackArgBytes bool
+
+	// StaleStackArgs does not take an x64 stack slot as an argument when its
+	// value reaches the call through another call (an INDIRECT): the
+	// outgoing parameter area belongs to each callee, so a compiler writes
+	// arguments after the previous call. Ghidra's onlyOpUse accepts a slot
+	// written once in the prologue (MSVC's EH state, mov [rsp+0x20], -2)
+	// whose only reads are calls, so once an earlier register argument is
+	// found the call gains in_R8, in_R9 and the -2.
+	StaleStackArgs bool
+
+	// FoldedStackCopies keeps a copy of one stack variable into another
+	// (b = a, with a filled in by a call such as GetEnumerator(&a)) live
+	// after RulePropagateCopy folds it into a loop MULTIEQUAL. Ghidra's
+	// ActionDirectWrite counts such a stack store as a direct write only
+	// while the COPY exists; once folded, b's INDIRECTs at the calls taking
+	// &b lose their address force, and when every path ends in a noreturn
+	// call dead code removal drops the copy: MoveNext(&b) reads the zeroed b.
+	FoldedStackCopies bool
+
+	// FloatGrouping parenthesizes a float + or * whose right operand is the
+	// same operation: float arithmetic is not associative, and PrintC prints
+	// a * (b * c) as a * b * c, which C evaluates as (a * b) * c.
+	FloatGrouping bool
+}
+
+// staleHighPiece reports a stack argument assembled as PIECE(high, low) where
+// low is written between the previous call in the block (or the block start)
+// and this call, and high is not: a compiler writes an argument whole right
+// before its call, so the high bytes are left over from an earlier, wider use
+// of the slot (often the previous call's argument).
+func staleHighPiece(fd *Funcdata, call *PcodeOp, high, low *Varnode) bool {
+	blk, at := call.Parent(), call.Seq().Order
+	since, prev := uint64(0), false // order of the last call before this one in blk
+	for i := 0; i < fd.NumCalls(); i++ {
+		c := fd.GetCallSpecs(i)
+		if c == nil || c.op == nil || c.op == call || c.op.Parent() != blk {
+			continue
+		}
+		if o := c.op.Seq().Order; o < at && (!prev || o > since) {
+			since, prev = o, true
+		}
+	}
+	inWindow := func(op *PcodeOp) bool {
+		o := op.Seq().Order
+		return op.Parent() == blk && o < at && (!prev || o > since)
+	}
+	if !low.IsWritten() || low.Def() == nil || !inWindow(low.Def()) {
+		return false
+	}
+	return !high.IsWritten() || high.Def() == nil || !inWindow(high.Def())
 }
 
 // formsAddress reports a Varnode used as a LOAD or STORE address, directly or

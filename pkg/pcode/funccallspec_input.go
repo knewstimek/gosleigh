@@ -136,6 +136,7 @@ func (fc *FuncCallSpecs) checkInputTrialUse(data *Funcdata, aliascheck *aliasChe
 		}
 	}
 	var ar ancestorRealistic
+	staleDropped := false
 	for i := 0; i < active.NumTrials(); i++ {
 		trial := active.Trial(i)
 		if trial.IsChecked() {
@@ -170,7 +171,14 @@ func (fc *FuncCallSpecs) checkInputTrialUse(data *Funcdata, aliascheck *aliasChe
 				}
 			case ar.execute(fc.op, slot, trial, false):
 				if data.ancestorOpUse(trimRecurseMax, vn, fc.op, trial, 0, 0) {
-					trial.MarkActive()
+					if data.ext.StaleStackArgs && vn.Space().AddrSize == 8 && valueCrossesCall(vn) {
+						// Beyond Ghidra (Extensions.StaleStackArgs): written
+						// before an earlier call, so not this call's argument.
+						trial.MarkInactive()
+						staleDropped = true
+					} else {
+						trial.MarkActive()
+					}
 				} else {
 					trial.MarkInactive()
 				}
@@ -208,20 +216,113 @@ func (fc *FuncCallSpecs) checkInputTrialUse(data *Funcdata, aliascheck *aliasChe
 			if !trial.IsActive() && !trial.IsDefinitelyNotUsed() && fc.calleeReadsTrial(trial) {
 				trial.markRescued()
 			}
-			// Beyond Ghidra (HostCalleeNotInputs): a register the callee
-			// never takes from its caller is not an argument, even though it
-			// is live at the call.
-			if trial.IsActive() && fc.calleeNotInputTrial(trial) {
-				trial.MarkInactive()
-			}
+		}
+		// Beyond Ghidra (HostCalleeNotInputs): a register or stack slot the
+		// callee never takes from its caller is not an argument, even though
+		// the caller wrote it (a leftover in an outgoing argument slot).
+		if trial.IsActive() && fc.calleeNotInputTrial(trial) {
+			trial.MarkInactive()
 		}
 		if trial.IsDefinitelyNotUsed() { // free up the dataflow
 			data.OpSetInput(fc.op, data.NewConstant(vn.Size(), 0), slot)
 		}
 	}
+	if staleDropped {
+		fc.keepWrittenIntegerTrials()
+	}
 	if data.ext.NestedPieceTrials || data.calleeReads != nil {
 		fc.yieldRescuedTrials(data)
 	}
+}
+
+// keepWrittenIntegerTrials activates the integer register trials the call
+// writes but Ghidra left inactive (a value also stored elsewhere, a zero
+// made by xor). With a stale stack argument active, Ghidra's fill-in
+// (ParamListStandard::fillinMap) took every register slot before it, so
+// these arguments came out; dropping the stale slot must not drop them.
+// Slots the caller never wrote are left to the fill-in, which no longer
+// adds them (in_R8, in_R9).
+func (fc *FuncCallSpecs) keepWrittenIntegerTrials() {
+	active := fc.GetActiveInput()
+	model := fc.Model()
+	if model == nil || model.InputParams == nil {
+		return
+	}
+	for i := 0; i < active.NumTrials(); i++ {
+		t := active.Trial(i)
+		if t.IsActive() || t.IsDefinitelyNotUsed() || t.GetAddress().Space == nil || t.GetAddress().Space.Kind == address.SpaceKindStack {
+			continue
+		}
+		slot := int(t.GetSlot())
+		if slot < 0 || slot >= fc.op.NumInput() {
+			continue
+		}
+		in := fc.op.Input(slot)
+		if !in.IsWritten() && !in.IsConstant() { // a constant is written too, once propagated
+			continue
+		}
+		if feedsCallTarget(in, fc.op.Input(0)) { // the vtable loaded to find the callee
+			continue
+		}
+		if e := model.InputParams.findEntry(t.GetAddress(), t.GetSize(), true); e != nil && e.getType() != typeclassFloat {
+			t.MarkActive()
+		}
+	}
+}
+
+// feedsCallTarget reports vn among the values an indirect call's target is
+// computed from (LOAD, address arithmetic, COPY): such a value is not an
+// argument (Funcdata::checkCallDoubleUse rejects flow into the call target).
+func feedsCallTarget(vn, target *Varnode) bool {
+	for depth, work := 0, []*Varnode{target}; depth < 4 && len(work) > 0; depth++ {
+		var next []*Varnode
+		for _, v := range work {
+			if v == vn {
+				return true
+			}
+			if !v.IsWritten() {
+				continue
+			}
+			switch d := v.Def(); d.Code() {
+			case CPUI_LOAD:
+				next = append(next, d.Input(1))
+			case CPUI_INT_ADD, CPUI_PTRADD, CPUI_PTRSUB, CPUI_COPY, CPUI_CAST:
+				next = append(next, d.Input(0))
+			}
+		}
+		work = next
+	}
+	return false
+}
+
+// valueCrossesCall reports a value that reaches its use through the INDIRECT
+// of a call on some path (directly or through MULTIEQUALs and other
+// INDIRECTs): the storage was written before that call.
+func valueCrossesCall(vn *Varnode) bool {
+	seen := map[*PcodeOp]bool{}
+	var walk func(v *Varnode) bool
+	walk = func(v *Varnode) bool {
+		if v == nil || !v.IsWritten() || seen[v.Def()] {
+			return false
+		}
+		d := v.Def()
+		seen[d] = true
+		switch d.Code() {
+		case CPUI_INDIRECT:
+			if c := d.Input(1).GetIndirectCause(); c != nil && c.IsCall() {
+				return true
+			}
+			return walk(d.Input(0))
+		case CPUI_MULTIEQUAL:
+			for i := 0; i < d.NumInput(); i++ {
+				if walk(d.Input(i)) {
+					return true
+				}
+			}
+		}
+		return false
+	}
+	return walk(vn)
 }
 
 // rescueNestedPieceTrial retests a register trial Ghidra rejected, with the
@@ -608,6 +709,13 @@ func (fd *Funcdata) onlyOpUse(invn *Varnode, opmatch *PcodeOp, trial *ParamTrial
 					}
 				}
 				res = false
+			case CPUI_INT_XOR, CPUI_INT_SUB:
+				// Beyond Ghidra (Extensions.SelfCancelNoUse): x ^ x and x - x do
+				// not depend on x.
+				if fd.ext.SelfCancelNoUse && functionalEquality(op.Input(0), op.Input(1)) {
+					continue
+				}
+				curFlags |= traverseActionAlt
 			case CPUI_MULTIEQUAL, CPUI_INT_SEXT, CPUI_INT_ZEXT, CPUI_CAST:
 				// pass through
 			case CPUI_PIECE:

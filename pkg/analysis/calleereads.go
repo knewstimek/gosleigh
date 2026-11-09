@@ -64,7 +64,7 @@ type CalleeReads struct {
 	params    []paramReg
 	notInputs map[uint64][]pcode.HostStorage
 	inputs    map[uint64]*inferredInputs // CalleeInputs cache
-	rbp, r11  uint64                     // frame registers for CalleeInputs
+	gpr       [16]uint64                 // RAX..R15 offsets (gprNames order)
 	homes     map[uint64][]homeStore     // home-area stores of the entry path, per entry
 }
 
@@ -147,8 +147,9 @@ func (c *CalleeReads) ensureEngine(entry uint64) bool {
 	c.rax, c.xmm0 = rax, xmm0
 	c.retRegsOK = okA && okX && c.findXMM()
 	c.findParams()
-	c.rbp, _ = registerOffset(engine, "RBP")
-	c.r11, _ = registerOffset(engine, "R11")
+	for g, n := range gprNames {
+		c.gpr[g], _ = registerOffset(engine, n)
+	}
 	return true
 }
 
@@ -159,6 +160,7 @@ func (c *CalleeReads) ensureEngine(entry uint64) bool {
 type homeStore struct {
 	disp uint64
 	reg  uint64
+	size uint32 // bytes stored: a varargs prologue homes whole registers
 }
 
 // scanReads walks the entry path and returns the register bytes read before
@@ -278,7 +280,7 @@ func (c *CalleeReads) homingCopies(ops []pcode.RawOp, written, spCopies map[uint
 				src = ops[cp].Inputs[0]
 			}
 			if !written[src.Offset] {
-				homes = append(homes, homeStore{k, src.Offset})
+				homes = append(homes, homeStore{k, src.Offset, src.Size})
 			}
 		}
 	}

@@ -359,6 +359,10 @@ func (p ParamTrial) SplitLo(sz int32) ParamTrial {
 	return res
 }
 
+// shrinkLow keeps only the trial's low sz bytes (little endian: same address);
+// beyond Ghidra, see Extensions.StaleStackArgBytes.
+func (p *ParamTrial) shrinkLow(sz int32) { p.size = sz }
+
 // TestShrink reports whether the trial can be shrunk to the new range.
 // C++ parity: ParamTrial::testShrink
 func (p ParamTrial) TestShrink(newAddr address.Address, sz int32) bool {

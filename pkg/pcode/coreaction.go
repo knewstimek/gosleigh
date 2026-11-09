@@ -2243,6 +2243,9 @@ func (a *ActionDirectWrite) Apply(data *Funcdata) int {
 				} else if op.Code() != CPUI_PIECE && op.Code() != CPUI_SUBPIECE {
 					push(vn)
 				}
+			} else if data.ext.FoldedStackCopies && op.Code() == CPUI_MULTIEQUAL && foldedStackCopy(vn) {
+				// Beyond Ghidra (Extensions.FoldedStackCopies).
+				push(vn)
 			} else if !a.propagateIndirect && op.Code() == CPUI_INDIRECT {
 				outvn := op.Output()
 				if outvn != nil && op.NumInput() > 0 && op.Input(0) != nil {
@@ -2281,6 +2284,41 @@ func (a *ActionDirectWrite) Apply(data *Funcdata) int {
 		}
 	}
 	return 0
+}
+
+// foldedStackCopy reports a stack MULTIEQUAL with an input moved (COPY,
+// PIECE, SUBPIECE) from a marker-defined value at another stack address: a
+// stack store of another variable's value that the rules folded into the
+// MULTIEQUAL. The store itself was a direct write (the isStackStore COPY case
+// above).
+func foldedStackCopy(vn *Varnode) bool {
+	if vn.Space() == nil || vn.Space().Kind != address.SpaceKindStack {
+		return false
+	}
+	var moved func(v *Varnode, depth int) bool
+	moved = func(v *Varnode, depth int) bool {
+		if !v.IsWritten() || depth > 3 {
+			return false
+		}
+		d := v.Def()
+		if depth > 0 && d.IsMarker() {
+			return v.Space() == vn.Space() && v.Offset() != vn.Offset()
+		}
+		switch d.Code() {
+		case CPUI_COPY, CPUI_SUBPIECE:
+			return moved(d.Input(0), depth+1)
+		case CPUI_PIECE:
+			return moved(d.Input(0), depth+1) || moved(d.Input(1), depth+1)
+		}
+		return false
+	}
+	op := vn.Def()
+	for i := 0; i < op.NumInput(); i++ {
+		if in := op.Input(i); in.IsWritten() && !in.Def().IsMarker() && moved(in, 0) {
+			return true
+		}
+	}
+	return false
 }
 
 // ActionFuncLink prepares each sub-function call for parameter recovery.
@@ -2931,6 +2969,17 @@ func (a *ActionParamDouble) Apply(data *Funcdata) int {
 				if mostvn == nil || leastvn == nil {
 					continue
 				}
+				// Beyond Ghidra (Extensions.StaleStackArgBytes, x64 8-byte slots only:
+				// on x86-32 a PIECE of two 4-byte slots is two arguments): the low bytes
+				// of the slot are written right before the call and the high
+				// bytes come from elsewhere (a wider earlier argument in the
+				// same slot): the argument is the low bytes.
+				if data.ext.StaleStackArgBytes && !spc.BigEndian && spc.AddrSize == 8 && staleHighPiece(data, op, mostvn, leastvn) {
+					trial.shrinkLow(leastvn.Size())
+					data.OpSetInput(op, leastvn, slot)
+					a.count++
+					continue
+				}
 				splitsize := leastvn.Size()
 				if spc.BigEndian {
 					splitsize = mostvn.Size()
@@ -3041,7 +3090,6 @@ func (a *ActionParamDouble) Apply(data *Funcdata) int {
 	}
 	return 0
 }
-
 
 // ActionRestructureVarnode rebuilds the local symbol map from discovered
 // varnodes and protects switch paths from INDIRECT collapse.

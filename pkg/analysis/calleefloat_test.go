@@ -172,23 +172,31 @@ func TestCalleeInputsStack(t *testing.T) {
 	}
 }
 
-// A register-only function taking integers, or one homing R9 (maybe
-// varargs), is not locked; a register-only one taking only floats is.
+// A possible varargs function (R9 homed whole) or a register-only one taking
+// 64-bit-copied integers is not locked; one homing a typed byte of R9, or
+// taking only floats, is.
 //
-//	mov [rsp+0x20], r9 ; movzx eax, byte [rsp+0x28] ; ret
+//	 0: mov [rsp+0x20], r9 ; lea rax, [rsp+0x28] ; mov [rcx], rax ; ret
+//	16: mov rax, rcx ; ret
+//	20: ucomisd xmm0, xmm1 ; ret
+//	25: mov [rsp+0x20], r9b ; movzx eax, byte [rsp+0x28] ; ret
 func TestCalleeInputsNotLocked(t *testing.T) {
 	prog, r := loadCode(t, []byte{
-		0x4c, 0x89, 0x4c, 0x24, 0x20, 0x0f, 0xb6, 0x44, 0x24, 0x28, 0xc3, 0xcc,
-		0x48, 0x89, 0xc8, 0xc3, // mov rax, rcx ; ret
-		0x66, 0x0f, 0x2e, 0xc1, 0xc3, // ucomisd xmm0, xmm1 ; ret
+		0x4c, 0x89, 0x4c, 0x24, 0x20, 0x48, 0x8d, 0x44, 0x24, 0x28, 0x48, 0x89, 0x01, 0xc3, 0xcc, 0xcc,
+		0x48, 0x89, 0xc8, 0xc3,
+		0x66, 0x0f, 0x2e, 0xc1, 0xc3,
+		0x44, 0x88, 0x4c, 0x24, 0x20, 0x0f, 0xb6, 0x44, 0x24, 0x28, 0xc3,
 	})
 	if ps, ok := r.CalleeInputs(at(prog, 0)); ok {
-		t.Errorf("R9 homed: want no lock, got %+v", ps)
+		t.Errorf("R9 homed whole: want no lock, got %+v", ps)
 	}
-	if ps, ok := r.CalleeInputs(at(prog, 12)); ok {
+	if ps, ok := r.CalleeInputs(at(prog, 16)); ok {
 		t.Errorf("integer register-only: want no lock, got %+v", ps)
 	}
-	ps, ok := r.CalleeInputs(at(prog, 16))
+	if ps, ok := r.CalleeInputs(at(prog, 25)); !ok || len(ps) != 5 || ps[4].Size != 1 {
+		t.Errorf("R9 byte homed: want 4 registers and a byte, got ok=%v %+v", ok, ps)
+	}
+	ps, ok := r.CalleeInputs(at(prog, 20))
 	if !ok || len(ps) != 2 || ps[0].Size != 8 || ps[1].Size != 8 || ps[0].Type.Name() != "double" {
 		t.Errorf("float-only: want double f(double, double), got ok=%v %+v", ok, ps)
 	}

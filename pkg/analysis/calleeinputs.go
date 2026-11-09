@@ -25,6 +25,7 @@ type slotRead struct {
 	size   int32
 	float  bool
 	scalar int32
+	addr   bool // an integer parameter used as an address (a pointer)
 }
 
 // inferredInputs is the CalleeInputs answer for one entry.
@@ -33,17 +34,24 @@ type inferredInputs struct {
 	ok     bool
 	// reg are the register reads (c.params order) for a caller passing them on.
 	reg [8]slotRead
+	// complete: every path was followed to its end, so lastStack (the last
+	// stack parameter slot read, -1 for none) is exact even when the list is
+	// not given (ok false for a size it cannot tell).
+	complete  bool
+	lastStack int
+	// mayBeVarargs: R9 homed whole (a varargs prologue).
+	mayBeVarargs bool
 }
 
 // inputPath is the state along one path of scanInputs.
 type inputPath struct {
 	at       uint64
-	written  uint8    // c.params written (or clobbered by a call)
-	stackW   uint32   // stack parameter slots written
-	sp, rbp  int64    // entry-relative values; valid when the bit is set in spOK
-	r11      int64    //
-	spOK     uint8    // bit 0 RSP, 1 RBP, 2 R11
-	xmmParam [16]int8 // XMM register -> index into c.params it still holds (-1 none)
+	written  uint8     // c.params written (or clobbered by a call)
+	stackW   uint32    // stack parameter slots written
+	frame    [16]int64 // general register -> entry-relative stack address it holds
+	frameOK  uint16    // bit g: frame[g] is valid
+	xmmParam [16]int8  // XMM register -> index into c.params it still holds (-1 none)
+	gprParam [16]int8  // general register -> integer parameter slot it still holds (-1 none)
 }
 
 func (p *inputPath) key() inputPath { return *p }
@@ -60,9 +68,9 @@ func (p *inputPath) key() inputPath { return *p }
 // into an XMM register. A call clobbers the parameter registers, but one not
 // touched before it may be passed on: it is an input when the callee reads it
 // before writing (CalleeReadsBeforeWrite), as Ghidra's core rescued by that
-// hint would take it, and not otherwise. After a dynamic allocation (sub rsp,
-// rax) RSP is no longer followed, but stack accesses through a frame register
-// set before it (RBP, R11) still are.
+// hint would take it, and not otherwise. A stack pointer moved by a register
+// (sub rsp, rax after __chkstk or alloca) ends the scan: stack parameters read
+// through it afterwards could not be seen.
 //
 // Only a function with stack parameters is answered, and not one homing R9
 // (maybe varargs); see buildInputs. The answer is given only when every path
@@ -88,6 +96,7 @@ func (c *CalleeReads) inputsOf(entry uint64) *inferredInputs {
 	if r, ok := c.inputs[entry]; ok {
 		return r
 	}
+	c.inputs[entry] = &inferredInputs{} // a recursive query meets "unknown"
 	r := c.scanInputs(entry)
 	c.inputs[entry] = r
 	return r
@@ -99,12 +108,20 @@ func (c *CalleeReads) scanInputs(entry uint64) *inferredInputs {
 	var stack [stackSlots]slotRead
 	budget := inputScanLimit
 	seen := map[inputPath]bool{}
-	start := inputPath{at: entry, spOK: 1}
+	start := inputPath{at: entry, frameOK: 1 << gprRSP}
 	for k := range start.xmmParam {
 		start.xmmParam[k] = -1
 		for j := 4; j < 8; j++ {
 			if c.xmmBase[k] == c.params[j].off {
 				start.xmmParam[k] = int8(j) // XMM0..3 hold their own slot's value
+			}
+		}
+	}
+	for g := range start.gprParam {
+		start.gprParam[g] = -1
+		for k := 0; k < 4; k++ {
+			if c.gpr[g] == c.params[k].off {
+				start.gprParam[g] = int8(k)
 			}
 		}
 	}
@@ -126,8 +143,10 @@ func (c *CalleeReads) scanInputs(entry uint64) *inferredInputs {
 				return fail
 			}
 			next, end := tr.Next.Offset, false
-			uniq := map[uint64]int64{} // unique temp -> entry-relative stack address
-			loaded := map[uint64]int{} // unique temp -> stack slot it was loaded from
+			uniq := map[uint64]int64{}    // unique temp -> entry-relative stack address
+			srcReg := map[uint64]uint64{} // unique temp -> register its stack address came from
+			loaded := map[uint64]int{}    // unique temp -> stack slot it was loaded from
+			ptrs := map[uint64]int8{}     // unique temp -> integer parameter it is computed from
 		ops:
 			for i, op := range tr.Ops {
 				if !noRead(tr.Ops, i) {
@@ -139,6 +158,7 @@ func (c *CalleeReads) scanInputs(entry uint64) *inferredInputs {
 				}
 				switch op.OpCode {
 				case pcode.CPUI_LOAD:
+					c.noteAddressUse(&p, ptrs, op.Inputs[1], &reg)
 					if d, ok := c.stackAddr(&p, uniq, op.Inputs[1]); ok {
 						if s, in := stackSlot(d, int32(op.Output.Size)); in && p.stackW&(1<<s) == 0 {
 							_, isXMM := c.xmmIndex(*op.Output)
@@ -149,6 +169,7 @@ func (c *CalleeReads) scanInputs(entry uint64) *inferredInputs {
 						}
 					}
 				case pcode.CPUI_STORE:
+					c.noteAddressUse(&p, ptrs, op.Inputs[1], &reg)
 					if d, ok := c.stackAddr(&p, uniq, op.Inputs[1]); ok {
 						if s, in := stackSlot(d, int32(op.Inputs[2].Size)); in {
 							p.stackW |= 1 << s
@@ -158,7 +179,7 @@ func (c *CalleeReads) scanInputs(entry uint64) *inferredInputs {
 					if !c.passOn(&p, op, &reg) {
 						return fail
 					}
-					p.sp += 8 // the callee's ret pops the pushed return address
+					p.frame[gprRSP] += 8 // the callee's ret pops the pushed return address
 				case pcode.CPUI_BRANCH:
 					if t := op.Inputs[0]; t.Space != nil && !t.Space.IsConstant() {
 						next = t.Offset
@@ -176,7 +197,7 @@ func (c *CalleeReads) scanInputs(entry uint64) *inferredInputs {
 					// provided no parameter register is left undecided for the
 					// unknown target. Otherwise a switch or computed jump whose
 					// paths are not followed.
-					if p.spOK&1 == 0 || p.sp != 0 || !c.passOn(&p, op, &reg) {
+					if p.frameOK&(1<<gprRSP) == 0 || p.frame[gprRSP] != 0 || !c.passOn(&p, op, &reg) {
 						return fail
 					}
 					end = true
@@ -194,7 +215,11 @@ func (c *CalleeReads) scanInputs(entry uint64) *inferredInputs {
 							}
 						}
 					}
-					c.trackWrite(&p, uniq, op)
+					c.trackPointer(&p, ptrs, op)
+					c.trackWrite(&p, uniq, srcReg, op)
+					if p.frameOK&(1<<gprRSP) == 0 {
+						return fail // sub rsp, rax (alloca, __chkstk): later RSP-based stack reads would be missed
+					}
 				}
 			}
 			if end {
@@ -203,7 +228,15 @@ func (c *CalleeReads) scanInputs(entry uint64) *inferredInputs {
 			p.at = next
 		}
 	}
-	return c.buildInputs(reg, stack, c.homesR9(entry))
+	res := c.buildInputs(reg, stack, c.homesR9(entry))
+	res.mayBeVarargs = c.homesR9(entry)
+	res.complete, res.lastStack = true, -1
+	for s := range stack {
+		if stack[s].size != 0 {
+			res.lastStack = s
+		}
+	}
+	return res
 }
 
 // noteParamRead records a read of a parameter register (or of an XMM register
@@ -226,15 +259,114 @@ func (c *CalleeReads) noteParamRead(p *inputPath, in pcode.VarnodeData, op pcode
 	}
 }
 
+// gprNames index c.gpr; volatileGPR are the ones a call clobbers (RAX, RCX,
+// RDX, R8-R11).
+var (
+	gprNames    = []string{"RAX", "RCX", "RDX", "RBX", "RSP", "RBP", "RSI", "RDI", "R8", "R9", "R10", "R11", "R12", "R13", "R14", "R15"}
+	volatileGPR = []int{0, 1, 2, 8, 9, 10, 11}
+)
+
+// sourceReg is the register an address computation (a copy or a constant
+// offset, possibly through a temporary) starts from; ^0 for none.
+func sourceReg(op pcode.RawOp, srcReg map[uint64]uint64) uint64 {
+	for _, in := range op.Inputs {
+		switch {
+		case in.Space != nil && in.Space.IsConstant():
+			continue
+		case in.Space != nil && in.Space.Name == "unique":
+			if r, ok := srcReg[in.Offset]; ok {
+				return r
+			}
+			return ^uint64(0)
+		case isRegister(in):
+			return in.Offset
+		}
+	}
+	return ^uint64(0)
+}
+
+// gprRSP indexes RSP in c.gpr (gprNames order).
+const gprRSP = 4
+
+// gprIndex is the general register v is (all 8 bytes), if any.
+func (c *CalleeReads) gprIndex(v pcode.VarnodeData) (int, bool) {
+	if !isRegister(v) || v.Size != 8 {
+		return 0, false
+	}
+	for g, off := range c.gpr {
+		if off == v.Offset {
+			return g, true
+		}
+	}
+	return 0, false
+}
+
+// pointerParam is the integer parameter slot v (a whole general register or
+// a temporary) holds or is computed from by a constant offset, or -1.
+func (c *CalleeReads) pointerParam(p *inputPath, ptrs map[uint64]int8, v pcode.VarnodeData) int8 {
+	if v.Space != nil && v.Space.Name == "unique" {
+		if k, ok := ptrs[v.Offset]; ok {
+			return k
+		}
+		return -1
+	}
+	if g, ok := c.gprIndex(v); ok {
+		return p.gprParam[g]
+	}
+	return -1
+}
+
+// trackPointer follows copies of the integer parameters (mov rbx, rdx) and
+// constant offsets from them (lea rax, [rdx+8]) so their use as an address
+// is seen.
+func (c *CalleeReads) trackPointer(p *inputPath, ptrs map[uint64]int8, op pcode.RawOp) {
+	out := *op.Output
+	k := int8(-1)
+	switch op.OpCode {
+	case pcode.CPUI_COPY:
+		k = c.pointerParam(p, ptrs, op.Inputs[0])
+	case pcode.CPUI_INT_ADD, pcode.CPUI_INT_SUB:
+		if op.Inputs[1].Space != nil && op.Inputs[1].Space.IsConstant() {
+			k = c.pointerParam(p, ptrs, op.Inputs[0])
+		}
+	}
+	if out.Space != nil && out.Space.Name == "unique" {
+		if k >= 0 {
+			ptrs[out.Offset] = k
+		} else {
+			delete(ptrs, out.Offset)
+		}
+		return
+	}
+	for g, off := range c.gpr {
+		if overlaps(out, off, 8) {
+			p.gprParam[g] = -1
+			if out.Offset == off && out.Size == 8 && op.OpCode == pcode.CPUI_COPY {
+				p.gprParam[g] = k
+			}
+		}
+	}
+}
+
+// noteAddressUse marks an integer parameter used as an address (a pointer:
+// its 8-byte size is exact).
+func (c *CalleeReads) noteAddressUse(p *inputPath, ptrs map[uint64]int8, addr pcode.VarnodeData, reg *[8]slotRead) {
+	if k := c.pointerParam(p, ptrs, addr); k >= 0 {
+		reg[k].addr = true
+	}
+}
+
 // trackWrite updates the path for an op's output: parameter registers
 // written, XMM copies of parameters, and the stack pointer and its copies.
-func (c *CalleeReads) trackWrite(p *inputPath, uniq map[uint64]int64, op pcode.RawOp) {
+func (c *CalleeReads) trackWrite(p *inputPath, uniq map[uint64]int64, srcReg map[uint64]uint64, op pcode.RawOp) {
 	out := *op.Output
 	if out.Space != nil && out.Space.Name == "unique" {
 		if d, ok := c.spValue(p, uniq, op); ok {
 			uniq[out.Offset] = d
+			srcReg[out.Offset] = sourceReg(op, srcReg)
 		} else {
 			delete(uniq, out.Offset)
+			delete(srcReg, out.Offset)
 		}
 		return
 	}
@@ -258,29 +390,19 @@ func (c *CalleeReads) trackWrite(p *inputPath, uniq map[uint64]int64, op pcode.R
 			p.written |= 1 << k
 		}
 	}
-	for i, reg := range []uint64{c.sp, c.rbp, c.r11} {
-		if out.Offset != reg || out.Size != 8 {
+	for g, off := range c.gpr {
+		if !overlaps(out, off, 8) {
 			continue
 		}
-		d, ok := c.spValue(p, uniq, op)
-		switch {
-		case ok:
-			p.setSP(i, d)
-		default:
-			p.spOK &^= 1 << i // e.g. RSP after sub rsp, rax
+		// A register stepped from itself (add rax, 8 walking a buffer in a
+		// loop) is not followed: it would make a new path state every
+		// iteration. RSP moves by itself but only by balanced amounts.
+		if d, ok := c.spValue(p, uniq, op); ok && out.Offset == off && out.Size == 8 && (g == gprRSP || sourceReg(op, srcReg) != off) {
+			p.frame[g] = d
+			p.frameOK |= 1 << g
+		} else {
+			p.frameOK &^= 1 << g // e.g. RSP after sub rsp, rax
 		}
-	}
-}
-
-func (p *inputPath) setSP(i int, d int64) {
-	p.spOK |= 1 << i
-	switch i {
-	case 0:
-		p.sp = d
-	case 1:
-		p.rbp = d
-	default:
-		p.r11 = d
 	}
 }
 
@@ -312,16 +434,8 @@ func (c *CalleeReads) stackAddr(p *inputPath, uniq map[uint64]int64, v pcode.Var
 		d, ok := uniq[v.Offset]
 		return d, ok
 	}
-	if !isRegister(v) || v.Size != 8 {
-		return 0, false
-	}
-	switch {
-	case v.Offset == c.sp && p.spOK&1 != 0:
-		return p.sp, true
-	case v.Offset == c.rbp && p.spOK&2 != 0:
-		return p.rbp, true
-	case v.Offset == c.r11 && p.spOK&4 != 0:
-		return p.r11, true
+	if g, ok := c.gprIndex(v); ok && p.frameOK&(1<<g) != 0 {
+		return p.frame[g], true
 	}
 	return 0, false
 }
@@ -360,11 +474,16 @@ func (c *CalleeReads) passOn(p *inputPath, op pcode.RawOp, reg *[8]slotRead) boo
 						n = int32(r.size)
 					}
 					if k >= 4 && n > 8 {
-						n = 0 // a whole XMM register: no scalar size, decided below
+						// A whole XMM register on the callee's entry path: its
+						// own full scan may know the scalar size.
+						n = 0
+						if in := c.inputsOf(t.Offset); in.complete {
+							n = in.reg[k].scalar
+						}
 					}
 					widen(&reg[k], n, k >= 4)
 					if n == 0 {
-						reg[k].size = 16
+						reg[k].size = 16 // no scalar size: rejected in buildInputs
 					}
 				}
 			}
@@ -373,6 +492,9 @@ func (c *CalleeReads) passOn(p *inputPath, op pcode.RawOp, reg *[8]slotRead) boo
 	p.written = 0xff
 	for x := range p.xmmParam {
 		p.xmmParam[x] = -1
+	}
+	for _, g := range volatileGPR {
+		p.gprParam[g] = -1
 	}
 	return true
 }
@@ -409,22 +531,23 @@ func (c *CalleeReads) buildInputs(reg [8]slotRead, stack [stackSlots]slotRead, m
 			lastStack = s
 		}
 	}
-	// Locked: a function with stack parameters, or one whose parameters are
-	// all floats. Other register-only functions are already served by the
-	// read and not-input hints, which leave each argument's size to the caller
-	// (an integer lock sized by a 64-bit register copy prints casts); a float
-	// size comes from a scalar operation and is exact, and the lock fixes a
-	// double argument the caller's heritage split to 4 bytes (SUB84(d, 0)).
-	// A function homing R9 may be varargs: its parameter count is not knowable.
-	floatsOnly := false
+	// Locked: a function with stack parameters, or a register-only one whose
+	// every parameter has an exact size. A float's size comes from a scalar
+	// operation; an integer's from a read narrower than the register (movzx
+	// esi, cx) or from its use as an address (a pointer). An integer seen only
+	// through 64-bit copies (mov rdi, rcx) may be a 32-bit value, and locking
+	// it at 8 bytes printed casts; such a function is left to the read and
+	// not-input hints, which keep each argument's size from the caller. A lock
+	// fixes a double argument the caller's heritage split to 4 bytes
+	// (SUB84(d, 0)) and junk taken in a slot the callee never reads. A
+	// function homing R9 may be varargs: its parameter count is not knowable.
+	exact := true
 	for s := 0; s < 4; s++ {
-		if reg[s].size != 0 {
-			floatsOnly = false
-			break
+		if r := reg[s]; r.size == 8 && !r.addr {
+			exact = false
 		}
-		floatsOnly = floatsOnly || reg[s+4].size != 0
 	}
-	if (lastStack < 0 && !floatsOnly) || mayBeVarargs {
+	if (lastStack < 0 && !exact) || mayBeVarargs {
 		return res
 	}
 	lastReg := -1
@@ -464,11 +587,12 @@ func (c *CalleeReads) buildInputs(reg [8]slotRead, stack [stackSlots]slotRead, m
 	return res
 }
 
-// homesR9 reports that the function's entry path stores R9 to its home slot.
+// homesR9 reports that the function's entry path stores all of R9 to its home
+// slot (a varargs prologue; mov [rsp+0x20], r9b homes a typed byte).
 func (c *CalleeReads) homesR9(entry uint64) bool {
 	c.reads(entry)
 	for _, h := range c.homes[entry] {
-		if h.disp == 0x20 && h.reg == c.params[3].off {
+		if h.disp == 0x20 && h.reg == c.params[3].off && h.size == 8 {
 			return true
 		}
 	}
