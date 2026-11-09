@@ -120,6 +120,38 @@ func (fc *FuncCallSpecs) applyCalleeReturnHint(fd *Funcdata) {
 	}
 }
 
+// applyCalleePrototypeHint locks the callee's inputs to the list the hint
+// source infers, when the host does not lock them (beyond Ghidra, see
+// HostCalleePrototype). The host's return lock, if any, is kept; the extrapop
+// comes from the default model when the host gives none.
+func (fc *FuncCallSpecs) applyCalleePrototypeHint(fd *Funcdata) {
+	// A host prototype with parameters, locked or not, carries their types
+	// (a method's this pointer); the inferred list would replace them.
+	if fc.entryAddress.Space == nil || (fc.hostProto != nil && (fc.hostProto.InputLocked || len(fc.hostProto.UnlockedParams) > 0)) {
+		return
+	}
+	h, ok := fd.calleeReads.(HostCalleePrototype)
+	if !ok {
+		return
+	}
+	params, ok := h.CalleeInputs(fc.entryAddress)
+	if !ok {
+		return
+	}
+	hf := HostFunction{ExtraPop: ExtrapopUnknown}
+	if fc.hostProto != nil {
+		hf = *fc.hostProto
+	}
+	if hf.ExtraPop == ExtrapopUnknown {
+		if m := fd.DefaultModel(); m != nil {
+			hf.ExtraPop = m.GetExtraPop()
+		}
+	}
+	hf.InputLocked = true
+	hf.Params = params
+	fc.hostProto = &hf
+}
+
 // floatReturnProto is base with its return locked to the float the hint
 // source reports for the function at entry (beyond Ghidra, HostCalleeReturn),
 // storage assigned from the model; false without a hint or a float return.
@@ -136,10 +168,17 @@ func (fd *Funcdata) floatReturnProto(entry address.Address, base *HostFunction) 
 	if size == 8 {
 		name = "double"
 	}
+	// Only the return is assigned storage here; base's inputs, possibly locked
+	// to inferred storage (applyCalleePrototypeHint), are kept as they are.
+	out := HostFunction{ExtraPop: base.ExtraPop, Model: base.Model, OutputLocked: true,
+		Output: &HostParam{Size: size, Type: ResolveHostType(&HostTypeDesc{Name: name, Meta: "float", Size: size})}}
+	assigned, ok := fd.assignCodeProtoStorage(&out)
+	if !ok {
+		return nil, false
+	}
 	hf := *base
-	hf.OutputLocked = true
-	hf.Output = &HostParam{Size: size, Type: ResolveHostType(&HostTypeDesc{Name: name, Meta: "float", Size: size})}
-	return fd.assignCodeProtoStorage(&hf)
+	hf.OutputLocked, hf.Output, hf.ExtraPop = true, assigned.Output, assigned.ExtraPop
+	return &hf, true
 }
 
 // keepsInputAtOutput reports that heritage should still try the call's

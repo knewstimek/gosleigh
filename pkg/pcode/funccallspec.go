@@ -115,6 +115,17 @@ type HostCalleeNotInputs interface {
 	CalleeNotInputs(entry address.Address) []HostStorage
 }
 
+// HostCalleePrototype is an optional extension of a HostCalleeReads source
+// (pkg/analysis; beyond Ghidra): the complete input list of the function at
+// entry, in storage order, when the source can infer all of it (every
+// register slot decided, every stack parameter read). The core locks the
+// callee's inputs to it when the host does not, as Ghidra's Java side commits
+// a prototype found by Decompiler Parameter ID; false leaves Ghidra's own
+// recovery.
+type HostCalleePrototype interface {
+	CalleeInputs(entry address.Address) ([]HostParam, bool)
+}
+
 // HostFunction is what the host reports about a function: its display name
 // and the prototype facts the C++ core receives from FunctionPrototype
 // (Java grabFromFunction): calling-convention name ("" or "unknown" when not

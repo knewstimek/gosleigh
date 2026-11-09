@@ -120,8 +120,8 @@ func (c *CalleeReads) scanNotInputs(at address.Address) []pcode.HostStorage {
 				break
 			}
 			next := tr.Next.Offset
-			for _, op := range tr.Ops {
-				if !selfCombine(op) {
+			for i, op := range tr.Ops {
+				if !noRead(tr.Ops, i) {
 					for _, in := range op.Inputs {
 						if isRegister(in) {
 							read |= c.paramMask(in, false) &^ p.written

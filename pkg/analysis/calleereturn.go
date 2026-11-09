@@ -105,9 +105,9 @@ func (c *CalleeReads) scanReturn(at address.Address, depth int) int32 {
 				break
 			}
 			next := tr.Next
-			for _, op := range tr.Ops {
+			for i, op := range tr.Ops {
 				seq++
-				if !selfCombine(op) {
+				if !noRead(tr.Ops, i) {
 					for _, in := range op.Inputs {
 						if isRegister(in) && overlaps(in, c.xmmBase[0], 4) {
 							p.xmmRead = true
@@ -119,7 +119,7 @@ func (c *CalleeReads) scanReturn(at address.Address, depth int) int32 {
 						p.raxSeq = seq
 					}
 					if k, ok := c.xmmIndex(*out); ok {
-						p.lane[k] = c.laneTag(op, p.lane)
+						p.lane[k] = c.laneTag(tr.Ops, i, p.lane)
 						if k == 0 {
 							p.xmmSeq, p.xmmRead = seq, false
 						}
@@ -184,9 +184,10 @@ func (c *CalleeReads) xmmIndex(out pcode.VarnodeData) (int, bool) {
 }
 
 // laneTag is the low-lane tag an op writing an XMM low lane leaves.
-func (c *CalleeReads) laneTag(op pcode.RawOp, lane [16]int32) int32 {
+func (c *CalleeReads) laneTag(ops []pcode.RawOp, i int, lane [16]int32) int32 {
+	op := ops[i]
 	out := *op.Output
-	if selfCombine(op) {
+	if selfCombine(ops, i) {
 		return laneZero // xorps x, x
 	}
 	if op.OpCode == pcode.CPUI_COPY && len(op.Inputs) == 1 && isRegister(op.Inputs[0]) &&

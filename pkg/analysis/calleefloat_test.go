@@ -140,6 +140,54 @@ func TestCalleeAnalysesSkipData(t *testing.T) {
 	}
 }
 
+// A VEX zeroing idiom copies its second operand into a temporary and XORs
+// it piece by piece; it is not a read of XMM3.
+//
+//	vxorps xmm3, xmm3, xmm3 ; ucomiss xmm0, xmm3 ; ret
+func TestVexSelfXorIsNoRead(t *testing.T) {
+	prog, r := loadCode(t, []byte{0xc5, 0xe0, 0x57, 0xdb, 0x0f, 0x2e, 0xc3, 0xc3})
+	const regXMM3 = 0x12c0
+	if ni := r.CalleeNotInputs(at(prog, 0)); !covers(ni, regXMM3) || covers(ni, regXMM0) {
+		t.Errorf("want XMM3 and not XMM0 among not-inputs %+v", ni)
+	}
+}
+
+// A stack thunk: the callee's register slots and stack parameters, with the
+// float loaded from the stack typed as one.
+//
+//	movss xmm0, [rsp+0x30] ; movzx eax, byte [rsp+0x28] ; mov [rdx], eax
+//	movss [rcx], xmm0 ; ret
+func TestCalleeInputsStack(t *testing.T) {
+	prog, r := loadCode(t, []byte{
+		0xf3, 0x0f, 0x10, 0x44, 0x24, 0x30, 0x0f, 0xb6, 0x44, 0x24, 0x28, 0x89, 0x02,
+		0xf3, 0x0f, 0x11, 0x01, 0xc3,
+	})
+	ps, ok := r.CalleeInputs(at(prog, 0))
+	if !ok || len(ps) != 6 {
+		t.Fatalf("want 4 register slots and 2 stack parameters, got ok=%v %+v", ok, ps)
+	}
+	if ps[4].Space != "stack" || ps[4].Offset != 0x28 || ps[4].Size != 1 ||
+		ps[5].Offset != 0x30 || ps[5].Size != 4 || ps[5].Type.Name() != "float" {
+		t.Errorf("stack parameters: %+v %+v", ps[4], ps[5])
+	}
+}
+
+// A register-only function or one homing R9 (maybe varargs) is not locked.
+//
+//	mov [rsp+0x20], r9 ; movzx eax, byte [rsp+0x28] ; ret
+func TestCalleeInputsNotLocked(t *testing.T) {
+	prog, r := loadCode(t, []byte{
+		0x4c, 0x89, 0x4c, 0x24, 0x20, 0x0f, 0xb6, 0x44, 0x24, 0x28, 0xc3, 0xcc,
+		0x0f, 0x2e, 0xc1, 0xc3, // ucomiss xmm0, xmm1 ; ret
+	})
+	if ps, ok := r.CalleeInputs(at(prog, 0)); ok {
+		t.Errorf("R9 homed: want no lock, got %+v", ps)
+	}
+	if ps, ok := r.CalleeInputs(at(prog, 12)); ok {
+		t.Errorf("register-only: want no lock, got %+v", ps)
+	}
+}
+
 // Every path returns without touching RCX: it is not an input; XMM0 is read.
 //
 //	xorps xmm1, xmm1 ; ucomiss xmm0, xmm1 ; ret

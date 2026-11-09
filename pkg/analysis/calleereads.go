@@ -63,13 +63,16 @@ type CalleeReads struct {
 	// CalleeNotInputs.
 	params    []paramReg
 	notInputs map[uint64][]pcode.HostStorage
-	homes     map[uint64][]homeStore // home-area stores of the entry path, per entry
+	inputs    map[uint64]*inferredInputs // CalleeInputs cache
+	rbp, r11  uint64                     // frame registers for CalleeInputs
+	homes     map[uint64][]homeStore     // home-area stores of the entry path, per entry
 }
 
 // NewCalleeReads returns a CalleeReads over prog's image.
 func NewCalleeReads(prog *decomp.Program) *CalleeReads {
 	return &CalleeReads{prog: prog, cache: map[uint64][]pcode.HostStorage{}, returns: map[uint64]int32{},
-		notInputs: map[uint64][]pcode.HostStorage{}, homes: map[uint64][]homeStore{}}
+		notInputs: map[uint64][]pcode.HostStorage{}, homes: map[uint64][]homeStore{},
+		inputs: map[uint64]*inferredInputs{}}
 }
 
 // CalleeReadsBeforeWrite implements pcode.HostCalleeReads.
@@ -144,6 +147,8 @@ func (c *CalleeReads) ensureEngine(entry uint64) bool {
 	c.rax, c.xmm0 = rax, xmm0
 	c.retRegsOK = okA && okX && c.findXMM()
 	c.findParams()
+	c.rbp, _ = registerOffset(engine, "RBP")
+	c.r11, _ = registerOffset(engine, "R11")
 	return true
 }
 
@@ -180,7 +185,7 @@ func (c *CalleeReads) scanReads(at address.Address) ([]pcode.HostStorage, []home
 			if homed[i] {
 				continue
 			}
-			if !selfCombine(op) {
+			if !noRead(tr.Ops, i) {
 				for _, in := range op.Inputs {
 					if isRegister(in) {
 						for b := in.Offset; b < in.Offset+uint64(in.Size); b++ {
@@ -310,12 +315,66 @@ func registerOffset(engine *sla.Engine, name string) (uint64, bool) {
 
 // selfCombine reports an op whose result does not depend on its inputs
 // because both are the same storage: xor/sub of a register with itself.
-func selfCombine(op pcode.RawOp) bool {
+// ops[i] is the op; an input that is a temporary copied from a register
+// earlier in the instruction counts as that register (VEX three-operand
+// forms: vxorps xmm3, xmm3, xmm3 reads the second operand into a temporary).
+func selfCombine(ops []pcode.RawOp, i int) bool {
+	op := ops[i]
 	switch op.OpCode {
 	case pcode.CPUI_INT_XOR, pcode.CPUI_INT_SUB, pcode.CPUI_BOOL_XOR:
-		return len(op.Inputs) == 2 && op.Inputs[0] == op.Inputs[1]
+		return len(op.Inputs) == 2 && copySource(ops[:i], op.Inputs[0]) == copySource(ops[:i], op.Inputs[1])
 	}
 	return false
+}
+
+// noRead reports that ops[i] reads no register value: it combines a value
+// with itself (selfCombine), or it copies a register into a temporary that
+// the instruction only combines with itself (the copy step of vxorps x, x, x).
+func noRead(ops []pcode.RawOp, i int) bool {
+	if selfCombine(ops, i) {
+		return true
+	}
+	op := ops[i]
+	if op.OpCode != pcode.CPUI_COPY || op.Output == nil || op.Output.Space == nil ||
+		op.Output.Space.Name != "unique" || len(op.Inputs) != 1 || !isRegister(op.Inputs[0]) {
+		return false
+	}
+	used := false
+	for j := i + 1; j < len(ops); j++ {
+		for _, in := range ops[j].Inputs {
+			if in.Space == op.Output.Space && overlaps(in, op.Output.Offset, uint64(op.Output.Size)) {
+				if !selfCombine(ops, j) {
+					return false
+				}
+				used = true
+			}
+		}
+	}
+	return used
+}
+
+// copySource is the register bytes a temporary (or a piece of one) was last
+// copied from in ops, or v.
+func copySource(ops []pcode.RawOp, v pcode.VarnodeData) pcode.VarnodeData {
+	if v.Space == nil || v.Space.Name != "unique" {
+		return v
+	}
+	for j := len(ops) - 1; j >= 0; j-- {
+		o := ops[j].Output
+		if o == nil || o.Space != v.Space || !overlaps(*o, v.Offset, uint64(v.Size)) {
+			continue
+		}
+		in := ops[j].Inputs
+		if ops[j].OpCode == pcode.CPUI_COPY && isRegister(in[0]) && o.Size == in[0].Size &&
+			v.Offset >= o.Offset && v.Offset+uint64(v.Size) <= o.Offset+uint64(o.Size) {
+			r := in[0]
+			r.Offset += v.Offset - o.Offset
+			r.Size = v.Size
+			return r
+		}
+		return v
+	}
+	return v
 }
 
 func isRegister(vn pcode.VarnodeData) bool {

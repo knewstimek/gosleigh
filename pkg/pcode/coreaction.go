@@ -1033,7 +1033,9 @@ func (a *ActionDefaultParams) Apply(data *Funcdata) int {
 		}
 		if !fc.HasModel() {
 			if fc.GetFuncdata() == nil {
-				fc.applyCalleeReturnHint(data) // beyond Ghidra: no-op without the hint source
+				// Beyond Ghidra: no-ops without the hint source.
+				fc.applyCalleePrototypeHint(data)
+				fc.applyCalleeReturnHint(data)
 			}
 			if otherfunc := fc.GetFuncdata(); otherfunc != nil {
 				if otherProto := otherfunc.GetFuncProto(); otherProto != nil {
