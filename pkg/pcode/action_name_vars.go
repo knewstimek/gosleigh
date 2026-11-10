@@ -397,6 +397,18 @@ func (a *ActionNameVars) Apply(data *Funcdata) int {
 			used[c.hv.Name()] = true
 		}
 	}
+	// The locked prototype's parameter symbols are in the local scope from
+	// the start, so a name inherited from a callee parameter (arg_1) must not
+	// take one of them, even before the parameter's variable is named here.
+	// C++ parity: ScopeInternal::makeNameUnique checks every symbol of the
+	// scope (ProtoStoreSymbol::setInput added the parameters).
+	// Host stack locals are not seeded: their own variables reach their names
+	// through makeNameUnique (addrTiedLinkName) and would be pushed to _00.
+	for _, info := range data.GetFuncProto().lockedParamNamesOrNil() {
+		if info.name != "" {
+			used[info.name] = true
+		}
+	}
 
 	cands := make([]*hvCandidate, 0, len(hvMap))
 	for _, c := range hvMap {

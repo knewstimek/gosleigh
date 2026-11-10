@@ -422,6 +422,14 @@ func (fp *FuncProto) SetLockedParamName(regOffset uint64, name string, nameLock 
 	fp.lockedParamNames[regOffset] = lockedParamName{name: name, nameLock: nameLock, isolate: isolate}
 }
 
+// lockedParamNamesOrNil is every locked register parameter's name record.
+func (fp *FuncProto) lockedParamNamesOrNil() map[uint64]lockedParamName {
+	if fp == nil {
+		return nil
+	}
+	return fp.lockedParamNames
+}
+
 // LockedParamName returns the injected display name and namelock flag for the
 // parameter at the given register-space byte offset, if any.
 // C++ parity: ProtoParameter name + Varnode::namelock for a locked parameter.
