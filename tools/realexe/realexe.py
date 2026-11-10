@@ -25,9 +25,8 @@ not read PDB, so a PDB-named golden would never match.
 """
 
 import argparse
-import contextlib
-import io
 import difflib
+import functools
 import hashlib
 import re
 import json
@@ -298,7 +297,7 @@ def build_goldengap(binary):
 	return rc == 0
 
 
-def do_run(work, timeout_s, mem_mb, fresh, jobs, binary=None):
+def do_run(work, timeout_s, mem_mb, fresh, jobs, binary=None, log=functools.partial(print, flush=True)):
 	meta = load_meta(work)
 	want = meta.get("sha256", {}).get(os.path.basename(meta["exe"]))
 	if want != sha256(meta["exe"]):
@@ -346,7 +345,7 @@ def do_run(work, timeout_s, mem_mb, fresh, jobs, binary=None):
 				done[rec["index"]] = rec
 				status = rec.get("error", "").split(":")[0]
 				if status:
-					print("[%d] %s %s %.1fs" % (rec["index"], rec["name"], status, rec["secs"]), flush=True)
+					log("[%d] %s %s %.1fs" % (rec["index"], rec["name"], status, rec["secs"]))
 		list(pool.map(lambda sh: run_shard(binary, args, sh, fns, timeout_s, emit), shards))
 
 	out = {"functions": [{k: done[i][k] for k in ("name", "output", "error") if k in done[i]} for i in range(len(fns))]}
@@ -362,13 +361,19 @@ def size_bucket(size):
 	return ">2048"
 
 
-def do_report(work):
+def do_report(work, table=True):
+	"""Write the work's GAPMAP and return (matched, total). Without table
+	(measure-all) nothing is printed and the per-bucket similarity, which is
+	only shown in the table, is not computed."""
 	goldens = os.path.join(work, "goldens.json")
 	summary = goldengap.do_report(
 		goldens, os.path.join(work, "gosleigh_out.json"),
 		os.path.join(work, "GAPMAP.md"), os.path.join(work, "gapmap.json"),
-		title="real-exe gap map",
+		title="real-exe gap map", quiet=not table,
 	)
+	if not table:
+		recs = summary["functions"]
+		return sum(1 for r in recs if r["tags"] == ["MATCH"]), len(recs)
 	gf = goldengap.load_json(goldens)["functions"]
 	got = goldengap.load_json(os.path.join(work, "gosleigh_out.json"))["functions"]
 	by_bucket = defaultdict(Counter)
@@ -406,18 +411,23 @@ def do_measure_all(works, timeout_s, mem_mb, jobs):
 	binary = os.path.join(root, "goldengap.exe")
 	if not build_goldengap(binary):
 		return False
-	clean = 0
 	start = time.time()
-	for name in works:
-		work = name if os.path.isabs(name) else os.path.join(root, name)
-		log = io.StringIO()
-		with contextlib.redirect_stdout(log):
-			ok = do_run(work, timeout_s, mem_mb, True, jobs, binary)
-			counts = do_report(work) if ok else None
-		if counts and counts[0] == counts[1]:
+	paths = [name if os.path.isabs(name) else os.path.join(root, name) for name in works]
+	# Works run side by side, one decompiler process each: a work's 200
+	# functions are a few seconds of decompiling, so splitting a work over
+	# processes mostly repeats its start-up (loading the image and the host
+	# symbol table) and waits on its slowest shard.
+	def one(work):
+		ok = do_run(work, timeout_s, mem_mb, True, 1, binary, log=lambda s: None)
+		return do_report(work, table=False) if ok else None
+	with concurrent.futures.ThreadPoolExecutor(max_workers=jobs) as pool:
+		counts = list(pool.map(one, paths))
+	clean = 0
+	for work, c in zip(paths, counts):
+		if c and c[0] == c[1]:
 			clean += 1
 		else:
-			got = "%d/%d" % counts if counts else "run failed"
+			got = "%d/%d" % c if c else "run failed"
 			print("%s %s (see %s)" % (os.path.basename(work), got, os.path.join(work, "GAPMAP.md")), flush=True)
 	print("%d/%d works all-MATCH, %.0fs" % (clean, len(works), time.time() - start))
 	return clean == len(works)
@@ -433,9 +443,12 @@ def similarity(want, got):
 	return difflib.SequenceMatcher(None, a, b, autojunk=False).ratio()
 
 
-def add_jobs(parser):
-	parser.add_argument("--jobs", type=int, choices=range(1, 5), default=2, metavar="1-4",
-		help="decompiler processes run at once (default 2)")
+MAX_JOBS = os.cpu_count() or 4
+
+
+def add_jobs(parser, default=2):
+	parser.add_argument("--jobs", type=int, choices=range(1, MAX_JOBS + 1), default=default,
+		metavar="1-%d" % MAX_JOBS, help="decompiler processes run at once (default %d)" % default)
 
 
 def main():
@@ -474,7 +487,7 @@ def main():
 	pma.add_argument("works", nargs="*", help="work dir names under local/realexe or paths (default: every work)")
 	pma.add_argument("--timeout", type=int, default=10)
 	pma.add_argument("--mem-mb", type=int, default=2048)
-	add_jobs(pma)
+	add_jobs(pma, default=max(2, MAX_JOBS // 2))
 	args = p.parse_args()
 
 	if args.cmd == "analyze":

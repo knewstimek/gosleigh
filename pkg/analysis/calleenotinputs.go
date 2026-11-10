@@ -121,7 +121,7 @@ func (c *CalleeReads) scanNotInputs(at address.Address) []pcode.HostStorage {
 			}
 			seen[p] = true
 			budget--
-			tr, err := c.engine.TranslateInstructionAt(address.Address{Space: c.code, Offset: p.at})
+			tr, err := c.translate(address.Address{Space: c.code, Offset: p.at})
 			if err != nil {
 				break
 			}
@@ -194,7 +194,7 @@ func (c *CalleeReads) paramMask(vn pcode.VarnodeData, write bool) uint32 {
 func (c *CalleeReads) findParams() {
 	var ps []paramReg
 	for _, n := range paramRegNames {
-		off, ok := registerOffset(c.engine, n)
+		off, ok := c.registerOffset(n)
 		if !ok {
 			return
 		}

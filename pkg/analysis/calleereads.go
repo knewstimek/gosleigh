@@ -66,13 +66,34 @@ type CalleeReads struct {
 	inputs    map[uint64]*inferredInputs // CalleeInputs cache
 	gpr       [16]uint64                 // RAX..R15 offsets (gprNames order)
 	homes     map[uint64][]homeStore     // home-area stores of the entry path, per entry
+	// insns caches translated instructions by address: the scans share
+	// callees and the path scans revisit addresses, and translating is the
+	// cost of every scan. Ops are read-only to the scans.
+	insns map[uint64]insn
+	regs  map[string]uint64 // register offsets by name
+}
+
+// insn is one cached translation.
+type insn struct {
+	tr  sla.InstructionTranslation
+	err error
+}
+
+// translate is TranslateInstructionAt through the cache. Callers hold c.mu.
+func (c *CalleeReads) translate(at address.Address) (sla.InstructionTranslation, error) {
+	if in, ok := c.insns[at.Offset]; ok {
+		return in.tr, in.err
+	}
+	tr, err := c.engine.TranslateInstructionAt(at)
+	c.insns[at.Offset] = insn{tr, err}
+	return tr, err
 }
 
 // NewCalleeReads returns a CalleeReads over prog's image.
 func NewCalleeReads(prog *decomp.Program) *CalleeReads {
 	return &CalleeReads{prog: prog, cache: map[uint64][]pcode.HostStorage{}, returns: map[uint64]int32{},
 		notInputs: map[uint64][]pcode.HostStorage{}, homes: map[uint64][]homeStore{},
-		inputs: map[uint64]*inferredInputs{}}
+		inputs: map[uint64]*inferredInputs{}, insns: map[uint64]insn{}}
 }
 
 // CalleeReadsBeforeWrite implements pcode.HostCalleeReads.
@@ -141,14 +162,21 @@ func (c *CalleeReads) ensureEngine(entry uint64) bool {
 		return false
 	}
 	c.engine, c.code = engine, at.Space
-	c.sp, c.spOK = registerOffset(engine, "RSP")
-	rax, okA := registerOffset(engine, "RAX")
-	xmm0, okX := registerOffset(engine, "XMM0")
+	c.regs = map[string]uint64{}
+	for key, n := range engine.RegisterNamesByLocation() {
+		var space, off, size uint64
+		if _, err := fmt.Sscanf(key, "%d:%d:%d", &space, &off, &size); err == nil {
+			c.regs[n] = off
+		}
+	}
+	c.sp, c.spOK = c.registerOffset("RSP")
+	rax, okA := c.registerOffset("RAX")
+	xmm0, okX := c.registerOffset("XMM0")
 	c.rax, c.xmm0 = rax, xmm0
 	c.retRegsOK = okA && okX && c.findXMM()
 	c.findParams()
 	for g, n := range gprNames {
-		c.gpr[g], _ = registerOffset(engine, n)
+		c.gpr[g], _ = c.registerOffset(n)
 	}
 	return true
 }
@@ -175,7 +203,7 @@ func (c *CalleeReads) scanReads(at address.Address) ([]pcode.HostStorage, []home
 	spCopies := map[uint64]bool{}
 	for n := 0; n < calleeScanLimit && !seen[at.Offset]; n++ {
 		seen[at.Offset] = true
-		tr, err := c.engine.TranslateInstructionAt(at)
+		tr, err := c.translate(at)
 		if err != nil {
 			break
 		}
@@ -302,17 +330,9 @@ func (c *CalleeReads) noteSPCopy(op pcode.RawOp, written, spCopies map[uint64]bo
 }
 
 // registerOffset finds a register's offset in the register space by name.
-func registerOffset(engine *sla.Engine, name string) (uint64, bool) {
-	for key, n := range engine.RegisterNamesByLocation() {
-		if n != name {
-			continue
-		}
-		var space, off, size uint64
-		if _, err := fmt.Sscanf(key, "%d:%d:%d", &space, &off, &size); err == nil {
-			return off, true
-		}
-	}
-	return 0, false
+func (c *CalleeReads) registerOffset(name string) (uint64, bool) {
+	off, ok := c.regs[name]
+	return off, ok
 }
 
 // selfCombine reports an op whose result does not depend on its inputs

@@ -103,7 +103,7 @@ func (c *CalleeReads) scanReturn(at address.Address, depth int) int32 {
 			}
 			seen[st] = true
 			budget--
-			tr, err := c.engine.TranslateInstructionAt(p.at)
+			tr, err := c.translate(p.at)
 			if err != nil {
 				break
 			}
@@ -220,7 +220,7 @@ func (c *CalleeReads) laneOffset(off uint64) uint64 {
 // findXMM fills c.xmmBase; false when a register is missing (not x86-64).
 func (c *CalleeReads) findXMM() bool {
 	for k := range c.xmmBase {
-		off, ok := registerOffset(c.engine, fmt.Sprintf("XMM%d", k))
+		off, ok := c.registerOffset(fmt.Sprintf("XMM%d", k))
 		if !ok {
 			return false
 		}

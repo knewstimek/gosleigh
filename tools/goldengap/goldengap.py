@@ -242,7 +242,7 @@ def classify_functions(goldens_path, gosleigh_out_path):
 	return records
 
 
-def do_report(goldens_path, gosleigh_out_path, out_md_path, out_json_path, title="Golden Gap Map"):
+def do_report(goldens_path, gosleigh_out_path, out_md_path, out_json_path, title="Golden Gap Map", quiet=False):
 	records = classify_functions(goldens_path, gosleigh_out_path)
 
 	tag_counts = Counter()
@@ -270,6 +270,8 @@ def do_report(goldens_path, gosleigh_out_path, out_md_path, out_json_path, title
 	with open(out_md_path, "w", encoding="utf-8") as f:
 		f.write(md)
 
+	if quiet:
+		return summary
 	print("report: %d/%d MATCH" % (match_count, len(records)))
 	for r in records:
 		print("  [%s] %s" % (r["name"], ",".join(r["tags"])))

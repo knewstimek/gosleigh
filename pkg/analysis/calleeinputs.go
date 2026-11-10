@@ -138,7 +138,7 @@ func (c *CalleeReads) scanInputs(entry uint64) *inferredInputs {
 				return fail
 			}
 			budget--
-			tr, err := c.engine.TranslateInstructionAt(address.Address{Space: c.code, Offset: p.at})
+			tr, err := c.translate(address.Address{Space: c.code, Offset: p.at})
 			if err != nil {
 				return fail
 			}
