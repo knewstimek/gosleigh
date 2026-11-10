@@ -236,8 +236,20 @@ func (b *Backend) AdjustRawInstructionVMA(adjust uint64) error {
 	return nil
 }
 
-// SetInstructionBytes stores contiguous instruction bytes beginning at addr.
+// SetInstructionBytes stores a copy of contiguous instruction bytes beginning
+// at addr.
 func (b *Backend) SetInstructionBytes(addr address.Address, data []byte) error {
+	return b.addImage(addr, data, true)
+}
+
+// ShareInstructionBytes maps data at addr without copying it: the backend
+// only reads its image, and the caller keeps data unchanged while the backend
+// is in use (an image shared by every engine built over it).
+func (b *Backend) ShareInstructionBytes(addr address.Address, data []byte) error {
+	return b.addImage(addr, data, false)
+}
+
+func (b *Backend) addImage(addr address.Address, data []byte, copyData bool) error {
 	if b == nil {
 		return fmt.Errorf("backend is nil")
 	}
@@ -252,8 +264,11 @@ func (b *Backend) SetInstructionBytes(addr address.Address, data []byte) error {
 		return fmt.Errorf("set instruction bytes: address overflow for %d bytes at %v", len(data), addr)
 	}
 
+	if copyData {
+		data = append([]byte(nil), data...)
+	}
 	b.mu.Lock()
-	b.image = append(b.image, imageChunk{space: addr.Space, start: addr.Offset, data: append([]byte(nil), data...)})
+	b.image = append(b.image, imageChunk{space: addr.Space, start: addr.Offset, data: data})
 	b.mu.Unlock()
 	return nil
 }

@@ -105,15 +105,12 @@ type captureProto struct {
 
 // loadCaptureData reads the <db> scopes of a savefile written by
 // DecompInterface.enableDebug (tools/realexe/GenCapture.java).
-func loadCaptureData(path string, ram *address.Space) (*captureData, error) {
-	raw, err := os.ReadFile(path)
+func loadCaptureData(fn goldenEntry, ram *address.Space) (*captureData, error) {
+	root, err := captureXML(fn.Entry)
 	if err != nil {
 		return nil, err
 	}
-	var root xnode
-	if err := xml.Unmarshal(raw, &root); err != nil {
-		return nil, fmt.Errorf("parse %s: %w", path, err)
-	}
+	path := capturePath(fn.Entry)
 	state := root.child("save_state")
 	if state == nil {
 		return nil, fmt.Errorf("%s: no save_state", path)
@@ -568,6 +565,43 @@ func codeTypeProto(proto *xnode, types map[string]*xnode, depth int) *pcode.Host
 // captureDir is the -host-captures directory: <entry as %08x>.xml per golden.
 var captureDir string
 
+func capturePath(entry int64) string { return fmt.Sprintf("%s/%08x.xml", captureDir, entry) }
+
+// lastCapture holds the parse of the most recent capture: the data symbols,
+// flow overrides, comments and injections of one function all come from its
+// one savefile, and parsing it was most of a run's time. Functions are
+// decompiled one at a time, so one entry is enough.
+var lastCapture struct {
+	sync.Mutex
+	entry int64
+	root  *xnode
+	err   error
+}
+
+// captureXML returns the parsed savefile of the function at entry.
+func captureXML(entry int64) (*xnode, error) {
+	lastCapture.Lock()
+	defer lastCapture.Unlock()
+	if (lastCapture.root != nil || lastCapture.err != nil) && lastCapture.entry == entry {
+		return lastCapture.root, lastCapture.err
+	}
+	root, err := parseCapture(capturePath(entry))
+	lastCapture.entry, lastCapture.root, lastCapture.err = entry, root, err
+	return root, err
+}
+
+func parseCapture(path string) (*xnode, error) {
+	raw, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var root xnode
+	if err := xml.Unmarshal(raw, &root); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", path, err)
+	}
+	return &root, nil
+}
+
 // hostWithData layers a function's captured data symbols over the program
 // symbol table.
 type hostWithData struct {
@@ -581,7 +615,7 @@ func withCapture(host pcode.HostScope, fn goldenEntry, ram *address.Space) pcode
 	if captureDir == "" || host == nil || ram == nil {
 		return host
 	}
-	cd, err := loadCaptureData(fmt.Sprintf("%s/%08x.xml", captureDir, fn.Entry), ram)
+	cd, err := loadCaptureData(fn, ram)
 	if err != nil {
 		return host
 	}
@@ -619,12 +653,8 @@ func captureFlowOverrides(fn goldenEntry) map[uint64]string {
 	if captureDir == "" {
 		return nil
 	}
-	raw, err := os.ReadFile(fmt.Sprintf("%s/%08x.xml", captureDir, fn.Entry))
+	root, err := captureXML(fn.Entry)
 	if err != nil {
-		return nil
-	}
-	var root xnode
-	if xml.Unmarshal(raw, &root) != nil {
 		return nil
 	}
 	var list *xnode
@@ -641,7 +671,7 @@ func captureFlowOverrides(fn goldenEntry) map[uint64]string {
 			find(&n.Kids[i])
 		}
 	}
-	find(&root)
+	find(root)
 	if list == nil {
 		return nil
 	}
@@ -667,12 +697,8 @@ func captureComments(fn goldenEntry) []bridge.HostComment {
 	if captureDir == "" {
 		return nil
 	}
-	raw, err := os.ReadFile(fmt.Sprintf("%s/%08x.xml", captureDir, fn.Entry))
+	root, err := captureXML(fn.Entry)
 	if err != nil {
-		return nil
-	}
-	var root xnode
-	if xml.Unmarshal(raw, &root) != nil {
 		return nil
 	}
 	state := root.child("save_state")
@@ -714,12 +740,8 @@ func captureInjections(fn goldenEntry, host pcode.HostScope, ram *address.Space)
 	if captureDir == "" {
 		return nil
 	}
-	raw, err := os.ReadFile(fmt.Sprintf("%s/%08x.xml", captureDir, fn.Entry))
+	root, err := captureXML(fn.Entry)
 	if err != nil {
-		return nil
-	}
-	var root xnode
-	if xml.Unmarshal(raw, &root) != nil {
 		return nil
 	}
 	state := root.child("save_state")
@@ -772,7 +794,7 @@ func captureInjections(fn goldenEntry, host pcode.HostScope, ram *address.Space)
 			}
 		}
 		addr := parseUint(at.attr("offset"))
-		inj.Callee = calleeAt(raw, inj.Name, host, ram)
+		inj.Callee = calleeAt(root, inj.Name, host, ram)
 		out[addr] = inj
 	}
 	return out
@@ -781,11 +803,7 @@ func captureInjections(fn goldenEntry, host pcode.HostScope, ram *address.Space)
 // calleeAt names the function a call fixup replaced: the call target of the
 // instruction at addr is not decoded here, so the capture's own function list
 // is used -- the injected callee is the one carrying an <inject> prototype.
-func calleeAt(raw []byte, injName string, host pcode.HostScope, ram *address.Space) string {
-	var root xnode
-	if xml.Unmarshal(raw, &root) != nil {
-		return ""
-	}
+func calleeAt(root *xnode, injName string, host pcode.HostScope, ram *address.Space) string {
 	db := root.child("save_state").child("db")
 	if db == nil {
 		return ""

@@ -190,6 +190,12 @@ func (t *SymbolTableBoundary) FindSymbol(id uint64) (*SymbolBoundary, bool) {
 	if t == nil {
 		return nil, false
 	}
+	// A .sla numbers its symbols by their position in the table (C++
+	// SymbolTable::findSymbol indexes symbollist by id), so the id is
+	// normally the index; the scan covers a table that is not in id order.
+	if id < uint64(len(t.Symbols)) && t.Symbols[id].ID == id {
+		return &t.Symbols[id], true
+	}
 	for i := range t.Symbols {
 		if t.Symbols[i].ID == id {
 			return &t.Symbols[i], true

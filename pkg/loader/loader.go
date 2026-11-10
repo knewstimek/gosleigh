@@ -88,6 +88,9 @@ type EngineBuilder struct {
 	// different VMAs coexist. Sections are additive to (and independent of)
 	// Bytes/BinaryPath; the returned entry address is still {ram, BaseAddr}, so
 	// callers set BaseAddr to the target function VMA.
+	// The engine keeps the section bytes without copying them (an engine is
+	// built per decompile over the same image), so they must not change while
+	// an engine built from them is in use.
 	Sections []PESection
 }
 
@@ -200,7 +203,7 @@ func (b *EngineBuilder) Build() (*sla.Engine, address.Address, error) {
 			continue
 		}
 		secAddr := address.Address{Space: ram, Offset: sec.VMA}
-		if setErr := backend.SetInstructionBytes(secAddr, sec.Bytes); setErr != nil {
+		if setErr := backend.ShareInstructionBytes(secAddr, sec.Bytes); setErr != nil {
 			return nil, address.Address{}, fmt.Errorf("loader: SetInstructionBytes section %q at 0x%x: %w", sec.Name, sec.VMA, setErr)
 		}
 	}

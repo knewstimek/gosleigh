@@ -444,11 +444,15 @@ def similarity(want, got):
 
 
 MAX_JOBS = os.cpu_count() or 4
+# REALEXE_JOBS sets the default for every command, so a machine busy with
+# other work keeps measurements to the cores it can spare.
+DEFAULT_JOBS = min(MAX_JOBS, max(1, int(os.environ.get("REALEXE_JOBS") or 2)))
 
 
-def add_jobs(parser, default=2):
-	parser.add_argument("--jobs", type=int, choices=range(1, MAX_JOBS + 1), default=default,
-		metavar="1-%d" % MAX_JOBS, help="decompiler processes run at once (default %d)" % default)
+def add_jobs(parser):
+	parser.add_argument("--jobs", type=int, choices=range(1, MAX_JOBS + 1), default=DEFAULT_JOBS,
+		metavar="1-%d" % MAX_JOBS,
+		help="decompiler processes run at once (default %d, from REALEXE_JOBS or 2)" % DEFAULT_JOBS)
 
 
 def main():
@@ -487,7 +491,7 @@ def main():
 	pma.add_argument("works", nargs="*", help="work dir names under local/realexe or paths (default: every work)")
 	pma.add_argument("--timeout", type=int, default=10)
 	pma.add_argument("--mem-mb", type=int, default=2048)
-	add_jobs(pma, default=max(2, MAX_JOBS // 2))
+	add_jobs(pma)
 	args = p.parse_args()
 
 	if args.cmd == "analyze":
