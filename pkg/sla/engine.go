@@ -345,6 +345,7 @@ func (e *Engine) loweringContextForAddress(addr address.Address) LoweringContext
 	ctx.NextOffset = 0
 	ctx.HasNext2 = false
 	ctx.Next2Offset = 0
+	ctx.Next2Lazy = nil
 	ctx.Handles = nil
 	ctx.SpacesByIndex = cloneSpacesByIndex(e.loweringTemplate.SpacesByIndex)
 	if ctx.SpacesByIndex == nil {
@@ -392,6 +393,7 @@ func isZeroLoweringTemplate(ctx LoweringContext) bool {
 		ctx.LabelBase == 0 &&
 		!ctx.HasNext &&
 		!ctx.HasNext2 &&
+		ctx.Next2Lazy == nil &&
 		ctx.NextOffset == 0 &&
 		ctx.Next2Offset == 0 &&
 		len(ctx.Handles) == 0

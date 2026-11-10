@@ -831,10 +831,9 @@ func translateRuntimeContext(walker *ParserWalker, base LoweringContext) Runtime
 		runtime.Next = next
 		runtime.HasNext = true
 	}
-	if next2 := ctx.GetN2addr(); !next2.IsInvalid() {
-		runtime.Next2 = next2
-		runtime.HasNext2 = true
-	}
+	// inst_next2 decodes the following instruction; only the rare constructor
+	// that reads it pays for that.
+	runtime.Next2Lazy = ctx.GetN2addr
 	if ref := ctx.GetRefAddr(); !ref.IsInvalid() {
 		runtime.Ref = ref
 		runtime.HasRef = true
@@ -846,6 +845,7 @@ func translateRuntimeContext(walker *ParserWalker, base LoweringContext) Runtime
 	if walker.Point != nil {
 		runtime.ParentHandle = &walker.Point.Handle
 		if len(walker.Point.Children) != 0 {
+			runtime.handleRefs = nil
 			runtime.Handles = make([]FixedHandle, len(walker.Point.Children))
 			for i, child := range walker.Point.Children {
 				if child != nil {
@@ -863,7 +863,7 @@ func translateLoweringContext(state BuilderState, base LoweringContext) Lowering
 	ctx.CurrentSpace = state.Runtime.CurrentSpace
 	ctx.ConstantSpace = state.Runtime.ConstantSpace
 	ctx.SpacesByIndex = state.Runtime.SpacesByIndex
-	ctx.Handles = translateHandleRefs(state.Runtime.Handles)
+	ctx.Handles = state.Runtime.handleList()
 	if state.Runtime.HasNext {
 		ctx.HasNext = true
 		ctx.NextOffset = state.Runtime.Next.Offset
@@ -878,6 +878,7 @@ func translateLoweringContext(state BuilderState, base LoweringContext) Lowering
 		ctx.HasNext2 = false
 		ctx.Next2Offset = 0
 	}
+	ctx.Next2Lazy = state.Runtime.Next2Lazy
 	return ctx
 }
 

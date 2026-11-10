@@ -52,6 +52,7 @@ type LoweringContext struct {
 	HasNext         bool
 	Next2Offset     uint64
 	HasNext2        bool
+	Next2Lazy       func() address.Address // RuntimeContext.Next2Lazy
 	SpacesByIndex   map[int64]*address.Space
 	Handles         []HandleReference
 	LabelBase       uint64
@@ -98,8 +99,17 @@ func NewLoweringContext(metadata *Metadata, instruction address.Address) Lowerin
 	return ctx
 }
 
+// runtimeContext is RuntimeContextFromLowering without converting the
+// handles up front: it runs for every constant of every lowered op, and the
+// handles are read one at a time through RuntimeContext.handle.
 func (ctx LoweringContext) runtimeContext() RuntimeContext {
-	return RuntimeContextFromLowering(ctx)
+	handles := ctx.Handles
+	ctx.Handles = nil
+	runtime := RuntimeContextFromLowering(ctx)
+	if len(handles) != 0 {
+		runtime.handleRefs = handles
+	}
+	return runtime
 }
 
 // LowerConstructTpl converts one decoded ConstructTpl boundary into executable raw p-code ops.

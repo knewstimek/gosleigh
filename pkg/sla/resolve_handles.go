@@ -566,10 +566,7 @@ func runtimeContextForWalker(walker *ParserWalker) (RuntimeContext, error) {
 		runtime.Next = ctx.GetNaddr()
 		runtime.HasNext = true
 	}
-	if !ctx.GetN2addr().IsInvalid() {
-		runtime.Next2 = ctx.GetN2addr()
-		runtime.HasNext2 = true
-	}
+	runtime.Next2Lazy = ctx.GetN2addr // see translateRuntimeContext
 	if !ctx.GetRefAddr().IsInvalid() {
 		runtime.Ref = ctx.GetRefAddr()
 		runtime.HasRef = true

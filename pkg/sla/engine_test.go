@@ -63,16 +63,20 @@ func TestEngineTranslateInstructionAtUsesBackendAddressLoader(t *testing.T) {
 	if loaderCalls[base.Offset] == 0 {
 		t.Fatalf("backend loader was not called for base address %v", base)
 	}
-	if loaderCalls[base.Add(4).Offset] == 0 {
-		t.Fatalf("backend loader was not called for fallthrough address %v", base.Add(4))
+	// inst_next2 is computed on first use, loading the fall-through then.
+	// C++ parity: ParserContext::getN2addr (context.cc).
+	if loaderCalls[base.Add(4).Offset] != 0 {
+		t.Fatalf("fall-through %v loaded before inst_next2 was asked for", base.Add(4))
 	}
-
 	pcodeCtx, ok := engine.DisassemblyCache().GetPcodeParserContext(base)
 	if !ok || pcodeCtx == nil {
 		t.Fatal("expected pcode parser context to be cached for base instruction")
 	}
 	if pcodeCtx.GetN2addr() != base.Add(8) {
-		t.Fatalf("unexpected prefetched n2addr: got %v want %v", pcodeCtx.GetN2addr(), base.Add(8))
+		t.Fatalf("unexpected n2addr: got %v want %v", pcodeCtx.GetN2addr(), base.Add(8))
+	}
+	if loaderCalls[base.Add(4).Offset] == 0 {
+		t.Fatalf("backend loader was not called for fallthrough address %v", base.Add(4))
 	}
 }
 
@@ -138,11 +142,15 @@ func TestEngineTranslateInstructionAtUsesSplitLoadHooksWithoutPayloadLoader(t *t
 	if loadFillCalls[base.Offset] == 0 {
 		t.Fatalf("split load-fill hook was not called for base address %v", base)
 	}
-	if loadFillCalls[base.Add(4).Offset] == 0 {
-		t.Fatalf("split load-fill hook was not called for fallthrough address %v", base.Add(4))
-	}
 	if loadContextCalls[base.Offset] == 0 {
 		t.Fatalf("split load-context hook was not called for base address %v", base)
+	}
+	// The fall-through is loaded when inst_next2 is first asked for.
+	if pcodeCtx, ok := engine.DisassemblyCache().GetPcodeParserContext(base); ok && pcodeCtx != nil {
+		pcodeCtx.GetN2addr()
+	}
+	if loadFillCalls[base.Add(4).Offset] == 0 {
+		t.Fatalf("split load-fill hook was not called for fallthrough address %v", base.Add(4))
 	}
 	if loadContextCalls[base.Add(4).Offset] == 0 {
 		t.Fatalf("split load-context hook was not called for fallthrough address %v", base.Add(4))

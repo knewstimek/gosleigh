@@ -115,6 +115,7 @@ func main() {
 	index := flag.Int("index", -1, "decompile only the golden at this index (-1 = all); lets a driver isolate each function in its own process")
 	memLimitMB := flag.Uint64("mem-limit-mb", 0, "exit with status 3 once the Go heap exceeds this many MB (0 = no limit)")
 	cpuProfile := flag.String("cpuprofile", "", "write a CPU profile to this file")
+	memProfile := flag.String("memprofile", "", "write an allocation profile to this file at exit")
 	indices := flag.String("indices", "", "comma-separated golden indices; streams one JSON line per function to stdout as each finishes (a driver shards work across processes and recovers from a hang)")
 	flag.Parse()
 	if *cpuProfile != "" {
@@ -122,6 +123,14 @@ func main() {
 			pprof.StartCPUProfile(f)
 			defer pprof.StopCPUProfile()
 		}
+	}
+	if *memProfile != "" {
+		defer func() {
+			if f, err := os.Create(*memProfile); err == nil {
+				pprof.Lookup("allocs").WriteTo(f, 0)
+				f.Close()
+			}
+		}()
 	}
 
 	if *memLimitMB > 0 {

@@ -30,6 +30,9 @@ type RuntimeContext struct {
 	HasNext       bool
 	Next2         address.Address
 	HasNext2      bool
+	// Next2Lazy computes Next2 on first use when HasNext2 is not set (it
+	// decodes the next instruction); an invalid address means none.
+	Next2Lazy     func() address.Address
 	Ref           address.Address
 	HasRef        bool
 	Dest          address.Address
@@ -37,6 +40,17 @@ type RuntimeContext struct {
 	SpacesByIndex map[int64]*address.Space
 	Handles       []FixedHandle
 	ParentHandle  *FixedHandle
+	// handleRefs are a lowering context's handles, read through handle()
+	// when Handles is nil (RuntimeContextFromLowering).
+	handleRefs []HandleReference
+}
+
+// handleList is every handle as lowering references (Handles first).
+func (ctx RuntimeContext) handleList() []HandleReference {
+	if ctx.Handles == nil {
+		return ctx.handleRefs
+	}
+	return translateHandleRefs(ctx.Handles)
 }
 
 // RuntimeContextFromLowering bridges the older lowering context into the runtime handle model.
@@ -48,6 +62,7 @@ func RuntimeContextFromLowering(ctx LoweringContext) RuntimeContext {
 		SpacesByIndex: ctx.SpacesByIndex,
 		HasNext:       ctx.HasNext,
 		HasNext2:      ctx.HasNext2,
+		Next2Lazy:     ctx.Next2Lazy,
 	}
 	if ctx.CurrentSpace != nil {
 		if ctx.HasNext {
@@ -60,15 +75,7 @@ func RuntimeContextFromLowering(ctx LoweringContext) RuntimeContext {
 	if len(ctx.Handles) != 0 {
 		runtime.Handles = make([]FixedHandle, len(ctx.Handles))
 		for i := range ctx.Handles {
-			runtime.Handles[i] = FixedHandle{
-				Space:        ctx.Handles[i].Space,
-				Size:         ctx.Handles[i].Size,
-				OffsetSpace:  ctx.Handles[i].OffsetSpace,
-				OffsetOffset: ctx.Handles[i].Offset,
-				OffsetSize:   ctx.Handles[i].OffsetSize,
-				TempSpace:    ctx.Handles[i].TempSpace,
-				TempOffset:   ctx.Handles[i].TempOffset,
-			}
+			runtime.Handles[i] = fixedFromRef(ctx.Handles[i])
 		}
 	}
 	return runtime
@@ -181,10 +188,15 @@ func fixConstScalar(c ConstBoundary, ctx RuntimeContext) (uint64, error) {
 		}
 		return ctx.Next.Offset, nil
 	case ConstKindNext2:
-		if !ctx.HasNext2 {
-			return 0, fmt.Errorf("next2 address is not set")
+		if ctx.HasNext2 {
+			return ctx.Next2.Offset, nil
 		}
-		return ctx.Next2.Offset, nil
+		if ctx.Next2Lazy != nil {
+			if a := ctx.Next2Lazy(); !a.IsInvalid() {
+				return a.Offset, nil
+			}
+		}
+		return 0, fmt.Errorf("next2 address is not set")
 	case ConstKindFlowRef:
 		if !ctx.HasRef {
 			return 0, fmt.Errorf("flowref address is not set")
@@ -360,11 +372,29 @@ func fixHandleSelector(c ConstBoundary, ctx RuntimeContext) (uint64, error) {
 	}
 }
 
-func (ctx RuntimeContext) handle(index int64) (*FixedHandle, error) {
-	if index < 0 || index >= int64(len(ctx.Handles)) {
-		return nil, fmt.Errorf("handle index %d out of range", index)
+func (ctx RuntimeContext) handle(index int64) (FixedHandle, error) {
+	if ctx.Handles == nil && ctx.handleRefs != nil {
+		if index < 0 || index >= int64(len(ctx.handleRefs)) {
+			return FixedHandle{}, fmt.Errorf("handle index %d out of range", index)
+		}
+		return fixedFromRef(ctx.handleRefs[index]), nil
 	}
-	return &ctx.Handles[index], nil
+	if index < 0 || index >= int64(len(ctx.Handles)) {
+		return FixedHandle{}, fmt.Errorf("handle index %d out of range", index)
+	}
+	return ctx.Handles[index], nil
+}
+
+func fixedFromRef(h HandleReference) FixedHandle {
+	return FixedHandle{
+		Space:        h.Space,
+		Size:         h.Size,
+		OffsetSpace:  h.OffsetSpace,
+		OffsetOffset: h.Offset,
+		OffsetSize:   h.OffsetSize,
+		TempSpace:    h.TempSpace,
+		TempOffset:   h.TempOffset,
+	}
 }
 
 func (ctx RuntimeContext) spaceByIndex(index int64) (*address.Space, error) {

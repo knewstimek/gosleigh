@@ -250,7 +250,11 @@ func TestLoweringContextRuntimeBridge(t *testing.T) {
 		}},
 	}
 
-	runtime := ctx.runtimeContext()
+	// The internal path reads handles on demand; it must see the same one.
+	if lazy, err := ctx.runtimeContext().handle(0); err != nil || lazy.OffsetOffset != 0x30 || lazy.TempOffset != 0x200 || !lazy.IsDynamic() {
+		t.Fatalf("unexpected on-demand handle: %+v %v", lazy, err)
+	}
+	runtime := RuntimeContextFromLowering(ctx)
 	if runtime.Instruction.Offset != 0x401000 || runtime.CurrentSpace != ram || runtime.ConstantSpace != constant {
 		t.Fatalf("unexpected runtime bridge header: %+v", runtime)
 	}
