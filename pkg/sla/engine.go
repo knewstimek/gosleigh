@@ -3,6 +3,7 @@ package sla
 import (
 	"fmt"
 	"sort"
+	"sync"
 
 	"github.com/knewstimek/gosleigh/pkg/address"
 	"github.com/knewstimek/gosleigh/pkg/pcode"
@@ -467,13 +468,27 @@ func (e *Engine) UserOpNames() []string {
 // When multiple symbols map to the same location, the shortest name wins (prefer
 // canonical short names like "eax" over longer aliases).
 // C++ parity: AddrSpace/VarnodeSymbol name table in slghsymbol.cc
+//
+// The map is built once per symbol table and shared by every caller (each
+// decompile asks for it several times); callers only read it.
 func (e *Engine) RegisterNamesByLocation() map[string]string {
-	result := make(map[string]string)
 	if e == nil || e.symbols == nil {
-		return result
+		return map[string]string{}
 	}
-	for i := range e.symbols.Symbols {
-		sym := &e.symbols.Symbols[i]
+	if m, ok := registerNameTables.Load(e.symbols); ok {
+		return m.(map[string]string)
+	}
+	m, _ := registerNameTables.LoadOrStore(e.symbols, buildRegisterNames(e.symbols))
+	return m.(map[string]string)
+}
+
+// registerNameTables caches RegisterNamesByLocation by symbol table.
+var registerNameTables sync.Map
+
+func buildRegisterNames(t *SymbolTableBoundary) map[string]string {
+	result := make(map[string]string)
+	for i := range t.Symbols {
+		sym := &t.Symbols[i]
 		if sym.Body.Varnode == nil || sym.Name == "" {
 			continue
 		}

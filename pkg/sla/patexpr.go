@@ -88,7 +88,7 @@ func GetPatternExpressionValue(expr *PatternExprBoundary, walker *ParserWalker, 
 }
 
 func evalConstantValue(expr PatternExprBoundary) (int64, error) {
-	value, err := requiredIntAttr(exprAttrSlice(expr), attrVal)
+	value, err := exprIntAttr(expr, attrVal)
 	if err != nil {
 		return 0, fmt.Errorf("read constant value: %w", err)
 	}
@@ -132,31 +132,31 @@ func evalTokenField(expr PatternExprBoundary, walker *ParserWalker) (int64, erro
 	if walker == nil || walker.constContext == nil || walker.Point == nil {
 		return 0, fmt.Errorf("token field requires active walker state")
 	}
-	bigendian, err := requiredBoolAttr(exprAttrSlice(expr), attrBigEndian)
+	bigendian, err := exprBoolAttr(expr, attrBigEndian)
 	if err != nil {
 		return 0, fmt.Errorf("read token field endian: %w", err)
 	}
-	signbit, err := requiredBoolAttr(exprAttrSlice(expr), attrSignBit)
+	signbit, err := exprBoolAttr(expr, attrSignBit)
 	if err != nil {
 		return 0, fmt.Errorf("read token field signbit: %w", err)
 	}
-	bitstart, err := requiredIntAttr(exprAttrSlice(expr), attrStartBit)
+	bitstart, err := exprIntAttr(expr, attrStartBit)
 	if err != nil {
 		return 0, fmt.Errorf("read token field startbit: %w", err)
 	}
-	bitend, err := requiredIntAttr(exprAttrSlice(expr), attrEndBit)
+	bitend, err := exprIntAttr(expr, attrEndBit)
 	if err != nil {
 		return 0, fmt.Errorf("read token field endbit: %w", err)
 	}
-	bytestart, err := requiredIntAttr(exprAttrSlice(expr), attrStartByte)
+	bytestart, err := exprIntAttr(expr, attrStartByte)
 	if err != nil {
 		return 0, fmt.Errorf("read token field startbyte: %w", err)
 	}
-	byteend, err := requiredIntAttr(exprAttrSlice(expr), attrEndByte)
+	byteend, err := exprIntAttr(expr, attrEndByte)
 	if err != nil {
 		return 0, fmt.Errorf("read token field endbyte: %w", err)
 	}
-	shift, err := requiredIntAttr(exprAttrSlice(expr), attrShift)
+	shift, err := exprIntAttr(expr, attrShift)
 	if err != nil {
 		return 0, fmt.Errorf("read token field shift: %w", err)
 	}
@@ -172,27 +172,27 @@ func evalContextField(expr PatternExprBoundary, walker *ParserWalker) (int64, er
 	if walker == nil || walker.constContext == nil {
 		return 0, fmt.Errorf("context field requires active walker context")
 	}
-	signbit, err := requiredBoolAttr(exprAttrSlice(expr), attrSignBit)
+	signbit, err := exprBoolAttr(expr, attrSignBit)
 	if err != nil {
 		return 0, fmt.Errorf("read context field signbit: %w", err)
 	}
-	startbit, err := requiredIntAttr(exprAttrSlice(expr), attrStartBit)
+	startbit, err := exprIntAttr(expr, attrStartBit)
 	if err != nil {
 		return 0, fmt.Errorf("read context field startbit: %w", err)
 	}
-	endbit, err := requiredIntAttr(exprAttrSlice(expr), attrEndBit)
+	endbit, err := exprIntAttr(expr, attrEndBit)
 	if err != nil {
 		return 0, fmt.Errorf("read context field endbit: %w", err)
 	}
-	startbyte, err := requiredIntAttr(exprAttrSlice(expr), attrStartByte)
+	startbyte, err := exprIntAttr(expr, attrStartByte)
 	if err != nil {
 		return 0, fmt.Errorf("read context field startbyte: %w", err)
 	}
-	endbyte, err := requiredIntAttr(exprAttrSlice(expr), attrEndByte)
+	endbyte, err := exprIntAttr(expr, attrEndByte)
 	if err != nil {
 		return 0, fmt.Errorf("read context field endbyte: %w", err)
 	}
-	shift, err := requiredIntAttr(exprAttrSlice(expr), attrShift)
+	shift, err := exprIntAttr(expr, attrShift)
 	if err != nil {
 		return 0, fmt.Errorf("read context field shift: %w", err)
 	}
@@ -205,7 +205,7 @@ func evalContextField(expr PatternExprBoundary, walker *ParserWalker) (int64, er
 }
 
 func evalOperandValue(expr PatternExprBoundary, walker *ParserWalker, hooks PatternExpressionValueHooks) (int64, error) {
-	index, err := requiredIntAttr(exprAttrSlice(expr), attrIndex)
+	index, err := exprIntAttr(expr, attrIndex)
 	if err != nil {
 		return 0, fmt.Errorf("read operand expression index: %w", err)
 	}
@@ -314,15 +314,25 @@ func evalUnaryExpr(expr PatternExprBoundary, walker *ParserWalker, hooks Pattern
 	return op(value), nil
 }
 
-func exprAttrSlice(expr PatternExprBoundary) []packedAttribute {
-	if len(expr.Attrs) == 0 {
-		return nil
+// exprIntAttr and exprBoolAttr read one attribute straight from the
+// expression's map (they run for every field of every decoded instruction),
+// with requiredIntAttr / requiredBoolAttr's checks and errors.
+func exprIntAttr(expr PatternExprBoundary, id uint32) (int64, error) {
+	attr, ok := expr.Attrs[id]
+	if !ok {
+		return requiredIntAttr(nil, id)
 	}
-	result := make([]packedAttribute, 0, len(expr.Attrs))
-	for _, attr := range expr.Attrs {
-		result = append(result, attr)
+	one := [1]packedAttribute{attr}
+	return requiredIntAttr(one[:], id)
+}
+
+func exprBoolAttr(expr PatternExprBoundary, id uint32) (bool, error) {
+	attr, ok := expr.Attrs[id]
+	if !ok {
+		return requiredBoolAttr(nil, id)
 	}
-	return result
+	one := [1]packedAttribute{attr}
+	return requiredBoolAttr(one[:], id)
 }
 
 func getPatternInstructionBytes(walker *ParserWalker, bytestart, byteend int, bigendian bool) (uint64, error) {
