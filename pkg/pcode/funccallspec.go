@@ -216,6 +216,12 @@ func newFuncCallSpecs(fd *Funcdata, op *PcodeOp) *FuncCallSpecs {
 				if hf, ok := fd.queryHostFunction(fc.entryAddress); ok {
 					fc.name = hf.Name
 					fc.hostProto = &hf
+				} else if name, ok := fd.hostScope.QueryExternalRef(fc.entryAddress); ok {
+					// A call deindirected through an external reference has the
+					// reference slot as its entry, and a restart rebuilds the call
+					// from that entry alone: name it from the reference again.
+					// C++ parity: FlowInfo::queryCall -> queryFunction(ExternRefSymbol::getRefAddr).
+					fc.name = name
 				}
 
 			}
