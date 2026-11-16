@@ -7,8 +7,8 @@ import (
 	"github.com/knewstimek/gosleigh/pkg/pcode"
 )
 
-// returnScanLimit bounds the instructions visited from a callee's entry over
-// all of its paths.
+// returnScanLimit bounds all path states visited by one return query,
+// including its recursive callees.
 const returnScanLimit = 2048
 
 // returnCallDepth bounds how far "call g; ret" is followed into g.
@@ -25,7 +25,8 @@ const (
 //
 // Every path from the entry to a return is followed (both sides of a
 // conditional branch, the target of a direct jump, so a tail jump continues
-// into the function it jumps to), within returnScanLimit instructions. For
+// into the function it jumps to), sharing returnScanLimit path states with
+// recursive calls. Exhausting that work leaves the return unknown. For
 // each XMM register the size of the value last written to its low lane is
 // tracked: a scalar float operation or load (movss, movsd, cvtdq2ps) sets
 // 4 or 8, a whole-register copy (movaps xmm0, xmm6) passes the source's size
@@ -49,21 +50,52 @@ func (c *CalleeReads) CalleeFloatReturn(entry address.Address) int32 {
 	if !c.ensureEngine(entry.Offset) || !c.retRegsOK {
 		return 0
 	}
-	return c.floatReturn(entry.Offset, 0)
-}
-
-// floatReturn is CalleeFloatReturn under c.mu. A function being scanned is
-// cached as 0 first, so recursion through a cycle answers unknown.
-func (c *CalleeReads) floatReturn(entry uint64, depth int) int32 {
-	if r, ok := c.returns[entry]; ok {
+	if r, ok := c.returns[entry.Offset]; ok {
 		return r
 	}
-	if !c.prog.IsExec(entry) { // an import slot: its bytes are a pointer
+	scan := returnScan{
+		remaining: returnScanLimit,
+		active:    map[uint64]bool{},
+		results:   map[returnKey]int32{},
+	}
+	r := c.floatReturn(entry.Offset, 0, &scan)
+	// A partially explored return tree cannot justify a return-type lock.
+	if scan.exhausted {
+		r = 0
+	}
+	c.returns[entry.Offset] = r
+	return r
+}
+
+type returnKey struct {
+	entry uint64
+	depth int
+}
+
+type returnScan struct {
+	remaining int
+	exhausted bool
+	active    map[uint64]bool
+	results   map[returnKey]int32
+}
+
+// Recursive answers depend on remaining depth and work. Keep them local to
+// the query; only a fresh top-level answer belongs in the program-wide cache.
+func (c *CalleeReads) floatReturn(entry uint64, depth int, scan *returnScan) int32 {
+	if !c.prog.IsExec(entry) || scan.active[entry] {
 		return 0
 	}
-	c.returns[entry] = 0
-	r := c.scanReturn(address.Address{Space: c.code, Offset: entry}, depth)
-	c.returns[entry] = r
+	key := returnKey{entry, depth}
+	if r, ok := scan.results[key]; ok {
+		return r
+	}
+	scan.active[entry] = true
+	r := c.scanReturn(address.Address{Space: c.code, Offset: entry}, depth, scan)
+	delete(scan.active, entry)
+	if scan.exhausted {
+		return 0
+	}
+	scan.results[key] = r
 	return r
 }
 
@@ -86,9 +118,9 @@ type returnState struct {
 	xmmRead  bool
 }
 
-func (c *CalleeReads) scanReturn(at address.Address, depth int) int32 {
+func (c *CalleeReads) scanReturn(at address.Address, depth int, scan *returnScan) int32 {
 	const unset = -1
-	seq, budget := 0, returnScanLimit
+	seq := 0
 	size := int32(0)
 	seen := map[returnState]bool{}
 	work := []returnPath{{at: at, xmmSeq: unset, raxSeq: unset}}
@@ -96,13 +128,17 @@ func (c *CalleeReads) scanReturn(at address.Address, depth int) int32 {
 		p := work[len(work)-1]
 		work = work[:len(work)-1]
 	path:
-		for budget > 0 {
+		for {
 			st := returnState{p.at.Offset, p.lane, p.raxSeq > p.xmmSeq, p.xmmRead}
 			if seen[st] {
 				break
 			}
+			if scan.remaining == 0 {
+				scan.exhausted = true
+				return 0
+			}
 			seen[st] = true
-			budget--
+			scan.remaining--
 			tr, err := c.translate(p.at)
 			if err != nil {
 				break
@@ -149,7 +185,10 @@ func (c *CalleeReads) scanReturn(at address.Address, depth int) int32 {
 					p.lane[0] = laneUnknown
 					if t := op.Inputs[0]; op.OpCode == pcode.CPUI_CALL && depth < returnCallDepth &&
 						t.Space != nil && !t.Space.IsConstant() {
-						p.lane[0] = c.floatReturn(t.Offset, depth+1)
+						p.lane[0] = c.floatReturn(t.Offset, depth+1, scan)
+						if scan.exhausted {
+							return 0
+						}
 					}
 					continue
 				case pcode.CPUI_BRANCHIND:

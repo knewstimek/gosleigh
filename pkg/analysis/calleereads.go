@@ -21,6 +21,10 @@ import (
 // many callees cheap and stops before unrelated code.
 const calleeScanLimit = 64
 
+// Charge both instructions and p-code ops so empty and SIMD translations
+// cannot make this program-lifetime cache grow without bound.
+const calleeCacheOpLimit = 32768
+
 // CalleeReads finds, for a function entry, the registers the function reads
 // before writing them along its entry path. Set it as
 // decomp.Function.CalleeReads; it implements pcode.HostCalleeReads. Results
@@ -69,8 +73,9 @@ type CalleeReads struct {
 	// insns caches translated instructions by address: the scans share
 	// callees and the path scans revisit addresses, and translating is the
 	// cost of every scan. Ops are read-only to the scans.
-	insns map[uint64]insn
-	regs  map[string]uint64 // register offsets by name
+	insns    map[uint64]insn
+	insnCost int
+	regs     map[string]uint64 // register offsets by name
 }
 
 // insn is one cached translation.
@@ -85,7 +90,18 @@ func (c *CalleeReads) translate(at address.Address) (sla.InstructionTranslation,
 		return in.tr, in.err
 	}
 	tr, err := c.engine.TranslateInstructionAt(at)
-	c.insns[at.Offset] = insn{tr, err}
+	// The scan owns the returned ops; retaining the engine's copy would
+	// bypass this cache's bound. Parser contexts keep their own reuse window.
+	c.engine.DisassemblyCache().DeleteRawOps(at)
+	cost := 1 + len(tr.Ops)
+	if c.insnCost+cost > calleeCacheOpLimit {
+		clear(c.insns)
+		c.insnCost = 0
+	}
+	if cost <= calleeCacheOpLimit {
+		c.insns[at.Offset] = insn{tr, err}
+		c.insnCost += cost
+	}
 	return tr, err
 }
 
